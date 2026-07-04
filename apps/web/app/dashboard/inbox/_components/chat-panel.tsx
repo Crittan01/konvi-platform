@@ -198,7 +198,7 @@ export function ChatPanel({
                     onClick={handleRerun}
                     disabled={rerunning || messages.length === 0}
                     title="Re-procesar último mensaje del cliente — útil si el bot dio respuesta mala o si actualizaste catálogo/cupones"
-                    className="text-violet-600 border-violet-500/30 hover:bg-violet-500/10 text-xs h-8"
+                    className="text-violet-600 border-violet-700/30 hover:bg-violet-500/10 text-xs h-8"
                   >
                     <RotateCw className={`h-3.5 w-3.5 mr-1 ${rerunning ? 'animate-spin' : ''}`} /> Rerun IA
                   </Button>
@@ -245,7 +245,7 @@ export function ChatPanel({
             </div>
           )}
           {rerunNotice && (
-            <div className="px-4 py-2 text-[11px] text-violet-700 bg-violet-500/10 border-b border-violet-500/30 flex items-center gap-1">
+            <div className="px-4 py-2 text-[11px] text-violet-700 bg-violet-500/10 border-b border-violet-700/30 flex items-center gap-1">
               <RotateCw className="h-3 w-3" /> {rerunNotice}
             </div>
           )}

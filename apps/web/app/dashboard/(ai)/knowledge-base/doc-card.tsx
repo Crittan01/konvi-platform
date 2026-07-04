@@ -27,7 +27,7 @@ const CATEGORIES = [
 
 const CATEGORY_COLORS: Record<string, string> = {
   faq:      'bg-blue-500/15 text-blue-700 border border-blue-700/30',
-  politica: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+  politica: 'bg-purple-500/15 text-purple-700 border border-purple-700/30',
   negocio:  'bg-green-500/15 text-green-700 border border-green-700/30',
   producto: 'bg-orange-500/15 text-orange-700 border border-orange-700/30',
   general:  'bg-muted text-muted-foreground border border-border',

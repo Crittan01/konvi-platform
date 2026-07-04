@@ -22,8 +22,8 @@ type ShippingOrigin = {
 const STATUS_COLORS: Record<string, string> = {
   quoted:     'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
   labeled:    'bg-blue-500/15 text-blue-700 border-blue-700/30',
-  picked_up:  'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  in_transit: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  picked_up:  'bg-purple-500/15 text-purple-700 border-purple-700/30',
+  in_transit: 'bg-indigo-500/15 text-indigo-700 border-indigo-700/30',
   delivered:  'bg-green-500/15 text-green-700 border-green-700/30',
   cancelled:  'bg-red-500/15 text-red-700 border-red-700/30',
 }
@@ -174,8 +174,8 @@ export default async function ShippingPage(
             <p className="text-2xl font-bold text-primary">{shipments.length}</p>
             <p className="text-xs text-muted-foreground mt-1">Total envíos</p>
           </div>
-          <div className={`rounded-xl border bg-card p-4 text-center ${inTransitCount > 0 ? 'border-indigo-500/30' : 'border-border'}`}>
-            <p className={`text-2xl font-bold ${inTransitCount > 0 ? 'text-indigo-400' : 'text-primary'}`}>{inTransitCount}</p>
+          <div className={`rounded-xl border bg-card p-4 text-center ${inTransitCount > 0 ? 'border-indigo-700/30' : 'border-border'}`}>
+            <p className={`text-2xl font-bold ${inTransitCount > 0 ? 'text-indigo-700' : 'text-primary'}`}>{inTransitCount}</p>
             <p className="text-xs text-muted-foreground mt-1">En tránsito</p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4 text-center">

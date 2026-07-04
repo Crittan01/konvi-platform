@@ -68,8 +68,8 @@ const STATUS_COLORS: Record<string, string> = {
   pending:         'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
   pending_payment: 'bg-amber-500/15 text-amber-600 border-amber-700/30',
   confirmed:  'bg-blue-500/15 text-blue-700 border-blue-700/30',
-  processing: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  shipped:    'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  processing: 'bg-purple-500/15 text-purple-700 border-purple-700/30',
+  shipped:    'bg-indigo-500/15 text-indigo-700 border-indigo-700/30',
   delivered:  'bg-green-500/15 text-green-700 border-green-700/30',
   cancelled:  'bg-red-500/15 text-red-700 border-red-700/30',
 }

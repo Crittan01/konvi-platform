@@ -12,8 +12,8 @@ const STATUS_COLORS: Record<string, string> = {
   pending:    'bg-yellow-500/15 text-yellow-700 border border-yellow-700/30',
   pending_payment: 'bg-amber-500/15 text-amber-700 border border-amber-700/30',  // F62
   confirmed:  'bg-blue-500/15 text-blue-700 border border-blue-700/30',
-  processing: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  shipped:    'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30',
+  processing: 'bg-purple-500/15 text-purple-700 border border-purple-700/30',
+  shipped:    'bg-indigo-500/15 text-indigo-700 border border-indigo-700/30',
   delivered:  'bg-green-500/15 text-green-700 border border-green-700/30',
   cancelled:  'bg-red-500/15 text-red-700 border border-red-700/30',
 }
@@ -179,7 +179,7 @@ export default async function MetricsPage(
             sub: `$${totalRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })} en ventas`,
           },
           {
-            icon: Package, label: 'Contactos / Prods.', value: contacts.length, color: 'text-violet-400',
+            icon: Package, label: 'Contactos / Prods.', value: contacts.length, color: 'text-violet-700',
             sub: `${activeProducts} productos activos`,
           },
         ].map(kpi => (

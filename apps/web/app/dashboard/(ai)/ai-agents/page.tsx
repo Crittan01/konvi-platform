@@ -291,8 +291,8 @@ export default async function AiAgentsPage() {
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center shrink-0">
-            <Sparkles className="h-6 w-6 text-purple-500" />
+          <div className="h-12 w-12 rounded-xl bg-purple-500/15 border border-purple-700/25 flex items-center justify-center shrink-0">
+            <Sparkles className="h-6 w-6 text-purple-700" />
           </div>
           <div>
             <p className="font-semibold text-foreground">Anti-Spam & RAG en Tiempo Real</p>

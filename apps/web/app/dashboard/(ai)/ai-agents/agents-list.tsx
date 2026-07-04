@@ -56,8 +56,8 @@ const ALL_ROLES = ['sales', 'support', 'marketing', 'claims', 'custom']
 
 const ROLE_BADGE: Record<string, string> = {
   sales:     'bg-emerald-500/10 text-emerald-700 border-emerald-700/25',
-  support:   'bg-sky-500/10 text-sky-700 border-sky-500/25',
-  marketing: 'bg-fuchsia-500/10 text-fuchsia-700 border-fuchsia-500/25',
+  support:   'bg-sky-500/10 text-sky-700 border-sky-700/25',
+  marketing: 'bg-fuchsia-500/10 text-fuchsia-700 border-fuchsia-700/25',
   claims:    'bg-amber-500/10 text-amber-700 border-amber-700/25',
   custom:    'bg-muted/40 text-muted-foreground border-border',
 }

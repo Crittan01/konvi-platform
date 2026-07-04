@@ -467,19 +467,19 @@ export function IntegrationsManager(props: Props) {
           tiempo_token) vive en /integrations/aveonline.
         */}
         {visibleCards.includes('aveonline') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-cyan-500/20 bg-cyan-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-700/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-cyan-700/20 bg-cyan-500/5' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-cyan-400" />
+                  <div className="h-9 w-9 rounded-xl bg-cyan-500/15 border border-cyan-700/20 flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-cyan-700" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Aveonline</p>
                     <p className="text-[11px] text-muted-foreground truncate">Shipping multi-carrier Colombia</p>
                   </div>
                 </div>
-                <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-400 border-cyan-500/30" />
+                <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-700 border-cyan-700/30" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -537,23 +537,23 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.aveonline && (
                     <>
-                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-cyan-700/20 bg-cyan-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-cyan-700 uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Ingresa el <strong className="text-foreground font-medium">usuario y password</strong> de tu cuenta Aveonline (la misma que usas en <span className="font-mono text-foreground">app.aveonline.co</span>).
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Validamos contra <span className="font-mono text-[10px] text-foreground">autenticarusuario.php</span> antes de guardar. El password se almacena cifrado en Supabase Vault.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               ¿No tienes cuenta? Cuenta DEMO: <span className="font-mono text-foreground">demointegracion</span> / <span className="font-mono text-foreground">demointegra2021</span>.
                             </p>
@@ -700,19 +700,19 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Wompi ─────────────────────────────────────────────────────────── */}
         {visibleCards.includes('wompi') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${wompiConnected ? 'border-violet-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${wompiConnected ? 'border-violet-500/20 bg-violet-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${wompiConnected ? 'border-violet-700/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${wompiConnected ? 'border-violet-700/20 bg-violet-500/5' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center shrink-0">
-                    <CreditCard className="h-4 w-4 text-violet-400" />
+                  <div className="h-9 w-9 rounded-xl bg-violet-500/15 border border-violet-700/20 flex items-center justify-center shrink-0">
+                    <CreditCard className="h-4 w-4 text-violet-700" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Wompi</p>
                     <p className="text-[11px] text-muted-foreground truncate">Pagos en línea Colombia</p>
                   </div>
                 </div>
-                <StatusBadge connected={wompiConnected} colorClass="bg-violet-500/15 text-violet-400 border-violet-500/30" />
+                <StatusBadge connected={wompiConnected} colorClass="bg-violet-500/15 text-violet-700 border-violet-700/30" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -754,23 +754,23 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.wompi && (
                     <>
-                      <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-violet-700/20 bg-violet-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Regístrate en <span className="font-mono text-foreground">wompi.co</span> y activa tu cuenta de comercio.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               En el Dashboard de Wompi → <strong className="text-foreground font-medium">Desarrolladores</strong> → copia la <strong className="text-foreground font-medium">Llave Privada</strong> y la <strong className="text-foreground font-medium">Llave de Eventos</strong>.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">https://konvi-api.onrender.com/api/v1/webhooks/wompi</span>
                             </p>
@@ -811,19 +811,19 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Telegram ──────────────────────────────────────────────────────── */}
         {visibleCards.includes('telegram') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${tgConnected ? 'border-sky-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${tgConnected ? 'border-sky-500/20 bg-sky-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${tgConnected ? 'border-sky-700/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${tgConnected ? 'border-sky-700/20 bg-sky-500/5' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center border ${tgConnected ? 'bg-sky-500/20 border-sky-500/30' : 'bg-white/10 border-white/10'}`}>
-                    <Bot className={`h-4 w-4 ${tgConnected ? 'text-sky-400' : 'text-muted-foreground'}`} />
+                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center border ${tgConnected ? 'bg-sky-500/20 border-sky-700/30' : 'bg-white/10 border-white/10'}`}>
+                    <Bot className={`h-4 w-4 ${tgConnected ? 'text-sky-700' : 'text-muted-foreground'}`} />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Telegram</p>
                     <p className="text-[11px] text-muted-foreground truncate">Alertas Operativas</p>
                   </div>
                 </div>
-                <StatusBadge connected={tgConnected} colorClass="bg-sky-500/15 text-sky-400 border-sky-500/30" />
+                <StatusBadge connected={tgConnected} colorClass="bg-sky-500/15 text-sky-700 border-sky-700/30" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -874,27 +874,27 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.telegram && (
                     <>
-                      <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-sky-400 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-sky-700/20 bg-sky-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-sky-700 uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              En Telegram busca <span className="font-mono text-foreground">@BotFather</span> → <span className="font-mono text-sky-400">/newbot</span> → sigue los pasos → copia el <strong className="text-foreground font-medium">Bot Token</strong>.
+                              En Telegram busca <span className="font-mono text-foreground">@BotFather</span> → <span className="font-mono text-sky-700">/newbot</span> → sigue los pasos → copia el <strong className="text-foreground font-medium">Bot Token</strong>.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Crea un <strong className="text-foreground font-medium">grupo privado</strong> y agrega el bot como miembro.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1 min-w-0">
                               <p>Abre en el navegador:</p>
-                              <p className="font-mono text-[10px] text-sky-300/80 bg-black/20 rounded px-2 py-1 break-all leading-normal">
-                                api.telegram.org/bot<span className="text-sky-400">TOKEN</span>/getUpdates
+                              <p className="font-mono text-[10px] text-sky-700/80 bg-black/20 rounded px-2 py-1 break-all leading-normal">
+                                api.telegram.org/bot<span className="text-sky-700">TOKEN</span>/getUpdates
                               </p>
                               <p>En el JSON busca <span className="font-mono text-foreground">&quot;chat&quot; → &quot;id&quot;</span>: número negativo.</p>
                             </div>
