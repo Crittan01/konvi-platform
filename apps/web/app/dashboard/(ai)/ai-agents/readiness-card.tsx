@@ -1,4 +1,12 @@
-import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
+'use client'
+
+import { CheckCircle2, XCircle, AlertCircle, HelpCircle } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip'
 
 // Rev. 71 — Lista de defaults conocidos. Si el nombre del agente coincide con
 // cualquiera de estos, el check considera "no personalizado". Cubre el default
@@ -166,30 +174,51 @@ export function ReadinessCard({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        {items.map(item => (
-          <div key={item.label} className="flex items-center gap-2.5" title={item.tooltip}>
-            {item.ok
-              ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
-              : score === 0 || !item.detail
-                ? <XCircle className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-                : <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
-            }
-            <div className="flex-1 min-w-0">
-              <span className="text-xs font-medium cursor-help">{item.label}</span>
-              {item.detail && (
-                <span className="text-xs text-muted-foreground"> — {item.detail}</span>
+      {/* Tooltip primitivo del DS: accesible por teclado (focus) y touch
+          (long-press), anuncia el contenido vía aria — reemplaza el `title=`
+          nativo que era invisible en móvil y para lectores de pantalla. */}
+      <TooltipProvider delayDuration={150}>
+        <div className="space-y-1.5">
+          {items.map(item => (
+            <div key={item.label} className="flex items-center gap-2.5">
+              {item.ok
+                ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+                : score === 0 || !item.detail
+                  ? <XCircle className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+                  : <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+              }
+              <div className="flex-1 min-w-0 flex items-center gap-1">
+                <span className="text-xs font-medium">{item.label}</span>
+                {item.tooltip && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`Más información: ${item.label}`}
+                        className="shrink-0 text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+                      >
+                        <HelpCircle className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs leading-relaxed">
+                      {item.tooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                {item.detail && (
+                  <span className="text-xs text-muted-foreground truncate"> — {item.detail}</span>
+                )}
+              </div>
+              {item.link && (
+                <a href={item.link}
+                  className="text-[10px] text-primary underline underline-offset-2 shrink-0 hover:no-underline">
+                  {item.ok ? 'Editar' : 'Configurar'}
+                </a>
               )}
             </div>
-            {item.link && (
-              <a href={item.link}
-                className="text-[10px] text-primary underline underline-offset-2 shrink-0 hover:no-underline">
-                {item.ok ? 'Editar' : 'Configurar'}
-              </a>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </TooltipProvider>
     </div>
   )
 }

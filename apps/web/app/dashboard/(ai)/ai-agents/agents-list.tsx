@@ -77,6 +77,9 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     new Set(FALLBACK_ROLES_CANONICAL),
   )
   const [suggesting, setSuggesting] = useState(false)
+  // Modelo Gemini que generó el último borrador (flash / pro / null=skeleton
+  // fallback). Se expone al operador para depurar la calidad de la sugerencia.
+  const [suggestedModel, setSuggestedModel] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -95,6 +98,7 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     setRoleDescription('')
     setStrictGuardrails(true)
     setFallbackRoles(new Set(FALLBACK_ROLES_CANONICAL))
+    setSuggestedModel(null)
     setError(null)
     setDrawerOpen(true)
   }
@@ -111,6 +115,7 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
         (FALLBACK_ROLES_CANONICAL as readonly string[]).includes(r),
     )
     setFallbackRoles(new Set(persisted))
+    setSuggestedModel(null)
     setError(null)
     setDrawerOpen(true)
   }
@@ -118,6 +123,7 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
   const onSuggest = async () => {
     setSuggesting(true)
     setError(null)
+    setSuggestedModel(null)
     try {
       const sb = createClient()
       const { data: { session } } = await sb.auth.getSession()
@@ -139,6 +145,8 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
       }
       const data = await resp.json()
       setRoleDescription(data.suggested_role_description || '')
+      // model_used null → el cascade se saturó y devolvió el skeleton base.
+      setSuggestedModel(data.model_used ?? null)
       if (!agentName && data.agent_name) setAgentName(data.agent_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al sugerir con IA')
@@ -361,6 +369,13 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
               <p className="text-[11px] text-muted-foreground">
                 Solo 1 agente por rol. Los tachados ya están asignados a otro agente.
               </p>
+              {selectedRole === 'custom' && !editing?.is_default && (
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  Nota: el router pre-LLM solo enruta a Ventas, Soporte, Marketing y Reclamos.
+                  Un agente <strong>Personalizado</strong> que no sea el default nunca recibirá
+                  tráfico automáticamente — úsalo solo si vas a asignarlo manualmente.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -401,9 +416,16 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
                 maxLength={2500}
                 disabled={isPending}
               />
-              <p className="text-[11px] text-muted-foreground">
-                {roleDescription.length}/2500 — La IA lee la filosofía del negocio + catálogo para personalizar.
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-muted-foreground">
+                  {roleDescription.length}/2500 — La IA lee la filosofía del negocio + catálogo para personalizar.
+                </p>
+                {suggestedModel !== null && (
+                  <span className="text-[10px] text-muted-foreground/70 shrink-0" title="Modelo Gemini que generó este borrador">
+                    Borrador IA · {suggestedModel}
+                  </span>
+                )}
+              </div>
             </div>
 
             {mode === 'edit' && editing?.is_default && (

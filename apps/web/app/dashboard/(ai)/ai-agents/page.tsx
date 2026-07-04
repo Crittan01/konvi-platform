@@ -6,11 +6,51 @@ import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
 import { AgentsList } from './agents-list'
 
+// Sincronizado 1:1 con el enum de Ajustes → General (settings/page.tsx:236-240).
+// NO agregar valores fantasma (antes había 'neutro'/'energico' que ningún tenant
+// puede tener); si el tono no está en el mapa, la card cae al slug crudo.
 const TONO_LABEL: Record<string, string> = {
-  amigable: 'Amigable y cercano',
-  formal: 'Formal y profesional',
-  neutro: 'Neutro',
-  energico: 'Enérgico y motivador',
+  formal:      'Formal — respetuoso, corporativo',
+  profesional: 'Profesional — preciso, sin coloquialismos',
+  amigable:    'Amigable — cercano y accesible',
+  cercano:     'Cercano — casual, como un amigo',
+  juvenil:     'Juvenil — dinámico',
+}
+
+// Whitelist de roles válidos — espejo de ALL_ROLES en agents-list.tsx y de
+// is_valid_role() en services/api/lib/agent_templates.py. La tabla NO tiene un
+// CHECK sobre `role` (migración 20260610000000 solo lo comenta), así que el
+// server action es la última línea de defensa contra un rol arbitrario que el
+// router jamás seleccionaría.
+const VALID_ROLES = new Set(['sales', 'support', 'marketing', 'claims', 'custom'])
+
+// Audit trail best-effort para mutaciones de agentes (crear/editar/borrar).
+// Mismo shape que apps/web/app/api/insights/route.ts:345 → tabla `audit_log`.
+// Nunca bloquea la operación: si el insert de auditoría falla, se loguea y sigue.
+async function writeAgentAudit(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  entry: {
+    tenantId: string
+    userId?: string
+    userEmail?: string
+    action: 'ai_agent.created' | 'ai_agent.updated' | 'ai_agent.deleted'
+    entityId?: string
+    payload: Record<string, unknown>
+  },
+) {
+  try {
+    await sb.from('audit_log').insert({
+      tenant_id: entry.tenantId,
+      user_id: entry.userId,
+      user_email: entry.userEmail,
+      action: entry.action,
+      entity_type: 'ai_agent',
+      entity_id: entry.entityId,
+      payload: entry.payload,
+    })
+  } catch (e) {
+    console.error('[ai-agents] audit_log write failed', { action: entry.action, tenantId: entry.tenantId, error: e })
+  }
 }
 
 export default async function AiAgentsPage() {
@@ -25,7 +65,14 @@ export default async function AiAgentsPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
+  const [
+    { data },
+    { data: tenant },
+    { data: kbStats },
+    { data: catalogStats },
+    { data: integrations },
+    { count: indexedCount },
+  ] = await Promise.all([
     // Rev. 109 ADR-0017 — multi-agente. order is_default desc para que
     // el primero retornado sea siempre el default cuando existan varios.
     supabase.from('ai_agents')
@@ -36,8 +83,11 @@ export default async function AiAgentsPage() {
     supabase.from('tenants').select(
       'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin, nit, email_contacto, telefono_contacto'
     ).eq('id', tenantId).maybeSingle(),
+    // Perf: NO traer la columna `embedding` (vector(3072) serializado ~60KB/doc
+    // por PostgREST → 1-3MB por render). Solo is_active/category para conteos y
+    // cobertura crítica; la indexación se cuenta aparte con un head-count.
     supabase.from('kb_documents')
-      .select('is_active, embedding, category')
+      .select('is_active, category')
       .eq('tenant_id', tenantId),
     supabase.from('products')
       // F7 (twin): products usa status (no is_active, inexistente) → el query erraba,
@@ -51,11 +101,18 @@ export default async function AiAgentsPage() {
       .select('provider, status')
       .eq('tenant_id', tenantId)
       .in('provider', ['wompi', 'aveonline']),
+    // Head-count de docs activos YA indexados (embedding no nulo) — sin traer
+    // el vector. Reemplaza el filtro en memoria sobre la columna embedding.
+    supabase.from('kb_documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .not('embedding', 'is', null),
   ])
 
-  const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null; category: string }>
+  const kbDocs      = (kbStats ?? []) as Array<{ is_active: boolean; category: string }>
   const activeDocs  = kbDocs.filter(d => d.is_active).length
-  const indexedDocs = kbDocs.filter(d => d.is_active && d.embedding).length
+  const indexedDocs = indexedCount ?? 0
   const totalDocs   = kbDocs.length
 
   // Rev. 71 — cobertura crítica por categoría: el bot anti-aluci necesita
@@ -117,6 +174,9 @@ export default async function AiAgentsPage() {
     if (!name) return { ok: false, error: 'El nombre del agente es obligatorio' }
     if (!role_description) return { ok: false, error: 'El prompt maestro es obligatorio' }
     if (role_description.length > 2500) return { ok: false, error: 'Máximo 2500 caracteres' }
+    // Defensa server-side: la UI restringe a ALL_ROLES, pero un rol arbitrario
+    // crearía un agente que el router nunca enruta. No confiar en el cliente.
+    if (!VALID_ROLES.has(roleVal)) return { ok: false, error: 'Rol inválido' }
 
     // Validación rol único: el rol debe estar libre (excepto si no hay
     // ningún agente — primer agente se crea como default sales).
@@ -137,13 +197,20 @@ export default async function AiAgentsPage() {
     // los nuevos son is_default=false (1 default por tenant garantizado
     // por partial unique index).
     const hasDefault = existingArr.some(a => a.is_default === true)
-    const { error: e1 } = await sb.from('ai_agents').insert({
+    const { data: inserted, error: e1 } = await sb.from('ai_agents').insert({
       tenant_id: m.tenant_id,
       name, role: roleVal, role_description,
       strict_guardrails: true,
       is_default: !hasDefault,
-    })
+    }).select('id').single()
     if (e1) return { ok: false, error: e1.message }
+    // Audit trail — el Prompt Maestro define el comportamiento del bot en
+    // producción; es de las mutaciones más sensibles del tenant.
+    await writeAgentAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id, userEmail: u?.email,
+      action: 'ai_agent.created', entityId: inserted?.id,
+      payload: { name, role: roleVal, is_default: !hasDefault },
+    })
     revalidatePath('/dashboard/ai-agents')
     return { ok: true }
   }
@@ -165,6 +232,8 @@ export default async function AiAgentsPage() {
       return { ok: false, error: 'Datos incompletos' }
     }
     if (role_description.length > 2500) return { ok: false, error: 'Máximo 2500 caracteres' }
+    // Defensa server-side simétrica con createAgent y con el endpoint /suggest.
+    if (!VALID_ROLES.has(roleVal)) return { ok: false, error: 'Rol inválido' }
 
     // Si el rol cambia, validar que el nuevo rol no esté tomado por OTRO agente.
     const { data: current } = await sb
@@ -216,6 +285,11 @@ export default async function AiAgentsPage() {
       .eq('id', id)
       .eq('tenant_id', m.tenant_id)
     if (e1) return { ok: false, error: e1.message }
+    await writeAgentAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id, userEmail: u?.email,
+      action: 'ai_agent.updated', entityId: id,
+      payload: { name, role: finalRole, strict_guardrails, is_default: isDefault },
+    })
     revalidatePath('/dashboard/ai-agents')
     return { ok: true }
   }
@@ -234,7 +308,7 @@ export default async function AiAgentsPage() {
     // No permitir borrar el default — el tenant siempre necesita 1 agente.
     const { data: target } = await sb
       .from('ai_agents')
-      .select('is_default')
+      .select('is_default, name, role')
       .eq('id', id)
       .eq('tenant_id', m.tenant_id)
       .maybeSingle()
@@ -252,6 +326,11 @@ export default async function AiAgentsPage() {
       .eq('id', id)
       .eq('tenant_id', m.tenant_id)
     if (e1) return { ok: false, error: e1.message }
+    await writeAgentAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id, userEmail: u?.email,
+      action: 'ai_agent.deleted', entityId: id,
+      payload: { name: target.name, role: target.role },
+    })
     revalidatePath('/dashboard/ai-agents')
     return { ok: true }
   }
@@ -264,9 +343,15 @@ export default async function AiAgentsPage() {
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-foreground">
             <Bot className="h-5 w-5 text-primary" /> Configuración de la Inteligencia Artificial
           </h1>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-700/30 bg-green-500/10 text-green-700">
-            Zero-Hallucinations Activo
-          </span>
+          {agent.strict_guardrails ? (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-700/30 bg-green-500/10 text-green-700">
+              Zero-Hallucinations Activo
+            </span>
+          ) : (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-500/10 text-amber-700">
+              Guardrails relajados
+            </span>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">
           Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp.
@@ -298,7 +383,7 @@ export default async function AiAgentsPage() {
             <p className="font-semibold text-foreground">Anti-Spam & RAG en Tiempo Real</p>
             <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
               La IA solo puede nutrirse de la base de conocimientos y catálogos explícitos.
-              Además, está controlada por guardrails de Meta (WhatsApp) que le obligan a emitir mensajes cortos.
+              Además, el system prompt del bot le exige mensajes cortos y directos, adecuados para WhatsApp.
             </p>
           </div>
         </div>

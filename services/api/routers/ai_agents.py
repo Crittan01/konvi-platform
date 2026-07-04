@@ -8,17 +8,22 @@ Endpoints:
 
   GET  /api/v1/ai-agents/templates
     Lista los templates disponibles por rol (sales / support / marketing
-    / claims / custom). Frontend lo usa para mostrar opciones al crear.
+    / claims / custom). NOTA: a HEAD ningún flujo de UI consume este endpoint
+    (el drawer de creación genera el prompt vía /suggest). Ver gap "GET
+    /ai-agents/templates existe pero ningún flujo lo consume" — decisión de
+    integrarlo o retirarlo está gated founder.
 
 Diseño:
-  • Templates en código (services/ai-orchestrator/lib/agent_templates.py),
-    accedidos via sys.path injection. Single source of truth.
+  • Templates en código (services/api/lib/agent_templates.py — el lib de la
+    API gana la resolución del namespace, ver nota F30 abajo). Single source
+    of truth.
   • Cascade LLM existente (services/ai-orchestrator/llm_cascade.py)
     reusado — sin duplicar lógica de fallback.
 """
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -28,6 +33,7 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RateLimitRule, build_rate_limit_dependency
 
 # Path injection para acceder a módulos top-level del orchestrator (llm_cascade, etc.).
 # F30: APPEND, nunca insert(0). Con insert(0) el orchestrator ganaba la resolución del
@@ -43,6 +49,19 @@ if str(_ORCHESTRATOR_DIR) not in sys.path:
 
 logger = logging.getLogger("api.ai_agents")
 router = APIRouter(prefix="/ai-agents", tags=["ai_agents"])
+
+# Rate limit dedicado para /suggest: es un endpoint LLM costoso (cascade Gemini,
+# hasta 3 tiers × 2 intentos por request). Bucket por tenant+user+IP para que un
+# manager no pueda disparar el cascade sin tope. Alineado con el límite del
+# preview web (20/h). Ajustable por env.
+RL_AI_SUGGEST = build_rate_limit_dependency(
+    RateLimitRule(
+        bucket="ai.suggest",
+        limit=int(os.getenv("API_RATE_LIMIT_AI_SUGGEST_PER_HOUR", "20")),
+        window_seconds=3600,
+    ),
+    include_user_id=True,
+)
 
 
 # ─── Schemas ────────────────────────────────────────────────────────────────
@@ -99,7 +118,11 @@ async def list_agent_templates() -> list[TemplateInfo]:
     ]
 
 
-@router.post("/suggest", response_model=SuggestResponse)
+@router.post(
+    "/suggest",
+    response_model=SuggestResponse,
+    dependencies=[Depends(RL_AI_SUGGEST)],  # LLM costoso — tope por tenant+user+IP
+)
 async def suggest_agent_prompt(
     body: SuggestRequest,
     tenant_id: str = Depends(get_current_tenant),
