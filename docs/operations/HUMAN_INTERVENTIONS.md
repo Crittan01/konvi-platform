@@ -113,3 +113,49 @@ Este documento conserva solo intervenciones activas reales.
 **CRITERIO DE EXITO**: query audit retorna 0 rows; ADR-0021 marcado CERRADO.
 
 **Referencia**: ver `docs/adr/0021-notification-channels-unified-source.md`.
+
+---
+
+## IH-EMAIL-01 — Site URL productivo + allow-list de redirects (Supabase Auth)
+
+**INTERVENCION HUMANA REQUERIDA**: Sí
+**RESPONSABLE**: Owner/DevOps
+**MOMENTO**: Antes del primer tenant productivo (bloqueante: sin esto los links de invite/recovery salen a `127.0.0.1:3000`).
+**PASOS DUMMY O GUIADOS**:
+1. Dashboard Supabase → Authentication → URL Configuration.
+2. `Site URL` = dominio web productivo (igual a `APP_URL` en Render).
+3. `Redirect URLs`: agregar `https://<dominio-web>/auth/callback` y `https://<dominio-web>/auth/confirm` (URLs exactas).
+**INSUMOS NECESARIOS**: dominio web productivo confirmado.
+**CRITERIO DE EXITO**: invite de prueba llega con link al dominio prod y `/auth/callback` establece sesión sin "redirect not allowed".
+**Referencia**: `docs/operations/runbooks/supabase-auth-email.md`.
+
+---
+
+## IH-EMAIL-02 — Aplicar plantillas es-CO + branding en el dashboard (Supabase Auth)
+
+**INTERVENCION HUMANA REQUERIDA**: Sí
+**RESPONSABLE**: Owner/DevOps
+**MOMENTO**: Antes del primer invite productivo (si no, salen defaults de Supabase en inglés).
+**PASOS DUMMY O GUIADOS**:
+1. Dashboard → Authentication → Emails (Templates).
+2. Pegar `subject` + HTML desde `supabase/templates/*.html` en cada plantilla (Invite, Reset Password, Confirm signup, Magic Link, Change Email).
+3. Verificar que el link siga siendo `{{ .ConfirmationURL }}` (no reescribirlo a mano: desacopla de `/auth/callback` y `/auth/confirm`).
+**INSUMOS NECESARIOS**: acceso admin dashboard; archivos del repo como fuente de verdad.
+**CRITERIO DE EXITO**: invite de prueba llega en es-CO, con "Konvi" y nombre del negocio visible; botón lleva a `/auth/callback`.
+**Referencia**: `docs/operations/runbooks/supabase-auth-email.md`.
+
+---
+
+## IH-EMAIL-03 — Custom SMTP: deliverability + rate-limit (Supabase Auth)
+
+**INTERVENCION HUMANA REQUERIDA**: Sí
+**RESPONSABLE**: Owner/DevOps + acceso al registrar DNS
+**MOMENTO**: Antes de producción (bloqueante legal Ley 1581 + funcional).
+**PASOS DUMMY O GUIADOS**:
+1. Elegir proveedor (recomendado dossier: Resend, `smtp.resend.com:587`). Ver `docs/research/sender-email-dossier-2026-05-05.md`.
+2. Verificar dominio: SPF + DKIM + DMARC en DNS.
+3. Dashboard → Authentication → SMTP Settings → habilitar Custom SMTP (`sender_name = "Konvi"`).
+4. Dashboard → Authentication → Rate Limits → subir emails/hora (default compartido ~2-4/h bloquea invitar 3+ seguidos).
+**INSUMOS NECESARIOS**: cuenta proveedor SMTP + acceso DNS del dominio.
+**CRITERIO DE EXITO**: envío de prueba a Gmail llega a inbox (no spam); invitar 3+ miembros seguidos no choca rate-limit.
+**Referencia**: `docs/operations/runbooks/supabase-auth-email.md` + dossier §8-9.

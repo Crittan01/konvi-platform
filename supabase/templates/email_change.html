@@ -1,0 +1,46 @@
+<!--
+  Plantilla: Cambio de correo (auth.email.template.email_change)
+  config.toml: double_confirm_changes=true → se confirma en la dirección nueva y la vieja.
+  {{ .ConfirmationURL }} → construido por Supabase; NO reescribir a mano.
+  {{ .Email }} / {{ .NewEmail }} → direcciones anterior y nueva.
+-->
+<div style="margin:0;padding:0;background:#f4f4f5;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#ffffff;border-radius:14px;border:1px solid #e4e4e7;overflow:hidden;">
+          <tr>
+            <td style="padding:28px 32px 8px 32px;">
+              <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.01em;color:#1d4ed8;">Konvi</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 32px 0 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+              <h1 style="margin:0 0 12px 0;font-size:20px;line-height:1.3;font-weight:700;color:#18181b;">Confirma tu nuevo correo</h1>
+              <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#3f3f46;">
+                Se solicitó cambiar el correo de tu cuenta de Konvi{{ if .Email }} de <strong>{{ .Email }}</strong>{{ end }}{{ if .NewEmail }} a <strong>{{ .NewEmail }}</strong>{{ end }}. Confirma para aplicar el cambio:
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 8px 32px;" align="left">
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#1d4ed8;color:#ffffff;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:11px 22px;border-radius:9px;">Confirmar cambio</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 28px 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+              <p style="margin:0 0 6px 0;font-size:12px;line-height:1.6;color:#71717a;">Si el botón no funciona, copia y pega este enlace:</p>
+              <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#1d4ed8;">{{ .ConfirmationURL }}</a></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 28px 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;border-top:1px solid #f4f4f5;">
+              <p style="margin:16px 0 0 0;font-size:11px;line-height:1.6;color:#a1a1aa;">Si no solicitaste este cambio, ignora este correo: tu correo actual seguirá igual.</p>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:16px 0 0 0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;color:#a1a1aa;">Konvi · Enviado automáticamente, no respondas a este correo.</p>
+      </td>
+    </tr>
+  </table>
+</div>
