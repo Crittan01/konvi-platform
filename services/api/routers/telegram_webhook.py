@@ -12,10 +12,30 @@ Autenticación:
   configurado en TELEGRAM_WEBHOOK_SECRET al registrar el webhook con setWebhook.
   Si la var no está configurada, el endpoint devuelve 503 (not configured).
 
-INTERVENCION HUMANA REQUERIDA — configurar setWebhook:
-  curl "https://api.telegram.org/bot{TOKEN}/setWebhook" \
-    -d "url=https://konvi-api.onrender.com/api/v1/integrations/telegram/webhook" \
-    -d "secret_token={TELEGRAM_WEBHOOK_SECRET}"
+Vinculación chat_id → tenant (RBAC de comandos):
+  Un comando solo se ejecuta si el chat_id está mapeado a un tenant en
+  `tenant_provider_identity` (provider='telegram'). Ese mapeo se puebla de dos
+  formas, ambas automáticas (sin backfill SQL manual):
+    1) al ENVIAR cualquier notificación/escalación al chat del operador
+       (notifications._register_telegram_identity), y
+    2) como self-heal en este webhook: si llega un comando de un chat aún no
+       mapeado, se resuelve el tenant contra `notification_settings`
+       (channel='telegram', config.chat_id) y, si hay UNA coincidencia
+       inequívoca, se registra la identidad y se ejecuta el comando.
+  Un chat sin notificación previa ni fila en notification_settings NO puede
+  ejecutar comandos (origen no autorizado).
+
+INTERVENCION HUMANA REQUERIDA — configurar setWebhook (una vez por bot del tenant):
+  RESPONSABLE: founder / operador de plataforma.
+  PASOS:
+    curl "https://api.telegram.org/bot{TOKEN}/setWebhook" \
+      -d "url=https://konvi-api.onrender.com/api/v1/integrations/telegram/webhook" \
+      -d "secret_token={TELEGRAM_WEBHOOK_SECRET}"
+  INSUMOS: {TOKEN} = bot_token del tenant; {TELEGRAM_WEBHOOK_SECRET} = env del API.
+  CRITERIO DE EXITO: getWebhookInfo devuelve la URL anterior y last_error_date vacío.
+  NOTA: la URL correcta incluye el segmento /integrations (prefijo del router en
+  main.py). La UI (telegram-setup.tsx) mostraba la URL sin ese segmento → un
+  setWebhook copiado de ahí daría 404. Corregir esa copy es tarea de la Console.
 
 Referencia Telegram Bot API: https://core.telegram.org/bots/api#setwebhook
 """
@@ -63,11 +83,21 @@ async def telegram_webhook(
     message = update.get("message") or update.get("edited_message") or {}
     text = str(message.get("text") or "").strip()
     chat_id = (message.get("chat") or {}).get("id")
+    # RBAC intra-chat / auditoría: registramos QUIÉN emitió el comando dentro
+    # del grupo (el grupo sigue siendo la frontera de confianza — cualquier
+    # miembro puede ejecutar — pero dejamos rastro del autor). Telegram entrega
+    # el autor en message.from.
+    from_user = message.get("from") or {}
+    author_id = from_user.get("id")
+    author_username = from_user.get("username") or from_user.get("first_name") or "?"
 
     if not text or not chat_id:
         return JSONResponse(status_code=200, content={"ok": True})
 
-    logger.info("[TG_WH] Comando recibido: chat=%s text=%r", chat_id, text[:80])
+    logger.info(
+        "[TG_WH] Comando recibido: chat=%s author=%s(@%s) text=%r",
+        chat_id, author_id, author_username, text[:80],
+    )
 
     # A6.2.7 finiquito 2026-06-24 (super-audit + triage wl982c7yb CRITICAL):
     # SEGURIDAD MULTI-TENANT. Antes los comandos /resolver /estado leían/mutaban
@@ -81,12 +111,20 @@ async def telegram_webhook(
     from lib.identity_registry import resolve_tenant_id
     tenant_id = resolve_tenant_id(supabase, "telegram", chat_id)
     if not tenant_id:
+        # Self-heal (fix gap "comandos muertos"): el chat aún no está en
+        # tenant_provider_identity, pero PUEDE ser un operador legítimo cuyo
+        # chat_id vive en notification_settings (lo configuró por la UI) y
+        # todavía no recibió ninguna notificación que lo auto-vinculara. Lo
+        # resolvemos ahí y, si hay UNA coincidencia inequívoca, lo registramos.
+        # Si es ambiguo (mismo chat_id en 2 tenants) o inexistente → rechazo.
+        tenant_id = _resolve_and_link_via_notification_settings(supabase, chat_id)
+    if not tenant_id:
         # Chat no vinculado a ningún tenant → NO ejecutamos comando ni respondemos
         # (sin tenant no hay bot_token con qué responder, y es un origen no
-        # autorizado). Backfill de identidad vía lib.identity_registry.register_identity.
+        # autorizado).
         logger.warning(
-            "[TG_WH] chat_id=%s SIN tenant en tenant_provider_identity — "
-            "comando RECHAZADO (origen no autorizado o pendiente backfill)",
+            "[TG_WH] chat_id=%s SIN tenant (ni identity ni notification_settings) — "
+            "comando RECHAZADO (origen no autorizado)",
             chat_id,
         )
         return JSONResponse(status_code=200, content={"ok": True})
@@ -97,6 +135,77 @@ async def telegram_webhook(
         _send_telegram_reply(chat_id, reply, tenant_id)
 
     return JSONResponse(status_code=200, content={"ok": True})
+
+
+def _resolve_and_link_via_notification_settings(supabase, chat_id) -> str:
+    """Fallback de resolución tenant para un chat aún no registrado.
+
+    Busca en `notification_settings` (channel='telegram', enabled=true) la fila
+    cuyo `config.chat_id` coincide con este chat. Si hay EXACTAMENTE una
+    coincidencia → registra la identidad (self-heal, O(1) las próximas veces) y
+    devuelve el tenant. Si hay 0 o >1 → devuelve "" (rechazo seguro: un chat_id
+    ambiguo entre 2 tenants NO debe poder ejecutar comandos sobre ninguno).
+
+    Cross-tenant por diseño (resolución de identidad externa, igual que
+    identity_registry.resolve_tenant_id) → exento del lint de tenant_filter.
+    """
+    if chat_id in (None, ""):
+        return ""
+    target = str(chat_id).strip()
+    try:
+        res = (
+            supabase.table("notification_settings")  # tenant_filter:exempt:resolution_lookup_by_provider_internal_id
+            .select("tenant_id, config")
+            .eq("channel", "telegram")
+            .eq("enabled", True)
+            .execute()
+        )
+    except Exception as exc:
+        logger.error("[TG_WH] fallback lookup notification_settings falló: %s", exc)
+        return ""
+
+    matches: list[str] = []
+    for row in (getattr(res, "data", None) or []):
+        cfg = dict(row.get("config") or {})
+        cfg_chat = cfg.get("chat_id") or cfg.get("telegram_chat_id")
+        if cfg_chat is not None and str(cfg_chat).strip() == target:
+            tid = str(row.get("tenant_id") or "").strip()
+            if tid and tid not in matches:
+                matches.append(tid)
+
+    if len(matches) != 1:
+        if len(matches) > 1:
+            logger.warning(
+                "[TG_WH] chat_id=%s AMBIGUO — %d tenants lo declaran en "
+                "notification_settings; comando rechazado.",
+                chat_id, len(matches),
+            )
+        return ""
+
+    tenant_id = matches[0]
+    try:
+        from lib.identity_registry import register_identity
+        register_identity(
+            supabase,
+            tenant_id,
+            "telegram",
+            chat_id,
+            metadata={"source": "webhook_self_heal"},
+            mark_verified=True,
+        )
+        logger.info(
+            "[TG_WH] chat_id=%s auto-vinculado a tenant=%s (self-heal).",
+            chat_id, tenant_id[:8],
+        )
+    except Exception as exc:
+        # No pudimos persistir el mapeo, pero la resolución fue inequívoca →
+        # ejecutamos igual este comando (best-effort; re-registrará al próximo).
+        logger.warning(
+            "[TG_WH] chat_id=%s resuelto a tenant=%s pero register_identity "
+            "falló: %s (comando procede igual).",
+            chat_id, tenant_id[:8], exc,
+        )
+    return tenant_id
 
 
 async def _handle_command(text: str, chat_id: int, tenant_id: str) -> str:

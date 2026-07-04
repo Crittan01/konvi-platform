@@ -83,7 +83,7 @@ async def notify_escalation_async(
     if not rows:
         logger.info(
             "[TG_ESCALATION] tenant=%s sin canal telegram en notification_settings — "
-            "configurar en Settings → Canales",
+            "configurar en Console → Integraciones → Telegram",
             tenant_id[:8] if tenant_id else "?",
         )
         return False
@@ -96,6 +96,16 @@ async def notify_escalation_async(
             tenant_id[:8] if tenant_id else "?",
         )
         return False
+
+    # Auto-vincula (tenant, telegram, chat_id) — misma razón que en
+    # dispatch_human_takeover_event: mantiene vivos /resolver /estado desde este
+    # chat. Best-effort (nunca rompe la escalación). Reusa el helper único de
+    # notifications.py para no duplicar la lógica del registry.
+    try:
+        from notifications import _register_telegram_identity  # noqa: PLC0415
+        _register_telegram_identity(supabase, tenant_id, chat_id)
+    except Exception as exc:
+        logger.debug("[TG_ESCALATION] auto-link skip tenant=%s: %s", tenant_id, exc)
 
     # Resolver bot_token via Vault (mismo patrón que dispatch_human_takeover_event).
     try:

@@ -22,24 +22,74 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv(
     "RESEND_FROM_EMAIL", "Konvi <noreply@commerce-ops.local>"
 )
+# URL pública de la Console — usada para deep-links accionables en Telegram/email.
+# Mismo env que Server Actions / emails (render.yaml key APP_URL). Default = dominio
+# real productivo (no un placeholder) para que el link nunca quede roto si el env
+# no está seteado en el servicio orchestrator.
+APP_URL = os.getenv("APP_URL", "https://konvi-web.onrender.com").rstrip("/")
 
 logger = logging.getLogger("orchestrator.notifications")
 
 
+def _register_telegram_identity(supabase: Client, tenant_id: str, chat_id: Any) -> None:
+    """Auto-vincula (tenant_id, telegram, chat_id) en tenant_provider_identity.
+
+    CRÍTICO (fix gap "comandos muertos"): los comandos /resolver /estado del
+    webhook resuelven el tenant del operador vía `resolve_tenant_id(...telegram...)`
+    y rechazan chats no mapeados. Antes NADA poblaba ese mapeo → todo comando
+    caía en silencio. La ruta de SALIDA (esta notificación) es justo donde
+    conocemos AMBOS lados del par (tenant_id + chat_id destino), así que
+    registramos la identidad al enviar: cuando el operador ve el mensaje con
+    `/resolver`, su chat ya está vinculado y el comando responde.
+
+    Best-effort: NUNCA rompe el envío de la notificación. Una colisión
+    cross-tenant (mismo chat_id apuntando a 2 tenants) se loguea como señal de
+    seguridad pero no aborta la alerta.
+    """
+    if not tenant_id or chat_id in (None, ""):
+        return
+    try:
+        import sys
+        from pathlib import Path
+        # Patrón canónico ai-orchestrator → services/api/lib (worker.py:2131).
+        _api_root = Path(__file__).resolve().parents[1] / "api"
+        if str(_api_root) not in sys.path:
+            sys.path.insert(0, str(_api_root))
+        from lib.identity_registry import (  # noqa: PLC0415
+            IdentityRegistryError,
+            register_identity,
+        )
+        register_identity(
+            supabase,
+            tenant_id,
+            "telegram",
+            chat_id,
+            metadata={"source": "notification_autolink"},
+            mark_verified=True,
+        )
+    except Exception as exc:  # incl. IdentityRegistryError (colisión cross-tenant)
+        # No rompemos la notificación: solo dejamos rastro. Si es colisión
+        # cross-tenant es un misconfig real (2 tenants con el mismo chat_id).
+        logger.warning(
+            "[NOTIFY] auto-link telegram identity falló tenant=%s chat=%s: %s",
+            (tenant_id[:8] if tenant_id else "?"), chat_id, exc,
+        )
+
+
 def _build_takeover_text(payload: dict[str, Any]) -> str:
-    tenant_id = str(payload.get("tenant_id", ""))
     conversation_id = str(payload.get("conversation_id", ""))
     customer_phone = str(payload.get("customer_phone", ""))
-    previous_status = str(payload.get("previous_status") or "unknown")
 
-    short_id = conversation_id[:8] if conversation_id else "N/A"
+    inbox_link = f"{APP_URL}/dashboard/inbox"
     return (
         "🚨 *Escalamiento humano requerido*\n"
         f"Cliente: `{customer_phone or 'N/A'}`\n"
         f"Conv ID: `{conversation_id or 'N/A'}`\n\n"
         f"Para devolver al bot:\n"
         f"`/resolver {conversation_id}`\n\n"
-        "Inbox: /dashboard/inbox"
+        # URL absoluta: un path relativo `/dashboard/inbox` Telegram lo trata
+        # como comando `/dashboard` y no es clickeable.
+        f"Inbox: {inbox_link}"
     )
 
 
@@ -156,11 +206,17 @@ async def _send_email_via_resend(
         return False
 
 
-def _dispatch_email_placeholder(config: dict[str, Any], payload: dict[str, Any]) -> bool:
-    """Mantenido por compat — wrapper no-async sobre _send_email_via_resend.
+async def _dispatch_email_event(config: dict[str, Any], payload: dict[str, Any]) -> bool:
+    """Envía el email de un evento operacional (takeover) vía Resend.
 
-    `dispatch_human_takeover_event` aún usa este path. Para nuevos
-    eventos preferir `notify_consent_event` / `notify_sar_received`.
+    `dispatch_human_takeover_event` usa este path. Para nuevos eventos
+    preferir `notify_consent_event` / `notify_sar_received`.
+
+    FIX gap "email nunca envía en producción": la versión previa
+    (`_dispatch_email_placeholder`) llamaba `asyncio.run(...)` dentro del
+    event loop async del worker → RuntimeError → return True SIN enviar. El
+    único caller (`dispatch_human_takeover_event`) YA es async, así que aquí
+    simplemente `await` el envío real. Sin loops anidados.
     """
     recipient = str(config.get("to_email") or config.get("recipient") or "").strip()
     if not recipient:
@@ -172,21 +228,16 @@ def _dispatch_email_placeholder(config: dict[str, Any], payload: dict[str, Any])
             recipient, payload.get("event_type"),
         )
         return True
-    # Resolución asíncrona via asyncio.run en sync context (caller actual).
-    import asyncio
-    subject = f"[Konvi] {payload.get('event_type', 'notification')}"
+    event_type = payload.get("event_type", "notification")
+    subject = f"[Konvi] {event_type}"
+    conv_id = str(payload.get("conversation_id") or "")
+    inbox_link = f"{APP_URL}/dashboard/inbox"
     html = (
-        f"<p>Evento operacional: <b>{payload.get('event_type')}</b></p>"
-        f"<pre>{payload}</pre>"
+        f"<p>Evento operacional: <b>{event_type}</b></p>"
+        + (f"<p>Conversación: <code>{conv_id}</code></p>" if conv_id else "")
+        + f'<p><a href="{inbox_link}">Abrir Inbox</a></p>'
     )
-    try:
-        return asyncio.run(_send_email_via_resend(
-            to=recipient, subject=subject, html=html,
-        ))
-    except RuntimeError:
-        # Caller ya tiene event loop activo — fire-and-forget.
-        logger.info("[EMAIL] caller has loop; fire-and-forget to=%s", recipient)
-        return True
+    return await _send_email_via_resend(to=recipient, subject=subject, html=html)
 
 
 async def notify_consent_revoked(
@@ -341,9 +392,12 @@ async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any
         if channel == "telegram":
             # Resolver bot_token desde Vault
             config["bot_token"] = resolve_secret(vault, config, "bot_token") or ""
+            # Auto-vincula el chat destino → tenant ANTES/independiente del envío,
+            # para que `/resolver` desde ese chat resuelva su tenant (comandos vivos).
+            _register_telegram_identity(supabase, tenant_id, config.get("chat_id"))
             ok = await _send_telegram_notification(config, text)
         elif channel == "email":
-            ok = _dispatch_email_placeholder(config, payload)
+            ok = await _dispatch_email_event(config, payload)
         else:
             logger.info("Canal no soportado aún: %s", channel)
             ok = True
