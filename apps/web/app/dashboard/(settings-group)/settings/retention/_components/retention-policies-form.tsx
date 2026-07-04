@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2, Save, Trash2 } from 'lucide-react'
@@ -34,6 +35,7 @@ export default function RetentionPoliciesForm({
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [busyEntity, setBusyEntity] = useState<Entity | null>(null)
+  const confirmar = useConfirm()
 
   const overridesByEntity = new Map(overrides.map(o => [o.entity, o]))
   const defaultsByEntity = new Map(defaults.map(d => [d.entity, d]))
@@ -45,11 +47,13 @@ export default function RetentionPoliciesForm({
     })
   }
 
-  const handleDelete = (entity: Entity, id: string) => {
-    if (!confirm(
-      `¿Eliminar override per-tenant para ${entityLabels[entity].label}? ` +
-      `La política volverá al default global.`
-    )) return
+  const handleDelete = async (entity: Entity, id: string) => {
+    if (!(await confirmar({
+      title: `¿Eliminar el override de ${entityLabels[entity].label}?`,
+      description: 'La retención de tu tenant volverá a regirse por el default global.',
+      confirmLabel: 'Eliminar override',
+      destructive: true,
+    }))) return
     setBusyEntity(entity)
     const fd = new FormData()
     fd.set('id', id)
@@ -140,7 +144,7 @@ export default function RetentionPoliciesForm({
                 {isOverridden && ov && (
                   <Button
                     type="button"
-                    onClick={() => handleDelete(entity, ov.id)}
+                    onClick={() => void handleDelete(entity, ov.id)}
                     disabled={busy}
                     size="sm"
                     variant="ghost"

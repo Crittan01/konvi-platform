@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import OrdersNewForm from '../orders-new-form'
 
@@ -107,17 +108,19 @@ function GenerateGuideButton({
   }>
 }) {
   const [isPending, startTransition] = useTransition()
+  const confirmar = useConfirm()
   const [result, setResult] = useState<{
     ok: boolean
     message?: string
   } | null>(null)
 
-  const handle = () => {
-    if (!confirm(
-      'Generar guía Aveonline para este pedido COD? '
-      + 'Tarda ~10-15s. Si tu cuenta tiene AVEONLINE_GENERATE_REAL_GUIDES=true, '
-      + 'la guía será facturable.',
-    )) return
+  const handle = async () => {
+    if (!(await confirmar({
+      title: '¿Generar guía COD para este pedido?',
+      description: 'Se creará la guía de envío en Aveonline con recaudo contraentrega. '
+        + 'Tarda entre 10 y 15 segundos y, si tu cuenta genera guías reales, será facturable.',
+      confirmLabel: 'Generar guía',
+    }))) return
     setResult(null)
     startTransition(async () => {
       const fd = new FormData()
@@ -131,7 +134,7 @@ function GenerateGuideButton({
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={handle}
+        onClick={() => void handle()}
         disabled={isPending}
         className="inline-flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 border border-emerald-700/40 hover:border-emerald-700/60 bg-emerald-50 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50"
         title="Genera guía Aveonline con contraentrega — el courier recauda al entregar"

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { DisconnectIntegrationButton } from './disconnect-button'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -127,6 +128,7 @@ export function IntegrationsManager(props: Props) {
 
   const router   = useRouter()
   const pathname = usePathname()
+  const confirmar = useConfirm()
 
   // Limpiar params de test/conexión de la URL después de 4 segundos
   useEffect(() => {
@@ -146,17 +148,17 @@ export function IntegrationsManager(props: Props) {
     // Rev. 108 Layer B (founder 2026-05-27 — auto-loguea cuenta anterior):
     // antes de redirigir a MeLi, confirmar con el tenant que conoce el
     // comportamiento. Si quiere cambiar de cuenta, instruir paso explícito.
-    const confirmed = window.confirm(
-      '¿Listo para conectar Mercado Libre?\n\n' +
-      'Si tu navegador tiene una sesión activa de Mercado Libre, ' +
-      'MeLi puede conectarte automáticamente con esa cuenta. ' +
-      'Para cambiar de cuenta:\n\n' +
-      '1. Cancela este diálogo\n' +
-      '2. Cierra sesión en https://mercadolibre.com.co (ícono usuario → Salir)\n' +
-      '3. O usa una ventana de incógnito\n' +
-      '4. Vuelve aquí y haz click en "Conectar" otra vez\n\n' +
-      'Si ya cerraste sesión o es tu primera conexión, presiona "Aceptar".'
-    )
+    const confirmed = await confirmar({
+      title: '¿Conectar Mercado Libre?',
+      description:
+        'Serás redirigido a Mercado Libre. Si tu navegador tiene una sesión ' +
+        'activa de MeLi, te conectará automáticamente con esa cuenta. ' +
+        'Para usar otra cuenta: cancela, cierra sesión en mercadolibre.com.co ' +
+        '(ícono usuario → Salir) o abre una ventana de incógnito, y vuelve a ' +
+        'presionar "Conectar". Si ya cerraste sesión o es tu primera conexión, continúa.',
+      confirmLabel: 'Conectar',
+      cancelLabel: 'Cancelar',
+    })
     if (!confirmed) return
 
     setMeliStartError(null)

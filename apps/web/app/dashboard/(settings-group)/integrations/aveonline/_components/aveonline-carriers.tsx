@@ -22,6 +22,7 @@ import {
   Truck, Loader2, AlertCircle, CheckCircle2, RefreshCw, Info,
   ShieldCheck, Coins, Save, ExternalLink,
 } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 type CarrierPref = {
   carrier_code: string
@@ -171,6 +172,7 @@ function getFacts(code: string): CarrierFacts {
 }
 
 export default function AveonlineCarriersSection() {
+  const confirmar = useConfirm()
   const [prefs, setPrefs] = useState<CarrierPref[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -202,10 +204,11 @@ export default function AveonlineCarriersSection() {
   }, [refresh])
 
   const seedFromAveonline = async () => {
-    if (!confirm(
-      'Consultar tus carriers habilitados en Aveonline y agregarlos a esta lista? '
-      + 'NO sobreescribe configuración existente (solo agrega nuevos).',
-    )) return
+    if (!(await confirmar({
+      title: '¿Sincronizar carriers desde Aveonline?',
+      description: 'Se consultarán los carriers habilitados en tu cuenta Aveonline y se agregarán a esta lista. No se sobreescribe la configuración existente: solo se agregan los nuevos.',
+      confirmLabel: 'Sincronizar',
+    }))) return
     setBusy(true)
     setError(null)
     setSuccess(null)

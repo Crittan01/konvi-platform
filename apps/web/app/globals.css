@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --font-inter: 'Inter';
+    /* --font-inter la provee next/font (app/layout.tsx) — self-hosted, zero CLS. */
 
     /* ── Commerce Ops Design System — Kaiu Organic Style ──────────────────
        Filosofía: Diseño orgánico, natural y elegante.
@@ -26,7 +26,7 @@
     --card-foreground:      156 33% 20%;
     --popover-foreground:   156 33% 20%;
     --secondary-foreground: 156 33% 20%;   
-    --muted-foreground:     156 20% 40%;   /* #527A68 — Gris-Verde legible */
+    --muted-foreground:     156 22% 34%;   /* #44695A — Gris-Verde ≥4.5:1 AA sobre el crema (antes 40% ≈ 4.4:1, borderline) */
     --accent-foreground:    156 33% 15%;
 
     /* Primary — Verde corporativo Kaiu */
@@ -47,7 +47,11 @@
 
     /* Custom */
     --amber:      43 65% 53%;    /* Kaiu Gold */
-    --sidebar-bg: 168 14%  8%;   /* Sidebar estructurado oscuro */
+    /* Superficies oscuras — fuente única (referenciadas por .sidebar-gradient
+       y .topbar-bg; antes duplicadas como literales hsl(...)). */
+    --sidebar-bg:     168 14%  8%;   /* Sidebar estructurado oscuro */
+    --sidebar-bg-end: 168 15%  6%;   /* Extremo inferior del gradiente */
+    --topbar-bg:      168 13% 15%;   /* #212B2A — entre sidebar y canvas */
   }
 }
 
@@ -64,7 +68,7 @@
 
   /* Barra superior: Verde intermedio, visualmente entre el sidebar profundo y el cream canvas */
   .topbar-bg {
-    background-color: hsl(168 13% 15%); /* #212B2A — Elegantemente más claro que el fondo del sidebar */
+    background-color: hsl(var(--topbar-bg));
     color: hsl(30 20% 98%);             /* Letras color cream claro */
     border-color: hsl(156 30% 20%);
   }
@@ -93,20 +97,31 @@
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
-  /* Scrollbar personalizada */
+  /* Scrollbar personalizada (webkit + estándar para Firefox) */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track  { background: hsl(var(--background)); }
   ::-webkit-scrollbar-thumb  { background: hsl(var(--border)); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) hsl(var(--background));
+  }
+
+  /* Foco visible universal (teclado): cubre los <button>/<a> crudos que no
+     usan los primitivos del DS. :focus-visible no dispara con click. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {
-  /* Sidebar — más oscuro que el canvas */
+  /* Sidebar — más oscuro que el canvas (tokens --sidebar-bg*, fuente única) */
   .sidebar-gradient {
     background: linear-gradient(
       180deg,
-      hsl(168 14% 8%) 0%,
-      hsl(168 15% 6%) 100%
+      hsl(var(--sidebar-bg)) 0%,
+      hsl(var(--sidebar-bg-end)) 100%
     );
   }
 
@@ -123,8 +138,11 @@
     background-clip: text;
   }
 
+  /* card-hover — OPT-IN para cards interactivas (F1: removido de la base de
+     Card; las cards estáticas no deben "flotar"). Transición limitada a las
+     propiedades animadas (no `all`) y respeta prefers-reduced-motion. */
   .card-hover {
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   }
 
   .card-hover:hover {
@@ -133,28 +151,8 @@
     transform: translateY(-2px);
   }
 
-  /* ── Animaciones Base (UI Fluida) ─────────────────────────────────────── */
-  .animate-fade-in {
-    animation: fadeIn 0.4s ease-out forwards;
-  }
-
-  .animate-slide-up {
-    animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  @keyframes slideUp {
-    from { 
-      opacity: 0;
-      transform: translateY(15px);
-    }
-    to { 
-      opacity: 1;
-      transform: translateY(0);
-    }
+  @media (prefers-reduced-motion: reduce) {
+    .card-hover { transition: none; }
+    .card-hover:hover { transform: none; }
   }
 }

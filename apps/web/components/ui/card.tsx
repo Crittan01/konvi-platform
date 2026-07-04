@@ -1,9 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+// F1 2026-07-04: card-hover ya NO es parte de la base — las cards estáticas
+// (KPIs, formularios) no deben "flotar" al hover. Cards interactivas lo
+// agregan explícito: <Card className="card-hover cursor-pointer">.
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm card-hover", className)} {...props} />
+    <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
   )
 )
 Card.displayName = "Card"

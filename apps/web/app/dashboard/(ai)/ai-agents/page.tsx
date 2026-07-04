@@ -340,7 +340,7 @@ export default async function AiAgentsPage() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-amber-600 dark:text-amber-400">
+          <p className="text-sm text-amber-700">
             No has configurado la Filosofía del negocio todavía.{' '}
             <a href="/dashboard/settings" className="underline hover:no-underline">
               Configúrala en Ajustes → General

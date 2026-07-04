@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { CheckCircle2, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 
 type Acceptance = {
@@ -26,14 +27,17 @@ export default function LegalAcceptanceClient({
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [busyDoc, setBusyDoc] = useState<string | null>(null)
+  const confirmar = useConfirm()
 
-  const handleAccept = (docId: string, docVersion: string) => {
-    if (!confirm(
-      `Vas a aceptar formalmente "${documentLabels[docId].label}" en versión ${docVersion}.\n\n` +
-      `Esta acción queda registrada con tu email + IP + timestamp de forma inmutable. ` +
-      `Si la versión cambia en el futuro, se requerirá nueva aceptación.\n\n` +
-      `¿Confirmas?`
-    )) return
+  const handleAccept = async (docId: string, docVersion: string) => {
+    if (!(await confirmar({
+      title: `Aceptar ${documentLabels[docId].label} (${docVersion})`,
+      description:
+        'La aceptación queda registrada de forma inmutable con tu email, IP y fecha. ' +
+        'Si el documento cambia de versión, tendrás que aceptarlo de nuevo.',
+      confirmLabel: 'Aceptar documento',
+      cancelLabel: 'Cancelar',
+    }))) return
     setBusyDoc(docId)
     const fd = new FormData()
     fd.set('document_id', docId)
@@ -96,7 +100,7 @@ export default function LegalAcceptanceClient({
                   {!accepted && canAccept && (
                     <Button
                       type="button"
-                      onClick={() => handleAccept(docId, version)}
+                      onClick={() => void handleAccept(docId, version)}
                       disabled={busy}
                       size="sm"
                       variant="outline"

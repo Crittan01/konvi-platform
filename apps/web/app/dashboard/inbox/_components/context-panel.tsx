@@ -203,8 +203,8 @@ export function ContextPanel({
         {context?.active_cart && context.active_cart.items.length > 0 && (
           <section className={`p-4 border-b border-border ${
             context.active_cart.requires_requote
-              ? 'bg-amber-50/30 dark:bg-amber-950/10'
-              : 'bg-emerald-50/20 dark:bg-emerald-950/5'
+              ? 'bg-amber-50/30'
+              : 'bg-emerald-50/20'
           }`}>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <ShoppingCart className="h-3.5 w-3.5" /> Carrito en construcción

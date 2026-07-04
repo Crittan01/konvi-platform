@@ -22,6 +22,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { KeyRound, Package, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw, Webhook, Copy, Trash2 } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 type AveonlineAgent = {
   id: string
@@ -47,6 +48,7 @@ export default function AveonlineSetup({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const confirmar = useConfirm()
 
   const handleConnect = (formData: FormData) => {
     setError(null)
@@ -61,8 +63,13 @@ export default function AveonlineSetup({
     })
   }
 
-  const handleDisconnect = () => {
-    if (!confirm('¿Desconectar Aveonline? Las cotizaciones futuras no usarán este provider hasta reconectar.')) {
+  const handleDisconnect = async () => {
+    if (!(await confirmar({
+      title: '¿Desconectar Aveonline?',
+      description: 'Las cotizaciones futuras no usarán este provider hasta que vuelvas a conectarlo.',
+      confirmLabel: 'Desconectar',
+      destructive: true,
+    }))) {
       return
     }
     setError(null)
@@ -486,7 +493,7 @@ export default function AveonlineSetup({
         )}
         <button
           type="button"
-          onClick={handleDisconnect}
+          onClick={() => void handleDisconnect()}
           disabled={isPending}
           className="rounded-md border border-destructive bg-background px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
         >
@@ -512,6 +519,7 @@ function AveonlineWebhookSection() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [secret, setSecret] = useState<string | null>(null)
+  const confirmar = useConfirm()
 
   const refresh = async () => {
     setLoading(true)
@@ -537,7 +545,11 @@ function AveonlineWebhookSection() {
   useEffect(() => { void refresh() }, [])
 
   const configure = async () => {
-    if (!confirm('Configurar webhook Aveonline ahora? Generará un secret nuevo y lo registrará en tu cuenta Aveonline automáticamente.')) {
+    if (!(await confirmar({
+      title: '¿Configurar webhook Aveonline?',
+      description: 'Se generará un secret nuevo y se registrará automáticamente en tu cuenta Aveonline.',
+      confirmLabel: 'Configurar webhook',
+    }))) {
       return
     }
     setBusy(true)
@@ -568,7 +580,11 @@ function AveonlineWebhookSection() {
   }
 
   const rotate = async () => {
-    if (!confirm('Rotar secret webhook? El secret actual seguirá válido 7 días (grace period) mientras Aveonline migra.')) {
+    if (!(await confirmar({
+      title: '¿Rotar el secret del webhook?',
+      description: 'El secret actual seguirá válido 7 días (periodo de gracia) mientras Aveonline migra al nuevo.',
+      confirmLabel: 'Rotar secret',
+    }))) {
       return
     }
     setBusy(true)
@@ -595,7 +611,12 @@ function AveonlineWebhookSection() {
   }
 
   const remove = async () => {
-    if (!confirm('Eliminar webhook? Dejaremos de recibir estados de envío en tiempo real. El tracking on-demand sigue funcionando.')) {
+    if (!(await confirmar({
+      title: '¿Eliminar el webhook?',
+      description: 'Dejarás de recibir estados de envío en tiempo real. El tracking on-demand sigue funcionando.',
+      confirmLabel: 'Eliminar webhook',
+      destructive: true,
+    }))) {
       return
     }
     setBusy(true)
