@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Plus, Trash2, Pencil, X, Loader2, Check } from 'lucide-react'
 import { createAttributeDef, updateAttributeDef, deleteAttributeDef, type AttributeDefInput } from '../actions'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { parseAllowedValues } from '../_lib/category-forms'
 
 // ADR-0029 D3 — editor del CONTRATO de atributos de UNA categoría (hoja). El bot cita estos atributos
 // como HECHOS (SET membership); definirlos aquí guía el alta y habilita la validación HARD server-side.
@@ -65,12 +66,6 @@ export function AttributeContractEditor({
     })
   }
 
-  const parseAllowed = (): (string | number)[] => {
-    if (form.type === 'boolean' || form.type === 'text') return []
-    return form.allowedText.split(',').map(s => s.trim()).filter(Boolean)
-      .map(v => (form.type === 'metric' || form.type === 'number') && !isNaN(Number(v)) ? Number(v) : v)
-  }
-
   const handleSubmit = async () => {
     const label = form.label.trim()
     if (!label) { setError('El nombre del atributo es obligatorio'); return }
@@ -80,7 +75,7 @@ export function AttributeContractEditor({
       type: form.type,
       unit: form.unit.trim() || null,
       is_variant_axis: form.is_variant_axis,
-      allowed_values: parseAllowed(),
+      allowed_values: parseAllowedValues(form.type, form.allowedText),
       sort_order: editingId ? undefined : defs.length,
     }
     const res = editingId
@@ -171,13 +166,14 @@ export function AttributeContractEditor({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <Label className="text-[10px] uppercase text-muted-foreground">Nombre *</Label>
-              <Input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })}
+              <Label htmlFor="attr-label" className="text-[10px] uppercase text-muted-foreground">Nombre *</Label>
+              <Input id="attr-label" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })}
                 placeholder="Ej. Ingrediente activo" className="h-8 mt-1" disabled={pending} />
             </div>
             <div>
-              <Label className="text-[10px] uppercase text-muted-foreground">Tipo</Label>
-              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as AttributeDef['type'] })}
+              <Label htmlFor="attr-type" className="text-[10px] uppercase text-muted-foreground">Tipo</Label>
+              <select id="attr-type" aria-label="Tipo de atributo"
+                value={form.type} onChange={e => setForm({ ...form, type: e.target.value as AttributeDef['type'] })}
                 disabled={pending}
                 className="w-full h-8 mt-1 rounded-md border border-input bg-background text-sm px-2 text-foreground">
                 {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -188,16 +184,16 @@ export function AttributeContractEditor({
 
           {(form.type === 'metric') && (
             <div>
-              <Label className="text-[10px] uppercase text-muted-foreground">Unidad</Label>
-              <Input value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}
+              <Label htmlFor="attr-unit" className="text-[10px] uppercase text-muted-foreground">Unidad</Label>
+              <Input id="attr-unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}
                 placeholder="Ej. ml, g, h" className="h-8 mt-1 w-32" disabled={pending} />
             </div>
           )}
 
           {needsAllowed && (
             <div>
-              <Label className="text-[10px] uppercase text-muted-foreground">Opciones (separadas por coma)</Label>
-              <Input value={form.allowedText} onChange={e => setForm({ ...form, allowedText: e.target.value })}
+              <Label htmlFor="attr-allowed" className="text-[10px] uppercase text-muted-foreground">Opciones (separadas por coma)</Label>
+              <Input id="attr-allowed" value={form.allowedText} onChange={e => setForm({ ...form, allowedText: e.target.value })}
                 placeholder={form.type === 'metric' ? 'Ej. 5, 10, 30, 50' : 'Ej. Lavanda, Menta, Coco'}
                 className="h-8 mt-1" disabled={pending} />
               <p className="text-[10px] text-muted-foreground/70 mt-1">
@@ -206,8 +202,8 @@ export function AttributeContractEditor({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-xs text-foreground/80 cursor-pointer">
-            <input type="checkbox" checked={form.is_variant_axis}
+          <label htmlFor="attr-variant" className="flex items-center gap-2 text-xs text-foreground/80 cursor-pointer">
+            <input id="attr-variant" type="checkbox" checked={form.is_variant_axis}
               onChange={e => setForm({ ...form, is_variant_axis: e.target.checked })} disabled={pending} />
             Genera variantes (SKU) — ej. cada Volumen/Aroma es una variante distinta del mismo producto
           </label>

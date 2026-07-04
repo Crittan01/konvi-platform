@@ -1,12 +1,16 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal, AlertTriangle, RefreshCw } from 'lucide-react'
 import { createCategory, updateCategory, deleteCategory } from '../actions'
 import { AttributeContractEditor, type AttributeDef } from './attribute-contract-editor'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { slugify } from '../_lib/category-forms'
 
 export type { AttributeDef }
 
@@ -19,28 +23,22 @@ export type CategoryRow = {
   product_count: number
 }
 
-/** Clave normalizada (única por tenant) derivada del label: sin acentos, minúsculas, _ por espacios. */
-function slugify(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-}
-
 const ROOT = '__root__'  // sentinel de <select> = sin padre (categoría raíz / vertical)
 
 export default function CategoriesManager({
   categories,
   attributeDefs,
   canWrite,
+  loadError = null,
+  countsExact = true,
 }: {
   categories: CategoryRow[]
   attributeDefs: AttributeDef[]
   canWrite: boolean
+  loadError?: string | null
+  countsExact?: boolean
 }) {
+  const router = useRouter()
   const confirmar = useConfirm()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -176,19 +174,35 @@ export default function CategoriesManager({
               <p className="text-[10px] text-muted-foreground/70 font-mono">{c.name}</p>
             </div>
             {!isParent && (
-              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {c.product_count} producto{c.product_count === 1 ? '' : 's'}
-              </span>
+              countsExact ? (
+                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                  {c.product_count} producto{c.product_count === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-amber-800 tabular-nums shrink-0 cursor-help underline decoration-dotted underline-offset-2">
+                      ≥ {c.product_count} producto{c.product_count === 1 ? '' : 's'}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Conteo parcial: el catálogo supera el máximo listado o el conteo falló. El total real puede ser mayor.</TooltipContent>
+                </Tooltip>
+              )
             )}
             {/* Contrato de atributos: solo en HOJAS (los productos cuelgan de hojas y heredan su contrato). */}
             {!isParent && canWrite && (
-              <button
-                onClick={() => setEditorCat(c)}
-                className="text-[11px] h-7 px-2 inline-flex items-center gap-1 rounded-md border border-primary/30 text-primary hover:bg-primary/10 shrink-0"
-                title="Definir los atributos que describen los productos de esta categoría"
-              >
-                <SlidersHorizontal className="h-3 w-3" /> Atributos ({defsFor(c.id).length})
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setEditorCat(c)}
+                    className="text-[11px] h-7 px-2 inline-flex items-center gap-1 rounded-md border border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                    aria-label={`Definir atributos de ${c.display_label}`}
+                  >
+                    <SlidersHorizontal className="h-3 w-3" /> Atributos ({defsFor(c.id).length})
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Define los atributos que describen los productos de esta categoría</TooltipContent>
+              </Tooltip>
             )}
             {canWrite && (
               <>
@@ -216,6 +230,7 @@ export default function CategoriesManager({
   }
 
   return (
+    <TooltipProvider delayDuration={150}>
     <div className="space-y-5 max-w-3xl">
       {/* Header */}
       <div>
@@ -226,6 +241,29 @@ export default function CategoriesManager({
           Las categorías con las que el bot presenta tu catálogo. Organízalas en 2 niveles: <span className="font-medium text-foreground/80">vertical</span> (ej. Salud y Belleza) › <span className="font-medium text-foreground/80">subcategoría</span> (ej. Aceites Esenciales). Los productos cuelgan de las subcategorías. {categories.length} en total.
         </p>
       </div>
+
+      {/* Error de carga (RLS/red): mostrar como error con reintento, NO como lista vacía. */}
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>No se pudieron cargar las categorías. {loadError}</span>
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 shrink-0" onClick={() => router.refresh()}>
+              <RefreshCw className="h-3.5 w-3.5" /> Reintentar
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Conteo parcial: catálogo por encima del máximo listado o conteo fallido. */}
+      {!countsExact && !loadError && (
+        <Alert variant="warning">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            El conteo de productos por categoría es parcial (el catálogo supera el máximo listado o el conteo no respondió). Los números mostrados con «≥» pueden quedarse cortos.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Crear */}
       {canWrite && (
@@ -265,19 +303,28 @@ export default function CategoriesManager({
         </div>
       )}
 
-      {/* Error */}
+      {/* Error de escritura (crear/editar/eliminar). */}
       {error && (
-        <div className="rounded-lg border border-red-700/40 bg-red-700/10 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* Lista en árbol: raíces en orden; bajo cada raíz, sus subcategorías indentadas. */}
       <div className="rounded-xl border border-border bg-card divide-y divide-border">
-        {categories.length === 0 && (
-          <p className="px-4 py-6 text-sm text-muted-foreground text-center">
-            Aún no hay categorías. {canWrite ? 'Crea la primera arriba.' : ''}
-          </p>
+        {categories.length === 0 && !loadError && (
+          <div className="px-4 py-8 text-center space-y-1.5">
+            <FolderTree className="h-6 w-6 text-muted-foreground/40 mx-auto" />
+            <p className="text-sm font-medium text-foreground">Aún no tienes categorías</p>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Las categorías son cómo el bot agrupa y presenta tu catálogo. Los productos sin categoría
+              caen a una heurística por título (menos precisa).{' '}
+              {canWrite
+                ? 'Crea tu primera vertical arriba (ej. «Salud y Belleza») y luego sus subcategorías.'
+                : 'Pide a un administrador que las configure.'}
+            </p>
+          </div>
         )}
         {roots.map(root => (
           <div key={root.id} className="divide-y divide-border/60">
@@ -300,5 +347,6 @@ export default function CategoriesManager({
         />
       )}
     </div>
+    </TooltipProvider>
   )
 }
