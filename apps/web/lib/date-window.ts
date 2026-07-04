@@ -38,6 +38,25 @@ export function bogotaWindowUTC(days: number, now: Date = new Date()): { fromUTC
   return { fromUTC: fromUTC.toISOString(), toUTC: now.toISOString() }
 }
 
+/**
+ * datetime-local (wall-clock Colombia, ej '2026-07-04T22:00') → ISO UTC.
+ * '' o null → null. El <input type="datetime-local"> no lleva zona; el operador
+ * escribe hora Colombia, así que se ancla a UTC-5 antes de persistir (timestamptz).
+ */
+export function bogotaLocalToUTC(local: string | null | undefined): string | null {
+  if (!local) return null
+  const d = new Date(`${local}:00-05:00`)
+  return isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+/** ISO UTC → 'YYYY-MM-DDTHH:mm' en hora Colombia, para prellenar un datetime-local. */
+export function utcToBogotaLocal(utc: string | null | undefined): string {
+  if (!utc) return ''
+  const d = new Date(utc)
+  if (isNaN(d.getTime())) return ''
+  return new Date(d.getTime() + COLOMBIA_UTC_OFFSET_MIN * MIN).toISOString().slice(0, 16)
+}
+
 /** Lista ordenada de las claves 'YYYY-MM-DD' Colombia de los últimos `days` días. */
 export function bogotaDayKeys(days: number, now: Date = new Date()): string[] {
   const bogotaNow = new Date(now.getTime() + COLOMBIA_UTC_OFFSET_MIN * MIN)

@@ -15,6 +15,15 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 import { revalidatePath } from 'next/cache'
 import { Tag, AlertTriangle } from 'lucide-react'
 import PromotionsManager from './_components/promotions-manager'
+import { bogotaLocalToUTC } from '@/lib/date-window'
+
+/**
+ * fixed_amount: la UI captura PESOS pero DB/engine/bot usan CENTAVOS (migración
+ * 20260515000000). percent (0-100) y free_shipping se guardan crudos.
+ */
+function couponDiscountToCents(discount_type: DiscountType, raw: number): number {
+  return discount_type === 'fixed_amount' ? raw * 100 : raw
+}
 
 export const metadata = {
   title: 'Promociones',
@@ -141,13 +150,15 @@ async function createCouponAction(formData: FormData): Promise<{ ok: boolean; er
   const code = ((formData.get('code') as string) || '').trim().toUpperCase()
   const description = ((formData.get('description') as string) || '').trim() || null
   const discount_type = (formData.get('discount_type') as DiscountType) || 'percent'
-  const discount_value = parseInt(((formData.get('discount_value') as string) || '0'), 10)
+  const discount_value = couponDiscountToCents(
+    discount_type, parseInt(((formData.get('discount_value') as string) || '0'), 10))
   const min_subtotal_pesos = parseInt(((formData.get('min_subtotal_pesos') as string) || '0'), 10)
   const min_subtotal_cents = min_subtotal_pesos * 100
   const max_red_raw = ((formData.get('max_redemptions') as string) || '').trim()
   const max_redemptions = max_red_raw ? parseInt(max_red_raw, 10) : null
-  const valid_from = ((formData.get('valid_from') as string) || '').trim() || null
-  const valid_until = ((formData.get('valid_until') as string) || '').trim() || null
+  // datetime-local = hora Colombia → UTC (antes se persistía crudo = corrido 5h)
+  const valid_from = bogotaLocalToUTC(((formData.get('valid_from') as string) || '').trim())
+  const valid_until = bogotaLocalToUTC(((formData.get('valid_until') as string) || '').trim())
 
   const validationError = validateCouponInput({
     code, discount_type, discount_value, min_subtotal_cents,
@@ -189,14 +200,15 @@ async function updateCouponAction(
   // `code` post-creación porque coupon_redemptions referencia coupon_id;
   // cambiar code rompe trazabilidad histórica).
   const description = ((formData.get('description') as string) || '').trim() || null
-  const discount_value = parseInt(((formData.get('discount_value') as string) || '0'), 10)
+  const discount_type = (formData.get('discount_type') as DiscountType) || 'percent'
+  const discount_value = couponDiscountToCents(
+    discount_type, parseInt(((formData.get('discount_value') as string) || '0'), 10))
   const min_subtotal_pesos = parseInt(((formData.get('min_subtotal_pesos') as string) || '0'), 10)
   const min_subtotal_cents = min_subtotal_pesos * 100
   const max_red_raw = ((formData.get('max_redemptions') as string) || '').trim()
   const max_redemptions = max_red_raw ? parseInt(max_red_raw, 10) : null
-  const valid_from = ((formData.get('valid_from') as string) || '').trim() || null
-  const valid_until = ((formData.get('valid_until') as string) || '').trim() || null
-  const discount_type = (formData.get('discount_type') as DiscountType) || 'percent'
+  const valid_from = bogotaLocalToUTC(((formData.get('valid_from') as string) || '').trim())
+  const valid_until = bogotaLocalToUTC(((formData.get('valid_until') as string) || '').trim())
 
   // Lookup para preservar code original.
   const { data: existing } = await sb

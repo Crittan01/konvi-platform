@@ -14,6 +14,7 @@ import {
   DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import type { Coupon, DiscountType } from '../page'
+import { utcToBogotaLocal } from '@/lib/date-window'
 
 type ActionResult = { ok: boolean; error?: string }
 
@@ -46,7 +47,7 @@ function formatCOP(cents: number): string {
 
 function formatDiscountValue(c: Coupon): string {
   if (c.discount_type === 'percent') return `${c.discount_value}%`
-  if (c.discount_type === 'fixed_amount') return formatCOP(c.discount_value * 100)
+  if (c.discount_type === 'fixed_amount') return formatCOP(c.discount_value)  // discount_value ya está en centavos
   return 'Envío gratis'
 }
 
@@ -550,7 +551,14 @@ function CouponForm({
             min="0"
             max={discountType === 'percent' ? '100' : undefined}
             required={discountType !== 'free_shipping'}
-            defaultValue={initialCoupon?.discount_value ?? ''}
+            defaultValue={
+              initialCoupon
+                // fixed_amount se guarda en centavos → mostrar pesos en el input
+                ? (initialCoupon.discount_type === 'fixed_amount'
+                    ? Math.floor(initialCoupon.discount_value / 100)
+                    : initialCoupon.discount_value)
+                : ''
+            }
             disabled={discountType === 'free_shipping'}
           />
         </div>
@@ -622,11 +630,7 @@ function CouponForm({
             id="valid_from"
             name="valid_from"
             type="datetime-local"
-            defaultValue={
-              initialCoupon?.valid_from
-                ? initialCoupon.valid_from.slice(0, 16)
-                : ''
-            }
+            defaultValue={utcToBogotaLocal(initialCoupon?.valid_from)}
           />
         </div>
         <div>
@@ -643,11 +647,7 @@ function CouponForm({
             id="valid_until"
             name="valid_until"
             type="datetime-local"
-            defaultValue={
-              initialCoupon?.valid_until
-                ? initialCoupon.valid_until.slice(0, 16)
-                : ''
-            }
+            defaultValue={utcToBogotaLocal(initialCoupon?.valid_until)}
           />
         </div>
       </div>

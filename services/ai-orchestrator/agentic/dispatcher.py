@@ -1119,7 +1119,7 @@ async def _run_agentic_full(
             supabase.table("coupons")
             .select(
                 "code, discount_type, discount_value, min_subtotal_cents, "
-                "max_redemptions, redemptions_count, valid_until",
+                "max_redemptions, redemptions_count, valid_from, valid_until",
             )
             .eq("tenant_id", tenant_id)
             .eq("is_active", True)
@@ -1127,16 +1127,32 @@ async def _run_agentic_full(
             # (is_customer_visible=false) siguen aplicando cuando el cliente da el código
             # (apply_coupon hace lookup por code), pero el bot no los menciona proactivamente.
             .eq("is_customer_visible", True)
-            .gt("valid_until", _now_iso)
+            # F2 bs1 2026-07-04 — vigencia: incluir cupones PERPETUOS (valid_until NULL,
+            # el default de la UI). Antes `.gt("valid_until", now)` los excluía → el bot
+            # nunca anunciaba el caso más común. valid_from se filtra abajo (postgrest no
+            # combina 2 grupos OR fácil).
+            .or_(f"valid_until.is.null,valid_until.gt.{_now_iso}")
             .order("created_at", desc=True)
             .limit(20)
             .execute()
         )
-        # Filtro adicional: descartar cupones con redemptions agotadas.
-        # (postgrest no admite comparar 2 columnas en .lt directo)
+        # Filtro adicional (Python): redemptions agotadas + aún-no-vigente (valid_from
+        # futuro) — anunciar uno no-vigente causa rechazo al cliente = fricción.
+        from datetime import datetime as _dt, timezone as _tz
+        _now_dt = _dt.now(_tz.utc)
         for c in (_coupons_res.data or []):
             max_red = c.get("max_redemptions")
             used = c.get("redemptions_count") or 0
+            _vfrom = c.get("valid_from")
+            if _vfrom:
+                try:
+                    _vf = _dt.fromisoformat(str(_vfrom).replace("Z", "+00:00"))
+                    if _vf.tzinfo is None:
+                        _vf = _vf.replace(tzinfo=_tz.utc)
+                    if _vf > _now_dt:
+                        continue  # aún no vigente
+                except (ValueError, TypeError):
+                    pass  # fecha ilegible → no bloquear el anuncio
             if max_red is None or int(used) < int(max_red):
                 active_coupons.append(c)
     except Exception as _coup_exc:
