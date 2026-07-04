@@ -1,184 +1,278 @@
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { XAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import ExpensesManager, { type Expense } from './expenses-manager'
-import { DollarSign, TrendingDown, TrendingUp, Activity, PieChart } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { XAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
+import ExpensesManager from './expenses-manager'
+import FinanceFilters from './finance-filters'
+import { DollarSign, TrendingDown, TrendingUp, Activity, HelpCircle, AlertTriangle, Download, ExternalLink } from 'lucide-react'
+import Link from 'next/link'
+import type { PnlResult } from '../lib/pnl'
+import type { FinanceRange } from '../lib/window'
+import { formatCOP, formatCOPNegative, formatBogotaDate } from '../lib/format'
 
-import { useState, useMemo } from 'react'
-
-type FinanceOrder = {
-  created_at?: string | null
-  status: string
-  total_amount: number
-  order_items: { unit_cost: number; quantity: number }[]
-}
+type ExpenseRow = { id: string; description: string; category: string; expense_date: string; amount: number }
 
 type Props = {
-  orders: FinanceOrder[]
-  expenses: Expense[]
+  pnl: PnlResult
+  expenses: ExpenseRow[]
+  range: FinanceRange
+  windowLabel: string
   canWrite: boolean
+  ordersCount: number
+  truncated: boolean
+  aggLimit: number
 }
 
-type TimeFilter = 'all' | 'month' | 'last_month'
+// Colores de las barras: tokens del tema (fondo claro Kaiu Cream), no literales
+// oscuros. Grid/tooltip via CSS vars → coherente con el design system.
+const BAR_COLORS: Record<string, string> = {
+  Ingresos: 'hsl(var(--primary))',
+  COGS: 'hsl(var(--amber))',
+  OPEX: 'hsl(0 74% 42%)',
+  Beneficio: 'hsl(152 55% 32%)',
+}
 
-export default function FinanceDashboard({ orders, expenses, canWrite }: Props) {
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('month')
+export default function FinanceDashboard({
+  pnl, expenses, range, windowLabel, canWrite, ordersCount, truncated, aggLimit,
+}: Props) {
+  const { revenue, cogs, opex, netProfit, netMargin, paidOrders, zeroCostItems, totalItems, opexByCategory } = pnl
 
-  // Derive target dates based on filter
-  const { startDate, endDate } = useMemo(() => {
-    const now = new Date()
-    if (timeFilter === 'all') return { startDate: new Date(0), endDate: new Date(8640000000000000) }
-    
-    if (timeFilter === 'month') {
-      return { 
-        startDate: new Date(now.getFullYear(), now.getMonth(), 1), 
-        endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) 
-      }
-    }
-    
-    // last_month
-    return { 
-      startDate: new Date(now.getFullYear(), now.getMonth() - 1, 1), 
-      endDate: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59) 
-    }
-  }, [timeFilter])
+  const isGlobalEmpty = paidOrders === 0 && expenses.length === 0 && opex === 0
 
-  // Filter Data
-  const filteredOrders = useMemo(() => orders.filter(o => {
-    const d = new Date(o.created_at || new Date())
-    return d >= startDate && d <= endDate
-  }), [orders, startDate, endDate])
-
-  const filteredExpenses = useMemo(() => expenses.filter(e => {
-    const d = new Date(e.expense_date)
-    return d >= startDate && d <= endDate
-  }), [expenses, startDate, endDate])
-
-  // 1. Calcular métricas principales
-  let totalRevenue = 0
-  let totalCOGS = 0 
-  
-  filteredOrders.forEach(o => {
-    if (o.status === 'cancelled') return
-    totalRevenue += o.total_amount
-    o.order_items.forEach((item) => {
-      // Si unit_cost es 0, históricamente no teníamos costo. Lo manejamos como COGS 0
-      totalCOGS += (item.unit_cost * item.quantity)
-    })
-  })
-
-  const totalOpex = filteredExpenses.reduce((acc, e) => acc + e.amount, 0)
-  
-  const grossProfit = totalRevenue - totalCOGS
-
-  const netProfit = grossProfit - totalOpex
-  const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
-
-  // Datos para gráfico simple (Resumen general)
   const summaryData = [
-    { name: 'Ventas Netas', value: totalRevenue, full: totalRevenue },
-    { name: 'COGS', value: totalCOGS, full: totalRevenue },
-    { name: 'OPEX', value: totalOpex, full: totalRevenue },
-    { name: 'Beneficio', value: netProfit < 0 ? 0 : netProfit, full: totalRevenue }
+    { name: 'Ingresos', value: revenue },
+    { name: 'COGS', value: cogs },
+    { name: 'OPEX', value: opex },
+    { name: 'Beneficio', value: netProfit < 0 ? 0 : netProfit },
   ]
 
-  // Render helpers
-  const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`
+  const chartAria = `Estructura del P&L en ${windowLabel}: Ingresos ${formatCOP(revenue)}, COGS ${formatCOP(cogs)}, OPEX ${formatCOP(opex)}, Beneficio Neto ${formatCOP(netProfit)}.`
+
+  const exportCsv = () => {
+    const rows: string[][] = [
+      ['Konvi — P&L', windowLabel],
+      [],
+      ['Concepto', 'Monto (COP)'],
+      ['Ingresos (pedidos pagados)', String(Math.round(revenue))],
+      ['COGS (costo de mercancía)', String(-Math.round(cogs))],
+      ['OPEX (gastos operativos)', String(-Math.round(opex))],
+      ['Beneficio Neto', String(Math.round(netProfit))],
+      ['Margen Neto (%)', netMargin.toFixed(1)],
+      [],
+      ['Gastos operativos del período'],
+      ['Fecha', 'Categoría', 'Descripción', 'Monto (COP)'],
+      ...expenses.map((e) => [
+        formatBogotaDate(e.expense_date),
+        e.category,
+        e.description,
+        String(Math.round(Number(e.amount) || 0)),
+      ]),
+    ]
+    const csv = rows
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `konvi-pnl-${range}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
-    <div className="space-y-6">
-      
-      {/* Filtros */}
-      <div className="flex bg-muted/30 border border-border/50 p-1 w-fit rounded-lg">
-        <button onClick={() => setTimeFilter('last_month')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'last_month' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Mes Pasado</button>
-        <button onClick={() => setTimeFilter('month')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'month' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Mes Actual</button>
-        <button onClick={() => setTimeFilter('all')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'all' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Todo el Histórico</button>
-      </div>
+    <TooltipProvider delayDuration={200}>
+      <div className="space-y-6">
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-border/50 shadow-sm">
-          <CardContent className="p-5 flex flex-col items-center justify-center text-center">
-             <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center mb-3">
-               <DollarSign className="h-5 w-5 text-blue-700" />
-             </div>
-             <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Ingresos Netos</p>
-             <h3 className="text-2xl font-bold mt-1 text-primary">{fmt(totalRevenue)}</h3>
-             <p className="text-[10px] text-muted-foreground mt-1 text-blue-700">De pedidos pagados</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/50 shadow-sm">
-          <CardContent className="p-5 flex flex-col items-center justify-center text-center relative overflow-hidden">
-             <div className="absolute -right-4 -bottom-4 opacity-5 pointer-events-none">
-                <PieChart className="h-32 w-32" />
-             </div>
-             <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center mb-3">
-               <TrendingDown className="h-5 w-5 text-amber-700" />
-             </div>
-             <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Costo Mercancía (COGS)</p>
-             <h3 className="text-2xl font-bold mt-1 text-amber-700">-{fmt(totalCOGS)}</h3>
-             <p className="text-[10px] text-muted-foreground mt-1">Inventario vendido</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/50 shadow-sm">
-          <CardContent className="p-5 flex flex-col items-center justify-center text-center">
-             <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
-               <Activity className="h-5 w-5 text-red-700" />
-             </div>
-             <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Gastos (OPEX)</p>
-             <h3 className="text-2xl font-bold mt-1 text-red-700">-{fmt(totalOpex)}</h3>
-             <p className="text-[10px] text-muted-foreground mt-1">Marketing, nómina, etc.</p>
-          </CardContent>
-        </Card>
-        <Card className={`border-border/50 shadow-sm relative overflow-hidden ${netProfit > 0 ? 'border-b-green-500 border-b-4' : 'border-b-red-500 border-b-4'}`}>
-          <CardContent className="p-5 flex flex-col items-center justify-center text-center">
-             <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit > 0 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-               <TrendingUp className={`h-5 w-5 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`} />
-             </div>
-             <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Beneficio Neto</p>
-             <h3 className={`text-2xl font-bold mt-1 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`}>{fmt(netProfit)}</h3>
-             <p className={`text-[11px] font-bold mt-1 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {netMargin.toFixed(1)}% Margen
-             </p>
-          </CardContent>
-        </Card>
-      </div>
+        {/* Controles */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FinanceFilters current={range} />
+            <span className="text-xs text-muted-foreground hidden sm:inline">· {windowLabel}</span>
+          </div>
+          {!isGlobalEmpty && (
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={exportCsv}>
+              <Download className="h-3.5 w-3.5" /> Exportar CSV
+            </Button>
+          )}
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-          <Card className="h-full border-border/50 shadow-sm">
-            <CardHeader className="pb-2 text-center border-b">
-              <CardTitle className="text-sm">Estructura de Gastos Financieros</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={summaryData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
-                   <XAxis dataKey="name" tick={{fill: '#888', fontSize: 10}} tickLine={false} axisLine={false} />
-                   <Tooltip 
-                     formatter={(value: unknown) => [fmt(Number(value) || 0), 'Monto']}
-                     contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }}
-                   />
-                   <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                     {summaryData.map((entry, index) => (
-                       <Cell key={`cell-${index}`} fill={
-                         entry.name === 'Ventas Netas' ? '#3b82f6' : 
-                         entry.name === 'COGS' ? '#f59e0b' : 
-                         entry.name === 'OPEX' ? '#ef4444' : '#22c55e'
-                       } />
-                     ))}
-                   </Bar>
-                 </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-        
-        <div className="lg:col-span-2">
-           <ExpensesManager expenses={filteredExpenses} canWrite={canWrite} />
-        </div>
+        {/* Aviso de truncamiento: la agregación cliente-side es incompleta */}
+        {truncated && (
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertTitle>P&amp;L aproximado en este rango</AlertTitle>
+            <AlertDescription>
+              Tienes {ordersCount.toLocaleString('es-CO')} pedidos en el período y el cálculo en el navegador
+              solo agrega los primeros {aggLimit.toLocaleString('es-CO')}. Elige un rango más corto (Mes Actual)
+              para ver cifras exactas. Estamos habilitando la agregación completa en el servidor.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Aviso de costos faltantes → margen inflado */}
+        {!isGlobalEmpty && totalItems > 0 && zeroCostItems > 0 && (
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertTitle>Tu margen puede estar inflado</AlertTitle>
+            <AlertDescription>
+              {zeroCostItems} de {totalItems} productos vendidos no tienen costo cargado, así que su COGS se
+              contó como $0. Carga el costo en el Catálogo para que el beneficio sea real.{' '}
+              <Link href="/dashboard/catalog" className="inline-flex items-center gap-1 font-medium underline underline-offset-2">
+                Ir al Catálogo <ExternalLink className="h-3 w-3" />
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {isGlobalEmpty ? (
+          <>
+            <EmptyState canWrite={canWrite} />
+            <ExpensesManager expenses={expenses} canWrite={canWrite} />
+          </>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <KpiCard
+                icon={<DollarSign className="h-5 w-5 text-primary" />} iconBg="bg-primary/10"
+                label="Ingresos" value={formatCOP(revenue)} valueClass="text-primary"
+                sub={`${paidOrders} ${paidOrders === 1 ? 'pedido pagado' : 'pedidos pagados'}`}
+                help="Suma de pedidos con pago confirmado (confirmado, en proceso, enviado, entregado). Excluye carritos sin pagar y cancelados."
+              />
+              <KpiCard
+                icon={<TrendingDown className="h-5 w-5 text-amber-700" />} iconBg="bg-amber-500/10"
+                label="Costo Mercancía (COGS)" value={formatCOPNegative(cogs)} valueClass="text-amber-700"
+                sub="Costo del inventario vendido"
+                help="Cost of Goods Sold: lo que te costó comprar/producir lo que vendiste. Sale del costo unitario cargado en el Catálogo."
+              />
+              <KpiCard
+                icon={<Activity className="h-5 w-5 text-red-700" />} iconBg="bg-red-500/10"
+                label="Gastos (OPEX)" value={formatCOPNegative(opex)} valueClass="text-red-700"
+                sub="Marketing, nómina, software…"
+                help="Operating Expenses: gastos operativos no atados a un producto vendido (pauta, nómina, suscripciones, logística)."
+              />
+              <Card className={`border-border/50 shadow-sm relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
+                <CardContent className="p-5 flex flex-col items-center justify-center text-center">
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                    <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} />
+                  </div>
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Beneficio Neto
+                    <JargonTip text="Ingresos − COGS − OPEX. Lo que realmente ganó (o perdió) el negocio en el período." />
+                  </p>
+                  <h3 className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCOP(netProfit)}</h3>
+                  <p className={`text-[11px] font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {netMargin.toFixed(1)}% Margen
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Gráfico + desglose OPEX */}
+              <div className="lg:col-span-1 space-y-6">
+                <Card className="border-border/50 shadow-sm">
+                  <CardHeader className="pb-2 text-center border-b">
+                    <CardTitle className="text-sm">Estructura del P&amp;L</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-6 h-[280px]" role="img" aria-label={chartAria}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={summaryData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <RTooltip
+                          cursor={{ fill: 'hsl(var(--muted) / 0.4)' }}
+                          formatter={(value: unknown) => [formatCOP(Number(value) || 0), 'Monto']}
+                          contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                        />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                          {summaryData.map((entry) => (
+                            <Cell key={entry.name} fill={BAR_COLORS[entry.name]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {opexByCategory.length > 0 && (
+                  <Card className="border-border/50 shadow-sm">
+                    <CardHeader className="pb-2 border-b">
+                      <CardTitle className="text-sm">OPEX por categoría</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-2.5">
+                      {opexByCategory.map((c) => (
+                        <div key={c.key} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">{c.label}</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden hidden sm:block">
+                              <div className="h-full bg-red-700 rounded-full" style={{ width: `${opex > 0 ? Math.round((c.amount / opex) * 100) : 0}%` }} />
+                            </div>
+                            <span className="font-mono font-medium text-red-700 w-24 text-right">{formatCOPNegative(c.amount)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+              <div className="lg:col-span-2">
+                <ExpensesManager expenses={expenses} canWrite={canWrite} />
+              </div>
+            </div>
+          </>
+        )}
       </div>
-      
+    </TooltipProvider>
+  )
+}
+
+function KpiCard({ icon, iconBg, label, value, valueClass, sub, help }: {
+  icon: React.ReactNode; iconBg: string; label: string; value: string; valueClass: string; sub: string; help: string
+}) {
+  return (
+    <Card className="border-border/50 shadow-sm">
+      <CardContent className="p-5 flex flex-col items-center justify-center text-center">
+        <div className={`h-10 w-10 rounded-full ${iconBg} flex items-center justify-center mb-3`}>{icon}</div>
+        <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+          {label}
+          <JargonTip text={help} />
+        </p>
+        <h3 className={`text-2xl font-bold mt-1 ${valueClass}`}>{value}</h3>
+        <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function JargonTip({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="text-muted-foreground hover:text-foreground" aria-label={`Qué es: ${text}`}>
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function EmptyState({ canWrite }: { canWrite: boolean }) {
+  return (
+    <div className="border border-dashed rounded-xl p-10 text-center space-y-3">
+      <DollarSign className="h-10 w-10 text-muted-foreground/50 mx-auto" />
+      <h2 className="text-base font-semibold text-foreground">Aún no hay movimiento financiero en este período</h2>
+      <p className="text-sm text-muted-foreground max-w-md mx-auto">
+        Cuando recibas pedidos pagados verás aquí tus Ingresos, el Costo de Mercancía (COGS) y tu Beneficio Neto.
+        {canWrite && ' Puedes empezar registrando tus gastos operativos (pauta, nómina, software) abajo.'}
+      </p>
     </div>
   )
 }
