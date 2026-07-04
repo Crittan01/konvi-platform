@@ -56,6 +56,17 @@ RUNTIME_ROLES = {"owner", "manager", "operator"}
 WRITE_ROLES = {"owner", "manager"}
 
 
+# F7 — copy RBAC canónico (single source of truth). Otros routers con literales
+# inline (integrations.py, settings.py, …) deberían importar estos helpers para
+# eliminar el drift de mensajes; se centralizan aquí primero.
+def msg_require_write_role(role: str) -> str:
+    return f"Permiso insuficiente. Se requiere owner o manager (rol actual: {role})"
+
+
+def msg_require_owner_role(role: str) -> str:
+    return f"Permiso insuficiente. Se requiere owner (rol actual: {role})"
+
+
 def _get_service_client() -> Client:
     """Cliente con service_role/secret para operaciones que requieren bypass de RLS."""
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -176,10 +187,7 @@ async def require_write_role(role: str = Depends(get_current_role)) -> str:
     Lanza 403 si el role es operator.
     """
     if role not in WRITE_ROLES:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Permiso insuficiente. Se requiere owner o manager (rol actual: {role})"
-        )
+        raise HTTPException(status_code=403, detail=msg_require_write_role(role))
     return role
 
 
@@ -190,10 +198,7 @@ async def require_owner_role(role: str = Depends(get_current_role)) -> str:
     Lanza 403 si el role es manager u operator.
     """
     if role != "owner":
-        raise HTTPException(
-            status_code=403,
-            detail=f"Permiso insuficiente. Se requiere owner (rol actual: {role})"
-        )
+        raise HTTPException(status_code=403, detail=msg_require_owner_role(role))
     return role
 
 

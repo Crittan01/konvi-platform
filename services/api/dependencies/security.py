@@ -222,6 +222,55 @@ RL_SEND_MESSAGE = build_rate_limit_dependency(
     include_user_id=True,  # rev. 69 — previene abuse desde IPs rotadas dentro del mismo tenant
 )
 
+# ─── F7 — Buckets estrictos por contrato (MFA anti-brute-force + offboarding) ──
+# El default write.default (120/min) es demasiado laxo para superficies
+# sensibles: adivinar recovery codes MFA o disparar exports pesados / borrados.
+# Estos buckets fijan el contrato documentado. include_user_id=True en MFA
+# porque el atacante ya trae el JWT de la víctima (sesión AAL1) y la key debe
+# ser por-usuario, no por-IP (IPs rotables).
+_SECONDS_PER_DAY = 86400
+_SECONDS_PER_HOUR = 3600
+
+MFA_VERIFY_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_MFA_VERIFY_PER_MINUTE", "5"))
+MFA_REGENERATE_LIMIT_PER_DAY = int(os.getenv("API_RATE_LIMIT_MFA_REGENERATE_PER_DAY", "1"))
+OFFBOARDING_EXPORT_LIMIT_PER_HOUR = int(
+    os.getenv("API_RATE_LIMIT_OFFBOARDING_EXPORT_PER_HOUR", "1")
+)
+OFFBOARDING_DELETION_LIMIT_PER_DAY = int(
+    os.getenv("API_RATE_LIMIT_OFFBOARDING_DELETION_PER_DAY", "1")
+)
+
+# MFA verify (+ flujos que consumen recovery codes): 5/min anti-brute-force.
+RL_MFA_VERIFY = build_rate_limit_dependency(
+    RateLimitRule(bucket="mfa.verify", limit=MFA_VERIFY_LIMIT_PER_MINUTE, window_seconds=60),
+    include_user_id=True,
+)
+# MFA regenerate: 1/día — evita invalidar recovery codes accidental/repetidamente.
+RL_MFA_REGENERATE = build_rate_limit_dependency(
+    RateLimitRule(
+        bucket="mfa.regenerate",
+        limit=MFA_REGENERATE_LIMIT_PER_DAY,
+        window_seconds=_SECONDS_PER_DAY,
+    ),
+    include_user_id=True,
+)
+# Offboarding export: 1/hora — heavy I/O, superficie de abuso.
+RL_OFFBOARDING_EXPORT = build_rate_limit_dependency(
+    RateLimitRule(
+        bucket="offboarding.export",
+        limit=OFFBOARDING_EXPORT_LIMIT_PER_HOUR,
+        window_seconds=_SECONDS_PER_HOUR,
+    ),
+)
+# Offboarding request-deletion: 1/día — acción destructiva irreversible.
+RL_OFFBOARDING_DELETION = build_rate_limit_dependency(
+    RateLimitRule(
+        bucket="offboarding.request_deletion",
+        limit=OFFBOARDING_DELETION_LIMIT_PER_DAY,
+        window_seconds=_SECONDS_PER_DAY,
+    ),
+)
+
 
 def webhook_rate_limit_check(
     supabase: Client | None,

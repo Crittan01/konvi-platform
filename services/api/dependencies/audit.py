@@ -134,12 +134,35 @@ def _extract_user_info(request: Optional[Request]) -> tuple[Optional[str], Optio
         return None, None
 
 
-def audit_log(*, entity_type: str, action: str) -> Callable:
+def _extract_tenant_from_request(request: Optional[Request]) -> Optional[str]:
+    """Resuelve tenant_id desde app_metadata del JWT cuando el handler no lo
+    recibe como kwarg (caso MFA: endpoints per-user sin dependency de tenant).
+    None si no se puede resolver."""
+    if request is None:
+        return None
+    try:
+        payload = _extract_jwt_payload(request)
+        app_metadata = payload.get("app_metadata") or {}
+        tid = app_metadata.get("tenant_id")
+        return str(tid) if tid else None
+    except Exception:
+        return None
+
+
+def audit_log(
+    *, entity_type: str, action: str, capture_result: bool = True
+) -> Callable:
     """Decorator opt-in para auditar mutations de FastAPI.
 
-    El handler decorado DEBE aceptar `request: Request`, `tenant_id`, `supabase`
-    como kwargs (vía Depends). Si falta alguno el decorator no rompe pero
-    advierte y omite el audit.
+    El handler decorado DEBE exponer el cliente Supabase como kwarg `supabase`
+    o `sb` (vía Depends). `tenant_id` se toma del kwarg homónimo o, si el
+    handler no lo recibe (endpoints per-user como MFA), se resuelve desde
+    `app_metadata.tenant_id` del JWT. Si no hay cliente ni tenant, el decorator
+    no rompe: advierte y omite el audit.
+
+    capture_result=False cuando el valor de retorno contiene material sensible
+    que NO debe persistirse (ej. recovery codes MFA en plaintext). En ese caso
+    `payload` se guarda como None — el audit registra la ACCIÓN, no el secreto.
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
@@ -147,19 +170,19 @@ def audit_log(*, entity_type: str, action: str) -> Callable:
             result = await func(*args, **kwargs)
 
             request: Optional[Request] = kwargs.get("request")
-            supabase = kwargs.get("supabase")
-            tenant_id = kwargs.get("tenant_id")
+            supabase = kwargs.get("supabase") or kwargs.get("sb")
+            tenant_id = kwargs.get("tenant_id") or _extract_tenant_from_request(request)
 
             if supabase is None or tenant_id is None:
                 logger.warning(
-                    "[AUDIT] skip — handler sin supabase/tenant_id en kwargs (entity=%s action=%s).",
+                    "[AUDIT] skip — handler sin supabase/tenant_id (entity=%s action=%s).",
                     entity_type, action,
                 )
                 return result
 
             user_id, user_email = _extract_user_info(request)
             entity_id = _extract_entity_id(kwargs, result)
-            payload = _safe_jsonable(result)
+            payload = _safe_jsonable(result) if capture_result else None
 
             write_audit_event(
                 supabase=supabase,

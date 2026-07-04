@@ -1,11 +1,13 @@
 import logging
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from observability import init_sentry
 
@@ -113,6 +115,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    # F7 — sin expose_headers el browser (fetch) NO puede leer estos headers de
+    # respuesta cross-origin: el SPA necesita X-RateLimit-* / Retry-After para
+    # respetar el throttling y X-Request-ID para correlacionar errores.
+    expose_headers=[
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "Retry-After",
+        "X-Request-ID",
+    ],
 )
 
 
@@ -135,6 +147,87 @@ async def security_headers_middleware(request: Request, call_next):
         "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
     )
     return response
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """F7 — correlation-id en el pipeline HTTP síncrono.
+
+    El webhook_framework ya tenía correlation_id; el gateway HTTP no. Sin un ID
+    por request es imposible correlacionar los logs de un fallo end-to-end.
+
+    Respeta un `X-Request-ID` entrante (proxy/tracing upstream) o genera uno.
+    Lo expone en `request.state.request_id` (accesible por handlers) y lo
+    devuelve en el header de respuesta.
+    """
+    incoming = request.headers.get("X-Request-ID", "").strip()
+    request_id = incoming[:64] if incoming else uuid.uuid4().hex
+    request.state.request_id = request_id
+    response: Response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# ─── F7 — Contrato de error uniforme es-CO ─────────────────────────────────────
+# Sin handler, FastAPI devuelve 422 con detail=[{type,loc,msg(EN),input}] — un
+# array con mensajes en inglés que el frontend es-CO no puede mostrar. Este
+# handler normaliza a `{detail: "<texto es-CO>", errors: [...], request_id}`.
+
+_VALIDATION_ES: dict[str, str] = {
+    "missing": "es obligatorio",
+    "string_type": "debe ser texto",
+    "string_too_short": "es demasiado corto",
+    "string_too_long": "es demasiado largo",
+    "int_parsing": "debe ser un número entero",
+    "int_type": "debe ser un número entero",
+    "float_parsing": "debe ser un número",
+    "float_type": "debe ser un número",
+    "bool_parsing": "debe ser verdadero o falso",
+    "bool_type": "debe ser verdadero o falso",
+    "value_error": "tiene un valor inválido",
+    "json_invalid": "no es un JSON válido",
+    "enum": "no es una opción permitida",
+    "greater_than": "es demasiado pequeño",
+    "greater_than_equal": "es demasiado pequeño",
+    "less_than": "es demasiado grande",
+    "less_than_equal": "es demasiado grande",
+    "list_type": "debe ser una lista",
+    "dict_type": "debe ser un objeto",
+    "uuid_parsing": "no es un identificador válido",
+    "datetime_parsing": "no es una fecha/hora válida",
+}
+
+
+def _field_label(loc: tuple) -> str:
+    """Nombre de campo legible: descarta el prefijo body/query/path."""
+    parts = [str(p) for p in loc if p not in ("body", "query", "path", "header")]
+    return ".".join(parts) if parts else "petición"
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = []
+    for err in exc.errors():
+        field = _field_label(tuple(err.get("loc", ())))
+        es_msg = _VALIDATION_ES.get(err.get("type", ""), "es inválido")
+        errors.append({"field": field, "message": f"El campo '{field}' {es_msg}."})
+
+    if len(errors) == 1:
+        detail = errors[0]["message"]
+    else:
+        detail = "Hay campos inválidos en la petición: " + " ".join(
+            e["message"] for e in errors
+        )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": detail,
+            "errors": errors,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
+
 
 app.include_router(products.router, prefix="/api/v1/products", dependencies=_OFFBOARDING_GATE)
 app.include_router(product_categories.router, prefix="/api/v1/product-categories", dependencies=_OFFBOARDING_GATE)
@@ -190,6 +283,48 @@ app.include_router(claims.router, prefix="/api/v1/claims", dependencies=_OFFBOAR
 app.include_router(purchases.router, prefix="/api/v1/purchases", dependencies=_OFFBOARDING_GATE)
 app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base", dependencies=_OFFBOARDING_GATE)
 
+# Versión/build para trazabilidad (Render expone RENDER_GIT_COMMIT).
+_BUILD_VERSION = (
+    os.getenv("RENDER_GIT_COMMIT")
+    or os.getenv("GIT_COMMIT")
+    or os.getenv("APP_VERSION")
+    or "unknown"
+)
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    """Liveness — trivial y sin dependencias externas.
+
+    Render usa este endpoint como healthcheck; NO debe tocar la DB (un blip de
+    Supabase reiniciaría el servicio sano). Para readiness usar /health/ready.
+    """
+    return {"status": "ok", "version": _BUILD_VERSION}
+
+
+@app.get("/health/ready")
+def readiness_check(response: Response):
+    """Readiness — verifica dependencias (DB) antes de declararse listo.
+
+    Devuelve 503 si Supabase no responde. Separado de /health para no acoplar
+    el liveness de Render a un blip transitorio de la DB.
+    """
+    db_ok = False
+    detail = None
+    try:
+        from dependencies.auth import _get_service_client
+
+        _get_service_client().table("tenants").select("id").limit(1).execute()
+        db_ok = True
+    except Exception as exc:  # pragma: no cover — depende de infra
+        detail = str(exc)[:200]
+        logger.warning("[READINESS] DB no disponible: %s", detail)
+
+    if not db_ok:
+        response.status_code = 503
+    return {
+        "status": "ready" if db_ok else "not_ready",
+        "version": _BUILD_VERSION,
+        "checks": {"database": "ok" if db_ok else "fail"},
+        "detail": detail,
+    }

@@ -35,7 +35,11 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
-from dependencies.security import RL_WRITE_DEFAULT
+from dependencies.security import (
+    RL_OFFBOARDING_DELETION,
+    RL_OFFBOARDING_EXPORT,
+    RL_WRITE_DEFAULT,
+)
 from lib.tenant_offboarding import (
     TenantOffboardingError,
     cancel_tenant_deletion,
@@ -140,7 +144,7 @@ async def offboarding_status(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/export", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/export", dependencies=[Depends(RL_OFFBOARDING_EXPORT)])
 async def export_data(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -149,7 +153,8 @@ async def export_data(
 ):
     """Genera export JSON portabilidad Habeas Data Ley 1581 Art. 19.
 
-    Owner-only. Rate-limited via RL_WRITE_DEFAULT (1 req/min por user).
+    Owner-only. Rate-limited a 1/hora por tenant (RL_OFFBOARDING_EXPORT):
+    el export es heavy I/O y no debe ser invocable en ráfaga.
     Devuelve JSON inline (no streaming aún — Fase 2 si tenants crecen >100k
     filas y bajamos a chunked download zip).
 
@@ -189,7 +194,7 @@ async def export_data(
     return payload
 
 
-@router.post("/request-deletion", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/request-deletion", dependencies=[Depends(RL_OFFBOARDING_DELETION)])
 async def request_deletion(
     body: RequestDeletionBody,
     request: Request,
@@ -254,7 +259,7 @@ async def request_deletion(
             f"Cuenta programada para eliminación el {scheduled_for.isoformat()}. "
             f"Mientras tanto la cuenta queda en modo lectura-solo. Puedes "
             f"cancelar via /cancel-deletion. Tus credenciales de integraciones "
-            f"(Wompi/Envia/MeLi/Meta/Telegram) fueron invalidadas — si cancelas, "
+            f"(Wompi/Aveonline/MeLi/Meta/Telegram) fueron invalidadas — si cancelas, "
             f"deberás reconectarlas."
         ),
     }
@@ -304,7 +309,7 @@ async def cancel_deletion(
         "ok": True,
         "message": (
             "Eliminación cancelada. La cuenta vuelve a estar activa, pero "
-            "debes re-conectar las integraciones (Wompi/Envia/MeLi/Meta/"
+            "debes re-conectar las integraciones (Wompi/Aveonline/MeLi/Meta/"
             "Telegram) desde Settings → Integraciones. Es por seguridad: los "
             "secrets pueden haber sido expuestos durante el grace period."
         ),

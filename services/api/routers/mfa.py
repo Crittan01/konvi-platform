@@ -24,11 +24,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from supabase import Client
 
+from dependencies.audit import audit_log
 from dependencies.auth import (
     _extract_jwt_payload,  # type: ignore
     get_service_client,
 )
-from dependencies.security import RL_WRITE_DEFAULT
+from dependencies.security import (
+    RL_MFA_REGENERATE,
+    RL_MFA_VERIFY,
+    RL_WRITE_DEFAULT,
+)
 from lib.mfa_recovery_codes import (
     MFARecoveryCodesError,
     clear_all_for_user,
@@ -98,7 +103,12 @@ async def count_recovery_codes(
     }
 
 
-@router.post("/recovery-codes/regenerate", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/recovery-codes/regenerate", dependencies=[Depends(RL_MFA_REGENERATE)])
+@audit_log(
+    entity_type="mfa",
+    action="mfa.recovery_codes_regenerated",
+    capture_result=False,  # SEGURIDAD: el result trae plaintexts — NUNCA persistir.
+)
 async def regenerate_recovery_codes(
     request: Request,
     sb: Client = Depends(get_service_client),
@@ -132,7 +142,8 @@ async def regenerate_recovery_codes(
     }
 
 
-@router.post("/recovery-codes/verify", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/recovery-codes/verify", dependencies=[Depends(RL_MFA_VERIFY)])
+@audit_log(entity_type="mfa", action="mfa.recovery_code_verified")
 async def verify_recovery_code(
     body: VerifyCodeBody,
     request: Request,
@@ -165,6 +176,7 @@ async def verify_recovery_code(
 
 
 @router.delete("/recovery-codes/clear", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="mfa", action="mfa.recovery_codes_cleared")
 async def clear_recovery_codes(
     request: Request,
     sb: Client = Depends(get_service_client),
@@ -209,7 +221,8 @@ def _list_user_mfa_factors(sb: Client, user_id: str) -> list[dict]:
         return []
 
 
-@router.post("/recovery/reset-totp", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/recovery/reset-totp", dependencies=[Depends(RL_MFA_VERIFY)])
+@audit_log(entity_type="mfa", action="mfa.totp_reset_via_recovery")
 async def recovery_reset_totp(
     body: RecoveryResetTotpBody,
     request: Request,
@@ -268,7 +281,12 @@ async def recovery_reset_totp(
     return {"ok": True, "deleted_factors": deleted_count}
 
 
-@router.post("/recovery/change-password", dependencies=[Depends(RL_WRITE_DEFAULT)])
+@router.post("/recovery/change-password", dependencies=[Depends(RL_MFA_VERIFY)])
+@audit_log(
+    entity_type="mfa",
+    action="mfa.password_changed_via_recovery",
+    capture_result=True,  # result = {"ok": true}; sin material sensible.
+)
 async def recovery_change_password(
     body: RecoveryChangePasswordBody,
     request: Request,
