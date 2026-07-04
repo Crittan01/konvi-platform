@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { bogotaLocalToUTC } from '@/lib/date-window'
+import { entityLabel, actionLabel } from '@/app/dashboard/(analytics)/audit/audit-labels'
+
+const EXPORT_CAP = 5000
+
+/** Neutraliza inyección de fórmulas CSV: celdas que abren con =,+,-,@,tab,CR se prefijan con ' (Excel/Sheets no las evalúan). */
+function csvSafe(value: string): string {
+  const v = value ?? ''
+  const needsGuard = /^[=+\-@\t\r]/.test(v)
+  const guarded = needsGuard ? `'${v}` : v
+  return `"${guarded.replace(/"/g, '""')}"`
+}
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -21,41 +33,51 @@ export async function GET(request: NextRequest) {
     .select('id, user_email, action, entity_type, entity_id, payload, created_at')
     .eq('tenant_id', meta.tenant_id)
     .order('created_at', { ascending: false })
-    .limit(5000)
+    .limit(EXPORT_CAP)
 
   if (entity)    query = query.eq('entity_type', entity)
   if (userEmail) query = query.ilike('user_email', `%${userEmail}%`)
-  if (fromDate)  query = query.gte('created_at', new Date(fromDate).toISOString())
-  if (toDate)    query = query.lte('created_at', new Date(toDate + 'T23:59:59').toISOString())
-
-  const { data } = await query
-  const rows = data ?? []
-
-  const ENTITY_LABELS: Record<string, string> = {
-    order: 'Pedido', product: 'Producto', contact: 'Contacto',
-    kb_document: 'Knowledge Base', integration: 'Integración',
-    settings: 'Configuración', inventory: 'Productos (Stock)',
+  // Bordes de día en hora Colombia (no TZ del servidor): 00:00 y 23:59:59.999 Bogotá.
+  if (fromDate) {
+    const fromUTC = bogotaLocalToUTC(`${fromDate}T00:00`)
+    if (fromUTC) query = query.gte('created_at', fromUTC)
+  }
+  if (toDate) {
+    const start = bogotaLocalToUTC(`${toDate}T00:00`)
+    if (start) query = query.lte('created_at', new Date(new Date(start).getTime() + 24 * 60 * 60 * 1000 - 1).toISOString())
   }
 
-  const header = ['Fecha', 'Usuario', 'Acción', 'Entidad', 'ID', 'Detalle']
+  const { data, error } = await query
+
+  // Surfacear el fallo: NO devolver 200 con CSV vacío (indistinguible de "no hay datos").
+  if (error) {
+    console.error('[audit/export] read failed', { tenantId: meta.tenant_id, entity, userEmail, fromDate, toDate, error: error.message })
+    return NextResponse.json({ error: 'No se pudo generar la exportación. Intenta de nuevo.' }, { status: 502 })
+  }
+
+  const rows = data ?? []
+
+  const header = ['Fecha (Colombia)', 'Usuario', 'Acción', 'Entidad', 'ID', 'Detalle']
   const csvRows = rows.map((r: {
     created_at: string; user_email: string | null; action: string;
     entity_type: string; entity_id: string | null; payload: unknown
   }) => [
-    new Date(r.created_at).toLocaleString('es-CO'),
+    new Date(r.created_at).toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
     r.user_email ?? '',
-    r.action,
-    ENTITY_LABELS[r.entity_type] ?? r.entity_type,
+    actionLabel(r.action),
+    entityLabel(r.entity_type),
     r.entity_id ?? '',
-    r.payload ? JSON.stringify(r.payload).replace(/"/g, '""') : '',
-  ].map(v => `"${v}"`).join(','))
+    r.payload ? JSON.stringify(r.payload) : '',
+  ].map(v => csvSafe(String(v))).join(','))
 
-  const csv = [header.join(','), ...csvRows].join('\n')
+  // BOM para que Excel abra UTF-8 (tildes es-CO) correctamente.
+  const csv = '﻿' + [header.join(','), ...csvRows].join('\r\n')
 
   return new NextResponse(csv, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="auditoria_${new Date().toISOString().slice(0, 10)}.csv"`,
+      'Cache-Control': 'no-store',
     },
   })
 }
