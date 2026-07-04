@@ -2,14 +2,18 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Package, Clock, ChevronRight, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck } from 'lucide-react'
+import { Package, Clock, ChevronRight, ChevronLeft, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck, RefreshCw, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import OrdersNewForm from '../orders-new-form'
+import { filterOrders, paginate, totalPages as calcTotalPages } from '../_lib/orders-filter'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
@@ -20,6 +24,7 @@ type Order = {
   id: string
   status: string
   total_amount: number
+  discount_amount?: number | null
   shipping_cost: number | null
   notes: string | null
   created_at: string
@@ -34,6 +39,8 @@ type Props = {
   contacts: Contact[]
   role: string
   canWrite: boolean
+  counts: Record<string, number>
+  loadError?: string | null
   updateStatusAction: (fd: FormData) => Promise<void>
   generateShippingGuideAction?: (fd: FormData) => Promise<{
     ok: boolean
@@ -66,12 +73,21 @@ const STATUS_NEXT: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   pending:         'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
-  pending_payment: 'bg-amber-500/15 text-amber-600 border-amber-700/30',
+  pending_payment: 'bg-amber-500/15 text-amber-700 border-amber-700/30',
   confirmed:  'bg-blue-500/15 text-blue-700 border-blue-700/30',
   processing: 'bg-purple-500/15 text-purple-700 border-purple-700/30',
   shipped:    'bg-indigo-500/15 text-indigo-700 border-indigo-700/30',
   delivered:  'bg-green-500/15 text-green-700 border-green-700/30',
   cancelled:  'bg-red-500/15 text-red-700 border-red-700/30',
+}
+
+// Ayuda contextual del ciclo de estados (gap operador): qué implica cada
+// avance. 'confirmed' descuenta inventario (orders.py) y 'delivered' es terminal.
+const STATUS_ADVANCE_HELP: Record<string, string> = {
+  confirmed:  'Al confirmar se descuenta el inventario de los productos del pedido.',
+  processing: 'Marca el pedido como en preparación para su despacho.',
+  shipped:    'Marca el pedido como despachado al cliente.',
+  delivered:  'Cierra el pedido como entregado. Es un estado final: no se puede reabrir.',
 }
 
 const STATUS_ICONS: Record<string, React.ElementType> = {
@@ -155,47 +171,83 @@ function GenerateGuideButton({
 
 
 function ActionButton({
-  orderId, nextStatus, originalStatus, updateStatusAction 
-}: { 
-  orderId: string, nextStatus: string, originalStatus: string, updateStatusAction: (fd: FormData) => Promise<void> 
+  orderId, nextStatus, originalStatus, updateStatusAction
+}: {
+  orderId: string, nextStatus: string, originalStatus: string, updateStatusAction: (fd: FormData) => Promise<void>
 }) {
   const [isPending, startTransition] = useTransition()
-  
-  const handleNext = () => {
+  const confirmar = useConfirm()
+
+  // Ejecuta el PATCH y surfacea éxito/error vía toast. Antes handleNext/handleCancel
+  // no capturaban: un throw del server action (transición inválida, RBAC, timeout)
+  // quedaba sin manejar y el spinner moría sin aviso.
+  const run = (fd: FormData, successMsg: string) => {
     startTransition(async () => {
-      const fd = new FormData()
-      fd.append('order_id', orderId)
-      fd.append('next_status', nextStatus)
-      await updateStatusAction(fd)
+      try {
+        await updateStatusAction(fd)
+        toast.success(successMsg)
+      } catch (e) {
+        toast.error(e instanceof Error && e.message ? e.message : 'No se pudo actualizar el pedido.')
+      }
     })
   }
-  
-  const handleCancel = () => {
-    startTransition(async () => {
-      const fd = new FormData()
-      fd.append('order_id', orderId)
-      fd.append('cancel', 'true')
-      await updateStatusAction(fd)
+
+  // Confirmación obligatoria: avanzar descuenta inventario (confirmed) o es
+  // terminal (delivered) — un misclick no debe ser irreversible sin aviso.
+  const handleNext = async () => {
+    const help = STATUS_ADVANCE_HELP[nextStatus] ?? `El pedido pasará a "${STATUS_LABELS[nextStatus]}".`
+    const ok = await confirmar({
+      title: `¿Avanzar a ${STATUS_LABELS[nextStatus]}?`,
+      description: help,
+      confirmLabel: `Avanzar a ${STATUS_LABELS[nextStatus]}`,
+      cancelLabel: 'Volver',
     })
+    if (!ok) return
+    const fd = new FormData()
+    fd.append('order_id', orderId)
+    fd.append('next_status', nextStatus)
+    run(fd, `Pedido actualizado a ${STATUS_LABELS[nextStatus]}.`)
+  }
+
+  const handleCancel = async () => {
+    const ok = await confirmar({
+      title: '¿Cancelar este pedido?',
+      description: 'El pedido quedará cancelado de forma definitiva. Esta acción no se puede revertir.',
+      confirmLabel: 'Cancelar pedido',
+      cancelLabel: 'Volver',
+      destructive: true,
+    })
+    if (!ok) return
+    const fd = new FormData()
+    fd.append('order_id', orderId)
+    fd.append('cancel', 'true')
+    run(fd, 'Pedido cancelado.')
   }
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3 border-t border-border">
-      <Button 
-        onClick={handleNext} 
-        disabled={isPending} 
-        size="sm" 
-        className="w-full sm:w-auto h-8 text-xs font-semibold"
-      >
-        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Avanzar a {STATUS_LABELS[nextStatus]} <ChevronRight className="h-3 w-3 ml-1" /></>}
-      </Button>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              onClick={() => { void handleNext() }}
+              disabled={isPending}
+              size="sm"
+              className="w-full sm:w-auto h-8 text-xs font-semibold"
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Avanzar a {STATUS_LABELS[nextStatus]} <ChevronRight className="h-3 w-3 ml-1" /></>}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{STATUS_ADVANCE_HELP[nextStatus] ?? `Pasar a "${STATUS_LABELS[nextStatus]}".`}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       {originalStatus === 'pending' && (
-        <Button 
-          variant="ghost" 
-          onClick={handleCancel} 
-          disabled={isPending} 
-          size="sm" 
-          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-700 hover:bg-red-400/10"
+        <Button
+          variant="ghost"
+          onClick={() => { void handleCancel() }}
+          disabled={isPending}
+          size="sm"
+          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-700 hover:bg-destructive/10"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancelar pedido'}
         </Button>
@@ -206,60 +258,31 @@ function ActionButton({
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, updateStatusAction, generateShippingGuideAction }: Props) {
+export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, counts, loadError, updateStatusAction, generateShippingGuideAction }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
 
-  // 1. Filtrado de órdenes local en memoria
-  const filteredOrders = useMemo(() => {
-    let result = initialOrders
-
-    // Filtrar por status
-    if (filterStatus !== 'all') {
-      result = result.filter(o => o.status === filterStatus)
-    }
-
-    // Buscar texto (ID, contacto, items)
-    const q = search.toLowerCase().trim()
-    if (q) {
-      result = result.filter(o => {
-        if (o.id.toLowerCase().includes(q)) return true
-        
-        const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
-        if (contact) {
-          if (contact.name?.toLowerCase().includes(q) || contact.phone.toLowerCase().includes(q)) return true
-        }
-
-        if (o.order_items.some(i => i.title.toLowerCase().includes(q))) return true
-        
-        return false
-      })
-    }
-    
-    return result
-  }, [initialOrders, filterStatus, search])
+  // 1. Filtrado local sobre la ventana cargada (helper puro, testeado en _lib).
+  const filteredOrders = useMemo(
+    () => filterOrders(initialOrders, filterStatus, search),
+    [initialOrders, filterStatus, search],
+  )
 
   // Reset pagination on filter changes
   useEffect(() => { setCurrentPage(1) }, [search, filterStatus])
 
   // 2. Paginación
-  const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE) || 1
-  const paginatedOrders = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE
-    return filteredOrders.slice(start, start + ITEMS_PER_PAGE)
-  }, [filteredOrders, currentPage])
+  const totalPages = calcTotalPages(filteredOrders.length, ITEMS_PER_PAGE)
+  const paginatedOrders = useMemo(
+    () => paginate(filteredOrders, currentPage, ITEMS_PER_PAGE),
+    [filteredOrders, currentPage],
+  )
 
-  // Contadores para pestañas
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { all: initialOrders.length }
-    initialOrders.forEach(o => {
-      c[o.status] = (c[o.status] || 0) + 1
-    })
-    return c
-  }, [initialOrders])
-
+  // Los contadores de las pestañas y el total del header vienen del servidor
+  // (COUNT agregado por estado, orders/page.tsx) → reflejan el total real del
+  // tenant, no solo la ventana de 100 cargada.
   return (
     <div className="space-y-5 max-w-7xl">
       {/* Header & Search */}
@@ -280,10 +303,11 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
               placeholder="Buscar por ID, nombre, teléfono o ítem..."
               value={search}
               onChange={e => setSearch(e.target.value)}
+              aria-label="Buscar pedidos"
               className="pl-9 h-9 text-sm bg-card w-full"
             />
             {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button type="button" onClick={() => setSearch('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -293,6 +317,19 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
           </Badge>
         </div>
       </div>
+
+      {/* Error de lectura (patrón data-fetching: surfacear, no falso-0) */}
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{loadError}</span>
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1.5 shrink-0" onClick={() => router.refresh()}>
+              <RefreshCw className="h-3 w-3" /> Reintentar
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* AI Insight */}
       {(role === 'owner' || role === 'manager') && (
@@ -306,7 +343,10 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
           return (
             <button
               key={s}
+              type="button"
               onClick={() => setFilterStatus(s)}
+              aria-pressed={filterStatus === s}
+              aria-label={`Filtrar por ${s === 'all' ? 'todos' : STATUS_LABELS[s]}${counts[s] ? ` (${counts[s]})` : ''}`}
               className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 filterStatus === s
                   ? 'bg-primary/15 text-primary border-primary/40'
@@ -340,13 +380,19 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
         {/* Lista de pedidos */}
         <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
           {paginatedOrders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 rounded-xl border border-dashed border-border text-center">
+            <div className="flex flex-col items-center justify-center py-16 px-6 rounded-xl border border-dashed border-border text-center">
               <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm">
-                {search ? 'No se encontraron resultados para la búsqueda.' : filterStatus === 'all' ? 'No hay pedidos aún.' : `No hay pedidos con estado "${STATUS_LABELS[filterStatus]}".`}
+              <p className="text-muted-foreground text-sm max-w-md">
+                {search
+                  ? 'No se encontraron resultados para la búsqueda.'
+                  : filterStatus === 'all'
+                    ? (canWrite
+                        ? 'Aún no tienes pedidos. Llegan automáticamente cuando un cliente compra por el bot de WhatsApp, o puedes crear uno a mano con el formulario “Nuevo Pedido” de la izquierda.'
+                        : 'Aún no hay pedidos. Llegan automáticamente cuando un cliente compra por el bot de WhatsApp.')
+                    : `No hay pedidos con estado "${STATUS_LABELS[filterStatus]}".`}
               </p>
               {(filterStatus !== 'all' || search) && (
-                <button onClick={() => { setFilterStatus('all'); setSearch('') }} className="mt-2 text-xs text-primary hover:underline">
+                <button type="button" onClick={() => { setFilterStatus('all'); setSearch('') }} className="mt-2 text-xs text-primary hover:underline">
                   Limpiar filtros
                 </button>
               )}
@@ -359,7 +405,8 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                 const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
                 const subtotal  = o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
                 const shipping  = o.shipping_cost ?? 0
-                const revenue   = o.total_amount ?? (subtotal + shipping)
+                const discount  = o.discount_amount ?? 0
+                const revenue   = o.total_amount ?? (subtotal + shipping - discount)
                 
                 return (
                   <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all focus-within:border-primary/50">
@@ -370,12 +417,16 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                             {STATUS_LABELS[o.status] ?? o.status}
                           </span>
                           {o.payment_method === 'cod' && (
-                            <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-700/30"
-                              title="Pago contraentrega — el courier recauda al entregar"
-                            >
-                              💵 COD
-                            </span>
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-700/30 cursor-default">
+                                    💵 COD
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Pago contraentrega — el courier recauda al entregar.</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           )}
                           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">
                             {o.id.split('-')[0].toUpperCase()}
@@ -409,6 +460,18 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                         <div className="flex justify-between items-center gap-2 pt-1.5 mt-1 border-t border-border/40">
                           <span className="text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> Envío</span>
                           <span className="font-mono tabular-nums shrink-0">${shipping.toLocaleString('es-CO')}</span>
+                        </div>
+                      )}
+                      {discount > 0 && (
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="text-emerald-700 flex items-center gap-1">Descuento</span>
+                          <span className="font-mono tabular-nums shrink-0 text-emerald-700">−${discount.toLocaleString('es-CO')}</span>
+                        </div>
+                      )}
+                      {(shipping > 0 || discount > 0) && (
+                        <div className="flex justify-between items-center gap-2 pt-1.5 mt-1 border-t border-border/60 font-semibold text-foreground">
+                          <span>Total</span>
+                          <span className="font-mono tabular-nums shrink-0">${revenue.toLocaleString('es-CO')}</span>
                         </div>
                       )}
                       {o.notes && (
@@ -449,12 +512,12 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                 <div className="flex items-center justify-between py-2 px-1 text-sm text-muted-foreground">
                   <span>Mostrando {(currentPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredOrders.length)} de {filteredOrders.length}</span>
                   <div className="flex items-center gap-1">
-                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>
-                       <span>{'<'}</span>
+                    <Button type="button" variant="outline" size="sm" aria-label="Página anterior" className="w-8 h-8 p-0" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>
+                       <ChevronLeft className="h-4 w-4" />
                     </Button>
-                    <span className="text-xs font-medium w-8 text-center">{currentPage}</span>
-                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>
-                       <span>{'>'}</span>
+                    <span className="text-xs font-medium w-8 text-center" aria-current="page">{currentPage}</span>
+                    <Button type="button" variant="outline" size="sm" aria-label="Página siguiente" className="w-8 h-8 p-0" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>
+                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

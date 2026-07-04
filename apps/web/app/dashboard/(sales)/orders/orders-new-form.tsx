@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { Plus, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,12 +63,17 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
   const subtotal = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
   const grandTotal = subtotal + shippingCost
 
+  // Solo productos con al menos una variante son pedibles. Antes addLine hacía
+  // no-op silencioso si el catálogo estaba vacío o el producto no tenía variante;
+  // ahora se filtran y el botón "Añadir" se deshabilita con guía contextual.
+  const addableProducts = products.filter(p => (p.product_variations?.length ?? 0) > 0)
+  const canAdd = addableProducts.length > 0
+
   // ── Añadir línea vacía ──────────────────────────────────────────────────────
   const addLine = () => {
-    if (products.length === 0) return
-    const p = products[0]
-    const v = p.product_variations?.[0]
-    if (!v) return
+    const p = addableProducts[0]
+    if (!p) return
+    const v = p.product_variations[0]
     setItems(prev => [...prev, {
       productId: p.id,
       productTitle: p.title,
@@ -79,7 +85,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
 
   // ── Cambiar producto en una línea ───────────────────────────────────────────
   const changeProduct = (idx: number, productId: string) => {
-    const p = products.find(pr => pr.id === productId)
+    const p = addableProducts.find(pr => pr.id === productId)
     if (!p) return
     const v = p.product_variations?.[0]
     if (!v) return
@@ -193,20 +199,28 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label>Productos</Label>
-            <Button type="button" size="sm" variant="outline" onClick={addLine} className="h-7 text-xs gap-1">
+            <Button type="button" size="sm" variant="outline" onClick={addLine} disabled={!canAdd} className="h-7 text-xs gap-1">
               <Plus className="h-3 w-3" />
               Añadir
             </Button>
           </div>
 
-          {items.length === 0 && (
+          {!canAdd ? (
+            <p className="text-xs text-muted-foreground text-center py-3 px-3 border border-dashed rounded-lg">
+              No tienes productos con variantes disponibles.{' '}
+              <Link href="/dashboard/catalog" className="text-primary hover:underline">
+                Créalos en Catálogo
+              </Link>{' '}
+              antes de armar un pedido.
+            </p>
+          ) : items.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-3 border border-dashed rounded-lg">
               Presiona &quot;Añadir&quot; para agregar productos
             </p>
           )}
 
           {items.map((item, idx) => {
-            const currentProduct = products.find(p => p.id === item.productId)
+            const currentProduct = addableProducts.find(p => p.id === item.productId)
             return (
               <div key={idx} className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                 <div className="flex gap-2 items-start">
@@ -215,9 +229,10 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
                     <select
                       value={item.productId}
                       onChange={e => changeProduct(idx, e.target.value)}
+                      aria-label="Producto"
                       className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                     >
-                      {products.map(p => (
+                      {addableProducts.map(p => (
                         <option key={p.id} value={p.id}>{p.title}</option>
                       ))}
                     </select>
@@ -226,11 +241,12 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
                       <select
                         value={item.variationId}
                         onChange={e => changeVariation(idx, e.target.value)}
+                        aria-label="Variante"
                         className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                       >
                         {currentProduct.product_variations.map(v => (
                           <option key={v.id} value={v.id}>
-                            {variationLabel(v)} — ${v.price ?? '?'}
+                            {variationLabel(v)} — {v.price != null ? `$${v.price.toLocaleString('es-CO')}` : 'sin precio'}
                           </option>
                         ))}
                       </select>
@@ -240,22 +256,23 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
                   <button
                     type="button"
                     onClick={() => removeLine(idx)}
+                    aria-label={`Eliminar ${item.productTitle}`}
                     className="mt-1 text-muted-foreground hover:text-destructive transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
 
-                {/* Precio y cantidad */}
+                {/* Precio y cantidad — COP sin centavos */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-0.5">
-                    <label className="text-xs text-muted-foreground">Precio ($)</label>
+                    <label className="text-xs text-muted-foreground">Precio (COP)</label>
                     <Input
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      step="50"
+                      min="1"
                       value={item.price}
-                      onChange={e => changePrice(idx, parseFloat(e.target.value) || 0)}
+                      onChange={e => changePrice(idx, parseInt(e.target.value, 10) || 0)}
                       className="h-7 text-xs"
                     />
                   </div>
@@ -265,7 +282,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
                       type="number"
                       min="1"
                       value={item.quantity}
-                      onChange={e => changeQty(idx, parseInt(e.target.value) || 1)}
+                      onChange={e => changeQty(idx, parseInt(e.target.value, 10) || 1)}
                       className="h-7 text-xs"
                     />
                   </div>
@@ -273,7 +290,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
 
                 {/* Subtotal línea */}
                 <p className="text-xs text-right text-muted-foreground">
-                  Subtotal: <span className="text-primary font-medium">${(item.price * item.quantity).toFixed(2)}</span>
+                  Subtotal: <span className="text-primary font-medium">${(item.price * item.quantity).toLocaleString('es-CO')}</span>
                 </p>
               </div>
             )
@@ -284,25 +301,26 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
             <div className="space-y-3 pt-3 border-t border-border">
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground">Subtotal ítems</span>
-                <span>${subtotal.toFixed(2)}</span>
+                <span>${subtotal.toLocaleString('es-CO')}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground flex items-center">
-                  Costo de Envío ($)
+                  Costo de envío (COP)
                 </span>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="50"
                   min="0"
                   value={shippingCost === 0 ? '' : shippingCost}
-                  placeholder="0.00"
-                  onChange={e => setShippingCost(parseFloat(e.target.value) || 0)}
+                  placeholder="0"
+                  aria-label="Costo de envío en pesos"
+                  onChange={e => setShippingCost(parseInt(e.target.value, 10) || 0)}
                   className="h-8 w-28 text-right text-xs"
                 />
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-border">
                 <span className="text-sm font-medium">Total</span>
-                <span className="text-xl font-bold text-primary">${grandTotal.toFixed(2)}</span>
+                <span className="text-xl font-bold text-primary">${grandTotal.toLocaleString('es-CO')}</span>
               </div>
             </div>
           )}
