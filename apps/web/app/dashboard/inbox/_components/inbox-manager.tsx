@@ -10,6 +10,7 @@ import { createIdempotencyKey } from '@/lib/idempotency'
 import type {
   Conversation,
   FilterStatus,
+  Message,
 } from '../_lib/types'
 import { isSlaBreach } from '../_lib/format'
 import { useConversationContext } from '../_hooks/use-conversation-context'
@@ -39,6 +40,9 @@ export default function InboxManager() {
     showArchived,
     setShowArchived,
     syncUrlParam,
+    hasMore: hasMoreConvs,
+    loadingMore: loadingMoreConvs,
+    loadMore: loadMoreConvs,
   } = useConversations({ supabase })
   // Refactor paso 9/10 2026-05-29 — messages state vive en useMessages hook.
   // Optimistic patch a conversations.last_interaction_at via callback.
@@ -107,6 +111,7 @@ export default function InboxManager() {
     context: convContext,
     loading: contextLoading,
     refreshing: contextRefreshing,
+    error: contextError,
     refresh: refreshConvContext,
   } = useConversationContext(selectedId, {
     onDeleted: () => setSelectedId(null),
@@ -124,6 +129,7 @@ export default function InboxManager() {
     loadMore: loadMoreMessages,
     messagesContainerRef,
     messagesEndRef,
+    applyOptimistic: applyOptimisticMessage,
   } = useMessages(selectedId, {
     supabase,
     onMessageInserted: (convId, ts) => {
@@ -168,8 +174,11 @@ export default function InboxManager() {
           { onConflict: 'tenant_id,user_id,conversation_id' },
         )
       }
-    } catch {
+    } catch (e) {
       // El badge optimistic ya está aplicado; el upsert es best-effort.
+      // Pero logueamos: si RLS/red falla sistemáticamente los badges unread
+      // quedan rotos y sin este log no habría diagnóstico posible.
+      console.warn('[inbox] conversation_reads.upsert falló', e)
     }
   }
 
@@ -254,6 +263,13 @@ export default function InboxManager() {
         setSendError(err.detail || 'No se pudo enviar')
       } else {
         setReplyText('')
+        // Optimistic insert: el backend devuelve el message insertado.
+        // Aparece de inmediato en el chat sin esperar Realtime/polling (~8-13s).
+        // Dedupe por id cuando Realtime emita el mismo row.
+        const json = await res.json().catch(() => null)
+        if (json?.message?.id) {
+          applyOptimisticMessage(json.message as Message)
+        }
       }
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') {
@@ -315,6 +331,9 @@ export default function InboxManager() {
         showArchived={showArchived}
         setShowArchived={setShowArchived}
         mobileView={mobileView}
+        hasMore={hasMoreConvs}
+        loadingMore={loadingMoreConvs}
+        onLoadMore={loadMoreConvs}
       />
 
       {/* ── Panel Chat — Refactor paso 10/10 — ChatPanel ────────────────────── */}
@@ -355,6 +374,7 @@ export default function InboxManager() {
           onOrderCreated={refreshContextAfterOrder}
           isOpen={contextPanelOpen}
           isMobileActive={mobileView === 'context'}
+          error={contextError}
         />
       )}
     </div>

@@ -57,7 +57,20 @@ interface Result {
   reload: () => void
   /** Sincronizar el querystring ?conv= con el ID dado (o limpiarlo). */
   syncUrlParam: (id: string | null) => void
+  /** Paginación incremental — hay conversaciones más antiguas sin cargar. */
+  hasMore: boolean
+  loadingMore: boolean
+  /** Cargar el siguiente lote (amplía la ventana en PAGE_STEP y re-fetchea). */
+  loadMore: () => void
 }
+
+// Ventana inicial + incremento por "Ver más". El re-fetch (realtime/poll) usa
+// la ventana vigente, de modo que lo cargado con "Ver más" NO se pierde.
+const PAGE_INITIAL = 50
+const PAGE_STEP = 50
+// Umbral de inactividad de Realtime para que el polling de seguridad refetchee
+// (paridad con useMessages: si Realtime está sano, no refetcheamos en vano).
+const POLLING_FALLBACK_THRESHOLD_MS = 8000
 
 export function useConversations({ supabase }: Options): Result {
   const router = useRouter()
@@ -68,9 +81,17 @@ export function useConversations({ supabase }: Options): Result {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showArchived, setShowArchivedState] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   // Ref para que las suscripciones Realtime lean el valor vigente sin re-suscribirse.
   const showArchivedRef = useRef(false)
   const pendingConvRestore = useRef<string | null>(null)
+  // Ventana vigente (crece con "Ver más"). Ref para que el re-fetch de
+  // realtime/poll respete lo ya cargado sin recrear el callback.
+  const pageSizeRef = useRef(PAGE_INITIAL)
+  // Timestamp del último evento Realtime — para que el poll solo actúe si
+  // Realtime parece inactivo.
+  const lastRealtimeAt = useRef(0)
 
   // URL sync — usar replace para NO empujar history (UX de panel selector).
   const syncUrlParam = useCallback((id: string | null) => {
@@ -102,7 +123,12 @@ export function useConversations({ supabase }: Options): Result {
       .from('conversations')
       .select('id, customer_phone, status, agentic_state, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
       .order('last_interaction_at', { ascending: false })
-      .limit(50)
+      // Perf: solo necesitamos el ÚLTIMO mensaje por conv para el preview —
+      // limitar el recurso embebido evita traer el historial completo de cada
+      // conv en cada carga/poll/realtime (payload crecía linealmente).
+      .order('created_at', { referencedTable: 'messages', ascending: false })
+      .limit(1, { referencedTable: 'messages' })
+      .limit(pageSizeRef.current)
     if (!showArchivedRef.current) {
       query = query.is('archived_at', null)
     }
@@ -116,6 +142,8 @@ export function useConversations({ supabase }: Options): Result {
     }
 
     setError(null)
+    // Si el backend devolvió la ventana completa, probablemente hay más.
+    setHasMore((data?.length ?? 0) >= pageSizeRef.current)
     type RawRow = Omit<Conversation, 'last_message'> & {
       messages?: Array<{ content: string; direction: string; created_at: string }>
     }
@@ -166,6 +194,18 @@ export function useConversations({ supabase }: Options): Result {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase])
 
+  // "Ver más": amplía la ventana y re-fetchea (respetando showArchived + filtros).
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    pageSizeRef.current += PAGE_STEP
+    try {
+      await loadConversations()
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, hasMore, loadConversations])
+
   // Restaurar conv de la URL en mount.
   useEffect(() => {
     const convId = new URLSearchParams(window.location.search).get('conv')
@@ -194,6 +234,7 @@ export function useConversations({ supabase }: Options): Result {
     const channel = supabase
       .channel('conversations:all')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+        lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
           const newConv = payload.new as Conversation
           if (newConv?.id) {
@@ -238,8 +279,12 @@ export function useConversations({ supabase }: Options): Result {
 
     // Polling de seguridad cada 20s — si Realtime falla por RLS/race,
     // el polling recoge la conversación nueva sin requerir F5 manual.
+    // Solo refetchea si Realtime lleva > umbral en silencio (evita refetch
+    // redundante permanente cuando Realtime está sano).
     const pollInterval = setInterval(() => {
-      loadConversations()
+      if (Date.now() - lastRealtimeAt.current > POLLING_FALLBACK_THRESHOLD_MS) {
+        loadConversations()
+      }
     }, 20000)
 
     return () => {
@@ -260,6 +305,9 @@ export function useConversations({ supabase }: Options): Result {
     setShowArchived,
     reload: loadConversations,
     syncUrlParam,
+    hasMore,
+    loadingMore,
+    loadMore,
   }
 }
 

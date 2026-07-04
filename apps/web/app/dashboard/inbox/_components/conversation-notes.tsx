@@ -9,7 +9,7 @@
  *   - Lista de notas (pinned primero).
  *   - Input para nueva nota con pin toggle.
  *   - Pin/unpin existente.
- *   - Edit inline (próxima iteración — hoy display-only).
+ *   - Edit inline del contenido (PATCH content — backend rev. conversations.py:1051).
  *   - Soft-delete con confirm.
  *
  * Visibilidad: solo se monta cuando hay conversación seleccionada (decisión
@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
-  AlertCircle, BadgeCheck, Loader2, Pin, PinOff, Plus, Trash2,
+  AlertCircle, BadgeCheck, Check, Loader2, Pencil, Pin, PinOff, Plus, Trash2, X,
 } from 'lucide-react'
 import type { ConversationNote } from '../_lib/types'
 import { timeAgo } from '../_lib/format'
@@ -36,6 +36,10 @@ export function ConversationNotes({ conversationId }: Props) {
   const [newText, setNewText] = useState('')
   const [newPinned, setNewPinned] = useState(false)
   const [creating, setCreating] = useState(false)
+  // Edición inline del contenido de una nota existente.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const fetchNotes = useCallback(async () => {
     setError(null)
@@ -130,6 +134,57 @@ export function ConversationNotes({ conversationId }: Props) {
     }
   }
 
+  const startEdit = (note: ConversationNote) => {
+    setEditingId(note.id)
+    setEditText(note.content)
+    setError(null)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditText('')
+  }
+
+  const onSaveEdit = async (note: ConversationNote) => {
+    const text = editText.trim()
+    if (!text) { setError('La nota no puede quedar vacía'); return }
+    if (text.length > 2000) { setError('Máximo 2000 caracteres'); return }
+    if (text === note.content) { cancelEdit(); return }
+    setSavingEdit(true)
+    setError(null)
+    try {
+      const sb = createClient()
+      const { data: { session } } = await sb.auth.getSession()
+      const token = session?.access_token
+      if (!token) { setError('Sesión expirada'); return }
+
+      const res = await fetch(
+        `/api/conversations/${conversationId}/notes/${note.id}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content: text }),
+        },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(data.detail || 'No se pudo editar la nota'); return }
+      // El backend devuelve la nota actualizada (con updated_at fresco).
+      setNotes(prev => sortNotes(prev.map(n =>
+        n.id === note.id
+          ? { ...n, ...data, content: data.content ?? text }
+          : n,
+      )))
+      cancelEdit()
+    } catch {
+      setError('Error de red al editar la nota')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   const onDelete = async (note: ConversationNote) => {
     if (!(await confirmar({
       title: '¿Eliminar esta nota?',
@@ -209,7 +264,7 @@ export function ConversationNotes({ conversationId }: Props) {
       </div>
 
       {error && (
-        <p className="text-[11px] text-red-600 mb-2 flex items-center gap-1">
+        <p className="text-[11px] text-red-700 mb-2 flex items-center gap-1">
           <AlertCircle className="h-3 w-3" /> {error}
         </p>
       )}
@@ -234,7 +289,38 @@ export function ConversationNotes({ conversationId }: Props) {
                   : 'bg-background border-border'
               }`}
             >
-              <p className="whitespace-pre-wrap break-words mb-1.5">{note.content}</p>
+              {editingId === note.id ? (
+                <div className="space-y-1.5 mb-1.5">
+                  <textarea
+                    value={editText}
+                    onChange={e => setEditText(e.target.value)}
+                    rows={2}
+                    maxLength={2000}
+                    autoFocus
+                    className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-amber-700/40 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={cancelEdit}
+                      disabled={savingEdit}
+                      className="inline-flex items-center gap-1 h-6 px-2 text-[11px] rounded-md border border-border hover:bg-muted/40 disabled:opacity-50"
+                    >
+                      <X className="h-3 w-3" /> Cancelar
+                    </button>
+                    <button
+                      onClick={() => onSaveEdit(note)}
+                      disabled={savingEdit || !editText.trim()}
+                      className="inline-flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {savingEdit
+                        ? <><Loader2 className="h-3 w-3 animate-spin" /> Guardando</>
+                        : <><Check className="h-3 w-3" /> Guardar</>}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap break-words mb-1.5">{note.content}</p>
+              )}
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1">
                   {note.is_pinned && <BadgeCheck className="h-2.5 w-2.5 text-amber-700" />}
@@ -243,24 +329,36 @@ export function ConversationNotes({ conversationId }: Props) {
                     <span className="italic">(editada)</span>
                   )}
                 </span>
-                <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={() => onTogglePin(note)}
-                    title={note.is_pinned ? 'Quitar pin' : 'Fijar arriba'}
-                    className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-muted/40"
-                  >
-                    {note.is_pinned
-                      ? <PinOff className="h-3 w-3" />
-                      : <Pin className="h-3 w-3" />}
-                  </button>
-                  <button
-                    onClick={() => onDelete(note)}
-                    title="Eliminar nota"
-                    className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-red-500/10 hover:text-red-600"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
+                {editingId !== note.id && (
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => startEdit(note)}
+                      title="Editar nota"
+                      aria-label="Editar nota"
+                      className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-muted/40"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={() => onTogglePin(note)}
+                      title={note.is_pinned ? 'Quitar pin' : 'Fijar arriba'}
+                      aria-label={note.is_pinned ? 'Quitar pin' : 'Fijar arriba'}
+                      className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-muted/40"
+                    >
+                      {note.is_pinned
+                        ? <PinOff className="h-3 w-3" />
+                        : <Pin className="h-3 w-3" />}
+                    </button>
+                    <button
+                      onClick={() => onDelete(note)}
+                      title="Eliminar nota"
+                      aria-label="Eliminar nota"
+                      className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-red-500/10 hover:text-red-700"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}

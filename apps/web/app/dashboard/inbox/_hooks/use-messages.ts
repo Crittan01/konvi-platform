@@ -53,6 +53,10 @@ interface Result {
   loadMore: () => Promise<void>
   messagesContainerRef: React.MutableRefObject<HTMLDivElement | null>
   messagesEndRef: React.RefObject<HTMLDivElement | null>
+  /** Optimistic insert de un mensaje recién enviado por el operador — evita
+   *  la espera de ~8-13s del fallback polling cuando Realtime tarda. Dedup por
+   *  id: cuando Realtime emita el mismo row, no se duplica. */
+  applyOptimistic: (msg: Message) => void
 }
 
 const MESSAGE_COLUMNS =
@@ -201,6 +205,13 @@ export function useMessages(
     }
   }, [conversationId, supabase, loadingMore, hasMore, messages])
 
+  // Optimistic insert (dedupe por id) + scroll al final.
+  const applyOptimistic = useCallback((msg: Message) => {
+    if (!msg?.id) return
+    setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]))
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }, [])
+
   return {
     messages,
     error,
@@ -209,6 +220,7 @@ export function useMessages(
     loadMore,
     messagesContainerRef,
     messagesEndRef,
+    applyOptimistic,
   }
 }
 

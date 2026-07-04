@@ -54,11 +54,17 @@ export function ChatEditorToolbar({
         setEmojiOpen(false)
       }
     }
+    // Esc cierra el picker (paridad con el comentario de onEmojiClick).
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEmojiOpen(false)
+    }
     // Defer para que el click que ABRE el picker no lo cierre inmediato.
     const t = setTimeout(() => document.addEventListener('mousedown', handler), 0)
+    document.addEventListener('keydown', keyHandler)
     return () => {
       clearTimeout(t)
       document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', keyHandler)
     }
   }, [emojiOpen])
 
@@ -169,7 +175,7 @@ export function ChatEditorToolbar({
                 </div>
               ))}
               <p className="text-[10px] text-muted-foreground italic px-0.5 pt-1 border-t border-border">
-                Tip: también podés usar el selector del sistema (Ctrl+Cmd+Espacio en Mac · Win+. en Windows) para cualquier otro emoji.
+                Tip: también puedes usar el selector del sistema (Ctrl+Cmd+Espacio en Mac · Win+. en Windows) para cualquier otro emoji.
               </p>
             </div>
           )}

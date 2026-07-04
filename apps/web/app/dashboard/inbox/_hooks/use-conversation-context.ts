@@ -33,6 +33,9 @@ interface Result {
   context: ConvContext | null
   loading: boolean
   refreshing: boolean
+  /** Último error de fetch (inicial o auto-refresh). Se limpia al primer éxito.
+   *  Antes se tragaba con `.catch(() => {})` → panel stale sin señal al operador. */
+  error: string | null
   refresh: () => void
 }
 
@@ -51,6 +54,7 @@ export function useConversationContext(
   const [context, setContext] = useState<ConvContext | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createClient())
   // Refs para callbacks estables sin re-suscribir el efecto.
   const onDeletedRef = useRef(onDeleted)
@@ -66,9 +70,15 @@ export function useConversationContext(
       fetch(`/api/conversations/${conversationId}/context`, {
         headers: { 'Authorization': `Bearer ${t}` },
       })
-        .then(r => r.json())
-        .then(j => setContext(j))
-        .catch(() => {})
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.json()
+        })
+        .then(j => { setContext(j); setError(null) })
+        .catch((e) => {
+          console.warn('[useConversationContext] refresh manual falló', e)
+          setError('No se pudo actualizar el contexto.')
+        })
     })
   }, [conversationId])
 
@@ -79,6 +89,7 @@ export function useConversationContext(
     }
     setLoading(true)
     setContext(null)
+    setError(null)
 
     const supabase = supabaseRef.current
     const controller = new AbortController()
@@ -103,15 +114,22 @@ export function useConversationContext(
           // deseleccionar para evitar loop infinito de fetches cada 5s.
           if (res.status === 404 && !cancelled && !controller.signal.aborted) {
             onDeletedRef.current?.()
+          } else if (!cancelled && !controller.signal.aborted) {
+            setError('No se pudo actualizar el contexto.')
           }
           return
         }
         const json = await res.json()
-        if (!cancelled && !controller.signal.aborted) setContext(json)
+        if (!cancelled && !controller.signal.aborted) {
+          setContext(json)
+          setError(null)
+        }
       } catch (e) {
-        if (!controller.signal.aborted && !opts?.silent) {
-          // Log silent — el padre no necesita conocer cada error de red.
+        if (!controller.signal.aborted) {
+          // Persistimos el error para que el panel muestre señal de stale
+          // (antes el auto-refresh podía fallar indefinidamente en silencio).
           console.warn('[useConversationContext] error', e)
+          if (!cancelled) setError('No se pudo actualizar el contexto.')
         }
       } finally {
         if (!cancelled && !controller.signal.aborted) {
@@ -133,5 +151,5 @@ export function useConversationContext(
     }
   }, [conversationId, refreshIntervalMs])
 
-  return { context, loading, refreshing, refresh }
+  return { context, loading, refreshing, error, refresh }
 }

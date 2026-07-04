@@ -24,7 +24,7 @@ import { useRef as _useRef } from 'react'  // unused; explicit just for clarity
 import type React from 'react'
 import {
   AlertCircle, Bot, Check, CheckCheck, ChevronLeft, ChevronsRight,
-  Circle, Clock, Info, MessageSquare, Phone, Send, User,
+  Circle, Clock, Info, MessageSquare, Paperclip, Phone, Send, User,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
@@ -38,6 +38,16 @@ import { wrapSelection } from '../_lib/editor'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
 
 void _useRef  // suppress unused
+
+// Etiqueta es-CO por content_type de media (para el placeholder cuando falta media_url).
+const MEDIA_TYPE_LABELS: Partial<Record<Message['content_type'], string>> = {
+  image: 'imagen',
+  audio: 'audio',
+  video: 'video',
+  document: 'documento',
+  sticker: 'sticker',
+  location: 'ubicación',
+}
 
 type Status = Conversation['status']
 
@@ -99,9 +109,13 @@ export function ChatPanel({
   // Rev. 109 founder 2026-05-29 — Rerun IA (P0-3 backlog).
   const [rerunning, setRerunning] = useState(false)
   const [rerunNotice, setRerunNotice] = useState<string | null>(null)
+  // Cooldown 5s post-clic: el backend delega el throttle a la UI
+  // (conversations.py:1146). Evita que N clicks rápidos disparen N corridas Gemini.
+  const [rerunCooldown, setRerunCooldown] = useState(false)
 
   const handleRerun = async () => {
     if (!selectedConv || selectedConv.status !== 'bot_active') return
+    if (rerunning || rerunCooldown) return
     setRerunning(true)
     setRerunNotice(null)
     try {
@@ -128,6 +142,9 @@ export function ChatPanel({
       setRerunNotice('Error de red al re-ejecutar')
     } finally {
       setRerunning(false)
+      // Cooldown 5s tras el clic para no amplificar costo LLM por spam.
+      setRerunCooldown(true)
+      setTimeout(() => setRerunCooldown(false), 5000)
     }
   }
 
@@ -149,6 +166,7 @@ export function ChatPanel({
           <div className="px-4 py-3 border-b border-border flex items-center gap-3 bg-card/80 backdrop-blur-md">
             <button
               onClick={() => setMobileView('list')}
+              aria-label="Volver a la lista de conversaciones"
               className="sm:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -196,8 +214,10 @@ export function ChatPanel({
                     size="sm"
                     variant="outline"
                     onClick={handleRerun}
-                    disabled={rerunning || messages.length === 0}
-                    title="Re-procesar último mensaje del cliente — útil si el bot dio respuesta mala o si actualizaste catálogo/cupones"
+                    disabled={rerunning || rerunCooldown || messages.length === 0}
+                    title={rerunCooldown
+                      ? 'Espera unos segundos antes de re-ejecutar de nuevo'
+                      : 'Re-procesar último mensaje del cliente — útil si el bot dio respuesta mala o si actualizaste catálogo/cupones'}
                     className="text-violet-600 border-violet-700/30 hover:bg-violet-500/10 text-xs h-8"
                   >
                     <RotateCw className={`h-3.5 w-3.5 mr-1 ${rerunning ? 'animate-spin' : ''}`} /> Rerun IA
@@ -224,6 +244,8 @@ export function ChatPanel({
               {/* Toggle panel contextual en desktop */}
               <button
                 onClick={onToggleContextPanel}
+                aria-label={contextPanelOpen ? 'Cerrar panel de cliente' : 'Abrir panel de cliente'}
+                aria-pressed={contextPanelOpen}
                 className="hidden lg:flex items-center justify-center h-8 w-8 rounded-lg border border-border hover:bg-accent text-muted-foreground"
                 title={contextPanelOpen ? 'Cerrar panel' : 'Abrir panel de cliente'}
               >
@@ -232,6 +254,7 @@ export function ChatPanel({
               {/* Abrir panel contextual en mobile */}
               <button
                 onClick={() => setMobileView('context')}
+                aria-label="Ver panel de cliente"
                 className="lg:hidden flex items-center justify-center h-8 w-8 rounded-lg border border-border hover:bg-accent text-muted-foreground"
                 title="Ver panel de cliente"
               >
@@ -345,7 +368,19 @@ export function ChatPanel({
                           loading="lazy"
                         />
                       </a>
-                    ) : null}
+                    ) : (
+                      // Media del cliente sin URL descargable (persistencia media inbound
+                      // pendiente — decisión Storage vs proxy Meta). Al menos indicamos el
+                      // tipo de adjunto para que el operador no lea "[Imagen recibida]" crudo.
+                      MEDIA_TYPE_LABELS[msg.content_type] && !msg.media_url ? (
+                        <div className={`mb-1.5 inline-flex items-center gap-1.5 text-[11px] italic rounded-md px-2 py-1 border ${
+                          isInbound ? 'border-border/60 bg-muted/40 text-muted-foreground' : 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80'
+                        }`}>
+                          <Paperclip className="h-3 w-3 shrink-0" />
+                          Adjunto de {MEDIA_TYPE_LABELS[msg.content_type]} recibido — previsualización no disponible
+                        </div>
+                      ) : null
+                    )}
                     {msg.content && (
                       // div (no <p>): renderWhatsAppFormat emite bloques <ul>/<ol>,
                       // inválidos dentro de <p> → hydration error en React 19 / Next 15.
@@ -361,7 +396,7 @@ export function ChatPanel({
                           : <Check className="h-3 w-3" />
                       )}
                       {!isInbound && msg.processing_status === 'failed' && (
-                        <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded-full"
+                        <span className="text-[10px] bg-red-500/20 text-red-700 px-1.5 py-0.5 rounded-full"
                           title={msg.skip_reason ?? 'Error al procesar'}>
                           ✕ Error
                         </span>
@@ -439,7 +474,9 @@ export function ChatPanel({
               <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-1">
                 {selectedConv.status === 'bot_active'
                   ? <><Bot className="h-3.5 w-3.5" /> El bot está respondiendo automáticamente</>
-                  : <><span className="h-3.5 w-3.5 inline-block" /> Conversación cerrada</>}
+                  : selectedConv.status === 'opted_out'
+                    ? <><AlertCircle className="h-3.5 w-3.5" /> Cliente pidió no ser contactado — reactiva el bot para responder</>
+                    : <><span className="h-3.5 w-3.5 inline-block" /> Conversación cerrada</>}
               </p>
             </div>
           )}

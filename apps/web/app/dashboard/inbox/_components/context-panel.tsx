@@ -46,6 +46,8 @@ interface Props {
   isOpen: boolean
   /** En móvil, sólo visible si mobileView==='context'. */
   isMobileActive: boolean
+  /** Error del auto-refresh del contexto — el panel puede quedar desactualizado. */
+  error?: string | null
 }
 
 export function ContextPanel({
@@ -57,6 +59,7 @@ export function ContextPanel({
   onOrderCreated,
   isOpen,
   isMobileActive,
+  error,
 }: Props) {
   const [showAllOrders, setShowAllOrders] = useState(false)
   const [productSearch, setProductSearch] = useState('')
@@ -84,11 +87,21 @@ export function ContextPanel({
         </span>
         <button
           onClick={onCloseMobile}
+          aria-label="Cerrar panel de cliente"
           className="lg:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Banner de error del auto-refresh: el panel puede estar desactualizado
+          (antes el error se tragaba silenciosamente → panel stale sin señal). */}
+      {error && (
+        <div className="px-4 py-2 text-[11px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-1.5">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>No se pudo actualizar el contexto — los datos pueden estar desactualizados.</span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto space-y-0">
         {/* Notas privadas del operador (P0-1 founder 2026-05-29) */}

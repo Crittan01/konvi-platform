@@ -51,6 +51,10 @@ interface Props {
   setShowArchived: (v: boolean | ((prev: boolean) => boolean)) => void
   /** En móvil, ocultar este panel cuando se selecciona chat o contexto. */
   mobileView: 'list' | 'chat' | 'context'
+  /** Paginación incremental: hay conversaciones más antiguas sin cargar. */
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
 }
 
 export function ConversationList({
@@ -67,6 +71,9 @@ export function ConversationList({
   showArchived,
   setShowArchived,
   mobileView,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: Props) {
   // State local: expansión de grupos por phone.
   const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set())
@@ -101,6 +108,8 @@ export function ConversationList({
             {hasUnread && (
               <span
                 className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"
+                role="status"
+                aria-label="Mensaje sin leer"
                 title="Mensaje sin leer"
               />
             )}
@@ -185,7 +194,11 @@ export function ConversationList({
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
+            <button
+              onClick={() => setSearch('')}
+              aria-label="Limpiar búsqueda"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2"
+            >
               <X className="h-3 w-3 text-muted-foreground" />
             </button>
           )}
@@ -262,12 +275,25 @@ export function ConversationList({
         ) : filteredConvs.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground text-sm">
             <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-20" />
-            <p>{search ? 'Sin resultados' : 'No hay conversaciones'}</p>
+            {search ? (
+              <p>Sin resultados para &ldquo;{search}&rdquo;.</p>
+            ) : (
+              <div className="space-y-1.5">
+                <p className="font-medium text-foreground">Aún no hay conversaciones</p>
+                <p className="text-xs leading-relaxed">
+                  Cuando un cliente le escriba a tu WhatsApp aparecerá aquí automáticamente.
+                  Verifica que tu número esté conectado en{' '}
+                  <a href="/dashboard/integrations" className="text-primary hover:underline">
+                    Configuración → Integraciones
+                  </a>.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           (() => {
             const groups = groupConvsByPhone(filteredConvs)
-            return groups.flatMap(group => {
+            const listRows = groups.flatMap(group => {
               const isExpanded = expandedPhones.has(group.phone)
               const rows: React.ReactNode[] = []
 
@@ -298,6 +324,23 @@ export function ConversationList({
 
               return rows
             })
+            // "Ver más" — carga incremental de conversaciones más antiguas
+            // (la búsqueda filtra solo lo cargado; cargar más amplía el alcance).
+            if (hasMore && !search) {
+              listRows.push(
+                <div key="__load_more" className="p-3">
+                  <button
+                    type="button"
+                    onClick={onLoadMore}
+                    disabled={loadingMore}
+                    className="w-full text-[11px] font-medium py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors disabled:opacity-60"
+                  >
+                    {loadingMore ? 'Cargando…' : 'Ver conversaciones más antiguas'}
+                  </button>
+                </div>,
+              )
+            }
+            return listRows
           })()
         )}
       </div>
