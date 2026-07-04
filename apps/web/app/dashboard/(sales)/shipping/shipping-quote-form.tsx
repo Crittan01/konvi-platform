@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, Package, ChevronDown, ChevronUp, Check, MapPin, Box, Zap, DollarSign } from 'lucide-react'
+import { toast } from 'sonner'
+import { Loader2, Package, ChevronDown, ChevronUp, Check, MapPin, Box, Zap, DollarSign, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // Label e Input se usan en la sección de paquete
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 import { createIdempotencyKey } from '@/lib/idempotency'
+import { normalizeDaneCode, resolveFastestIdx } from './_lib/shipping-rates'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +21,8 @@ interface ShippingOrigin {
 }
 
 interface Rate {
+  rate_id?: string
+  id?: string
   carrier?: string
   service?: string
   total_price?: number
@@ -49,12 +53,6 @@ interface Props {
   orderId?:       string | null
   destDefaults?:  Record<string, string> | null
   onQuoted?:      () => void
-}
-
-function normalizeDaneCode(raw?: string): string {
-  const digits = String(raw ?? '').replace(/\D/g, '')
-  if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
-  return digits.slice(0, 5)
 }
 
 // ─── GeoSelector — solo departamento + ciudad (mínimo para cotizar) ──────────
@@ -144,10 +142,11 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
   const [open, setOpen]               = useState(!!orderId)
   const [submitting, setSubmitting]   = useState(false)
   const [error, setError]             = useState<string | null>(null)
-  const [result, setResult]           = useState<{ shipmentId: string; rates: Rate[] } | null>(null)
+  const [result, setResult]           = useState<{ shipmentId: string | null; rates: Rate[]; highlights?: { cheapest?: Rate; fastest?: Rate } } | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
+  const [saveError, setSaveError]     = useState<string | null>(null)
 
   const originGeo: Record<string, string> = shippingOrigin ? {
     city:      shippingOrigin.city        ?? '',
@@ -212,7 +211,16 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
         }
         // 7. Ordenar por precio ascendente (más económico primero)
         ratesList.sort((a, b) => (Number(a.total_price) || 999999) - (Number(b.total_price) || 999999))
-        setResult({ shipmentId: data.shipment_id, rates: ratesList })
+        const highlights = (data.highlights ?? undefined) as { cheapest?: Rate; fastest?: Rate } | undefined
+        const shipmentId = (data.shipment_id ?? null) as string | null
+        setResult({ shipmentId, rates: ratesList, highlights })
+        // El insert de la fila shipment va en try/except en el backend y puede
+        // responder 201 con shipment_id=null (columna faltante, RLS, etc.). Sin
+        // este aviso el operador cree que guardó y al seleccionar tarifa haría
+        // PATCH a /api/shipping/null/rate → 404 silencioso.
+        if (!shipmentId && ratesList.length > 0) {
+          setError('Se obtuvieron tarifas pero no se pudo guardar la cotización. Podrás comparar precios, pero para dejar la tarifa registrada vuelve a cotizar.')
+        }
       }
     } catch {
       setError('Tiempo de espera agotado o error de red. Intenta de nuevo.')
@@ -223,9 +231,17 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
 
   const handleSelectRate = async (idx: number) => {
     if (!result) return
+    // Guard: sin shipmentId el PATCH iría a /api/shipping/null/rate → 404.
+    // No dejamos que el operador crea que guardó algo que no persistió.
+    if (!result.shipmentId) {
+      setSaveError('No se puede guardar: la cotización no quedó registrada. Vuelve a cotizar.')
+      toast.error('La cotización no quedó registrada. Vuelve a cotizar.')
+      return
+    }
     setSelectedIdx(idx)
     setSaving(true)
     setSaved(false)
+    setSaveError(null)
     const rate = result.rates[idx]
     try {
       const rateKey = createIdempotencyKey('shipping.rate.confirm')
@@ -238,24 +254,44 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
         body:    JSON.stringify(rate),
         signal:  AbortSignal.timeout(10000),
       })
-      if (res.ok) { setSaved(true); onQuoted() }
+      if (res.ok) {
+        setSaved(true)
+        toast.success('Tarifa guardada')
+        onQuoted()
+      } else {
+        const err = await res.json().catch(() => ({ detail: '' }))
+        const msg = err.detail || 'No se pudo guardar la tarifa. Intenta de nuevo.'
+        setSaveError(msg)
+        toast.error(msg)
+      }
+    } catch {
+      const msg = 'Error de red al guardar la tarifa. Intenta de nuevo.'
+      setSaveError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
   }
 
-
-  const fastestIdx = result
-    ? result.rates.reduce((best, r, i) => {
-        if (!r.delivery_date) return best
-        if (best === -1) return i
-        return r.delivery_date < result.rates[best].delivery_date! ? i : best
-      }, -1)
-    : -1
+  // Destacado "Más rápido": usar los highlights que YA calcula el backend
+  // (shipping.py _build_rate_highlights vía delivery_estimate). El frontend
+  // NO recalcula con rate.delivery_date — Aveonline nunca emite ese campo, así
+  // que el cálculo previo daba siempre -1 y la card jamás aparecía.
+  const fastestIdx = result ? resolveFastestIdx(result.rates, result.highlights) : -1
 
   return (
     <Card>
-      <CardHeader className="cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label={open ? 'Contraer cotizador de envío' : 'Expandir cotizador de envío'}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o) }
+        }}
+      >
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex flex-wrap items-center gap-2">
@@ -361,7 +397,16 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
             }) => (
               <div
                 onClick={() => handleSelectRate(idx)}
-                className={`rounded-lg border p-3 cursor-pointer transition-all ${
+                role="button"
+                tabIndex={0}
+                aria-pressed={selectedIdx === idx}
+                aria-label={`Seleccionar tarifa ${String(rate.carrier ?? 'carrier')}${
+                  rate.total_price != null ? ` por $${Number(rate.total_price).toLocaleString('es-CO')}` : ''
+                }`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectRate(idx) }
+                }}
+                className={`rounded-lg border p-3 cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                   selectedIdx === idx
                     ? 'border-primary bg-primary/10'
                     : accent === 'green'
@@ -489,6 +534,12 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
 
             return (
               <div className="mt-5 space-y-4">
+                {saveError && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg border border-red-700/30 bg-red-500/5 text-xs text-red-700">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>{saveError}</span>
+                  </div>
+                )}
                 {/* Destacados */}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Destacados</p>
