@@ -45,6 +45,25 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# Estados de pago que cuentan como "rechazo". La tabla payments los guarda en
+# minúsculas (wompi_webhook.py → wompi_status.lower()); incluimos mayúsculas por
+# robustez ante filas legacy. `_DECLINED_UPPER` es para el path fallback que
+# compara con .upper(); `_DECLINED_VALUES` para el filtro server-side .in_.
+_DECLINED_UPPER = {"DECLINED", "ERROR"}
+_DECLINED_VALUES = ["declined", "DECLINED", "error", "ERROR"]
+
+# Mapa provider en tenant_integrations → label emitido en tenant_provider_health.
+# "mercadolibre" (canónico en OAuth/marketplace) se emite como "meli" (la UI
+# keya por "meli"; ver collect_meli). Fuente única para el prune de orphans.
+_INTEGRATION_TO_HEALTH_LABEL = {
+    "whatsapp": "whatsapp",
+    "wompi": "wompi",
+    "aveonline": "aveonline",
+    "telegram": "telegram",
+    "mercadolibre": "meli",
+}
+
+
 # ─── Modelo ──────────────────────────────────────────────────────────────────
 
 
@@ -214,15 +233,17 @@ def collect_wompi(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         return []
 
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    # count="exact" evita el cap silencioso de PostgREST (~1000 filas): con
+    # >1000 pagos/24h, len(rows) truncaba el denominador y sesgaba el %. Cuando
+    # el cliente no expone .count (stub de test), caemos a conteo por filas.
     try:
-        res = (
+        res_total = (
             supabase.table("payments")
-            .select("status")
+            .select("status", count="exact")
             .eq("tenant_id", tenant_id)
             .gte("created_at", cutoff)
             .execute()
         )
-        rows = res.data or []
     except Exception as exc:
         return [HealthMetric(
             provider="wompi",
@@ -232,7 +253,32 @@ def collect_wompi(supabase: Any, tenant_id: str) -> list[HealthMetric]:
             detail={"error": str(exc)[:200]},
         )]
 
-    total = len(rows)
+    total = getattr(res_total, "count", None)
+    if total is None:
+        # Fallback (cliente/stub sin count): conteo sobre filas materializadas.
+        rows = res_total.data or []
+        total = len(rows)
+        declined = sum(1 for r in rows if (r.get("status") or "").upper() in _DECLINED_UPPER)
+    else:
+        # Path productivo: segundo count exacto filtrando rechazos server-side
+        # (no re-materializa filas, sin sesgo por truncado).
+        declined = 0
+        if total > 0:
+            try:
+                res_decl = (
+                    supabase.table("payments")
+                    .select("id", count="exact")
+                    .eq("tenant_id", tenant_id)
+                    .gte("created_at", cutoff)
+                    .in_("status", _DECLINED_VALUES)
+                    .execute()
+                )
+                declined = getattr(res_decl, "count", None) or 0
+            except Exception as exc:
+                logger.warning(
+                    "[HEALTH] wompi declined count falló tenant=%s: %s", tenant_id, exc,
+                )
+
     if total == 0:
         return [HealthMetric(
             provider="wompi",
@@ -243,7 +289,6 @@ def collect_wompi(supabase: Any, tenant_id: str) -> list[HealthMetric]:
             detail={"total_transactions_24h": 0},
         )]
 
-    declined = sum(1 for r in rows if (r.get("status") or "").upper() in {"DECLINED", "ERROR"})
     rate_pct = round((declined / total) * 100, 2)
 
     if rate_pct >= 10:
@@ -457,6 +502,47 @@ PROVIDER_COLLECTORS = {
 }
 
 
+def _prune_disconnected_health(supabase: Any, tenant_id: str) -> None:
+    """Borra filas de tenant_provider_health de providers que el tenant YA no
+    tiene conectados.
+
+    Sin esto, al desconectar una integración su última observación quedaba
+    congelada para siempre en la UI (ej. 'critical' eterno 'hace 30d'), porque
+    los collectors retornan [] cuando no hay conexión y nadie eliminaba la fila.
+
+    Fuente de verdad = estado de conexión en tenant_integrations (no la ausencia
+    de métricas este ciclo), así un provider conectado que solo falló una lectura
+    NO pierde sus filas. Best-effort: cualquier fallo se loguea y NO bloquea la
+    recolección.
+    """
+    try:
+        res = (
+            supabase.table("tenant_integrations")
+            .select("provider, status")
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        rows = res.data or []
+        connected = {
+            _INTEGRATION_TO_HEALTH_LABEL.get(r.get("provider"), r.get("provider"))
+            for r in rows
+            if r.get("status") == "connected"
+        }
+        stale_labels = set(_INTEGRATION_TO_HEALTH_LABEL.values()) - connected
+        for label in stale_labels:
+            (
+                supabase.table("tenant_provider_health")
+                .delete()
+                .eq("tenant_id", tenant_id)
+                .eq("provider", label)
+                .execute()
+            )
+    except Exception as exc:
+        logger.warning(
+            "[HEALTH] prune de filas huérfanas falló tenant=%s: %s", tenant_id, exc,
+        )
+
+
 def collect_all_for_tenant(supabase: Any, tenant_id: str) -> list[HealthMetric]:
     """Invoca todos los collectors para un tenant. Errores per provider
     NO bloquean los demás."""
@@ -470,6 +556,8 @@ def collect_all_for_tenant(supabase: Any, tenant_id: str) -> list[HealthMetric]:
                 "[HEALTH] Collector %s falló para tenant %s: %s",
                 provider, tenant_id, exc, exc_info=True,
             )
+    # Limpia filas de providers desconectados (no las tocan los collectors).
+    _prune_disconnected_health(supabase, tenant_id)
     return all_metrics
 
 
