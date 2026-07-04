@@ -385,7 +385,7 @@ export function ContextPanel({
               Catálogo ({context?.product_count ?? '—'})
             </p>
             {context && (context.low_stock_count ?? 0) > 0 && (
-              <span className="text-[10px] text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+              <span className="text-[10px] text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-700/20">
                 {context.low_stock_count} bajo stock
               </span>
             )}
@@ -428,10 +428,10 @@ export function ContextPanel({
                       <p className="text-xs font-medium leading-tight">{product.title}</p>
                       <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border ${
                         product.stock_total === 0
-                          ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                          ? 'bg-red-500/10 text-red-700 border-red-700/20'
                           : product.stock_total <= 3
-                            ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                            : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                            ? 'bg-amber-500/10 text-amber-600 border-amber-700/20'
+                            : 'bg-emerald-500/10 text-emerald-600 border-emerald-700/20'
                       }`}>
                         {product.stock_total === 0 ? 'Sin stock' : `${product.stock_total} uds`}
                       </span>
@@ -446,7 +446,7 @@ export function ContextPanel({
                             key={v.id}
                             className={`text-[10px] px-1.5 py-0.5 rounded border ${
                               v.stock_quantity <= 0
-                                ? 'border-red-500/20 text-red-400 bg-red-500/5'
+                                ? 'border-red-700/20 text-red-700 bg-red-500/5'
                                 : 'border-border text-muted-foreground'
                             }`}
                           >

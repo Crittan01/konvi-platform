@@ -259,18 +259,18 @@ export default async function KnowledgeBasePage(
             <BookOpen className="h-5 w-5 text-primary" /> Knowledge Base
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            <span className={totalCount >= MAX_DOCS ? 'text-amber-400 font-medium' : ''}>
+            <span className={totalCount >= MAX_DOCS ? 'text-amber-700 font-medium' : ''}>
               {totalCount}/{MAX_DOCS} documentos
             </span>
             {' · '}{activeCount} activos
-            {' · '}<span className="text-emerald-400">{embCount} con RAG</span>
+            {' · '}<span className="text-emerald-700">{embCount} con RAG</span>
             {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} sin embedding</span>}
           </p>
         </div>
       </div>
 
       {/* AI badge */}
-      <div className="flex items-start gap-3 rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-green-400">
+      <div className="flex items-start gap-3 rounded-xl border border-green-700/30 bg-green-500/5 px-4 py-3 text-sm text-green-700">
         <BrainCircuit className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
           <span className="font-semibold">Base de Conocimiento activa en respuestas.</span>{' '}
@@ -339,7 +339,7 @@ export default async function KnowledgeBasePage(
                 <PenLine className="h-4 w-4" /> Nuevo documento
               </h2>
               {atLimit ? (
-                <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/8 text-xs text-amber-400 mt-3">
+                <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-700/30 bg-amber-500/8 text-xs text-amber-700 mt-3">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                   <span>Límite de {MAX_DOCS} documentos alcanzado. Elimina alguno para agregar nuevos.</span>
                 </div>

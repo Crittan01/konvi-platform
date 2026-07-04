@@ -203,20 +203,20 @@ export function ChatPanel({
                     <RotateCw className={`h-3.5 w-3.5 mr-1 ${rerunning ? 'animate-spin' : ''}`} /> Rerun IA
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onUpdateStatus('human_takeover')} disabled={takingOver}
-                    className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
+                    className="text-amber-600 border-amber-700/30 hover:bg-amber-500/10 text-xs h-8">
                     <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
                   </Button>
                 </>
               )}
               {selectedConv.status === 'human_takeover' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
-                  className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8">
+                  className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8">
                   <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
                 </Button>
               )}
               {selectedConv.status === 'opted_out' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
-                  className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8"
+                  className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8"
                   title="Reactivar bot. consent_revoked_at sigue marcado — para reactivar marketing proactivo, el cliente debe re-otorgar consent explícitamente.">
                   <Bot className="h-3.5 w-3.5 mr-1" /> Reactivar bot
                 </Button>
@@ -240,7 +240,7 @@ export function ChatPanel({
             </div>
           </div>
           {statusError && (
-            <div className="px-4 py-2 text-[11px] text-red-400 bg-red-500/5 border-b border-red-500/20">
+            <div className="px-4 py-2 text-[11px] text-red-700 bg-red-500/5 border-b border-red-700/20">
               {statusError}
             </div>
           )}
@@ -313,7 +313,7 @@ export function ChatPanel({
               </div>
             )}
             {error ? (
-              <div className="text-center text-red-400 text-sm pt-12">
+              <div className="text-center text-red-700 text-sm pt-12">
                 <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-70" />
                 {error}
               </div>
@@ -388,7 +388,7 @@ export function ChatPanel({
           {/* Footer */}
           {selectedConv.status === 'human_takeover' ? (
             <div className="p-3 border-t border-border bg-card space-y-2">
-              {sendError && <p className="text-xs text-red-400 text-center">{sendError}</p>}
+              {sendError && <p className="text-xs text-red-700 text-center">{sendError}</p>}
               <ChatEditorToolbar
                 textareaRef={replyInputRef}
                 setReplyText={setReplyText}

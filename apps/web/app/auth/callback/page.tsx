@@ -59,11 +59,11 @@ function AuthCallbackInner() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-4">
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400 max-w-md w-full">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700 max-w-md w-full">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Enlace inválido</p>
-            <p className="text-xs text-red-400/70 mt-0.5">{error}</p>
+            <p className="text-xs text-red-700/70 mt-0.5">{error}</p>
           </div>
         </div>
         <a href="/login" className="text-xs text-primary underline">Ir al inicio de sesión</a>

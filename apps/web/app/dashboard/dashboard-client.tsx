@@ -186,7 +186,7 @@ export default function DashboardClient({
               label="Agente humano"
               value={ops.humanTakeovers}
               icon={UserCheck}
-              color="text-amber-400"
+              color="text-amber-700"
               description="Requieren atención"
               urgent={ops.humanTakeovers > 0}
             />
@@ -195,7 +195,7 @@ export default function DashboardClient({
               label="Pedidos pendientes"
               value={ops.pendingOrders}
               icon={Clock}
-              color="text-blue-400"
+              color="text-blue-700"
               description="Por confirmar"
               urgent={ops.pendingOrders > 0}
             />
@@ -204,7 +204,7 @@ export default function DashboardClient({
               label="Bajo stock"
               value={ops.lowStockCount}
               icon={AlertTriangle}
-              color="text-red-400"
+              color="text-red-700"
               description="Variantes críticas"
               urgent={ops.lowStockCount > 0}
             />
@@ -409,7 +409,7 @@ function KpiCard({
   trendValue?: string
 }) {
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
-  const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : 'text-muted-foreground'
+  const trendColor = trend === 'up' ? 'text-emerald-700' : trend === 'down' ? 'text-red-700' : 'text-muted-foreground'
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-sm">

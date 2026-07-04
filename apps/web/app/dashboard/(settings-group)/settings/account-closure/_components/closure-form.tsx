@@ -263,7 +263,7 @@ export function ClosureForm({ tenantName, status }: Props) {
                   placeholder={`ELIMINAR ${tenantName}`}
                   className={`w-full px-3 py-2 rounded-md border bg-background font-mono text-sm ${
                     confirmationPhrase && !phraseOk
-                      ? 'border-red-500'
+                      ? 'border-red-700'
                       : phraseOk
                         ? 'border-green-600'
                         : 'border-border'
@@ -286,7 +286,7 @@ export function ClosureForm({ tenantName, status }: Props) {
                   rows={3}
                   placeholder="Ej: Cierre operativo del negocio · Migración a otra plataforma · Pruebas finalizadas"
                   className={`w-full px-3 py-2 rounded-md border bg-background text-sm ${
-                    reason && !reasonOk ? 'border-red-500' : 'border-border'
+                    reason && !reasonOk ? 'border-red-700' : 'border-border'
                   }`}
                 />
                 <p className="text-xs text-muted-foreground mt-1">

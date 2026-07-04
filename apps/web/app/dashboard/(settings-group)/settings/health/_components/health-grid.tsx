@@ -36,7 +36,7 @@ function StatusIcon({ status }: { status: HealthRow['status'] }) {
   if (status === 'critical') {
     return <AlertCircle className="h-5 w-5 text-red-600" />
   }
-  return <Circle className="h-5 w-5 text-slate-400" />
+  return <Circle className="h-5 w-5 text-slate-700" />
 }
 
 function StatusBadge({ status }: { status: HealthRow['status'] }) {
@@ -44,7 +44,7 @@ function StatusBadge({ status }: { status: HealthRow['status'] }) {
     healthy: 'bg-emerald-50 text-emerald-700 border-emerald-700',
     warning: 'bg-amber-50 text-amber-700 border-amber-700',
     critical: 'bg-red-50 text-red-700 border-red-700',
-    unknown: 'bg-slate-50 text-slate-600 border-slate-400',
+    unknown: 'bg-slate-50 text-slate-600 border-slate-700',
   }
   const labels = {
     healthy: 'OK',

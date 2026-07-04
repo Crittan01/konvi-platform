@@ -207,7 +207,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
                     key={f.name}
                     className={`group relative rounded-lg overflow-hidden border-2 transition-colors bg-card flex flex-col ${
                       f.usedByProduct
-                        ? 'border-emerald-500/40 hover:border-emerald-500/70'
+                        ? 'border-emerald-700/40 hover:border-emerald-700/70'
                         : 'border-border hover:border-primary'
                     }`}
                   >

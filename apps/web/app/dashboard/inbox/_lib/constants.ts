@@ -25,13 +25,13 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
 }
 
 export const ORDER_STATUS_COLOR: Record<string, string> = {
-  pending:    'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
-  pending_payment: 'bg-amber-500/10 text-amber-700 border-amber-500/20',  // F62
-  confirmed:  'bg-blue-500/10 text-blue-700 border-blue-500/20',
+  pending:    'bg-yellow-500/10 text-yellow-700 border-yellow-700/20',
+  pending_payment: 'bg-amber-500/10 text-amber-700 border-amber-700/20',  // F62
+  confirmed:  'bg-blue-500/10 text-blue-700 border-blue-700/20',
   processing: 'bg-purple-500/10 text-purple-700 border-purple-500/20',
   shipped:    'bg-sky-500/10 text-sky-700 border-sky-500/20',
-  delivered:  'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
-  cancelled:  'bg-red-500/10 text-red-600 border-red-500/20',
+  delivered:  'bg-emerald-500/10 text-emerald-700 border-emerald-700/20',
+  cancelled:  'bg-red-500/10 text-red-600 border-red-700/20',
 }
 
 // ─── Status conversación ──────────────────────────────────────────────────────
@@ -41,25 +41,25 @@ export const ORDER_STATUS_COLOR: Record<string, string> = {
 export const STATUS_CONFIG = {
   bot_active: {
     label: 'Bot activo',
-    color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
+    color: 'bg-emerald-500/10 text-emerald-700 border-emerald-700/20',
     dot: 'bg-emerald-500',
     description: 'Bot activo: el asistente IA responde automáticamente con catálogo, KB y FSM de venta. Toma el control con "Tomar control" si necesitas intervenir.',
   },
   human_takeover: {
     label: 'Agente humano',
-    color: 'bg-amber-500/10 text-amber-700 border-amber-500/20',
+    color: 'bg-amber-500/10 text-amber-700 border-amber-700/20',
     dot: 'bg-amber-500',
     description: 'Agente humano: un operador tomó el control y el bot está pausado. Para devolver al bot, usa "Volver al bot" aquí o desde Telegram envía /resolver {id}.',
   },
   closed: {
     label: 'Cerrada',
-    color: 'bg-slate-500/10 text-slate-700 border-slate-500/20',
+    color: 'bg-slate-500/10 text-slate-700 border-slate-700/20',
     dot: 'bg-slate-500',
     description: 'Cerrada: la conversación quedó archivada por inactividad o resolución manual. Si el cliente vuelve a escribir, se reabre automáticamente como Bot activo.',
   },
   opted_out: {
     label: 'Opt-out',
-    color: 'bg-rose-500/10 text-rose-700 border-rose-500/20',
+    color: 'bg-rose-500/10 text-rose-700 border-rose-700/20',
     dot: 'bg-rose-500',
     description: 'Cliente revocó consent vía STOP/BAJA/CANCELAR (rev. 105 H.4.1). No recibirá mensajes proactivos. Si vuelve a escribir voluntariamente, el bot puede responder dentro de la ventana de 24h, pero outbound proactivo (templates HSM) sigue bloqueado por consent_revoked_at.',
   },

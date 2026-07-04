@@ -110,7 +110,7 @@ export function BotPreview() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs text-red-400">
+        <div className="rounded-lg border border-red-700/30 bg-red-500/8 px-3 py-2 text-xs text-red-700">
           {error}
         </div>
       )}
@@ -124,7 +124,7 @@ export function BotPreview() {
               <span className="text-xs font-medium text-muted-foreground">{result.agent_name}:</span>
             </div>
             {result.kb_used && (
-              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-700/20">
                 <Zap className="h-2.5 w-2.5" />
                 RAG activo · {result.kb_count} doc{result.kb_count !== 1 ? 's' : ''} usados
               </span>

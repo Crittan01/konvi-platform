@@ -230,7 +230,7 @@ export function ConversationNotes({ conversationId }: Props) {
               key={note.id}
               className={`p-2 rounded-lg border text-xs ${
                 note.is_pinned
-                  ? 'bg-amber-100/40 border-amber-300/40'
+                  ? 'bg-amber-100/40 border-amber-700/40'
                   : 'bg-background border-border'
               }`}
             >

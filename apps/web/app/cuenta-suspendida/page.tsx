@@ -9,8 +9,8 @@ export default function CuentaSuspendidaPage() {
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <div className="max-w-md w-full text-center space-y-5">
         <div className="flex justify-center">
-          <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
-            <PauseCircle className="h-8 w-8 text-amber-400" />
+          <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-700/30 flex items-center justify-center">
+            <PauseCircle className="h-8 w-8 text-amber-700" />
           </div>
         </div>
         <div className="space-y-2">

@@ -37,25 +37,25 @@ const ROLES = {
   owner: {
     label: 'Administrador',
     icon: Crown,
-    color: 'bg-amber-500/10 text-amber-400 border-amber-500/25',
-    headerColor: 'border-amber-500/20 bg-amber-500/5',
-    textColor: 'text-amber-400',
-    iconColor: 'text-amber-400',
+    color: 'bg-amber-500/10 text-amber-700 border-amber-700/25',
+    headerColor: 'border-amber-700/20 bg-amber-500/5',
+    textColor: 'text-amber-700',
+    iconColor: 'text-amber-700',
     description: 'Acceso total. Configura integraciones, equipo y datos del negocio.',
   },
   manager: {
     label: 'Supervisor',
     icon: Briefcase,
-    color: 'bg-blue-500/10 text-blue-400 border-blue-500/25',
-    headerColor: 'border-blue-500/20 bg-blue-500/5',
-    textColor: 'text-blue-400',
-    iconColor: 'text-blue-400',
+    color: 'bg-blue-500/10 text-blue-700 border-blue-700/25',
+    headerColor: 'border-blue-700/20 bg-blue-500/5',
+    textColor: 'text-blue-700',
+    iconColor: 'text-blue-700',
     description: 'Gestiona operaciones: pedidos, catálogo, inventario, métricas, IA.',
   },
   operator: {
     label: 'Gestor',
     icon: Headphones,
-    color: 'bg-slate-500/10 text-slate-400 border-slate-500/25',
+    color: 'bg-slate-500/10 text-slate-700 border-slate-700/25',
     headerColor: 'border-border bg-muted/20',
     textColor: 'text-muted-foreground',
     iconColor: 'text-muted-foreground',
@@ -391,11 +391,11 @@ export default async function TeamPage(
 
       {/* Banners resultado */}
       {searchParams.invited && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Invitación enviada</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">
+            <p className="text-xs text-emerald-700/70 mt-0.5">
               Se envió un email a <strong>{searchParams.invited}</strong> con el enlace de acceso.
               Si no llega en unos minutos, revisa la carpeta de spam o usa &quot;Reenviar&quot;.
             </p>
@@ -403,11 +403,11 @@ export default async function TeamPage(
         </div>
       )}
       {searchParams.added && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Acceso otorgado</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">
+            <p className="text-xs text-emerald-700/70 mt-0.5">
               <strong>{searchParams.added}</strong> ya tenía cuenta y fue agregado al equipo directamente.
               No se envió email — puede iniciar sesión ahora.
             </p>
@@ -427,63 +427,63 @@ export default async function TeamPage(
           : decodeURIComponent(searchParams.error)
 
         return (
-          <div className="flex items-start gap-3 p-4 rounded-xl border border-red-500/30 bg-red-500/8 text-sm text-red-400">
+          <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/8 text-sm text-red-700">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <div>
               <p className="font-medium">Error al procesar la acción</p>
-              <p className="text-xs text-red-400/70 mt-0.5">{msg}</p>
+              <p className="text-xs text-red-700/70 mt-0.5">{msg}</p>
             </div>
           </div>
         )
       })()}
       {searchParams.inactivated && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/8 text-sm text-amber-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-700/30 bg-amber-500/8 text-sm text-amber-700">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro inactivado</p>
-            <p className="text-xs text-amber-400/70 mt-0.5">
+            <p className="text-xs text-amber-700/70 mt-0.5">
               El acceso fue suspendido y la sesión cerrada. Puedes activarlo de nuevo cuando sea necesario.
             </p>
           </div>
         </div>
       )}
       {searchParams.activated && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro activado</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">
+            <p className="text-xs text-emerald-700/70 mt-0.5">
               El acceso fue restaurado. El miembro podrá iniciar sesión nuevamente.
             </p>
           </div>
         </div>
       )}
       {searchParams.removed && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro eliminado</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">
+            <p className="text-xs text-emerald-700/70 mt-0.5">
               El usuario fue removido del equipo y su sesión activa fue cerrada inmediatamente.
             </p>
           </div>
         </div>
       )}
       {searchParams.resent && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Invitación reenviada</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
+            <p className="text-xs text-emerald-700/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
           </div>
         </div>
       )}
       {searchParams.role_changed && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-500/30 bg-blue-500/8 text-sm text-blue-400">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-700/30 bg-blue-500/8 text-sm text-blue-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Rol actualizado</p>
-            <p className="text-xs text-blue-400/70 mt-0.5">La sesión del miembro fue cerrada. Al iniciar sesión nuevamente tendrá el nuevo rol activo en su JWT.</p>
+            <p className="text-xs text-blue-700/70 mt-0.5">La sesión del miembro fue cerrada. Al iniciar sesión nuevamente tendrá el nuevo rol activo en su JWT.</p>
           </div>
         </div>
       )}
@@ -575,7 +575,7 @@ export default async function TeamPage(
                           <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5 shrink-0">Tú</span>
                         )}
                         {!m.confirmed && (
-                          <span className="text-[10px] font-medium text-amber-400 border border-amber-500/30 bg-amber-500/10 rounded-full px-1.5 py-0.5 shrink-0">
+                          <span className="text-[10px] font-medium text-amber-700 border border-amber-700/30 bg-amber-500/10 rounded-full px-1.5 py-0.5 shrink-0">
                             Pendiente
                           </span>
                         )}
@@ -601,7 +601,7 @@ export default async function TeamPage(
                             <form action={resendInvite}>
                               <input type="hidden" name="email" value={m.email} />
                               <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Enviado"
-                                className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
+                                className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10">
                                 Reenviar
                               </SubmitButton>
                             </form>
@@ -614,7 +614,7 @@ export default async function TeamPage(
                           <form action={activateMember}>
                             <input type="hidden" name="user_id" value={m.user_id} />
                             <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Activado"
-                              className="text-xs h-7 px-2.5 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
+                              className="text-xs h-7 px-2.5 text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
                               Activar
                             </SubmitButton>
                           </form>

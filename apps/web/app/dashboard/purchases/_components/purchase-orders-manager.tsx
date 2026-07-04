@@ -146,7 +146,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                                <input type="number" value={it.cost} step="0.01" onChange={(e) => setItems(cur => cur.map((x, i) => i === idx ? { ...x, cost: Number(e.target.value) } : x))} className="w-full p-1 border rounded" />
                              </td>
                              <td className="p-2 text-center">
-                               <button onClick={() => setItems(cur => cur.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5 text-red-400" /></button>
+                               <button onClick={() => setItems(cur => cur.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5 text-red-700" /></button>
                              </td>
                            </tr>
                         ))}
@@ -165,7 +165,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
       )}
 
       {suppliers.length === 0 && !showAdd && canWrite && (
-        <div className="border border-amber-500/20 bg-amber-500/10 p-4 rounded-lg flex items-center justify-between">
+        <div className="border border-amber-700/20 bg-amber-500/10 p-4 rounded-lg flex items-center justify-between">
            <p className="text-xs text-amber-600/90 font-medium">Aún no hay proveedores registrados. Ve a la pestaña Proveedores primero.</p>
         </div>
       )}
@@ -182,9 +182,9 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                </div>
                <div className="text-left sm:text-right">
                   <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                    o.status === 'received' ? 'bg-green-500/15 text-green-500' :
-                    o.status === 'cancelled' ? 'bg-red-500/15 text-red-500' :
-                    'bg-blue-500/15 text-blue-500'
+                    o.status === 'received' ? 'bg-green-500/15 text-green-700' :
+                    o.status === 'cancelled' ? 'bg-red-500/15 text-red-700' :
+                    'bg-blue-500/15 text-blue-700'
                   }`}>
                     {o.status === 'ordered' ? 'Solicitado / Pendiente' : o.status === 'received' ? 'Recibido' : 'Cancelado'}
                   </span>
@@ -204,7 +204,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
              {o.status === 'ordered' && canWrite && (
                <div className="mt-3 flex flex-wrap gap-2 justify-end pt-3 border-t">
                   <form action={async () => { const r = await cancelPurchaseOrder(o.id); if (!r.ok) window.alert(r.error || 'No se pudo cancelar la orden.') }}>
-                    <SubmitButton variant="outline" size="sm" pendingText="Cancelando..." savedText="Cancelada" className="h-8 text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 gap-2 border-red-500/20">
+                    <SubmitButton variant="outline" size="sm" pendingText="Cancelando..." savedText="Cancelada" className="h-8 text-xs text-red-700 hover:text-red-600 hover:bg-red-500/10 gap-2 border-red-700/20">
                       <XCircle className="h-3.5 w-3.5" /> Cancelar Orden
                     </SubmitButton>
                   </form>

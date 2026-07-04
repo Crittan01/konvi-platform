@@ -447,7 +447,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
             {state.totpEnrolled ? (
               <ShieldCheck className="h-6 w-6 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
-              <Shield className="h-6 w-6 text-slate-400 shrink-0 mt-0.5" />
+              <Shield className="h-6 w-6 text-slate-700 shrink-0 mt-0.5" />
             )}
             <div className="flex-1">
               <h2 className="text-base font-semibold">

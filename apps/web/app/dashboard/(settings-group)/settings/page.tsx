@@ -326,9 +326,9 @@ export default async function SettingsPage() {
                 <ActionResultForm action={saveHorarioAsesor} className="space-y-4">
 
                   {/* Indicador: bot 24/7 */}
-                  <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-700/20 px-3 py-2">
                     <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
-                    <span className="text-xs text-emerald-400 font-medium">Bot de ventas: activo 24/7 (automático)</span>
+                    <span className="text-xs text-emerald-700 font-medium">Bot de ventas: activo 24/7 (automático)</span>
                   </div>
 
                   {/* Horario de asesor humano — client component para interactividad */}
@@ -485,7 +485,7 @@ export default async function SettingsPage() {
                       <>
                         <span className="text-xs text-muted-foreground shrink-0 group-hover:text-foreground/70 transition-colors">{label}</span>
                         <span className={`text-xs font-medium flex items-center gap-1 text-right ${
-                          ok === true ? 'text-emerald-400' : ok === false ? 'text-muted-foreground/60' : ''
+                          ok === true ? 'text-emerald-700' : ok === false ? 'text-muted-foreground/60' : ''
                         }`}>
                           {ok === true && <CheckCircle2 className="h-3 w-3 shrink-0" />}
                           {ok === false && <XCircle className="h-3 w-3 shrink-0" />}
@@ -595,7 +595,7 @@ export default async function SettingsPage() {
               {/* Cerrar cuenta (destructive, owner only) */}
               <Link
                 href="/dashboard/settings/account-closure"
-                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-red-200 bg-red-50/30 hover:border-red-400 hover:bg-red-50 transition-colors"
+                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-red-200 bg-red-50/30 hover:border-red-700 hover:bg-red-50 transition-colors"
               >
                 <div className="h-9 w-9 rounded-md bg-red-100 text-red-700 inline-flex items-center justify-center shrink-0">
                   <Trash2 className="h-5 w-5" />

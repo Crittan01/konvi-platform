@@ -54,7 +54,7 @@ export function NewDocForm({
           })}
         </select>
         {emptyCategories.includes(category) && (
-          <p className="text-[11px] text-amber-500 mt-1">
+          <p className="text-[11px] text-amber-700 mt-1">
             Esta categoría está vacía — el bot no podrá responder con verdad si un cliente pregunta sobre este tema.
           </p>
         )}
@@ -67,7 +67,7 @@ export function NewDocForm({
           <p className="font-semibold text-foreground/90">Guía para esta categoría</p>
           <p className="text-muted-foreground italic">{guide.placeholder}</p>
           <p className="text-emerald-600">✓ Sí: <span className="text-foreground/80">{guide.doYes}</span></p>
-          <p className="text-red-500">✗ No: <span className="text-foreground/80">{guide.doNo}</span></p>
+          <p className="text-red-700">✗ No: <span className="text-foreground/80">{guide.doNo}</span></p>
         </div>
       )}
 
@@ -103,7 +103,7 @@ export function NewDocForm({
                 <p className="font-semibold text-foreground/90">{c.label}</p>
                 <p className="text-muted-foreground italic">{g.placeholder}</p>
                 <p className="text-emerald-600 mt-0.5">✓ Sí: <span className="text-foreground/80">{g.doYes}</span></p>
-                <p className="text-red-500">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
+                <p className="text-red-700">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
               </div>
             )
           })}

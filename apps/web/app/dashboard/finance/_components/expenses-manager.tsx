@@ -47,7 +47,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
       </div>
 
       {showAdd && (
-        <Card className="border-red-500/30">
+        <Card className="border-red-700/30">
            <CardContent className="pt-6">
               <form action={async (fd) => { await addExpense(fd); setShowAdd(false) }} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -63,7 +63,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-semibold text-muted-foreground uppercase">Monto ($) *</label>
-                    <Input name="amount" type="number" min="1" step="1" placeholder="0" required className="h-8 text-xs font-mono border-red-500/30 text-red-500" />
+                    <Input name="amount" type="number" min="1" step="1" placeholder="0" required className="h-8 text-xs font-mono border-red-700/30 text-red-700" />
                   </div>
                   <div className="space-y-1 lg:col-span-2">
                     <label className="text-[10px] font-semibold text-muted-foreground uppercase">Fecha del Gasto</label>
@@ -114,7 +114,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                          {new Date(e.expense_date).toLocaleDateString()}
                        </span>
                      </td>
-                     <td className="px-4 py-3 text-right font-mono text-red-500 font-medium">
+                     <td className="px-4 py-3 text-right font-mono text-red-700 font-medium">
                        -${e.amount.toLocaleString()}
                      </td>
                    </tr>

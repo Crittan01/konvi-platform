@@ -220,7 +220,7 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
             : 'Guardar opciones de despacho'}
         </Button>
         {saved && (
-          <span className="flex items-center gap-1 text-xs text-emerald-400">
+          <span className="flex items-center gap-1 text-xs text-emerald-700">
             <Check className="h-3.5 w-3.5" /> Información guardada
           </span>
         )}

@@ -100,7 +100,7 @@ export function MfaChallengeForm({ factorId, message }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 p-3 flex items-start gap-2">
+        <div className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
           <ShieldAlert className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>

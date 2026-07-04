@@ -6,10 +6,10 @@ import { BrainCircuit, Loader2 } from 'lucide-react'
 import { STARTER_TEMPLATES } from './starter-templates'
 
 const CATEGORY_COLORS: Record<string, string> = {
-  faq:      'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  faq:      'bg-blue-500/15 text-blue-700 border border-blue-700/30',
   politica: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  negocio:  'bg-green-500/15 text-green-400 border border-green-500/30',
-  producto: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  negocio:  'bg-green-500/15 text-green-700 border border-green-700/30',
+  producto: 'bg-orange-500/15 text-orange-700 border border-orange-700/30',
   general:  'bg-muted text-muted-foreground border border-border',
 }
 

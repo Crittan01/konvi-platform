@@ -168,7 +168,7 @@ export function ConversationList({
             <MessageSquare className="h-4 w-4 text-primary" />
             Inbox AI
           </h1>
-          <div className="flex items-center gap-1 text-xs text-emerald-400">
+          <div className="flex items-center gap-1 text-xs text-emerald-700">
             <Wifi className="h-3 w-3" />
             <span>Live</span>
           </div>
@@ -210,7 +210,7 @@ export function ConversationList({
             onClick={() => setShowArchived(v => !v)}
             className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
               showArchived
-                ? 'bg-slate-200 text-slate-700 border-slate-400 font-medium'
+                ? 'bg-slate-200 text-slate-700 border-slate-700 font-medium'
                 : 'border-border text-muted-foreground hover:text-foreground'
             }`}
             title="Mostrar conversaciones archivadas (cerradas con >90 días sin actividad)"
@@ -255,7 +255,7 @@ export function ConversationList({
             ))}
           </div>
         ) : error ? (
-          <div className="p-8 text-center text-red-400 text-sm">
+          <div className="p-8 text-center text-red-700 text-sm">
             <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-70" />
             <p>{error}</p>
           </div>

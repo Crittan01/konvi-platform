@@ -54,7 +54,7 @@ export function DisconnectIntegrationButton({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+              <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0" />
               ¿Desconectar {providerLabel}?
             </DialogTitle>
             <DialogDescription className="pt-1 text-sm">

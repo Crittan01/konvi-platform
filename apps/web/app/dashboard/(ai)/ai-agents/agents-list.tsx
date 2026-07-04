@@ -55,10 +55,10 @@ const ROLE_LABEL: Record<string, string> = {
 const ALL_ROLES = ['sales', 'support', 'marketing', 'claims', 'custom']
 
 const ROLE_BADGE: Record<string, string> = {
-  sales:     'bg-emerald-500/10 text-emerald-700 border-emerald-500/25',
+  sales:     'bg-emerald-500/10 text-emerald-700 border-emerald-700/25',
   support:   'bg-sky-500/10 text-sky-700 border-sky-500/25',
   marketing: 'bg-fuchsia-500/10 text-fuchsia-700 border-fuchsia-500/25',
-  claims:    'bg-amber-500/10 text-amber-700 border-amber-500/25',
+  claims:    'bg-amber-500/10 text-amber-700 border-amber-700/25',
   custom:    'bg-muted/40 text-muted-foreground border-border',
 }
 
@@ -236,9 +236,9 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
           claims:    'Devoluciones, reclamos, garantías (Ley 1480)',
         }
         return (
-          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3.5 mt-1 space-y-2">
+          <div className="rounded-lg border border-amber-700/25 bg-amber-500/5 p-3.5 mt-1 space-y-2">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-500" />
+              <Sparkles className="h-4 w-4 text-amber-700" />
               <p className="text-sm font-semibold text-foreground">
                 Sugerencia: mejora la cobertura de tu bot
               </p>

@@ -127,7 +127,7 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
           )}
         </div>
         <p className="text-xs text-muted-foreground">PNG, JPG o WebP · máx 2 MB</p>
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="text-xs text-red-700">{error}</p>}
       </div>
     </div>
   )

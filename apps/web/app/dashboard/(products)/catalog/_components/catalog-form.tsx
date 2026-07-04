@@ -341,7 +341,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
             <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
             <Input type="number" step="50" min="0" value={v.cost_price}
               onChange={e => onChange('cost_price', parseFloat(e.target.value) || '')}
-              className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="Para margen" />
+              className="h-8 text-xs font-mono mt-1 border-amber-700/30" placeholder="Para margen" />
           </div>
         </div>
 
@@ -651,7 +651,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
 
       {/* Error + Guardar */}
       {error && (
-        <p className="text-xs text-red-500 font-medium bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
+        <p className="text-xs text-red-700 font-medium bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
       )}
 
       <button type="button" onClick={handleSubmit} disabled={submitting}

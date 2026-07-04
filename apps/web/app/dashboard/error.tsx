@@ -23,7 +23,7 @@ export default function DashboardError({
         <CardContent className="pt-8 pb-8 text-center space-y-5">
           <div className="flex justify-center">
             <div className="h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center">
-              <AlertTriangle className="h-6 w-6 text-red-400" />
+              <AlertTriangle className="h-6 w-6 text-red-700" />
             </div>
           </div>
           <div className="space-y-1">

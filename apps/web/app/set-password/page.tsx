@@ -65,7 +65,7 @@ export default async function SetPasswordPage(
         </CardHeader>
         <CardContent>
           {searchParams.error && (
-            <div className="flex items-start gap-2 p-3 mb-4 rounded-lg border border-red-500/30 bg-red-500/8 text-sm text-red-400">
+            <div className="flex items-start gap-2 p-3 mb-4 rounded-lg border border-red-700/30 bg-red-500/8 text-sm text-red-700">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <p>{decodeURIComponent(searchParams.error)}</p>
             </div>

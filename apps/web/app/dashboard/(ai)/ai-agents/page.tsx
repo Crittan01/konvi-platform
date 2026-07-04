@@ -264,7 +264,7 @@ export default async function AiAgentsPage() {
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-foreground">
             <Bot className="h-5 w-5 text-primary" /> Configuración de la Inteligencia Artificial
           </h1>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-400">
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-700/30 bg-green-500/10 text-green-700">
             Zero-Hallucinations Activo
           </span>
         </div>
@@ -305,9 +305,9 @@ export default async function AiAgentsPage() {
       </div>
 
       {/* Card: Filosofía del negocio — contexto inyectado automáticamente */}
-      <div className={`rounded-xl border p-5 space-y-3 ${hasFilosofia ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-amber-500/25 bg-amber-500/5'}`}>
+      <div className={`rounded-xl border p-5 space-y-3 ${hasFilosofia ? 'border-emerald-700/25 bg-emerald-500/5' : 'border-amber-700/25 bg-amber-500/5'}`}>
         <div className="flex items-center gap-2">
-          <BookOpen className={`h-4 w-4 ${hasFilosofia ? 'text-emerald-500' : 'text-amber-500'}`} />
+          <BookOpen className={`h-4 w-4 ${hasFilosofia ? 'text-emerald-700' : 'text-amber-700'}`} />
           <p className="text-sm font-semibold">
             Filosofía del negocio — inyectada automáticamente al bot
           </p>

@@ -75,7 +75,7 @@ type Props = {
 const STATUS_CONFIG = {
   active:  { label: 'Activo',  className: 'bg-green-500/15 text-green-600' },
   paused:  { label: 'Pausado', className: 'bg-yellow-500/15 text-yellow-600' },
-  closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-500' },
+  closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-700' },
 }
 
 const CONDITION_LABEL: Record<string, string> = {
@@ -281,7 +281,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             )}
                           </div>
                           {rowError && (
-                            <p className="text-xs text-red-400 flex items-center gap-1 mt-0.5">
+                            <p className="text-xs text-red-700 flex items-center gap-1 mt-0.5">
                               <AlertTriangle className="h-3 w-3 shrink-0" /> {rowError}
                               <button onClick={() => clearError(item.meli_id)} className="ml-1 text-muted-foreground hover:text-foreground">
                                 <X className="h-3 w-3" />
@@ -302,7 +302,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                       <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
                         item.available_quantity > 0
                           ? 'bg-amber-500/15 text-amber-600'
-                          : 'bg-red-500/15 text-red-500'
+                          : 'bg-red-500/15 text-red-700'
                       }`}>
                         {item.available_quantity} u.
                       </span>
@@ -344,7 +344,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                     <td className="py-3 px-4">
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         {item.permalink && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 hover:text-blue-600" asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-700 hover:text-blue-600" asChild>
                             <a href={item.permalink} target="_blank" rel="noreferrer" title="Ver en Mercado Libre">
                               <ExternalLink className="h-3.5 w-3.5" />
                             </a>
@@ -355,7 +355,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-8 text-xs gap-1.5 text-blue-600 border-blue-500/30"
+                            className="h-8 text-xs gap-1.5 text-blue-600 border-blue-700/30"
                             onClick={() => handleSyncStock(item)}
                             title="Sincronizar stock y precio desde el Catálogo a MeLi"
                           >
@@ -368,7 +368,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 text-xs gap-1.5 text-yellow-600 border-yellow-500/30"
+                              className="h-8 text-xs gap-1.5 text-yellow-600 border-yellow-700/30"
                               onClick={() => handleStatusChange(item, 'paused')}
                             >
                               <Pause className="h-3 w-3" /> Pausar
@@ -377,7 +377,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 text-xs gap-1.5 text-green-600 border-green-500/30"
+                              className="h-8 text-xs gap-1.5 text-green-600 border-green-700/30"
                               onClick={() => handleStatusChange(item, 'active')}
                             >
                               <Play className="h-3 w-3" /> Activar

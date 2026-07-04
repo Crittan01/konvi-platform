@@ -100,11 +100,11 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
         <Card className="border-border/50 shadow-sm">
           <CardContent className="p-5 flex flex-col items-center justify-center text-center">
              <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center mb-3">
-               <DollarSign className="h-5 w-5 text-blue-500" />
+               <DollarSign className="h-5 w-5 text-blue-700" />
              </div>
              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Ingresos Netos</p>
              <h3 className="text-2xl font-bold mt-1 text-primary">{fmt(totalRevenue)}</h3>
-             <p className="text-[10px] text-muted-foreground mt-1 text-blue-500">De pedidos pagados</p>
+             <p className="text-[10px] text-muted-foreground mt-1 text-blue-700">De pedidos pagados</p>
           </CardContent>
         </Card>
         <Card className="border-border/50 shadow-sm">
@@ -113,31 +113,31 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
                 <PieChart className="h-32 w-32" />
              </div>
              <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center mb-3">
-               <TrendingDown className="h-5 w-5 text-amber-500" />
+               <TrendingDown className="h-5 w-5 text-amber-700" />
              </div>
              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Costo Mercancía (COGS)</p>
-             <h3 className="text-2xl font-bold mt-1 text-amber-500">-{fmt(totalCOGS)}</h3>
+             <h3 className="text-2xl font-bold mt-1 text-amber-700">-{fmt(totalCOGS)}</h3>
              <p className="text-[10px] text-muted-foreground mt-1">Inventario vendido</p>
           </CardContent>
         </Card>
         <Card className="border-border/50 shadow-sm">
           <CardContent className="p-5 flex flex-col items-center justify-center text-center">
              <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
-               <Activity className="h-5 w-5 text-red-500" />
+               <Activity className="h-5 w-5 text-red-700" />
              </div>
              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Gastos (OPEX)</p>
-             <h3 className="text-2xl font-bold mt-1 text-red-500">-{fmt(totalOpex)}</h3>
+             <h3 className="text-2xl font-bold mt-1 text-red-700">-{fmt(totalOpex)}</h3>
              <p className="text-[10px] text-muted-foreground mt-1">Marketing, nómina, etc.</p>
           </CardContent>
         </Card>
         <Card className={`border-border/50 shadow-sm relative overflow-hidden ${netProfit > 0 ? 'border-b-green-500 border-b-4' : 'border-b-red-500 border-b-4'}`}>
           <CardContent className="p-5 flex flex-col items-center justify-center text-center">
              <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit > 0 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-               <TrendingUp className={`h-5 w-5 ${netProfit > 0 ? 'text-green-500' : 'text-red-500'}`} />
+               <TrendingUp className={`h-5 w-5 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`} />
              </div>
              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Beneficio Neto</p>
-             <h3 className={`text-2xl font-bold mt-1 ${netProfit > 0 ? 'text-green-500' : 'text-red-500'}`}>{fmt(netProfit)}</h3>
-             <p className={`text-[11px] font-bold mt-1 ${netProfit > 0 ? 'text-green-500' : 'text-red-500'}`}>
+             <h3 className={`text-2xl font-bold mt-1 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`}>{fmt(netProfit)}</h3>
+             <p className={`text-[11px] font-bold mt-1 ${netProfit > 0 ? 'text-green-700' : 'text-red-700'}`}>
                 {netMargin.toFixed(1)}% Margen
              </p>
           </CardContent>

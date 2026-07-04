@@ -9,13 +9,13 @@ import AiInsightPanel from '@/components/ai-insight-panel'
 const DAY_LABELS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá']
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:    'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30',
-  pending_payment: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',  // F62
-  confirmed:  'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  pending:    'bg-yellow-500/15 text-yellow-700 border border-yellow-700/30',
+  pending_payment: 'bg-amber-500/15 text-amber-700 border border-amber-700/30',  // F62
+  confirmed:  'bg-blue-500/15 text-blue-700 border border-blue-700/30',
   processing: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
   shipped:    'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30',
-  delivered:  'bg-green-500/15 text-green-400 border border-green-500/30',
-  cancelled:  'bg-red-500/15 text-red-400 border border-red-500/30',
+  delivered:  'bg-green-500/15 text-green-700 border border-green-700/30',
+  cancelled:  'bg-red-500/15 text-red-700 border border-red-700/30',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -171,11 +171,11 @@ export default async function MetricsPage(
             sub: `${inboundMessages} recibidos · ${outboundMessages} enviados`,
           },
           {
-            icon: Users, label: 'Conversaciones', value: conversations.length, color: 'text-blue-400',
+            icon: Users, label: 'Conversaciones', value: conversations.length, color: 'text-blue-700',
             sub: `${botConversations} bot · ${humanConversations} humano`,
           },
           {
-            icon: ShoppingCart, label: 'Pedidos', value: orders.length, color: 'text-emerald-400',
+            icon: ShoppingCart, label: 'Pedidos', value: orders.length, color: 'text-emerald-700',
             sub: `$${totalRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })} en ventas`,
           },
           {
@@ -198,9 +198,9 @@ export default async function MetricsPage(
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Tasa conversión', value: `${conversionRate}%`, note: 'Conv. → Pedido', Icon: TrendingUp, color: 'text-primary' },
-          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', Icon: CheckCircle2, color: 'text-emerald-400' },
-          { label: '% Inbound', value: messages.length > 0 ? `${Math.round((inboundMessages / messages.length) * 100)}%` : '—', note: 'de los mensajes', Icon: ArrowDownToLine, color: 'text-blue-400' },
-          { label: 'Pedidos cancelados', value: (ordersByStatus['cancelled'] ?? 0).toString(), note: 'en el período', Icon: XCircle, color: 'text-red-400' },
+          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', Icon: CheckCircle2, color: 'text-emerald-700' },
+          { label: '% Inbound', value: messages.length > 0 ? `${Math.round((inboundMessages / messages.length) * 100)}%` : '—', note: 'de los mensajes', Icon: ArrowDownToLine, color: 'text-blue-700' },
+          { label: 'Pedidos cancelados', value: (ordersByStatus['cancelled'] ?? 0).toString(), note: 'en el período', Icon: XCircle, color: 'text-red-700' },
         ].map(k => (
           <div key={k.label} className="rounded-xl border border-border bg-card px-4 py-3">
             <div className="flex items-center gap-1.5 mb-1">
@@ -276,9 +276,9 @@ export default async function MetricsPage(
                 <div key={title} className="flex justify-between items-start gap-3">
                   <div className="flex gap-2 items-center min-w-0">
                     <span className={`shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[11px] font-bold ${
-                      i === 0 ? 'bg-yellow-400/20 text-yellow-400' :
-                      i === 1 ? 'bg-slate-400/20 text-slate-400' :
-                      i === 2 ? 'bg-orange-400/20 text-orange-400' : 'bg-muted text-muted-foreground'
+                      i === 0 ? 'bg-yellow-400/20 text-yellow-700' :
+                      i === 1 ? 'bg-slate-400/20 text-slate-700' :
+                      i === 2 ? 'bg-orange-400/20 text-orange-700' : 'bg-muted text-muted-foreground'
                     }`}>{i + 1}</span>
                     <p className="text-sm font-medium truncate">{title}</p>
                   </div>
@@ -296,7 +296,7 @@ export default async function MetricsPage(
       {/* ── Reclamos ── */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center gap-2 mb-4">
-          <AlertCircle className="h-4 w-4 text-red-400" />
+          <AlertCircle className="h-4 w-4 text-red-700" />
           <p className="text-sm font-medium">Reclamos</p>
           <span className="ml-auto text-xs text-muted-foreground">{claims.length} en período</span>
         </div>
@@ -306,9 +306,9 @@ export default async function MetricsPage(
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
             {[
-              { label: 'Total reclamos',   value: claims.length,         color: 'text-red-400' },
-              { label: 'Abiertos',         value: openClaims,            color: 'text-amber-400' },
-              { label: 'Reembolsados',     value: refundedClaims.length, color: 'text-emerald-400' },
+              { label: 'Total reclamos',   value: claims.length,         color: 'text-red-700' },
+              { label: 'Abiertos',         value: openClaims,            color: 'text-amber-700' },
+              { label: 'Reembolsados',     value: refundedClaims.length, color: 'text-emerald-700' },
               { label: 'Tasa reclamo/pedido', value: `${claimRate}%`,   color: 'text-primary' },
             ].map(k => (
               <div key={k.label} className="rounded-lg border border-border p-3 text-center">
@@ -322,7 +322,7 @@ export default async function MetricsPage(
         {totalRefunded > 0 && (
           <p className="text-xs text-muted-foreground mb-4">
             Total reembolsado:{' '}
-            <span className="font-semibold text-emerald-400">
+            <span className="font-semibold text-emerald-700">
               ${totalRefunded.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
             </span>
           </p>

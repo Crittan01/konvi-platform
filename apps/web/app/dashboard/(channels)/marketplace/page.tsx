@@ -30,8 +30,8 @@ export default async function MarketplacePage() {
     return (
       <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
-          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center">
-            <Store className="h-7 w-7 text-yellow-500" />
+          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-700/20 flex items-center justify-center">
+            <Store className="h-7 w-7 text-yellow-700" />
           </div>
           <div className="space-y-1.5">
             <h2 className="text-base font-semibold">Mercado Libre no conectado</h2>
@@ -80,15 +80,15 @@ export default async function MarketplacePage() {
     return (
       <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
         <div className="flex flex-col items-center gap-4 text-center max-w-lg px-4">
-          <div className="h-14 w-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-            <Store className="h-7 w-7 text-red-500" />
+          <div className="h-14 w-14 rounded-2xl bg-red-500/10 border border-red-700/20 flex items-center justify-center">
+            <Store className="h-7 w-7 text-red-700" />
           </div>
           <div className="space-y-1.5">
             <h2 className="text-base font-semibold">No se pudo cargar Mercado Libre</h2>
             <p className="text-muted-foreground text-sm leading-relaxed">
               La integración parece conectada, pero falló la consulta de publicaciones.
             </p>
-            <p className="text-xs text-red-400 font-mono break-words">{marketplaceLoadError}</p>
+            <p className="text-xs text-red-700 font-mono break-words">{marketplaceLoadError}</p>
           </div>
           <div className="flex items-center gap-2">
             <a
@@ -113,8 +113,8 @@ export default async function MarketplacePage() {
     return (
       <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
-          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center">
-            <Store className="h-7 w-7 text-yellow-500" />
+          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-700/20 flex items-center justify-center">
+            <Store className="h-7 w-7 text-yellow-700" />
           </div>
           <div className="space-y-1.5">
             <h2 className="text-base font-semibold">Mercado Libre requiere reconexión</h2>
@@ -203,7 +203,7 @@ export default async function MarketplacePage() {
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-auto">
       <div className="flex flex-col gap-2">
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Store className="h-5 w-5 text-yellow-500" /> Mercado Libre
+          <Store className="h-5 w-5 text-yellow-700" /> Mercado Libre
         </h1>
         <p className="text-muted-foreground max-w-3xl text-sm">
           Tus publicaciones en MeLi. Vincula manualmente cada item al producto de tu catálogo para activar el sync de stock — solo los items vinculados se sincronizan.

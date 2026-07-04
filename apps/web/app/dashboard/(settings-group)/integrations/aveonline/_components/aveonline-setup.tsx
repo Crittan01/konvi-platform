@@ -323,14 +323,14 @@ export default function AveonlineSetup({
 
       {/* ID Agente — REQUERIDO para generación de guías (§3.5 dossier) */}
       <div className={`rounded-lg border p-5 space-y-3 ${
-        idagente ? 'border-border bg-card' : 'border-amber-500/30 bg-amber-500/5'
+        idagente ? 'border-border bg-card' : 'border-amber-700/30 bg-amber-500/5'
       }`}>
         <div className="flex items-center gap-2 text-foreground">
           <Truck className="h-5 w-5 text-muted-foreground" />
           <h3 className="font-semibold">ID Agente — Punto de despacho</h3>
         </div>
         {!idagente && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+          <div className="flex items-start gap-2 rounded-md border border-amber-700/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <div className="space-y-0.5">
               <p className="font-medium">ID Agente NO configurado</p>
@@ -374,7 +374,7 @@ export default function AveonlineSetup({
         )}
 
         {!agentsLoading && !agentsError && agents.length === 0 && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-300">
+          <div className="rounded-md border border-amber-700/30 bg-amber-500/5 p-3 text-sm text-amber-700">
             No hay agentes registrados en tu cuenta Aveonline. Pídele a tu
             asesor logístico que active al menos uno desde el panel
             Aveonline → Configuración → Agentes.
@@ -702,7 +702,7 @@ function AveonlineWebhookSection() {
               </div>
             </div>
             {status.configured && status.has_grace_period && (
-              <span className="text-xs px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+              <span className="text-xs px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-700">
                 Rotación reciente — grace activo
               </span>
             )}
@@ -747,7 +747,7 @@ function AveonlineWebhookSection() {
       )}
 
       {secret && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 space-y-2">
+        <div className="rounded-md border border-amber-700 bg-amber-50 p-4 space-y-2">
           <div className="flex items-center gap-2 text-amber-900 font-medium text-sm">
             <KeyRound className="h-4 w-4" />
             Secret generado — guárdalo ahora
@@ -758,7 +758,7 @@ function AveonlineWebhookSection() {
             quieres reconfigurar manualmente en el panel Aveonline.
           </p>
           <div className="flex items-center gap-2">
-            <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-amber-300 flex-1 break-all">
+            <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-amber-700 flex-1 break-all">
               {secret}
             </code>
             <button

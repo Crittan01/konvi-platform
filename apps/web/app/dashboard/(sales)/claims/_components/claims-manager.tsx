@@ -37,10 +37,10 @@ type RecentOrder = {
 // ─── Maps ─────────────────────────────────────────────────────────────────────
 
 const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> = {
-  open:          { label: 'Abierto',      color: 'bg-red-500/15 text-red-400 border-red-500/30',       dot: 'bg-red-400' },
-  investigating: { label: 'Investigando', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', dot: 'bg-amber-400' },
-  resolved:      { label: 'Resuelto',     color: 'bg-green-500/15 text-green-400 border-green-500/30', dot: 'bg-green-400' },
-  refunded:      { label: 'Reembolsado',  color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-400' },
+  open:          { label: 'Abierto',      color: 'bg-red-500/15 text-red-700 border-red-700/30',       dot: 'bg-red-400' },
+  investigating: { label: 'Investigando', color: 'bg-amber-500/15 text-amber-700 border-amber-700/30', dot: 'bg-amber-400' },
+  resolved:      { label: 'Resuelto',     color: 'bg-green-500/15 text-green-700 border-green-700/30', dot: 'bg-green-400' },
+  refunded:      { label: 'Reembolsado',  color: 'bg-emerald-500/15 text-emerald-700 border-emerald-700/30', dot: 'bg-emerald-400' },
   rejected:      { label: 'Rechazado',    color: 'bg-muted text-muted-foreground border-border',       dot: 'bg-muted-foreground' },
 }
 
@@ -264,7 +264,7 @@ export default function ClaimsManager({
                 )}
 
                 {selectedClaim.status === 'refunded' && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 rounded-lg">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 border border-emerald-700/30 bg-emerald-500/10 px-3 py-1.5 rounded-lg">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Reembolso efectuado
                   </span>
                 )}
@@ -272,7 +272,7 @@ export default function ClaimsManager({
 
               {/* Error acción */}
               {actionError && (
-                <div className="mx-6 mt-4 flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                <div className="mx-6 mt-4 flex items-center gap-2 text-xs text-red-700 bg-red-500/10 border border-red-700/20 rounded-lg px-3 py-2">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {actionError}
                 </div>
               )}
@@ -286,7 +286,7 @@ export default function ClaimsManager({
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Monto solicitado</p>
-                    <p className="font-medium text-sm font-mono text-red-400">
+                    <p className="font-medium text-sm font-mono text-red-700">
                       {selectedClaim.requested_amount
                         ? `$${selectedClaim.requested_amount.toLocaleString('es-CO')}`
                         : 'No definido'}
@@ -379,7 +379,7 @@ export default function ClaimsManager({
             </div>
 
             {createError && (
-              <p className="text-xs text-red-400 flex items-center gap-1">
+              <p className="text-xs text-red-700 flex items-center gap-1">
                 <AlertCircle className="h-3.5 w-3.5" /> {createError}
               </p>
             )}

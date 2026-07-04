@@ -26,10 +26,10 @@ const CATEGORIES = [
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
-  faq:      'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  faq:      'bg-blue-500/15 text-blue-700 border border-blue-700/30',
   politica: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  negocio:  'bg-green-500/15 text-green-400 border border-green-500/30',
-  producto: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  negocio:  'bg-green-500/15 text-green-700 border border-green-700/30',
+  producto: 'bg-orange-500/15 text-orange-700 border border-orange-700/30',
   general:  'bg-muted text-muted-foreground border border-border',
 }
 
@@ -97,7 +97,7 @@ export function DocCard({ doc, updateDocument, activateDocument, desactivateDocu
             </span>
             {/* Terminología humana: sin "embedding" ni "RAG" */}
             {doc.is_active && doc.has_embedding ? (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-700/30 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Listo para IA
               </span>
             ) : doc.is_active && !doc.has_embedding ? (
@@ -129,7 +129,7 @@ export function DocCard({ doc, updateDocument, activateDocument, desactivateDocu
               <SubmitButton size="sm" variant="outline"
                 pendingText={doc.has_embedding ? 'Activando...' : 'Indexando...'}
                 savedText="Activado"
-                className="text-xs h-7 w-full text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10">
+                className="text-xs h-7 w-full text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
                 Activar
               </SubmitButton>
             </form>

@@ -62,8 +62,8 @@ export function KbMigrationBanner({ canWrite }: { canWrite: boolean }) {
   if (!visible) return null
 
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+    <div className="rounded-xl border border-amber-700/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
+      <AlertCircle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0 text-sm">
         <p className="font-semibold text-amber-700 mb-0.5">Categorías KB actualizadas (rev. 68)</p>
         <p className="text-xs text-foreground/80">

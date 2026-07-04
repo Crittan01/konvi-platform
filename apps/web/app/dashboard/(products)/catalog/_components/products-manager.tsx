@@ -87,23 +87,23 @@ export default function ProductsManager({
         </div>
 
         {/* Stock bajo */}
-        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-border'}`}>
-          <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-yellow-500/15' : 'bg-muted'}`}>
-            <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-yellow-500' : 'text-muted-foreground'}`} />
+        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-amber-700/30 bg-amber-500/5' : 'border-border'}`}>
+          <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-amber-500/15' : 'bg-muted'}`}>
+            <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-amber-700' : 'text-muted-foreground'}`} />
           </div>
           <div className="min-w-0">
-            <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-yellow-500' : 'text-foreground'}`}>{lowStockCount}</p>
+            <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-amber-700' : 'text-foreground'}`}>{lowStockCount}</p>
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Stock bajo</p>
           </div>
         </div>
 
         {/* Sin stock */}
-        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-border'}`}>
+        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-red-700/30 bg-red-500/5' : 'border-border'}`}>
           <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${zeroStockCount > 0 ? 'bg-red-500/15' : 'bg-muted'}`}>
-            <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
+            <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-red-700' : 'text-muted-foreground'}`} />
           </div>
           <div className="min-w-0">
-            <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-red-400' : 'text-foreground'}`}>{zeroStockCount}</p>
+            <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-red-700' : 'text-foreground'}`}>{zeroStockCount}</p>
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Sin stock</p>
           </div>
         </div>

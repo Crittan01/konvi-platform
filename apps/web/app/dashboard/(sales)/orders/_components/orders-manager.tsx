@@ -65,13 +65,13 @@ const STATUS_NEXT: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:         'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  pending_payment: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
-  confirmed:  'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  pending:         'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
+  pending_payment: 'bg-amber-500/15 text-amber-600 border-amber-700/30',
+  confirmed:  'bg-blue-500/15 text-blue-700 border-blue-700/30',
   processing: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
   shipped:    'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
-  delivered:  'bg-green-500/15 text-green-400 border-green-500/30',
-  cancelled:  'bg-red-500/15 text-red-400 border-red-500/30',
+  delivered:  'bg-green-500/15 text-green-700 border-green-700/30',
+  cancelled:  'bg-red-500/15 text-red-700 border-red-700/30',
 }
 
 const STATUS_ICONS: Record<string, React.ElementType> = {
@@ -195,7 +195,7 @@ function ActionButton({
           onClick={handleCancel} 
           disabled={isPending} 
           size="sm" 
-          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-400 hover:bg-red-400/10"
+          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-700 hover:bg-red-400/10"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancelar pedido'}
         </Button>
@@ -355,7 +355,7 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
             <div className="space-y-4">
               {paginatedOrders.map((o) => {
                 const nextStatus = STATUS_NEXT[o.status]
-                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-400'
+                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-700'
                 const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
                 const subtotal  = o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
                 const shipping  = o.shipping_cost ?? 0
@@ -371,7 +371,7 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                           </span>
                           {o.payment_method === 'cod' && (
                             <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-700/30"
                               title="Pago contraentrega — el courier recauda al entregar"
                             >
                               💵 COD

@@ -275,7 +275,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
       {open && (
         <CardContent>
           {!shippingOrigin && (
-            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-700/30 text-xs text-amber-700">
               No tienes dirección de origen configurada. Ve a{' '}
               <a href="/dashboard/settings" className="underline font-medium">Configuración</a>{' '}
               y completa la sección &quot;Dirección de origen&quot;.
@@ -332,7 +332,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
               </div>
             </div>
 
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-xs text-red-700">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting
@@ -365,9 +365,9 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                   selectedIdx === idx
                     ? 'border-primary bg-primary/10'
                     : accent === 'green'
-                    ? 'border-emerald-500/40 bg-emerald-500/5 hover:border-emerald-500/60'
+                    ? 'border-emerald-700/40 bg-emerald-500/5 hover:border-emerald-700/60'
                     : accent === 'blue'
-                    ? 'border-blue-500/40 bg-blue-500/5 hover:border-blue-500/60'
+                    ? 'border-blue-700/40 bg-blue-500/5 hover:border-blue-700/60'
                     : 'border-border hover:border-primary/40'
                 }`}
               >
@@ -375,8 +375,8 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                   <div className="flex items-center gap-1 mb-1.5">
                     <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
                       accent === 'green'
-                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                        ? 'bg-emerald-500/15 text-emerald-700 border-emerald-700/30'
+                        : 'bg-blue-500/15 text-blue-700 border-blue-700/30'
                     }`}>
                       {icon} {label}
                     </span>

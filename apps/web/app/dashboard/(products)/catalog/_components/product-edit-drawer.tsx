@@ -82,7 +82,7 @@ function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs font-semibold tabular-nums">{fmtPrice(v)}</p>
-          <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-500' : 'text-muted-foreground'}`}>
+          <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
             {v.stock_quantity} u.
           </p>
         </div>
@@ -111,7 +111,7 @@ function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction
         </div>
         <div>
           <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
-          <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-7 text-xs font-mono mt-1 border-amber-500/30" placeholder="0" />
+          <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-7 text-xs font-mono mt-1 border-amber-700/30" placeholder="0" />
         </div>
         <div>
           <label className="text-[10px] text-muted-foreground uppercase font-semibold">SKU</label>
@@ -434,7 +434,7 @@ export function ProductEditDrawer({
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">SKU</label><Input name="sku" placeholder="PROD-001" className="h-7 text-xs font-mono mt-1" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio *</label><Input name="price" type="number" min="50" step="50" placeholder="0" required className="h-7 text-xs font-mono mt-1" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio anterior</label><Input name="compare_at_price" type="number" step="50" placeholder="Opcional" className="h-7 text-xs font-mono mt-1 border-dashed" /></div>
-                  <div><label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label><Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-7 text-xs font-mono mt-1 border-amber-500/30" /></div>
+                  <div><label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label><Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-7 text-xs font-mono mt-1 border-amber-700/30" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock *</label><Input name="stock" type="number" min="0" defaultValue={0} required className="h-7 text-xs font-mono mt-1" /></div>
                 </div>
                 <div className="flex gap-2 justify-end">
@@ -457,7 +457,7 @@ export function ProductEditDrawer({
                   <input type="hidden" name="variation_id" value={v.id} />
                   <input type="hidden" name="product_id" value={product.id} />
                   <span className="text-xs font-medium truncate">{fmtAttrs(v.attributes)}</span>
-                  <span className={`text-xs font-mono text-right tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-500' : 'text-muted-foreground'}`}>{v.stock_quantity} u.</span>
+                  <span className={`text-xs font-mono text-right tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>{v.stock_quantity} u.</span>
                   <Input name="reason" placeholder="Ej: Compra proveedor..." required className="h-7 text-xs" />
                   <Input name="delta" type="number" placeholder="±0" required className="h-7 text-xs font-mono text-center" />
                   <SubmitButton size="sm" pendingText="..." savedText="✓" className="h-7 w-10 p-0 text-xs">OK</SubmitButton>

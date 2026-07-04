@@ -41,11 +41,11 @@ export default function ForgotPasswordForm() {
   if (sent) {
     return (
       <div className="space-y-4">
-        <div className="flex items-start gap-3 p-4 rounded-lg border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Revisa tu correo</p>
-            <p className="text-xs text-emerald-400/70 mt-0.5">
+            <p className="text-xs text-emerald-700/70 mt-0.5">
               Si el email está registrado, recibirás el enlace en unos minutos.
               Revisa también la carpeta de spam.
             </p>

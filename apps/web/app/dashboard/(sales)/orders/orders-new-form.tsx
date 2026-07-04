@@ -318,7 +318,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
           />
         </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="text-xs text-red-700">{error}</p>}
 
         <Button
           type="button"

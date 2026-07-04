@@ -113,7 +113,7 @@ export function VariantMatrixGenerator({ productId, addVariationAction, onDone }
 
   if (done) {
     return (
-      <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-sm text-emerald-400 flex items-center gap-2">
+      <div className="p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/5 text-sm text-emerald-700 flex items-center gap-2">
         <Zap className="h-4 w-4" />
         {matrix?.length} variantes creadas exitosamente.
       </div>

@@ -38,7 +38,7 @@ export default function InactivateMemberButton({ userId, memberEmail, action }: 
         size="sm"
         variant="outline"
         onClick={() => setOpen(true)}
-        className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+        className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10"
       >
         <PauseCircle className="h-3 w-3 mr-1" />
         Inactivar

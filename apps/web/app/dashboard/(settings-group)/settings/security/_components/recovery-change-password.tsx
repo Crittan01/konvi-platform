@@ -72,7 +72,7 @@ export function RecoveryChangePassword() {
   return (
     <div className="space-y-3">
       {success && (
-        <div className="rounded-md border border-emerald-300 bg-emerald-50 p-2 flex items-start gap-2">
+        <div className="rounded-md border border-emerald-700 bg-emerald-50 p-2 flex items-start gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-700 mt-0.5 shrink-0" />
           <p className="text-sm text-emerald-800">
             Contraseña actualizada. Tu próximo inicio de sesión usará la nueva.
@@ -80,7 +80,7 @@ export function RecoveryChangePassword() {
         </div>
       )}
       {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 p-2 flex items-start gap-2">
+        <div className="rounded-md border border-red-700 bg-red-50 p-2 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>

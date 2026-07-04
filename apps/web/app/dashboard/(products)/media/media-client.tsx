@@ -119,7 +119,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
         )}
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
             <X className="h-4 w-4 shrink-0" />
             {error}
             <button onClick={() => setError(null)} className="ml-auto"><X className="h-3.5 w-3.5" /></button>

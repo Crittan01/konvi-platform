@@ -68,7 +68,7 @@ export default function ChangeRoleButton({ userId, memberEmail, currentRole, act
                 Se cambiará el rol de <span className="font-medium text-foreground">{memberEmail}</span>{' '}
                 a <span className="font-medium text-foreground">{ROLE_LABELS[selectedRole] ?? selectedRole}</span>.
               </span>
-              <span className="block text-amber-400/90 text-xs">
+              <span className="block text-amber-700/90 text-xs">
                 La sesión activa de este miembro se cerrará y deberá iniciar sesión de nuevo para obtener el nuevo rol.
               </span>
             </DialogDescription>

@@ -520,7 +520,7 @@ function CouponForm({
             name="discount_type"
             value={discountType}
             onChange={(e) => setDiscountType(e.target.value as DiscountType)}
-            className="w-full rounded-md border border-slate-400 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-slate-700 px-3 py-2 text-sm"
           >
             <option value="percent">Porcentaje (%)</option>
             <option value="fixed_amount">Monto fijo (COP)</option>
