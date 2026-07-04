@@ -35,16 +35,21 @@ services:
     # container típicamente 2-4 GB en Free tier). 1500 MB Node heap deja margen.
     # Si vuelve OOM: subir a 2048 o migrar el wrap Sentry (sin auth token skip).
     #
-    # pnpm (via corepack, versión pineada en package.json packageManager) — NO npm.
-    # El repo es un workspace pnpm con lockfile: CI usa `pnpm --frozen-lockfile` y
-    # se valida con pnpm. `npm install` resolvía versiones DISTINTAS (@types/react /
-    # @radix-ui drift) → type-errors que no aparecen con pnpm. --frozen-lockfile
-    # garantiza que Render construya el árbol exacto validado.
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS='--max-old-space-size=1500' pnpm run build
-    startCommand: pnpm run start
+    # pnpm (via corepack en modo SHIM `corepack pnpm@x ...`) — NO npm, NO `corepack
+    # enable`. El repo es un workspace pnpm con lockfile: CI usa `pnpm
+    # --frozen-lockfile` y se valida con pnpm. `npm install` resolvía versiones
+    # DISTINTAS (@types/react / @radix-ui drift) → type-errors que no aparecen con
+    # pnpm. `corepack enable` falla en Render (EROFS: /usr/bin read-only); el modo
+    # shim ejecuta pnpm sin escribir symlinks globales. --frozen-lockfile garantiza
+    # el árbol EXACTO validado. COREPACK_ENABLE_DOWNLOAD_PROMPT=0 evita el prompt.
+    buildCommand: corepack pnpm@10.33.0 install --frozen-lockfile && NODE_OPTIONS='--max-old-space-size=1500' corepack pnpm@10.33.0 run build
+    startCommand: corepack pnpm@10.33.0 run start
     envVars:
       - key: NODE_ENV
         value: production
+      # corepack en modo shim: no preguntar antes de descargar pnmp@10.33.0.
+      - key: COREPACK_ENABLE_DOWNLOAD_PROMPT
+        value: "0"
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
       - key: NEXT_PUBLIC_SUPABASE_URL
