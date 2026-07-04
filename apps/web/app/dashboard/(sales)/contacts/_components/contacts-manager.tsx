@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2, Paperclip, ExternalLink, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, Paperclip, ExternalLink, RefreshCw, AlertCircle, Plus } from 'lucide-react'
 import { getConsentEvidenceSignedUrl } from './helpers/upload-evidence'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,7 @@ import { validateAddress, type StructuredAddress, type BuildingType, type Conjun
 import HabeasDataActions from './habeas-data-actions'
 import DocumentFields, { type DocType } from './document-fields'
 import { PHONE_COUNTRIES, formatPhone } from './helpers/phone-countries'
-import { CONSENT_SOURCE_HELP } from './helpers/consent-source-help'
+import { CONSENT_SOURCE_HELP, consentSourceLabel, attachmentSkipMessage } from './helpers/consent-source-help'
 
 type ContactAddress = {
   street?: string; number?: string; city?: string
@@ -70,6 +71,11 @@ type ActionResult = { ok: boolean; error?: string }
 
 type Props = {
   initialContacts: Contact[]
+  // Data-fetching pattern: el server surfacea errores de lectura y si el
+  // listado quedó acotado a la ventana `fetchCap`.
+  loadError?: string | null
+  capReached?: boolean
+  fetchCap?: number
   canWrite: boolean
   addAction:    (fd: FormData) => Promise<ActionResult>
   editAction:   (fd: FormData) => Promise<ActionResult>
@@ -155,7 +161,7 @@ function ExistingAttachmentCard({
 
 // Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
 // de country code. Para CO formato bonito; otros países muestra +N+digits.
-export default function ContactsManager({ initialContacts, canWrite, userRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
+export default function ContactsManager({ initialContacts, loadError, capReached, fetchCap, canWrite, userRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
   const isOwner = userRole === 'owner'
   const [search, setSearch] = useState('')
   // Sem 7 F2 cierre 2026-05-20 — P7 founder UAT: botón refresh manual.
@@ -174,6 +180,10 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     // Status Filter
     if (consentFilter === 'yes') result = result.filter(c => c.consent_given)
     if (consentFilter === 'no') result = result.filter(c => !c.consent_given)
+    // "Revocados" incluye tanto la supresión total (consent_given=false +
+    // revoked_at) como el soft opt-out (consent_given=true + revoked_at,
+    // marketing bloqueado). Coincide con el contador del header.
+    if (consentFilter === 'revoked') result = result.filter(c => !!c.consent_revoked_at)
 
     // Text Filter
     const q = search.trim().toLowerCase()
@@ -256,6 +266,17 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
   const toggleRenewedConsent = (id: string) =>
     setRenewedConsent(prev => ({ ...prev, [id]: !prev[id] }))
 
+  // Rev. F2 (gap fix) — En Edit, un contacto sin dirección (típico de los
+  // creados por el bot) NO debe forzar a inventar una dirección completa
+  // solo para corregir el nombre. El AddressSelector marca sus campos como
+  // required cuando showBuildingDetails=true; para no bloquear el guardado
+  // solo renderizamos el selector cuando el contacto YA tiene dirección o
+  // cuando el operador decide agregarla explícitamente. Si no se renderiza,
+  // el form no envía campos addr_* y la dirección actual se conserva.
+  const [addingAddress, setAddingAddress] = useState<Record<string, boolean>>({})
+  const enableAddressEdit = (id: string) =>
+    setAddingAddress(prev => ({ ...prev, [id]: true }))
+
   // Rev. 102 — state controlled del check "consent_given" para form Add
   // y para forms Edit (per-contact). Permite condicionar UX:
   //   - inputs PII disabled si check OFF (Ley 1581 Art. 9 — sin consent
@@ -321,25 +342,18 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     setTimeout(() => setIsRefreshing(false), 600)
   }
 
-  // Rev. 102 — feedback visual de éxito tras Guardar (no usamos modal
-  // para no agregar fricción a la acción explícita del operador).
-  // Banner verde efímero (3s) que confirma que la operación se ejecutó.
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const showSuccess = (msg: string) => {
-    setSuccessMessage(msg)
-    setTimeout(() => setSuccessMessage(null), 3500)
-  }
-
+  // Feedback de mutaciones vía toast (sonner) — reemplaza el banner efímero
+  // custom y los window.alert nativos (no tematizables ni accesibles).
   const handleAdd = (fd: FormData) => {
     const error = validateFormData(fd)
     if (error) {
-      window.alert(`No se puede guardar: ${error}`)
+      toast.error('No se puede guardar', { description: error })
       return
     }
     startTransition(async () => {
       const res = await addAction(fd)
       if (!res.ok) {
-        window.alert(`No se pudo guardar: ${res.error || 'Error desconocido.'}`)
+        toast.error('No se pudo guardar el contacto', { description: res.error || 'Error desconocido.' })
         return
       }
       addFormRef.current?.reset()
@@ -348,24 +362,24 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       setAddConsentSource('')
       setAddPhoneCountry('57')
       router.refresh()
-      showSuccess('Contacto guardado correctamente.')
+      toast.success('Contacto guardado correctamente.')
     })
   }
 
   const handleEdit = (fd: FormData) => {
     const error = validateFormData(fd)
     if (error) {
-      window.alert(`No se puede actualizar: ${error}`)
+      toast.error('No se puede actualizar', { description: error })
       return
     }
     startTransition(async () => {
       const res = await editAction(fd)
       if (!res.ok) {
-        window.alert(`No se pudo actualizar: ${res.error || 'Error desconocido.'}`)
+        toast.error('No se pudo actualizar el contacto', { description: res.error || 'Error desconocido.' })
         return
       }
       router.refresh()
-      showSuccess('Cambios guardados correctamente.')
+      toast.success('Cambios guardados correctamente.')
     })
   }
 
@@ -399,11 +413,11 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
         // Next.js enmascaraba el message en producción. `alert` es bloqueante a
         // propósito: el operador DEBE leer la condición (esperar ~30 min o
         // cancelar la orden) antes de reintentar.
-        window.alert(res.error || 'No se pudo eliminar el contacto.')
+        toast.error('No se pudo eliminar el contacto', { description: res.error || undefined, duration: 8000 })
         return
       }
       router.refresh()
-      showSuccess('Contacto eliminado.')
+      toast.success('Contacto eliminado.')
     })
   }
 
@@ -422,7 +436,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     if (!pendingReactivateId || !reactivateConsentAction) return
     const reason = pendingReactivateReason.trim()
     if (reason.length < 10) {
-      window.alert('La razón debe tener al menos 10 caracteres (auditoría Habeas Data).')
+      toast.error('La razón debe tener al menos 10 caracteres (auditoría Habeas Data).')
       return
     }
     const fd = new FormData()
@@ -435,9 +449,9 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       const res = await reactivateConsentAction(fd)
       if (res.ok) {
         router.refresh()
-        showSuccess(res.message || 'Consent reactivado.')
+        toast.success(res.message || 'Consent reactivado.')
       } else {
-        window.alert(`Error reactivando consent (${targetId.slice(0, 8)}…): ${res.message}`)
+        toast.error(`Error reactivando consent (${targetId.slice(0, 8)}…)`, { description: res.message, duration: 8000 })
       }
     })
   }
@@ -459,15 +473,40 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
 
   return (
     <div className="space-y-4">
-      {/* Rev. 102 — Banner efímero de éxito */}
-      {successMessage && (
+      {/* Estado de error de lectura (data-fetching pattern: no falso-0) */}
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-700/40 bg-red-700/5 px-4 py-3 text-sm text-red-700 flex items-start gap-2"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">No se pudieron cargar los contactos.</p>
+            <p className="text-xs text-red-700/90 mt-0.5">{loadError}</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 h-7 text-xs gap-1.5 border-red-700/50 text-red-700 hover:bg-red-700/10"
+              onClick={handleRefresh}
+            >
+              <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} /> Reintentar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Aviso de ventana acotada: hay más contactos de los mostrados */}
+      {capReached && !loadError && (
         <div
           role="status"
-          aria-live="polite"
-          className="fixed top-4 right-4 z-50 rounded-lg border border-emerald-700/50 bg-emerald-700/10 px-4 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top-2"
+          className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-2.5 text-xs text-amber-700 flex items-start gap-2"
         >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          {successMessage}
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Mostrando los primeros {fetchCap ?? 500} contactos. Si buscas uno que no aparece,
+            usa el buscador por nombre, teléfono o email.
+          </span>
         </div>
       )}
 
@@ -549,7 +588,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
               Reactivar consent marketing
             </DialogTitle>
             <DialogDescription>
-              Esta acción permite que el cliente vuelva a recibir HSM templates marketing.
+              Esta acción permite que el cliente vuelva a recibir mensajes de marketing por WhatsApp.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
@@ -565,7 +604,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
               <ul className="list-disc list-inside space-y-0.5">
                 <li>El cliente debió haber dado consent renovado <strong>explícito</strong> (idealmente vía WhatsApp con confirmación).</li>
                 <li>Si solo te pidió por teléfono o presencial, la razón debe documentarlo claramente para audit ante SIC.</li>
-                <li>La razón quedará en <code>consent_audit_log</code> (append-only, 7 años retención).</li>
+                <li>La razón queda registrada de forma permanente e inalterable (se conserva 7 años como prueba ante la SIC).</li>
               </ul>
             </div>
             <div className="space-y-1">
@@ -608,8 +647,12 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       {/* Búsqueda y Filtros */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Label htmlFor="contacts-search" className="sr-only">
+            Buscar contactos por nombre, teléfono o email
+          </Label>
+          <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
+            id="contacts-search"
             type="text"
             placeholder="Buscar por nombre, teléfono o email..."
             value={search}
@@ -617,14 +660,17 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
             className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
+        <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Filtrar por estado de consentimiento">
           {[
             { value: 'all', label: 'Todos' },
             { value: 'yes', label: 'Con consent.' },
             { value: 'no',  label: 'Sin consent.' },
+            { value: 'revoked', label: 'Revocados' },
           ].map(opt => (
             <button
               key={opt.value}
+              type="button"
+              aria-pressed={consentFilter === opt.value}
               onClick={() => setConsentFilter(opt.value)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 consentFilter === opt.value
@@ -761,8 +807,9 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                     <span className="text-xs text-foreground leading-snug">
                       <strong>El titular autorizó el tratamiento de sus datos</strong> (Ley 1581/2012).
                       <span className="block text-muted-foreground mt-0.5 text-[11px]">
-                        Sin esta autorización solo se guarda el teléfono. Los demás
-                        campos personales se rechazan en el servidor.
+                        Si no marcas esta casilla, el contacto igual se guarda pero
+                        queda con el consentimiento pendiente: el bot se lo pedirá al
+                        cliente en su próxima conversación por WhatsApp.
                       </span>
                     </span>
                   </label>
@@ -862,11 +909,38 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
         {/* Lista */}
         <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
           {paginatedContacts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 rounded-xl border border-dashed border-border text-center">
+            <div className="flex flex-col items-center justify-center py-16 px-6 rounded-xl border border-dashed border-border text-center">
               <Users className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm">
-                {search ? `Sin resultados para "${search}"` : 'No hay contactos registrados.'}
-              </p>
+              {search || consentFilter !== 'all' ? (
+                <>
+                  <p className="text-sm font-medium text-foreground">Sin resultados</p>
+                  <p className="text-muted-foreground text-xs mt-1 max-w-sm">
+                    {search
+                      ? <>Ningún contacto coincide con &quot;{search}&quot;.</>
+                      : 'Ningún contacto coincide con este filtro.'}
+                    {' '}Ajusta la búsqueda o los filtros.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-foreground">Aún no hay contactos</p>
+                  <p className="text-muted-foreground text-xs mt-1 max-w-sm">
+                    Los contactos se crean <strong>automáticamente</strong> cuando un cliente
+                    escribe al WhatsApp del negocio.
+                    {canWrite && ' También puedes registrar uno a mano desde el formulario “Agregar Contacto” a la izquierda.'}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 h-7 text-xs gap-1.5"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} /> Refrescar
+                  </Button>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -902,7 +976,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                             // Marketing bloqueado pero chat activo (Q3 + Op-A.2).
                             <span
                               className="flex items-center gap-1 text-[11px] text-rose-700"
-                              title="Cliente envió STOP/BAJA por WhatsApp. Templates HSM marketing bloqueados. Conversación puede continuar normalmente — bot responde a mensajes inbound. Para reactivar marketing, usar 'Reactivar consent' (requiere doble opt-in del cliente preferiblemente)."
+                              title="Cliente envió STOP/BAJA por WhatsApp. Mensajes de marketing por WhatsApp bloqueados. La conversación puede continuar normalmente — el bot responde a los mensajes que el cliente envíe. Para reactivar el marketing, usa 'Reactivar consent' (requiere que el cliente lo pida explícitamente)."
                             >
                               <ShieldOff className="h-3 w-3" /> Marketing bloqueado · Chat activo
                             </span>
@@ -939,7 +1013,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                         {c.notes && <p className="text-xs text-muted-foreground mt-0.5 italic">{c.notes}</p>}
                         {(c.consent_source || c.consent_notice_version) && (
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {c.consent_source ? `Canal: ${c.consent_source}` : ''}
+                            {c.consent_source ? `Canal: ${consentSourceLabel(c.consent_source)}` : ''}
                             {c.consent_source && c.consent_notice_version ? ' · ' : ''}
                             {c.consent_notice_version ? `Aviso: ${c.consent_notice_version}` : ''}
                           </p>
@@ -987,6 +1061,21 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                             Evidencia: {extractEvidenceNote(c.consent_evidence)}
                           </p>
                         )}
+                        {/* gap fix — el adjunto de evidencia física falló y NUNCA
+                            se avisó al operador. Ahora se surfacea el motivo para
+                            que sepa que el escaneo del consent firmado no quedó
+                            guardado y pueda reintentar desde Editar. */}
+                        {(() => {
+                          const skipMsg = attachmentSkipMessage(
+                            (c.consent_evidence as Record<string, unknown> | null)?.attachment_skip_reason as string | undefined,
+                          )
+                          return skipMsg ? (
+                            <p className="text-xs text-amber-700 mt-0.5 flex items-start gap-1" title="Reintenta la subida desde Editar → Adjuntar evidencia física.">
+                              <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                              <span>Adjunto de evidencia NO guardado: {skipMsg} Reintenta desde Editar.</span>
+                            </p>
+                          ) : null
+                        })()}
                         {c.document_type && c.document_number && (
                           <p className="text-xs text-muted-foreground mt-0.5">
                             Doc: <span className="font-mono">{c.document_type} {c.document_number}</span>
@@ -1183,7 +1272,28 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                         <div className="space-y-1">
                           <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
                           {piiUnlocked ? (
-                            <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} showBuildingDetails />
+                            (c.address?.street || addingAddress[c.id]) ? (
+                              <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} showBuildingDetails />
+                            ) : (
+                              // gap fix — sin dirección no forzamos inventarla para
+                              // guardar otros cambios (contactos creados por el bot).
+                              <div className="rounded-md border border-dashed border-border p-2.5 space-y-1.5">
+                                <p className="text-[11px] text-muted-foreground">
+                                  Este contacto no tiene dirección (normal si lo creó el bot).
+                                  Puedes guardar otros cambios sin agregarla — el bot se la
+                                  pedirá al cliente al momento de comprar.
+                                </p>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1.5"
+                                  onClick={() => enableAddressEdit(c.id)}
+                                >
+                                  <Plus className="h-3 w-3" /> Agregar dirección de entrega
+                                </Button>
+                              </div>
+                            )
                           ) : (
                             <div className="text-[10px] text-muted-foreground italic">
                               Dirección bloqueada — confirma consentimiento renovado para editar.
@@ -1248,7 +1358,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                                 <span className="text-xs text-foreground leading-snug">
                                   <strong>El titular autoriza el tratamiento de sus datos</strong> (Ley 1581/2012).
                                   <span className="block text-muted-foreground mt-0.5 text-[11px]">
-                                    Marca el check + canal para registrar el consent. Si lo dejas sin marcar, el contacto queda con consent_given=false (el bot pedirá consent al titular en su próxima interacción).
+                                    Marca la casilla y el canal para registrar el consentimiento. Si la dejas sin marcar, el contacto queda con el consentimiento pendiente (el bot se lo pedirá al cliente en su próxima conversación).
                                   </span>
                                 </span>
                               </label>
@@ -1335,6 +1445,15 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                                     uploadedAt={attachmentUploadedAt}
                                   />
                                 )}
+                                {(() => {
+                                  const skipMsg = attachmentSkipMessage(evidenceObj.attachment_skip_reason as string | undefined)
+                                  return skipMsg && !hasAttachment ? (
+                                    <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2 text-[11px] text-amber-700 flex items-start gap-1.5">
+                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                      <span>El último intento de adjuntar evidencia falló: {skipMsg} Vuelve a subir el archivo abajo.</span>
+                                    </div>
+                                  ) : null
+                                })()}
                                 <div className="space-y-1">
                                   <Label className="text-xs">
                                     {hasAttachment ? 'Reemplazar evidencia física' : 'Adjuntar evidencia física'}
@@ -1423,12 +1542,12 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
                 <div className="flex items-center justify-between py-2 px-1 text-sm text-muted-foreground">
                   <span>Mostrando {(currentPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredContacts.length)} de {filteredContacts.length}</span>
                   <div className="flex items-center gap-1">
-                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>
-                       <span>{'<'}</span>
+                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} aria-label="Página anterior">
+                       <span aria-hidden="true">{'<'}</span>
                     </Button>
-                    <span className="text-xs font-medium w-8 text-center">{currentPage}</span>
-                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>
-                       <span>{'>'}</span>
+                    <span className="text-xs font-medium w-8 text-center" aria-current="page">{currentPage}</span>
+                    <Button variant="outline" size="sm" className="w-8 h-8 p-0" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} aria-label="Página siguiente">
+                       <span aria-hidden="true">{'>'}</span>
                     </Button>
                   </div>
                 </div>

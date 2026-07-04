@@ -64,6 +64,13 @@ const SUPPORTED_COUNTRY_CODES = new Set([
   '55',  // Brasil
 ])
 
+// Cota superior del listado. El bot crea un contact por cada teléfono
+// entrante, así que el fetch DEBE estar acotado (data-fetching pattern:
+// listados acotados). La paginación real server-side es decisión de
+// producto pendiente (umbral definitivo); mientras tanto 500 protege el
+// render y la búsqueda/filtros operan sobre esa ventana en memoria.
+const CONTACTS_FETCH_CAP = 500
+
 const normalizeDaneCode = (raw?: string | null) => {
   const digits = String(raw ?? '').replace(/\D/g, '')
   if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
@@ -111,6 +118,10 @@ export default async function ContactsPage(
   const consentFilter = searchParams?.consent ?? 'all'
 
   let contacts: Contact[] = []
+  // Data-fetching pattern: surfacear errores de lectura (NO falso-0). Si la
+  // query falla, el operador ve un estado de error con reintento, no una
+  // lista vacía que parece "no hay contactos".
+  let loadError: string | null = null
 
   if (tenantId) {
     let query = supabase
@@ -121,18 +132,28 @@ export default async function ContactsPage(
         'consent_evidence, consent_actor_email, consent_revoked_at, consent_revoked_reason, created_at, address'
       )
       .eq('tenant_id', tenantId)
+      // No listar contactos soft-eliminados (retención Cód. Comercio): quedan
+      // con deleted_at poblado y NO deben aparecer como "Sin nombre".
+      .is('deleted_at', null)
       .order('name', { ascending: true, nullsFirst: false })
+      // Listado acotado: traemos como máximo CONTACTS_FETCH_CAP filas para
+      // que la búsqueda/filtros/paginación operen en memoria sin unbounded fetch.
+      .limit(CONTACTS_FETCH_CAP)
 
     if (consentFilter === 'yes') query = query.eq('consent_given', true)
     if (consentFilter === 'no')  query = query.eq('consent_given', false)
 
-    const { data } = await query
-    contacts = Array.isArray(data) ? (data as unknown as Contact[]) : []
+    const { data, error } = await query
+    if (error) {
+      loadError = error.message || 'No se pudieron cargar los contactos.'
+    } else {
+      contacts = Array.isArray(data) ? (data as unknown as Contact[]) : []
+    }
   }
 
-  // Filtros iniciales ya no se hacen de forma ruda en query,
-  // traemos los primeros 500 contactos para que paginen local.
-  // Solo la búsqueda full server haría falta si la DB crece mucho, pero por ahora en memoria es Nivel Pro.
+  // Si alcanzamos la cota, la ventana en memoria puede no contener todos los
+  // contactos del tenant — avisamos al operador para que use la búsqueda.
+  const capReached = contacts.length >= CONTACTS_FETCH_CAP
 
   const consentCount = contacts.filter(c => c.consent_given).length
   const revokedCount = contacts.filter(c => !c.consent_given && !!c.consent_revoked_at).length
@@ -206,7 +227,9 @@ export default async function ContactsPage(
     } : null
     // Rev. 69 — documento de identidad.
     const docTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
-    const docType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(docTypeRaw) ? docTypeRaw : null
+    // Rev. 102 — TI removido (menores, Decreto 1377): la API lo rechaza (422)
+    // y el dropdown ya no lo ofrece. La whitelist debe coincidir.
+    const docType = ['CC', 'CE', 'NIT', 'PP', 'OTHER'].includes(docTypeRaw) ? docTypeRaw : null
     const docNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
     // Rev. 102 — phone con country code seleccionable.
     const phoneCountryRaw = ((formData.get('phone_country') as string) || '57').replace(/\D/g, '')
@@ -780,6 +803,9 @@ export default async function ContactsPage(
 
       <ContactsManager
         initialContacts={contacts}
+        loadError={loadError}
+        capReached={capReached}
+        fetchCap={CONTACTS_FETCH_CAP}
         canWrite={canWrite}
         userRole={role}
         addAction={addContact}
