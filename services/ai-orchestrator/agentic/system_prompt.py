@@ -173,7 +173,25 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     el prompt de los estados post-carrito.
     """
     if not catalog:
-        return "(Catálogo vacío para este tenant.)"
+        # F5 bot_engine fix — primer día del tenant: catálogo aún sin cargar.
+        # Sin una regla explícita el LLM tendía a improvisar productos o a
+        # quedar mudo. Damos comportamiento determinístico: honestidad + no
+        # inventar + capturar el interés del cliente + escalar si insiste.
+        return (
+            "CATÁLOGO SIN PRODUCTOS CARGADOS todavía.\n"
+            "REGLA (no violable): NO inventes productos, precios ni "
+            "categorías — no hay ninguno disponible aún.\n"
+            "Comportamiento esperado:\n"
+            "• Reconoce con calidez que el catálogo se está preparando y que "
+            "aún no hay productos publicados.\n"
+            "• Ofrece tomar los datos del cliente (con su autorización, vía "
+            "`record_consent` + `save_contact_field`) para avisarle apenas "
+            "haya novedades.\n"
+            "• Si el cliente insiste en comprar o necesita atención humana, "
+            "usa `escalate_to_human`.\n"
+            "• NUNCA prometas un producto, precio o fecha que no puedas "
+            "confirmar."
+        )
     lines: list[str] = []
     # ADR-0027 Fase 2 — agrupar por la categoría REAL del tenant (helper compartido con
     # render_category_index; fallback título-head si el producto no trae 'category').

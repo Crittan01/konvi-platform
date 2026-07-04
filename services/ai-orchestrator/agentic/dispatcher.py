@@ -343,7 +343,7 @@ async def _emit_degraded_response_and_escalate(
     else:
         degraded_text = (
             "Mmm, no te entendí del todo. "
-            "¿Me lo cuentas de otra forma?"
+            "Me lo cuentas de otra forma?"
         )
 
     try:
@@ -953,7 +953,7 @@ async def _run_agentic_full(
                 _degraded_msg = (
                     f"Recibí tu {_media_label}, pero estoy teniendo "
                     f"dificultades técnicas para procesarlo en este momento. "
-                    f"¿Podrías escribirme el mensaje, o intentar de nuevo "
+                    f"Podrías escribirme el mensaje, o intentar de nuevo "
                     f"en unos minutos? Si prefieres, te conecto con un "
                     f"especialista del equipo."
                 )
@@ -1292,16 +1292,22 @@ async def _run_agentic_full(
         _medical_hit = _detect_medical_query(content)
         _drug_hit = _detect_drug_purchase_request(content) if not _medical_hit else False
         if _medical_hit or _drug_hit:
+            # F5 bot_engine fix — el redirect es multi-tenant: usa el nombre
+            # real del tenant (tenant_name, resuelto arriba desde DB) en vez
+            # del branding KAIU hardcodeado, que se filtraba a cualquier
+            # tenant agentic cuyo cliente hiciera una consulta médica/farma.
+            # Estilo WhatsApp CO (orchestrator style rule): sin signos de
+            # apertura `¿`/`¡` (el normalizer los quita igual, pero mantenemos
+            # la fuente coherente con la voz canónica).
             if _medical_hit:
                 _redirect = (
-                    "Entiendo tu inquietud. Soy asistente de venta de "
-                    "productos de KAIU Living Natural — no estoy "
-                    "capacitada para dar recomendaciones médicas ni "
-                    "diagnosticar condiciones de salud.\n\n"
+                    f"Entiendo tu inquietud. Soy el asistente de venta de "
+                    f"*{tenant_name}* — no estoy capacitado para dar "
+                    "recomendaciones médicas ni diagnosticar condiciones "
+                    "de salud.\n\n"
                     "Para temas de salud te recomiendo consultar a un "
                     "profesional médico o tu EPS.\n\n"
-                    "¿Te puedo ayudar con algún producto de nuestra "
-                    "tienda?"
+                    "Te puedo ayudar con algún producto de la tienda?"
                 )
                 _log_reason = "medical_query"
             else:
@@ -1310,8 +1316,7 @@ async def _run_agentic_full(
                     "WhatsApp Business + regulación colombiana (INVIMA), "
                     "los medicamentos solo pueden adquirirse en "
                     "droguerías/farmacias autorizadas.\n\n"
-                    "¿Te puedo ayudar con algún producto de cosmética "
-                    "natural KAIU?"
+                    f"Te puedo ayudar con algún producto de *{tenant_name}*?"
                 )
                 _log_reason = "drug_purchase"
             await _send_outbound_text(
@@ -2630,6 +2635,13 @@ async def _run_agentic_full(
                 tenant_name=tenant_name,
                 tenant_pitch=tenant_pitch,
                 tenant_tone=tenant_tone,
+                # F5 bot_engine fix — persona del agente activo (ADR-0017) +
+                # filosofía del tenant en el path primario V3. Antes solo el
+                # monolito V2 los inyectaba → el bot ignoraba el nombre/rol
+                # que el operador configuró en /dashboard/ai-agents.
+                agent_name=_agent.get("name") or "Sara Camila",
+                agent_role_description=_agent.get("role_description"),
+                tenant_philosophy=tenant_philosophy,
                 catalog_view=_catalog_view,
                 catalog=catalog,
                 contact_record=contact or {},

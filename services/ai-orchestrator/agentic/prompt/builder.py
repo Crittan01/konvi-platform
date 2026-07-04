@@ -154,6 +154,15 @@ def build_prompt_for_state(
     tenant_pitch: Optional[str] = None,
     tenant_tone: Optional[str] = None,
     agent_name: str = "Sara Camila",
+    # F5 bot_engine fix — el path V3 per-state (primario) ignoraba la persona
+    # del agente activo (ADR-0017 multi-agente): siempre se presentaba como
+    # "Sara Camila" y descartaba el role_description configurado en
+    # /dashboard/ai-agents y la filosofía del tenant. Ambos SÍ llegaban al
+    # monolito V2 (fallback), creando divergencia de comportamiento entre
+    # paths. Ahora V3 recibe y renderiza ambos (reusa los renderers canónicos
+    # de system_prompt para no duplicar el formato).
+    agent_role_description: Optional[str] = None,
+    tenant_philosophy: Optional[dict] = None,
     catalog: Optional[list[dict]] = None,
     contact_record: Optional[dict] = None,
     carriers: Optional[list[dict]] = None,
@@ -203,6 +212,24 @@ def build_prompt_for_state(
         agent_name=agent_name, tenant_name=tenant_name,
         pitch=pitch, tone=tone,
     ))
+
+    # F5 bot_engine fix — filosofía del negocio + persona del agente activo.
+    # Reusa los renderers canónicos del monolito (system_prompt) para mantener
+    # UN solo formato/contrato entre paths V2 y V3. Ambos retornan "" si el
+    # input es None/vacío (backward-compat con tenants/agentes sin config).
+    try:
+        from agentic.system_prompt import (
+            _render_philosophy_block,
+            _render_agent_persona_block,
+        )
+        _philosophy = _render_philosophy_block(tenant_philosophy)
+        if _philosophy:
+            parts.append(_philosophy)
+        _persona = _render_agent_persona_block(agent_role_description)
+        if _persona:
+            parts.append(_persona)
+    except Exception:  # pragma: no cover — falla-seguro: prompt sin persona
+        pass
 
     # Saludo time-aware solo donde es relevante.
     if state in (
