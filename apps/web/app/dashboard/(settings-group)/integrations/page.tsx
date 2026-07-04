@@ -49,18 +49,23 @@ export default async function IntegrationsPage(
   let templatesTotal = 0
 
   if (tenantId) {
-    const [intRes, notifRes, tplRes] = await Promise.all([
+    // Conteos con head:true (COUNT server-side) en vez de traer todas las filas
+    // para contar en JS — criterio explícito de no full-fetch para contar.
+    const [intRes, notifRes, tplTotalRes, tplApprovedRes] = await Promise.all([
       supabase.from('tenant_integrations').select('provider, status, meta').eq('tenant_id', tenantId),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
       supabase.from('whatsapp_templates')
-        .select('status')
+        .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId),
+      supabase.from('whatsapp_templates')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'APPROVED'),
     ])
     integrations  = (intRes.data as Integration[])   || []
     notifications = (notifRes.data as NotifSetting[]) || []
-    const tplRows = (tplRes.data as Array<{ status: string }>) || []
-    templatesTotal = tplRows.length
-    templatesApproved = tplRows.filter(t => t.status === 'APPROVED').length
+    templatesTotal = tplTotalRes.count ?? 0
+    templatesApproved = tplApprovedRes.count ?? 0
   }
 
   const providers = ['aveonline', 'mercadolibre', 'whatsapp', 'wompi']

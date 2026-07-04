@@ -23,6 +23,7 @@ import WhatsAppTabs from './_components/whatsapp-tabs'
 import WhatsAppSetup from './_components/whatsapp-setup'
 import WhatsAppTemplates from './_components/whatsapp-templates'
 import WhatsAppQuality from './_components/whatsapp-quality'
+import WhatsAppOptOuts from './_components/whatsapp-optouts'
 
 export const metadata = {
   title: 'WhatsApp — Integraciones',
@@ -30,18 +31,23 @@ export const metadata = {
 }
 
 // ─── Tipos (re-exportados de la versión anterior /whatsapp-templates) ───────
+// Enums + validadores viven en ./_lib/template-validation (lógica pura, testeada
+// con vitest). Se re-exportan aquí para no romper `import ... from '../page'`.
+import {
+  VALID_CATEGORIES,
+  VALID_PARAMETER_FORMATS,
+  EDITABLE_STATUSES,
+  NAME_PATTERN,
+  LANGUAGE_PATTERN,
+  parseComponentsJSON,
+  type TemplateCategory,
+  type TemplateStatus,
+  type ParameterFormat,
+  type TemplateComponent,
+} from './_lib/template-validation'
 
-export type TemplateCategory = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
-export type TemplateStatus =
-  | 'LOCAL_DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISABLED' | 'PAUSED'
-export type ParameterFormat = 'POSITIONAL' | 'NAMED'
-
-export type TemplateComponent = {
-  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS'
-  text?: string
-  format?: string
-  buttons?: Array<Record<string, unknown>>
-  example?: Record<string, unknown>
+export type {
+  TemplateCategory, TemplateStatus, ParameterFormat, TemplateComponent,
 }
 
 export type WhatsAppTemplate = {
@@ -62,63 +68,43 @@ export type WhatsAppTemplate = {
   updated_at: string
 }
 
-const VALID_CATEGORIES = new Set<TemplateCategory>([
-  'UTILITY', 'MARKETING', 'AUTHENTICATION',
-])
-const VALID_PARAMETER_FORMATS = new Set<ParameterFormat>([
-  'POSITIONAL', 'NAMED',
-])
-const EDITABLE_STATUSES = new Set<TemplateStatus>(['LOCAL_DRAFT', 'REJECTED'])
-const NAME_PATTERN = /^[a-z][a-z0-9_]{2,49}$/
-const LANGUAGE_PATTERN = /^[a-z]{2}(_[A-Z]{2})?$/
-
-function validateComponents(components: TemplateComponent[]): string | null {
-  if (!Array.isArray(components) || components.length === 0) {
-    return 'components debe ser una lista no vacía.'
-  }
-  const validTypes = new Set(['HEADER', 'BODY', 'FOOTER', 'BUTTONS'])
-  const seenTypes = new Set<string>()
-  let bodyCount = 0
-  for (let i = 0; i < components.length; i++) {
-    const c = components[i]
-    if (typeof c !== 'object' || c === null) {
-      return `components[${i}] debe ser un objeto.`
-    }
-    const t = (c.type || '').toUpperCase()
-    if (!validTypes.has(t)) {
-      return `components[${i}].type "${t}" inválido. Válidos: HEADER, BODY, FOOTER, BUTTONS.`
-    }
-    if (t !== 'BUTTONS' && seenTypes.has(t)) {
-      return `components[${i}]: type "${t}" duplicado. Solo BUTTONS puede repetirse.`
-    }
-    seenTypes.add(t)
-    if (t === 'BODY') {
-      bodyCount++
-      if (!(c.text || '').trim()) {
-        return `components[${i}] BODY requiere campo 'text' no vacío.`
-      }
-    }
-  }
-  if (bodyCount !== 1) {
-    return 'components requiere exactamente 1 BODY.'
-  }
-  return null
+export type OptOutRow = {
+  id: string
+  phone: string
+  name: string | null
+  consent_revoked_at: string
 }
 
-function parseComponentsJSON(raw: string): { ok: true; value: TemplateComponent[] }
-                                          | { ok: false; error: string } {
-  let parsed: unknown
+// ─── Audit log helper (paridad con claims/categories/purchases) ─────────────
+// Las server actions de este panel escriben directo a Supabase (no pasan por el
+// API router), así que el audit_log se inserta aquí mismo. RLS: audit_log usa
+// app_current_tenant() que resuelve del JWT del usuario (mismo mecanismo que
+// whatsapp_templates), por lo que el insert user-scoped pasa el WITH CHECK.
+async function writeAuditLog(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  args: {
+    tenantId: string
+    userId: string | null
+    userEmail: string | null
+    action: string
+    entityId: string | null
+    payload: Record<string, unknown>
+  },
+): Promise<void> {
   try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return { ok: false, error: 'components: JSON inválido. Revisá llaves y comillas.' }
+    await sb.from('audit_log').insert({
+      tenant_id: args.tenantId,
+      user_id: args.userId,
+      user_email: args.userEmail,
+      action: args.action,
+      entity_type: 'whatsapp_template',
+      entity_id: args.entityId,
+      payload: args.payload,
+    })
+  } catch (e) {
+    // El audit no debe tumbar la operación de negocio; log y seguir.
+    console.error('[whatsapp-templates] audit_log insert falló', e)
   }
-  if (!Array.isArray(parsed)) {
-    return { ok: false, error: 'components: debe ser un array JSON.' }
-  }
-  const err = validateComponents(parsed as TemplateComponent[])
-  if (err) return { ok: false, error: err }
-  return { ok: true, value: parsed as TemplateComponent[] }
 }
 
 // ─── Server actions templates (movidas de /whatsapp-templates) ──────────────
@@ -185,7 +171,7 @@ async function createDraftAction(
     }
   }
 
-  const { error } = await sb.from('whatsapp_templates').insert({
+  const { data: inserted, error } = await sb.from('whatsapp_templates').insert({
     tenant_id: meta.tenant_id,
     waba_id,
     name,
@@ -196,7 +182,7 @@ async function createDraftAction(
     status: 'LOCAL_DRAFT',
     quality_rating: 'UNKNOWN',
     created_by: user?.id ?? null,
-  })
+  }).select('id').maybeSingle()
 
   if (error) {
     if (error.code === '23505') {
@@ -207,6 +193,15 @@ async function createDraftAction(
     }
     return { ok: false, error: `Error al crear plantilla: ${error.message}` }
   }
+
+  await writeAuditLog(sb, {
+    tenantId: meta.tenant_id,
+    userId: user?.id ?? null,
+    userEmail: user?.email ?? null,
+    action: 'whatsapp_template.created',
+    entityId: (inserted?.id as string) ?? null,
+    payload: { name, language, category, parameter_format },
+  })
 
   revalidatePath('/dashboard/integrations/whatsapp')
   return { ok: true }
@@ -256,6 +251,10 @@ async function updateDraftAction(
   const parsed = parseComponentsJSON(componentsRaw)
   if (!parsed.ok) return { ok: false, error: parsed.error }
 
+  // Editar reabre el ciclo: el template vuelve a LOCAL_DRAFT y se DESLIGA de la
+  // submission Meta anterior. Nulear meta_template_id/submitted_at/approved_at
+  // evita que un webhook tardío del submit viejo (que matchea por meta_template_id)
+  // pise el draft nuevo — paridad con el helper canónico whatsapp_templates.py.
   const { error } = await sb
     .from('whatsapp_templates')
     .update({
@@ -264,11 +263,23 @@ async function updateDraftAction(
       components: parsed.value,
       status: 'LOCAL_DRAFT',
       status_reason: null,
+      meta_template_id: null,
+      submitted_at: null,
+      approved_at: null,
     })
     .eq('id', id)
     .eq('tenant_id', meta.tenant_id)
 
   if (error) return { ok: false, error: `Error al actualizar: ${error.message}` }
+
+  await writeAuditLog(sb, {
+    tenantId: meta.tenant_id,
+    userId: user?.id ?? null,
+    userEmail: user?.email ?? null,
+    action: 'whatsapp_template.updated',
+    entityId: id,
+    payload: { category, parameter_format, previous_status: existing.status },
+  })
 
   revalidatePath('/dashboard/integrations/whatsapp')
   return { ok: true }
@@ -311,6 +322,15 @@ async function deleteDraftAction(
     .eq('tenant_id', meta.tenant_id)
 
   if (error) return { ok: false, error: `Error al eliminar: ${error.message}` }
+
+  await writeAuditLog(sb, {
+    tenantId: meta.tenant_id,
+    userId: user?.id ?? null,
+    userEmail: user?.email ?? null,
+    action: 'whatsapp_template.deleted',
+    entityId: id,
+    payload: { name: existing.name },
+  })
 
   revalidatePath('/dashboard/integrations/whatsapp')
   return { ok: true }
@@ -365,7 +385,8 @@ export default async function WhatsAppIntegrationPage(
         )
         .eq('tenant_id', tenantId)
         .order('status', { ascending: true })
-        .order('name', { ascending: true }),
+        .order('name', { ascending: true })
+        .limit(200),  // cota defensiva: un tenant no debería tener >200 plantillas
     ])
     const integData = integRes.data as {
       status?: string; credentials?: Record<string, string>; meta?: Record<string, unknown>
@@ -378,6 +399,20 @@ export default async function WhatsAppIntegrationPage(
       }
     }
     templates = (tplRes.data as WhatsAppTemplate[] | null) ?? []
+  }
+
+  // Opt-outs: contactos que revocaron consentimiento (STOP) — el bot ya bloquea
+  // outbound para ellos. Se listan solo cuando la tab está activa (evita query ociosa).
+  let optOuts: OptOutRow[] = []
+  if (tenantId && tab === 'optouts') {
+    const { data: ooData } = await supabase
+      .from('contacts')
+      .select('id, phone, name, consent_revoked_at')
+      .eq('tenant_id', tenantId)
+      .not('consent_revoked_at', 'is', null)
+      .order('consent_revoked_at', { ascending: false })
+      .limit(200)
+    optOuts = (ooData as OptOutRow[] | null) ?? []
   }
 
   const connected = integration?.status === 'connected'
@@ -415,7 +450,7 @@ export default async function WhatsAppIntegrationPage(
             <>
               <span className="inline-flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-emerald-700 inline-block" />
-                Connected
+                Conectado
               </span>
               {wabaId && <> · WABA {wabaId}</>}
               {displayPhone && <> · {displayPhone}</>}
@@ -425,9 +460,9 @@ export default async function WhatsAppIntegrationPage(
             <>
               <span className="inline-flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-slate-700 inline-block" />
-                Disconnected
+                Desconectado
               </span>
-              {' · Configurá WhatsApp en la tab Setup para empezar.'}
+              {' · Configura WhatsApp en la pestaña Setup para empezar.'}
             </>
           )}
         </p>
@@ -438,8 +473,8 @@ export default async function WhatsAppIntegrationPage(
         <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-3 text-sm text-amber-900">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           {!connected
-            ? 'WhatsApp aún no está conectado. Andá a la tab Setup para conectar.'
-            : 'WhatsApp conectado pero falta el waba_id. Completá Setup primero.'}
+            ? 'WhatsApp aún no está conectado. Ve a la pestaña Setup para conectar.'
+            : 'WhatsApp conectado pero falta el waba_id. Completa Setup primero.'}
         </div>
       )}
 
@@ -477,13 +512,7 @@ export default async function WhatsAppIntegrationPage(
       )}
 
       {tab === 'optouts' && (
-        <div className="rounded-xl border border-dashed border-muted-foreground/30 p-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            Lista de opt-outs (clientes que pidieron no recibir mensajes).
-            <br />
-            <span className="text-xs">Disponible próximamente (Sem 11).</span>
-          </p>
-        </div>
+        <WhatsAppOptOuts optOuts={optOuts} connected={connected} />
       )}
     </div>
   )

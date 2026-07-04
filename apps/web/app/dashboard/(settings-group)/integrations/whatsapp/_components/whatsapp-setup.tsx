@@ -5,16 +5,16 @@
  *   1. Identidad — WABA + Phone Number + tokens
  *   2. Webhook & Eventos — URL + status topics
  *   3. Cumplimiento — ventana 24h · opt-out · Habeas Data
- *   4. Zona de riesgo — desconectar (deshabilitado hoy)
- *   + Banner migración
+ *   4. Zona de riesgo — desconectar (deshabilitado hoy, gated founder)
  */
-import { MessageSquareText, KeyRound, Webhook, Copy } from 'lucide-react'
+import { MessageSquareText, KeyRound, Webhook } from 'lucide-react'
 import {
   SetupSection, SetupField, SetupGrid,
   ComplianceSection, DangerZoneSection,
-  MigrationBanner, EmptyDisconnected,
+  EmptyDisconnected,
 } from '../../_components/setup-primitives'
 import { WhatsAppCredentialsForm } from './whatsapp-credentials-form'
+import { CopyInlineButton } from './copy-inline-button'
 
 type Props = {
   connected: boolean
@@ -94,12 +94,9 @@ export default function WhatsAppSetup({ connected, credentials, canWrite, tenant
             <code className="flex-1 truncate font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
               https://api.konvi.co/api/v1/whatsapp/webhook/{tenantId}
             </code>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-            >
-              <Copy className="h-3 w-3" /> Copiar
-            </button>
+            <CopyInlineButton
+              value={`https://api.konvi.co/api/v1/whatsapp/webhook/${tenantId}`}
+            />
           </div>
         </div>
         <div className="text-xs text-muted-foreground pt-1 border-t border-border">
@@ -128,15 +125,6 @@ export default function WhatsAppSetup({ connected, credentials, canWrite, tenant
         actionLabel="Desconectar WhatsApp"
         actionDisabled
       />
-
-      {/* Banner migración */}
-      <MigrationBanner>
-        Editar credenciales o reconectar se hace desde{' '}
-        <a href="/dashboard/integrations" className="underline font-medium">
-          /dashboard/integrations
-        </a>
-        . Migración a este panel: Sem 8.
-      </MigrationBanner>
     </div>
   )
 }
