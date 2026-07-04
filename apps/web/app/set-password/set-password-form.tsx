@@ -42,7 +42,7 @@ export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <p className="text-sm text-destructive text-center">{error}</p>
+        <p className="text-sm text-destructive text-center" role="alert" aria-live="assertive">{error}</p>
       )}
 
       {/* Contraseña */}
@@ -63,9 +63,10 @@ export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta 
             type="button"
             onClick={() => setShowPassword(v => !v)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            tabIndex={-1}
+            aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            aria-pressed={showPassword}
           >
-            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -88,9 +89,10 @@ export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta 
             type="button"
             onClick={() => setShowConfirm(v => !v)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            tabIndex={-1}
+            aria-label={showConfirm ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            aria-pressed={showConfirm}
           >
-            {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showConfirm ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
           </button>
         </div>
       </div>

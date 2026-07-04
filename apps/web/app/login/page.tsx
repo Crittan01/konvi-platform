@@ -2,13 +2,21 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import LoginForm from './login-form'
+import { isBannedError, translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
+
+/** Añade `?next=<ruta>` a un destino sólo si el deep-link es una ruta interna. */
+function withNext(base: string, next?: string): string {
+  const safe = next ? safeNextPath(next, '') : ''
+  return safe ? `${base}?next=${encodeURIComponent(safe)}` : base
+}
 
 export default async function LoginPage(
   props: {
-    searchParams: Promise<{ message?: string; error?: string; force?: string }>
+    searchParams: Promise<{ message?: string; error?: string; force?: string; next?: string }>
   }
 ) {
   const searchParams = await props.searchParams;
+  const nextParam = searchParams.next
   const supabase = await createClient()
   const { data } = await supabase.auth.getUser()
 
@@ -22,14 +30,14 @@ export default async function LoginPage(
     // Sesión activa con MFA pendiente → al challenge (no a intermedia).
     const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     if (aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
-      redirect('/login/mfa')
+      redirect(withNext('/login/mfa', nextParam))
     }
     // Sesión válida sin ?force → renderizar intermedia abajo (NO auto-redirect).
   }
 
   const continueAction = async () => {
     'use server'
-    redirect('/dashboard')
+    redirect(safeNextPath(nextParam))
   }
 
   const switchUserAction = async () => {
@@ -43,6 +51,7 @@ export default async function LoginPage(
     'use server'
     const email = formData.get('email') as string
     const password = formData.get('password') as string
+    const nextField = (formData.get('next') as string) || undefined
     const supabase = await createClient()
 
     // Rev. 109 J.2.4.3 — Si hay sesión activa de otro usuario, cerrarla
@@ -61,23 +70,46 @@ export default async function LoginPage(
     })
 
     if (error) {
-      return redirect('/login?message=Correo+o+contraseña+incorrectos')
+      // El ban nativo (ban_duration aplicado por el owner desde Equipo) llega
+      // aquí como error de sign-in. Antes colapsaba al genérico y el miembro
+      // suspendido creía haber olvidado su clave. Ahora va a la pantalla real.
+      if (isBannedError(error)) {
+        return redirect('/cuenta-suspendida')
+      }
+      // Discrimina rate-limit / email sin confirmar / etc. sin filtrar inglés
+      // ni revelar si el correo existe (fallback = credenciales inválidas).
+      const msg = translateAuthError(error, 'Correo o contraseña incorrectos.')
+      const params = new URLSearchParams({ message: msg })
+      const safeNext = nextField ? safeNextPath(nextField, '') : ''
+      if (safeNext) params.set('next', safeNext)
+      return redirect(`/login?${params.toString()}`)
     }
 
     // Rev. 109 J.2.4.3 — Si el usuario tiene MFA activa, el AAL inicial
     // post-password es 'aal1'. Necesita challenge para subir a 'aal2'.
     const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     if (aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
-      // Tiene factor verified pero sesión actual es solo password.
-      return redirect('/login/mfa')
+      // Tiene factor verified pero sesión actual es solo password. Propaga el
+      // deep-link para que el challenge aterrice en el destino pedido.
+      return redirect(withNext('/login/mfa', nextField))
     }
 
-    return redirect('/dashboard')
+    return redirect(safeNextPath(nextField))
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 mix-blend-overlay pointer-events-none"></div>
+    <div className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-[#131A19]">
+      {/* Textura grano — SVG inline (sin dependencia runtime de terceros en la
+          puerta de entrada del producto; el asset externo era un vector de
+          supply-chain en el login). */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 opacity-5 mix-blend-overlay pointer-events-none"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+        }}
+      ></div>
       <div className="relative w-full max-w-[420px] p-6 sm:p-8">
         <div className="flex flex-col items-center mb-8">
           {/* Logo mock / Brand */}
@@ -85,7 +117,7 @@ export default async function LoginPage(
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Konvi</h1>
-          <p className="text-emerald-500/80 mt-2 text-sm text-center font-medium">Tenant Administrativo de Comercio</p>
+          <p className="text-white/60 mt-2 text-sm text-center font-medium">Consola de administración de tu negocio</p>
         </div>
 
         {forceLogin && data?.user && (
@@ -131,7 +163,7 @@ export default async function LoginPage(
         ) : (
           <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
             <CardContent className="pt-6">
-              <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} />
+              <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} next={nextParam} />
             </CardContent>
           </Card>
         )}

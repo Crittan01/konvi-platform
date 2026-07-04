@@ -22,13 +22,17 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { type EmailOtpType } from '@supabase/supabase-js'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code      = searchParams.get('code')
   const tokenHash = searchParams.get('token_hash')
   const type      = searchParams.get('type') as EmailOtpType | null
-  const next      = searchParams.get('next') ?? '/dashboard'
+  // Open-redirect fix: `next` es controlado por el atacante en el link del
+  // correo. safeNextPath descarta URLs absolutas / protocol-relative → sólo
+  // rutas internas same-origin (antes next=https://evil.com ganaba sobre origin).
+  const next      = safeNextPath(searchParams.get('next'))
 
   const cookieStore = await cookies()
 
@@ -50,12 +54,14 @@ export async function GET(request: NextRequest) {
     }
   )
 
+  const linkFallback = 'El enlace es inválido o expiró. Solicita uno nuevo.'
+
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
       return NextResponse.redirect(new URL(next, origin))
     }
-    const msg = encodeURIComponent(error.message)
+    const msg = encodeURIComponent(translateAuthError(error, linkFallback))
     return NextResponse.redirect(new URL(`/login?error=${msg}`, origin))
   }
 
@@ -64,7 +70,7 @@ export async function GET(request: NextRequest) {
     if (!error) {
       return NextResponse.redirect(new URL(next, origin))
     }
-    const msg = encodeURIComponent(error.message)
+    const msg = encodeURIComponent(translateAuthError(error, linkFallback))
     return NextResponse.redirect(new URL(`/login?error=${msg}`, origin))
   }
 

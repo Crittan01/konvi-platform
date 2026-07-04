@@ -10,9 +10,10 @@ import Link from 'next/link'
 interface Props {
   action:  (formData: FormData) => Promise<void>
   message?: string
+  next?: string
 }
 
-export default function LoginForm({ action, message }: Props) {
+export default function LoginForm({ action, message, next }: Props) {
   const [showPwd,   setShowPwd]   = useState(false)
   const [isPending, startTransition] = useTransition()
 
@@ -24,13 +25,14 @@ export default function LoginForm({ action, message }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="space-y-2">
         <Label htmlFor="email">Correo Corporativo</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="admin@commerce.local"
+          placeholder="tu@negocio.com"
           required
           autoComplete="email"
         />
@@ -57,15 +59,16 @@ export default function LoginForm({ action, message }: Props) {
             type="button"
             onClick={() => setShowPwd(v => !v)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            tabIndex={-1}
+            aria-label={showPwd ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            aria-pressed={showPwd}
           >
-            {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showPwd ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
           </button>
         </div>
       </div>
 
       {message && (
-        <p className="text-sm text-destructive text-center">{message}</p>
+        <p className="text-sm text-destructive text-center" role="alert" aria-live="assertive">{message}</p>
       )}
 
       <Button className="w-full" type="submit" disabled={isPending}>

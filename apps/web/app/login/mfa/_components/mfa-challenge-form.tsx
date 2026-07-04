@@ -8,7 +8,7 @@
  */
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, KeyRound, ArrowLeft, ShieldAlert } from 'lucide-react'
+import { Loader2, KeyRound, ArrowLeft, ShieldAlert, LogOut } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 
 interface Props {
@@ -87,7 +87,10 @@ export function MfaChallengeForm({ factorId, message }: Props) {
       }
       if (!res.ok) throw new Error(data.detail || 'Código inválido')
 
-      router.push('/dashboard?recovery_used=1')
+      // El banner de "sesión recuperada" del dashboard se dispara por la cookie
+      // HMAC mfa_recovery_session que setea el proxy, no por query param — no
+      // adjuntamos ?recovery_used (antes era un parámetro que nadie leía).
+      router.push('/dashboard')
       router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Código inválido')
@@ -97,10 +100,27 @@ export function MfaChallengeForm({ factorId, message }: Props) {
     }
   }
 
+  // Salida del challenge: si el usuario perdió tanto el authenticator como los
+  // códigos, NO puede completar el 2do factor. Necesita poder cerrar sesión
+  // (o cambiar de cuenta) y saber a quién escribir — de lo contrario queda
+  // atrapado en un formulario sin salida (gap security_mfa).
+  const signOut = async () => {
+    setBusy(true)
+    try {
+      const sb = createClient()
+      await sb.auth.signOut()
+    } catch {
+      // best-effort — igual redirigimos al login.
+    } finally {
+      router.push('/login')
+      router.refresh()
+    }
+  }
+
   return (
     <div className="space-y-4">
       {error && (
-        <div className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
+        <div role="alert" aria-live="assertive" className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
           <ShieldAlert className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>
@@ -109,10 +129,11 @@ export function MfaChallengeForm({ factorId, message }: Props) {
       {mode === 'totp' ? (
         <>
           <div>
-            <label className="block text-sm font-medium text-foreground mb-2">
+            <label htmlFor="mfa-challenge-totp" className="block text-sm font-medium text-foreground mb-2">
               Código de 6 dígitos
             </label>
             <input
+              id="mfa-challenge-totp"
               type="text"
               value={code}
               onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -154,10 +175,11 @@ export function MfaChallengeForm({ factorId, message }: Props) {
       ) : (
         <>
           <div>
-            <label className="block text-sm font-medium text-foreground mb-2">
+            <label htmlFor="mfa-challenge-recovery" className="block text-sm font-medium text-foreground mb-2">
               Código de respaldo
             </label>
             <input
+              id="mfa-challenge-recovery"
               type="text"
               value={code}
               onChange={e => setCode(e.target.value.toUpperCase())}
@@ -198,6 +220,28 @@ export function MfaChallengeForm({ factorId, message }: Props) {
           </button>
         </>
       )}
+
+      {/* Salida del challenge — imprescindible para no dejar atrapado a quien
+          perdió el authenticator Y los códigos de respaldo. */}
+      <div className="pt-4 mt-2 border-t border-border space-y-2">
+        <p className="text-xs text-muted-foreground">
+          ¿Perdiste tu authenticator <strong>y</strong> tus códigos de respaldo?
+          No podemos verificarte aquí. Escribe a{' '}
+          <a href="mailto:soporte@konvi.co" className="font-medium text-foreground underline underline-offset-2">
+            soporte@konvi.co
+          </a>{' '}
+          desde tu correo, con tu número de documento, para recuperar el acceso.
+        </p>
+        <button
+          type="button"
+          onClick={signOut}
+          disabled={busy}
+          className="w-full text-sm text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Cerrar sesión / usar otra cuenta
+        </button>
+      </div>
     </div>
   )
 }

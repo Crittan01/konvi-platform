@@ -17,13 +17,15 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import { Loader2, AlertCircle } from 'lucide-react'
+import { translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
 
 function AuthCallbackInner() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
 
-  const next = searchParams.get('next') ?? '/set-password'
+  // safeNextPath: `next` viene del link de invitación (controlado externamente).
+  const next = safeNextPath(searchParams.get('next'), '/set-password')
 
   useEffect(() => {
     const hash = typeof window !== 'undefined' ? window.location.hash : ''
@@ -48,7 +50,7 @@ function AuthCallbackInner() {
         }
         setError('Enlace de invitación inválido o expirado. Solicita una nueva invitación.')
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : 'Error desconocido')
+        setError(translateAuthError(e, 'No pudimos validar la invitación. Solicita una nueva.'))
       }
     }
 
@@ -59,8 +61,8 @@ function AuthCallbackInner() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-4">
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700 max-w-md w-full">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700 max-w-md w-full" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
           <div>
             <p className="font-medium">Enlace inválido</p>
             <p className="text-xs text-red-700/70 mt-0.5">{error}</p>

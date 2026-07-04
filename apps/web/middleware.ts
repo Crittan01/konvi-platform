@@ -60,10 +60,16 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Si trata de entrar a dashboard y NO hay user, lo patea al login
+  // Si trata de entrar a dashboard y NO hay user, lo patea al login.
+  // Deep-link: preserva el destino en `?next=` para volver ahí tras autenticar
+  // (el path viene del request → inherentemente same-origin; el consumidor lo
+  // revalida con safeNextPath antes de redirigir).
   if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
+    const dest = request.nextUrl.pathname + request.nextUrl.search
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    url.search = ''
+    url.searchParams.set('next', dest)
     return NextResponse.redirect(url)
   }
 
@@ -102,13 +108,24 @@ export async function middleware(request: NextRequest) {
           if (_isApi) {
             return NextResponse.json({ detail: 'MFA requerida' }, { status: 401 })
           }
+          // Deep-link: preserva el destino para aterrizar ahí tras el challenge.
+          const dest = request.nextUrl.pathname + request.nextUrl.search
           const url = request.nextUrl.clone()
           url.pathname = '/login/mfa'
+          url.search = ''
+          url.searchParams.set('next', dest)
           return NextResponse.redirect(url)
         }
-      } catch {
-        // Si el check de AAL falla (network/timeout), prefer fail open
-        // para no bloquear users por outage temporal de Supabase Auth.
+      } catch (e) {
+        // Si el check de AAL falla (network/timeout), prefer fail open para no
+        // bloquear users por outage temporal de Supabase Auth. F6: se emite una
+        // señal (antes el catch era vacío → si el check fallaba de forma
+        // sistemática, el gate MFA quedaba desactivado de facto sin que nadie lo
+        // supiera). console.error queda en los logs de Render / Sentry.
+        console.error(
+          '[middleware] AAL2 check falló — fail-open (gate MFA omitido en este request):',
+          e instanceof Error ? e.message : e,
+        )
       }
     }
   }

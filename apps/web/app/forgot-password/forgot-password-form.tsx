@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import { translateAuthError } from '@/app/auth/_lib/auth-errors'
 
 export default function ForgotPasswordForm() {
   const [sent,      setSent]      = useState(false)
@@ -26,11 +27,15 @@ export default function ForgotPasswordForm() {
 
     startTransition(async () => {
       const supabase = createClient()
+      // next=/set-password?mode=reset → la pantalla destino usa copy de "olvidé
+      // mi clave" (no de invitación nueva). Se codifica porque `next` viaja como
+      // query param de /auth/confirm.
+      const next = encodeURIComponent('/set-password?mode=reset')
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/confirm?next=/set-password`,
+        redirectTo: `${window.location.origin}/auth/confirm?next=${next}`,
       })
       if (error) {
-        setError(error.message)
+        setError(translateAuthError(error, 'No pudimos enviar el enlace. Inténtalo de nuevo.'))
       } else {
         // No revelar si el email existe o no — siempre mostrar éxito (seguridad)
         setSent(true)
@@ -62,7 +67,7 @@ export default function ForgotPasswordForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-sm text-destructive" role="alert" aria-live="assertive">{error}</p>
       )}
       <div className="space-y-1.5">
         <Label htmlFor="email">Correo electrónico</Label>
