@@ -66,6 +66,26 @@ export type Coupon = {
   total_historical_redemptions: number
 }
 
+/**
+ * Fila de `coupon_redemptions` para la vista de auditoría de redenciones
+ * (F2 — sheet de solo-lectura al click en el contador de usos). Columnas
+ * mínimas que responden "¿qué órdenes usaron este cupón y por cuánto?":
+ * estado FSM, monto aplicado (snapshot histórico), orden vinculada y las
+ * marcas de tiempo del ciclo applied → consumed / revoked.
+ */
+export type RedemptionStatus = 'applied' | 'consumed' | 'revoked'
+
+export type Redemption = {
+  id: string
+  order_id: string | null
+  discount_applied_cents: number
+  status: RedemptionStatus
+  applied_at: string
+  consumed_at: string | null
+  revoked_at: string | null
+  revoked_reason: string | null
+}
+
 const VALID_DISCOUNT_TYPES = new Set<DiscountType>([
   'percent', 'fixed_amount', 'free_shipping',
 ])
@@ -310,6 +330,44 @@ async function deleteCouponAction(
   return { ok: true }
 }
 
+/**
+ * Lee las redenciones de UN cupón (solo-lectura, auditoría). RLS-scoped:
+ * usa el cliente Supabase del usuario (JWT) + filtro explícito por
+ * `tenant_id` (ADR-0025) → doble defensa contra fugas cross-tenant. No pasa
+ * por la API porque es lectura pura (mismo patrón que la carga de cupones).
+ *
+ * Degrada con seguridad: cualquier fallo devuelve `{ ok:false, error }` que
+ * el sheet muestra con opción de reintento; nunca lanza a la UI.
+ */
+async function fetchRedemptionsAction(
+  couponId: string,
+): Promise<{ ok: boolean; rows?: Redemption[]; error?: string }> {
+  'use server'
+  const sb = await createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string }
+  if (!meta.tenant_id) return { ok: false, error: 'Sesión inválida.' }
+
+  const id = (couponId || '').trim()
+  if (!id) return { ok: false, error: 'ID de cupón requerido.' }
+
+  const { data, error } = await sb
+    .from('coupon_redemptions')
+    .select(
+      'id, order_id, discount_applied_cents, status, ' +
+      'applied_at, consumed_at, revoked_at, revoked_reason',
+    )
+    .eq('coupon_id', id)
+    .eq('tenant_id', meta.tenant_id)
+    .order('applied_at', { ascending: false })
+    .limit(500)
+
+  if (error) {
+    return { ok: false, error: 'No pudimos cargar las redenciones. Reintenta en un momento.' }
+  }
+  return { ok: true, rows: (data ?? []) as unknown as Redemption[] }
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default async function PromotionsPage() {
@@ -409,6 +467,7 @@ export default async function PromotionsPage() {
         updateCouponAction={updateCouponAction}
         toggleCouponActiveAction={toggleCouponActiveAction}
         deleteCouponAction={deleteCouponAction}
+        fetchRedemptionsAction={fetchRedemptionsAction}
       />
     </div>
   )

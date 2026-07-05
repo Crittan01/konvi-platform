@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Tag, Plus, Pencil, Power, AlertTriangle, CheckCircle2, Loader2,
   Percent, DollarSign, Truck, Trash2, ShieldCheck, HelpCircle, RefreshCw,
+  History, Receipt,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +14,10 @@ import { Badge } from '@/components/ui/badge'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/ui/sheet'
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@/components/ui/tooltip'
@@ -20,10 +25,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import type { Coupon, DiscountType } from '../page'
+import type { Coupon, DiscountType, Redemption, RedemptionStatus } from '../page'
 import { utcToBogotaLocal } from '@/lib/date-window'
 
 type ActionResult = { ok: boolean; error?: string }
+
+type RedemptionsResult = { ok: boolean; rows?: Redemption[]; error?: string }
 
 type Props = {
   initialCoupons: Coupon[]
@@ -33,6 +40,7 @@ type Props = {
   updateCouponAction: (formData: FormData) => Promise<ActionResult>
   toggleCouponActiveAction: (formData: FormData) => Promise<ActionResult>
   deleteCouponAction: (formData: FormData) => Promise<ActionResult>
+  fetchRedemptionsAction: (couponId: string) => Promise<RedemptionsResult>
 }
 
 const DISCOUNT_TYPE_LABEL: Record<DiscountType, string> = {
@@ -64,6 +72,42 @@ function formatDate(iso: string | null): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: '2-digit' })
+}
+
+// Fecha + hora en zona Colombia (los timestamps se persisten en UTC). Para el
+// audit de redenciones importa la hora, no solo el día.
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleString('es-CO', {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+  })
+}
+
+// Estado FSM de una redención (coupon_redemptions.status). Mapea al mismo
+// vocabulario de Badge del resto del módulo:
+//   applied  → cupón vivo en un carrito, aún no consumido (info).
+//   consumed → orden con pago APROBADO; cuenta en redemptions_count (success).
+//   revoked  → cliente lo quitó o el carrito murió; no cuenta (secondary).
+const REDEMPTION_STATUS_META: Record<RedemptionStatus, {
+  label: string
+  variant: 'success' | 'info' | 'secondary'
+  hint: string
+}> = {
+  consumed: {
+    label: 'Consumido', variant: 'success',
+    hint: 'Orden con pago aprobado. Cuenta en el total oficial de usos del cupón.',
+  },
+  applied: {
+    label: 'Aplicado', variant: 'info',
+    hint: 'Aplicado en un carrito activo, aún sin pago aprobado. No cuenta en el total oficial.',
+  },
+  revoked: {
+    label: 'Revocado', variant: 'secondary',
+    hint: 'El cliente lo removió o el carrito se canceló/abandonó. No cuenta en el total oficial.',
+  },
 }
 
 /**
@@ -122,6 +166,7 @@ export default function PromotionsManager({
   updateCouponAction,
   toggleCouponActiveAction,
   deleteCouponAction,
+  fetchRedemptionsAction,
 }: Props) {
   const router = useRouter()
   const now = Date.now()
@@ -131,6 +176,35 @@ export default function PromotionsManager({
   const [deleting, setDeleting] = useState<Coupon | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  // Vista de redenciones (F2): sheet de solo-lectura por cupón. Estado propio
+  // (no useTransition) porque es una carga on-demand independiente de las
+  // mutaciones. `viewing` guarda el cupón cuya auditoría se está mostrando.
+  const [viewing, setViewing] = useState<Coupon | null>(null)
+  const [redemptions, setRedemptions] = useState<Redemption[]>([])
+  const [redemptionsLoading, setRedemptionsLoading] = useState(false)
+  const [redemptionsError, setRedemptionsError] = useState<string | null>(null)
+
+  const loadRedemptions = (c: Coupon) => {
+    setRedemptionsLoading(true)
+    setRedemptionsError(null)
+    setRedemptions([])
+    fetchRedemptionsAction(c.id)
+      .then((res) => {
+        if (!res.ok) {
+          setRedemptionsError(res.error || 'No pudimos cargar las redenciones.')
+          return
+        }
+        setRedemptions(res.rows ?? [])
+      })
+      .catch(() => setRedemptionsError('Error de red. Reintenta en un momento.'))
+      .finally(() => setRedemptionsLoading(false))
+  }
+
+  const openRedemptions = (c: Coupon) => {
+    setViewing(c)
+    loadRedemptions(c)
+  }
 
   const handleCreate = (formData: FormData) => {
     setFormError(null)
@@ -289,28 +363,39 @@ export default function PromotionsManager({
                         : '—'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
+                      {c.total_historical_redemptions > 0 ? (
+                        // Con historial: el contador es un botón que abre el
+                        // sheet de auditoría de redenciones (F2). Cubre tanto
+                        // "N hist." (revocadas/aplicadas) como el caso normal.
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => openRedemptions(c)}
+                              aria-label={`Ver las ${c.total_historical_redemptions} redenciones del cupón ${c.code}`}
+                              className="-mx-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              <span className="underline decoration-dotted underline-offset-2">{usageStr}</span>
+                              {c.total_historical_redemptions > c.redemptions_count && (
+                                <span className="inline-flex items-center rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  {c.total_historical_redemptions} hist.
+                                </span>
+                              )}
+                              <History className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            Ver redenciones: qué órdenes usaron este cupón, por cuánto y en qué estado.
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="cursor-help">{usageStr}</span>
                           </TooltipTrigger>
-                          <TooltipContent>Veces consumido (orden con pago APROBADO) sobre el máximo.</TooltipContent>
+                          <TooltipContent>Veces consumido (orden con pago APROBADO) sobre el máximo. Sin redenciones aún.</TooltipContent>
                         </Tooltip>
-                        {c.total_historical_redemptions > c.redemptions_count && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="inline-flex cursor-help items-center rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                {c.total_historical_redemptions} hist.
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {c.total_historical_redemptions} aplicaciones en historial (incluye
-                              revocadas y consumidas). El contador principal solo cuenta órdenes con
-                              pago aprobado.
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* F4.2: is_customer_visible gobierna si el bot lo anuncia
@@ -520,6 +605,155 @@ export default function PromotionsManager({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Sheet de redenciones (F2): auditoría de solo-lectura por cupón.
+          Responde "¿qué órdenes usaron este cupón, por cuánto y en qué
+          estado?" sin depender de SQL. Datos ya en coupon_redemptions. */}
+      <Sheet
+        open={!!viewing}
+        onOpenChange={(o) => {
+          if (!o) { setViewing(null); setRedemptions([]); setRedemptionsError(null) }
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="w-full overflow-y-auto sm:max-w-xl"
+        >
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-primary" />
+              Redenciones de{' '}
+              <span className="font-mono">{viewing?.code}</span>
+            </SheetTitle>
+            <SheetDescription>
+              Órdenes que aplicaron este cupón, el monto descontado y su estado.
+              Solo lectura (auditoría Habeas Data).
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-4">
+            {redemptionsLoading ? (
+              <div className="space-y-2" aria-busy="true" aria-label="Cargando redenciones">
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : redemptionsError ? (
+              <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-6 text-center">
+                <AlertTriangle className="mx-auto mb-2 h-8 w-8 text-rose-700" />
+                <p className="text-sm text-rose-900">{redemptionsError}</p>
+                {viewing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+                    onClick={() => loadRedemptions(viewing)}
+                  >
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                    Reintentar
+                  </Button>
+                )}
+              </div>
+            ) : redemptions.length === 0 ? (
+              <div className="rounded-md border border-border bg-muted/20 p-6 text-center text-muted-foreground">
+                <Receipt className="mx-auto mb-2 h-8 w-8" />
+                <p className="text-sm">Este cupón aún no tiene redenciones registradas.</p>
+              </div>
+            ) : (
+              <>
+                {/* Resumen por estado — contexto rápido antes del detalle. */}
+                <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                  {(['consumed', 'applied', 'revoked'] as RedemptionStatus[]).map((st) => {
+                    const n = redemptions.filter((r) => r.status === st).length
+                    if (n === 0) return null
+                    const meta = REDEMPTION_STATUS_META[st]
+                    return (
+                      <Badge key={st} variant={meta.variant}>
+                        {n} {meta.label.toLowerCase()}
+                        {n === 1 ? '' : 's'}
+                      </Badge>
+                    )
+                  })}
+                </div>
+                <div className="rounded-md border border-border bg-card">
+                  <Table>
+                    <TableHeader className="bg-muted/30">
+                      <TableRow>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Descuento</TableHead>
+                        <TableHead>Orden</TableHead>
+                        <TableHead>Fecha</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {redemptions.map((r) => {
+                        const meta = REDEMPTION_STATUS_META[r.status]
+                        // Fecha relevante según el estado FSM.
+                        const when = r.status === 'consumed'
+                          ? r.consumed_at
+                          : r.status === 'revoked'
+                          ? r.revoked_at
+                          : r.applied_at
+                        return (
+                          <TableRow key={r.id}>
+                            <TableCell>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="cursor-help">
+                                    <Badge variant={meta.variant}>{meta.label}</Badge>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{meta.hint}</TooltipContent>
+                              </Tooltip>
+                              {r.status === 'revoked' && r.revoked_reason && (
+                                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                                  {r.revoked_reason}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {formatCOP(r.discount_applied_cents)}
+                            </TableCell>
+                            <TableCell>
+                              {r.order_id ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="cursor-help font-mono text-xs">
+                                      {r.order_id.slice(0, 8)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Orden {r.order_id}</TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="cursor-help text-muted-foreground">—</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Aplicado en un carrito que aún no generó orden.
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {formatDateTime(when)}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                {redemptions.length >= 500 && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Mostrando las 500 redenciones más recientes.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
     </TooltipProvider>
   )
