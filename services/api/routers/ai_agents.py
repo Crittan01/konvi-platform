@@ -241,10 +241,14 @@ async def suggest_agent_prompt(
                 ),
             )
 
+        # Tiers familia Gemini 3.x (workhorse → rescue). Fuente única de IDs
+        # válidos = lib.llm_suggest._suggest_tiers() (mismos que el cascade de
+        # producción, llm_cascade._DEFAULT_TIERS). Migrado desde 2.5 (retiro
+        # 2026-10-16). Override por env GEMINI_SUGGEST_TIERS (CSV).
+        from lib.llm_suggest import _suggest_tiers
         outcome = cascade_invoke(
             gemini_invoker=_invoke,
-            tiers=["gemini-2.5-flash", "gemini-2.5-flash-lite",
-                   "gemini-2.5-pro"],
+            tiers=_suggest_tiers(),
             attempts_per_tier=2,
         )
         if not outcome.degraded and outcome.response is not None:

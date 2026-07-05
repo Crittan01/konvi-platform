@@ -146,6 +146,12 @@ async def run_agentic_turn(
     # agentic_turn_audit para diagnosticar runtime sin depender de logs
     # stdout (que rotan).
     last_finish_reason: Optional[str] = None
+    # F5 telemetría de costo (decisión bot_engine #2): acumular tokens de
+    # TODOS los responses Gemini del turn (loop multi-tool + fallbacks).
+    # Se persiste en agentic_shadow_log.total_tokens → costo LLM por tenant,
+    # insumo directo de pricing/límites. Best-effort: si el SDK no reporta
+    # usage_metadata, queda 0 (nunca rompe el turn).
+    total_tokens = 0
 
     try:
         from google import genai
@@ -197,6 +203,7 @@ async def run_agentic_turn(
                 tool_call_log=tool_call_log,
                 error=f"gemini_error: {exc}",
                 finish_reason=last_finish_reason,
+                total_tokens=total_tokens,
             )
 
         # Extraer parts (text + function_calls) del response.
@@ -204,6 +211,7 @@ async def run_agentic_turn(
         text_part = _extract_text(response)
         # Capturar finish_reason de TODOS los responses (texto/tool/empty).
         last_finish_reason = _extract_finish_reason(response) or last_finish_reason
+        total_tokens += _extract_total_tokens(response)
 
         # Manejo activo empty_output (rev. 107): si Gemini retorna response
         # sin tools y sin texto, detectar finish_reason y aplicar strategy
@@ -294,6 +302,7 @@ async def run_agentic_turn(
                         _extract_finish_reason(fallback_response)
                         or last_finish_reason
                     )
+                    total_tokens += _extract_total_tokens(fallback_response)
                     if fallback_text.strip():
                         outbound_text = fallback_text
                         # Marcar como "recovered" — no degraded.
@@ -365,6 +374,7 @@ async def run_agentic_turn(
                                     f"claude_rescue_from:{finish_reason or 'STOP'}"
                                 ),
                                 finish_reason=last_finish_reason,
+                                total_tokens=total_tokens,
                             )
             except Exception as claude_exc:
                 logger.warning(
@@ -392,6 +402,7 @@ async def run_agentic_turn(
                 truncated_reason=truncated_reason,
                 finish_reason=last_finish_reason,
                 requires_silent_escalation=requires_silent_escalation_flag,
+                total_tokens=total_tokens,
             )
 
         if not function_calls:
@@ -499,6 +510,7 @@ async def run_agentic_turn(
         truncated=truncated,
         truncated_reason=truncated_reason,
         finish_reason=last_finish_reason,
+        total_tokens=total_tokens,
     )
 
 
@@ -678,6 +690,24 @@ def _extract_text(response: Any) -> str:
             if text:
                 pieces.append(text)
     return "\n".join(pieces).strip()
+
+
+def _extract_total_tokens(response: Any) -> int:
+    """Extrae `usage_metadata.total_token_count` del response Gemini.
+
+    F5 telemetría de costo (decisión bot_engine #2). Best-effort: si el SDK
+    no reporta usage (response degraded, mock de test sin usage_metadata),
+    retorna 0 — NUNCA rompe el turn. Suma prompt + candidates + tool tokens
+    (total_token_count ya los engloba en el SDK google-genai).
+    """
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            return 0
+        total = getattr(usage, "total_token_count", None)
+        return int(total) if total else 0
+    except Exception:
+        return 0
 
 
 def _extract_finish_reason(response: Any) -> str:

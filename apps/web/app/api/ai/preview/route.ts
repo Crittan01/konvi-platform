@@ -64,9 +64,13 @@ export async function POST(request: NextRequest) {
   }
 
   let message = ''
+  let requestedAgentId = ''
   try {
     const body = await request.json()
     message = (body.message as string)?.trim() ?? ''
+    // Multi-agente: el operador puede elegir QUÉ agente probar. Si no envía
+    // agent_id (o el UI tiene 1 solo agente), se prueba el default.
+    requestedAgentId = typeof body.agent_id === 'string' ? body.agent_id.trim() : ''
   } catch {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
   }
@@ -75,14 +79,25 @@ export async function POST(request: NextRequest) {
 
   const tenantId = m.tenant_id
 
+  // Query del agente a probar. Fix (F5): antes se usaba .maybeSingle() sin
+  // orden ni filtro → con >1 agente PostgREST devolvía uno ARBITRARIO y el
+  // preview no reflejaba el agente recién creado. Ahora: si el operador pidió
+  // un agent_id concreto lo cargamos (scoped al tenant, sin IDOR); si no, el
+  // default (is_default desc como tie-break determinista).
+  const agentBaseQuery = supabase.from('ai_agents')
+    .select('id, name, role, role_description, strict_guardrails, is_default')
+    .eq('tenant_id', tenantId)
+  const agentQuery = requestedAgentId
+    ? agentBaseQuery.eq('id', requestedAgentId).maybeSingle()
+    : agentBaseQuery.order('is_default', { ascending: false })
+        .order('name', { ascending: true }).limit(1).maybeSingle()
+
   // ── 1. Cargar contexto del tenant en paralelo ─────────────────────────────
   const [tenantRes, agentRes, catalogRes] = await Promise.all([
     supabase.from('tenants')
       .select('name, mision, vision, valores, tono_comunicacion, store_type')
       .eq('id', tenantId).single(),
-    supabase.from('ai_agents')
-      .select('name, role_description, strict_guardrails')
-      .eq('tenant_id', tenantId).maybeSingle(),
+    agentQuery,
     supabase.from('products')
       // F7: la tabla products usa columnas title/status (no name/is_active, que nunca
       // existieron) — PostgREST erroraba y el catálogo salía SIEMPRE vacío → el preview
@@ -95,6 +110,12 @@ export async function POST(request: NextRequest) {
 
   const tenant  = tenantRes.data
   const catalog = (catalogRes.data ?? []) as Array<{ title: string; description?: string; product_variations?: Array<{ price: number; stock_quantity: number; attributes?: Record<string, string> }> }>
+  // Si el operador pidió un agente concreto y no existe (borrado en otra
+  // pestaña, o no pertenece al tenant), es un 404 explícito — no caer al
+  // fallback genérico, que probaría un agente que no es el pedido.
+  if (requestedAgentId && !agentRes.data) {
+    return NextResponse.json({ error: 'Agente no encontrado' }, { status: 404 })
+  }
   const agent  = agentRes.data ?? {
     name: 'Vendedor Oficial',
     role_description: 'Eres el asistente de ventas. Ayuda al cliente cordialmente.',
@@ -150,9 +171,21 @@ export async function POST(request: NextRequest) {
   // ── 3. Construir system prompt simplificado ───────────────────────────────
   const tonoInst = TONO_DESC[tenant?.tono_comunicacion ?? 'amigable'] ?? TONO_DESC.amigable
   const tenantName = tenant?.name ?? 'la tienda'
+  // Multi-agente: el encabezado ya no asume "ventas" — con selector de agente el
+  // preview puede probar Soporte/Reclamos/Marketing. El role_description sigue
+  // definiendo el comportamiento; esto solo evita contradecir el rol elegido.
+  const ROLE_INTRO: Record<string, string> = {
+    sales:     'asesor/a de ventas',
+    support:   'asesor/a de soporte',
+    marketing: 'especialista de marketing',
+    claims:    'especialista en reclamos',
+    custom:    'asistente',
+  }
+  const agentRole = (agent as { role?: string | null }).role ?? 'sales'
+  const roleIntro = ROLE_INTRO[agentRole] ?? 'asistente'
 
   const systemLines: string[] = [
-    `Eres ${agent.name}, asistente de ventas de ${tenantName} atendiendo por WhatsApp.`,
+    `Eres ${agent.name}, ${roleIntro} de ${tenantName} atendiendo por WhatsApp.`,
     agent.role_description ? `\nROL Y COMPORTAMIENTO:\n${agent.role_description}` : '',
     `\nTONO: ${tonoInst}`,
     tenant?.mision      ? `MISIÓN DEL NEGOCIO: ${tenant.mision}` : '',

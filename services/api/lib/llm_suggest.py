@@ -13,13 +13,34 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Tiers canónicos (barato → caro), igual que ai_agents.py.
-_TIERS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+# Tiers canónicos familia Gemini 3.x (workhorse → rescue), igual que ai_agents.py.
+# IDs validados: son los mismos que ai-orchestrator/llm_cascade.py:_DEFAULT_TIERS
+# usa en producción (el bot real ya corre gemini-3.5-flash). Migrado desde la
+# familia 2.5 (gemini-2.5-flash se retira 2026-10-16, ai.google.dev/.../deprecations).
+# Orden calidad-first: flash primero (mejor prompt), lite como retry barato, pro
+# como rescate. Override por env GEMINI_SUGGEST_TIERS (CSV) para ajustar sin deploy.
+_DEFAULT_SUGGEST_TIERS = [
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+]
+
+
+def _suggest_tiers() -> list[str]:
+    raw = os.getenv("GEMINI_SUGGEST_TIERS", "").strip()
+    if not raw:
+        return list(_DEFAULT_SUGGEST_TIERS)
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    return parts or list(_DEFAULT_SUGGEST_TIERS)
+
+
+_TIERS = _suggest_tiers()
 
 
 @dataclass
@@ -56,11 +77,11 @@ def run_suggestion(
             cfg = {
                 "max_output_tokens": max_output_tokens,
                 "temperature": temperature,
-                # Gemini 2.5: max_output_tokens cuenta thinking + salida. Para
-                # generación de contenido (no razonamiento) desactivar thinking
-                # evita que se coma el presupuesto y trunque el JSON a medias.
-                # (flash/flash-lite aceptan budget=0; si el cascade llega a pro,
-                # que requiere thinking, esa llamada degrada y no rompe.)
+                # Gemini (2.5/3.x): max_output_tokens cuenta thinking + salida.
+                # Para generación de contenido (no razonamiento) desactivar
+                # thinking evita que se coma el presupuesto y trunque el JSON a
+                # medias. (flash/flash-lite aceptan budget=0; si el cascade llega
+                # a pro, que requiere thinking, esa llamada degrada y no rompe.)
                 "thinking_config": genai_types.ThinkingConfig(thinking_budget=0),
             }
             if json_mode:

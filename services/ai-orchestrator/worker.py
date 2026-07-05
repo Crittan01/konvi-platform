@@ -19,6 +19,13 @@ logger = logging.getLogger("orchestrator.worker")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
 MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
+# F5 bot_engine — rate-limit inbound→LLM POR CONVERSACIÓN (protección de costo
+# Gemini). Un contacto que inunda mensajes (loop/abuso) no debe disparar una
+# llamada LLM por cada uno. Cap generoso: un cliente legítimo nunca lo alcanza;
+# frena ráfagas anómalas. 0 ⇒ desactivado. Reusa el RPC distribuido
+# rate_limit_hit (migración 20260425 distributed_rate_limiter), sin estado local.
+INBOUND_LLM_RATE_LIMIT = int(os.getenv("INBOUND_LLM_RATE_LIMIT", "30"))
+INBOUND_LLM_RATE_WINDOW_SECONDS = int(os.getenv("INBOUND_LLM_RATE_WINDOW_SECONDS", "60"))
 # Rev. 85 — debounce/coalescing window. Si el cliente envía múltiples
 # mensajes rápidos, esperamos esta ventana antes de procesar para juntar
 # en un solo input al LLM (no perder contexto al ver solo el último msg).
@@ -313,6 +320,8 @@ class OrchestratorWorker:
             "cart_abandoned_skipped_quiet_hours": 0,        # gap F7-25
             "wompi_void_notify_failed": 0,                  # gap F7-14
             "sla_notify_failed": 0,                         # gap F7-15
+            # F5 bot_engine — rate-limit inbound→LLM (protección costo Gemini).
+            "inbound_llm_rate_limited": 0,
         }
 
     def stop(self):
@@ -532,6 +541,35 @@ class OrchestratorWorker:
 
         return self._combine_by_conversation(ready)
 
+    def _inbound_llm_rate_limited(self, tenant_id: str, conversation_id: str) -> bool:
+        """True si la conversación superó el cap inbound→LLM en la ventana.
+
+        F5 bot_engine — protección de costo Gemini. Reusa el RPC distribuido
+        `rate_limit_hit(p_key, p_limit, p_window_seconds)` (migración 20260425)
+        con key `{tenant_id}:inbound_llm:{conversation_id}`. Fail-open: si el
+        RPC falla (DB hiccup), NO bloqueamos al cliente (preferible pagar el
+        turno que dejar mudo al bot por un error de infra). Cap<=0 ⇒ desactivado.
+        """
+        if INBOUND_LLM_RATE_LIMIT <= 0:
+            return False
+        try:
+            key = f"{tenant_id}:inbound_llm:{conversation_id}"
+            res = self.supabase.rpc("rate_limit_hit", {
+                "p_key": key,
+                "p_limit": INBOUND_LLM_RATE_LIMIT,
+                "p_window_seconds": INBOUND_LLM_RATE_WINDOW_SECONDS,
+            }).execute()
+            rows = res.data or []
+            row = rows[0] if isinstance(rows, list) and rows else (rows if isinstance(rows, dict) else {})
+            # allowed=True mientras count<=limit → rate_limited = NOT allowed.
+            return not bool(row.get("allowed", True))
+        except Exception as exc:
+            logger.warning(
+                "[INBOUND_RATE_LIMIT] RPC falló conv=%s: %s — fail-open",
+                str(conversation_id)[:8], exc,
+            )
+            return False
+
     async def _poll_inbound_messages(self):
         """Busca mensajes inbound pendientes y los orquesta.
 
@@ -613,6 +651,33 @@ class OrchestratorWorker:
                 logger.info(
                     "Mensaje %s ya fue tomado por otro worker. Saltando.", msg["id"]
                 )
+                continue
+            # F5 bot_engine — rate-limit inbound→LLM por conversación (protección
+            # de costo Gemini). Si la conversación superó el cap en la ventana, NO
+            # despachamos al LLM: marcamos el mensaje procesado con skip_reason y
+            # seguimos. Silencioso por diseño (una ráfaga anómala no debe generar
+            # ni costo LLM ni costo outbound). CAS-guard ya nos dio el lock.
+            if self._inbound_llm_rate_limited(msg["tenant_id"], msg["conversation_id"]):
+                self._metrics["inbound_llm_rate_limited"] += 1
+                logger.warning(
+                    "[INBOUND_RATE_LIMIT] conv=%s tenant=%s superó %d msg/%ds — "
+                    "skip LLM (protección costo)",
+                    str(msg["conversation_id"])[:8], str(msg["tenant_id"])[:8],
+                    INBOUND_LLM_RATE_LIMIT, INBOUND_LLM_RATE_WINDOW_SECONDS,
+                )
+                try:
+                    self.supabase.table("messages").update({
+                        "processing_status": "processed",
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "skip_reason": "inbound_llm_rate_limited",
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
+                        "processing_status", PROCESSING_STATUS_PROCESSING).execute()
+                except Exception as _rl_exc:
+                    logger.warning(
+                        "[INBOUND_RATE_LIMIT] no pude marcar processed %s: %s",
+                        msg["id"], _rl_exc,
+                    )
                 continue
             try:
                 # ADR-0018 Fase B+C: dispatcher decide legacy/agentic/shadow según flags.

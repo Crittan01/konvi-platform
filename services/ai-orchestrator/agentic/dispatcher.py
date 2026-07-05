@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 AGENTIC_SHADOW_ENABLED = os.getenv("AGENTIC_SHADOW_ENABLED", "false").lower() == "true"
 AGENTIC_SHADOW_TIMEOUT_S = float(os.getenv("AGENTIC_SHADOW_TIMEOUT_S", "30"))
 
+# F5 bot_engine #3 — content_types entrantes no-texto/no-multimodal
+# (document/sticker/location). Manejados determinísticamente antes del loop
+# agentic (ver agentic/nontext_content.py).
+try:
+    from agentic.nontext_content import NONTEXT_CONTENT_TYPES as _NONTEXT_CONTENT_TYPES
+except Exception:  # pragma: no cover - import defensivo
+    _NONTEXT_CONTENT_TYPES = frozenset({"document", "sticker", "location"})
+
 
 async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
     """Lee `tenant_integrations.meta.agentic_enabled` del row dedicado
@@ -67,6 +75,34 @@ async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
             tenant_id, exc,
         )
         return False
+
+
+def _load_tenant_agentic_meta(supabase: Any, tenant_id: str) -> dict:
+    """Lee el `meta` JSONB del row `provider='agentic'` del tenant.
+
+    F5 bot_engine — fuente de los guardrails per-tenant (meta.guardrails). Sync
+    (se llama dentro del path cutover, no en hot loop). Degrada seguro a {} si
+    el row no existe o hay error → sin restricción (comportamiento previo).
+    """
+    try:
+        res = (
+            supabase.table("tenant_integrations")
+            .select("meta")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "agentic")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return {}
+        return rows[0].get("meta") or {}
+    except Exception as exc:
+        logger.warning(
+            "[TENANT_GUARDRAILS] error leyendo meta tenant=%s: %s — {}",
+            tenant_id, exc,
+        )
+        return {}
 
 
 try:
@@ -980,6 +1016,50 @@ async def _run_agentic_full(
                 conversation_id[:8], content_type, mm_exc,
             )
     # ── /multimodal ──
+
+    # ── F5 bot_engine #3 — content_type no-texto/no-multimodal ──
+    # document/sticker/location NO pasan por el pipeline multimodal (arriba,
+    # solo audio/image/video). Antes caían al agentic como si su placeholder
+    # ("[Documento recibido]") fuera texto del cliente → el LLM improvisaba.
+    # Ahora se responden determinísticamente (sin costo LLM) y, para document,
+    # se deriva a humano (riesgo de fraude en comprobantes — principio #4).
+    if content_type in _NONTEXT_CONTENT_TYPES:
+        try:
+            from agentic.nontext_content import handle_nontext_content
+            _nt = handle_nontext_content(content_type)
+        except Exception as _nt_exc:
+            logger.warning(
+                "[NONTEXT_DISPATCH] conv=%s type=%s handler falló: %s",
+                conversation_id[:8], content_type, _nt_exc,
+            )
+            _nt = None
+        if _nt is not None:
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id,
+                tenant_id=tenant_id, text=_nt.reply_text,
+            )
+            if _nt.escalate:
+                await _escalate_conversation_to_human(
+                    supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    reason=_nt.escalation_reason or f"inbound {content_type}",
+                )
+            _mark_message_processing(
+                supabase, tenant_id, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            # Persistir estado FSM (lee cart/conv de DB, no depende de history).
+            _resolve_and_persist_agentic_state(
+                supabase=supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id, contact={},
+                history=[],
+            )
+            logger.info(
+                "[NONTEXT_DISPATCH] conv=%s type=%s manejado (escalate=%s)",
+                conversation_id[:8], content_type, _nt.escalate,
+            )
+            return
+    # ── /content_type no-texto ──
 
     # Import los tools para que se auto-registren.
     import agentic.tools.catalog  # noqa: F401
@@ -2695,6 +2775,49 @@ async def _run_agentic_full(
             "[AGENTIC_AGENT_TOOLS] conv=%s agent=%s tools_allowed=%d",
             conversation_id[:8], _agent.get("name") or "?", len(_allowed_tools),
         )
+
+    # F5 bot_engine — guardrails a NIVEL TENANT (tools_allowed/denied +
+    # fsm_states apagados). Solo RESTRINGE sobre lo que per-state/per-agent ya
+    # permitió; ausencia de config = no-op (degrada seguro). Ver
+    # agentic/tenant_guardrails.py.
+    try:
+        from agentic.tenant_guardrails import (
+            parse_tenant_guardrails,
+            apply_tenant_tool_guardrails,
+            is_state_denied,
+        )
+        from agentic.tools.registry import all_tools
+        _tenant_guardrails = parse_tenant_guardrails(
+            _load_tenant_agentic_meta(supabase, tenant_id)
+        )
+        _before = None if _allowed_tools is None else len(_allowed_tools)
+        _allowed_tools = apply_tenant_tool_guardrails(
+            _allowed_tools, _tenant_guardrails,
+            all_tool_names=[t.name for t in all_tools()],
+        )
+        if _tenant_guardrails["tools_allowed"] or _tenant_guardrails["tools_denied"]:
+            logger.info(
+                "[TENANT_GUARDRAILS] conv=%s tools %s→%s (allow=%d deny=%d)",
+                conversation_id[:8], _before,
+                None if _allowed_tools is None else len(_allowed_tools),
+                len(_tenant_guardrails["tools_allowed"]),
+                len(_tenant_guardrails["tools_denied"]),
+            )
+        if is_state_denied(
+            _tenant_guardrails,
+            _resolved_state.value if _resolved_state else None,
+        ):
+            logger.warning(
+                "[TENANT_GUARDRAILS] conv=%s estado=%s APAGADO para el tenant — "
+                "sirviendo con toolset restringido del tenant",
+                conversation_id[:8],
+                _resolved_state.value if _resolved_state else "?",
+            )
+    except Exception as _tg_exc:
+        logger.warning(
+            "[TENANT_GUARDRAILS] conv=%s falló (no-op degrade): %s",
+            conversation_id[:8], _tg_exc,
+        )
     # ─── /per-state ───
 
     # Ejecutar agente.
@@ -3319,13 +3442,75 @@ def _persist_turn_audit(
             "final_text": (final_text or "")[:2000] if final_text else None,
             "system_prompt_chars": system_prompt_chars,
             "history_turns": history_turns,
+            # F5 telemetría de costo (decisión bot_engine #2): tokens Gemini
+            # del turn. La columna la agrega la migración 20260704155000; el
+            # código degrada seguro si aún no está aplicada (retry sin columna).
+            "total_tokens": int(getattr(result, "total_tokens", 0) or 0),
         }
         supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
+        # Degrade-safe: si la columna total_tokens aún no existe (migración
+        # 20260704155000 sin aplicar), reintentar SIN ella para no perder la
+        # observabilidad universal del turn (finish_reason, invariants, etc.).
+        if "total_tokens" in str(exc):
+            try:
+                row.pop("total_tokens", None)
+                supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
+                return
+            except Exception as exc2:
+                exc = exc2
         logger.warning(
             "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
             mode, conversation_id[:8], exc,
         )
+
+
+async def _escalate_conversation_to_human(
+    supabase: Any,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    reason: str,
+) -> None:
+    """Marca conversation.status='human_takeover' + audit + notifica al equipo.
+
+    F5 bot_engine #3 — reusa el patrón canónico del tool escalate_to_human
+    (agentic/tools/escalation.py) para el path no-texto (document). Best-effort:
+    ni el audit ni la notificación bloquean; el cambio de status es lo crítico.
+    """
+    try:
+        supabase.table("conversations").update({
+            "status": "human_takeover",
+        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:
+        logger.warning(
+            "[NONTEXT_ESCALATE] conv=%s no pude marcar human_takeover: %s",
+            conversation_id[:8], exc,
+        )
+        return
+    try:
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "escalation_audit",
+            "content": "",
+            "payload": {"reason": reason, "source": "nontext_dispatch"},
+            "processed": True,
+            "processing_status": "processed",
+        }).execute()
+    except Exception:
+        pass
+    try:
+        from telegram_notifications import notify_escalation_async
+        await notify_escalation_async(
+            supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            reason=reason,
+        )
+    except Exception:
+        pass
 
 
 # ─── Gate de conversation status (Rev. 107) ────────────────────────────────

@@ -5,6 +5,7 @@ import { Bot, BookOpen, Sparkles } from 'lucide-react'
 import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
 import { AgentsList } from './agents-list'
+import { guardrailsForRole } from './agent-guardrails'
 
 // Sincronizado 1:1 con el enum de Ajustes → General (settings/page.tsx:236-240).
 // NO agregar valores fantasma (antes había 'neutro'/'energico' que ningún tenant
@@ -197,11 +198,18 @@ export default async function AiAgentsPage() {
     // los nuevos son is_default=false (1 default por tenant garantizado
     // por partial unique index).
     const hasDefault = existingArr.some(a => a.is_default === true)
+    // F5 — persistir los guardrails del rol (tools_allowed / fsm_states_allowed).
+    // Antes se insertaban NULL → el dispatcher los interpreta como "todas las
+    // tools" (agentic/dispatcher.py:3468), así que un agente Soporte creado por
+    // UI podía generar links de pago. Espejo de agent_templates.py.
+    const guardrails = guardrailsForRole(roleVal)
     const { data: inserted, error: e1 } = await sb.from('ai_agents').insert({
       tenant_id: m.tenant_id,
       name, role: roleVal, role_description,
       strict_guardrails: true,
       is_default: !hasDefault,
+      tools_allowed: guardrails.tools_allowed,
+      fsm_states_allowed: guardrails.fsm_states_allowed,
     }).select('id').single()
     if (e1) return { ok: false, error: e1.message }
     // Audit trail — el Prompt Maestro define el comportamiento del bot en
@@ -272,8 +280,17 @@ export default async function AiAgentsPage() {
         )
       : null
 
+    // F5 — reaplica los guardrails del rol FINAL en cada edición. Cubre 3 casos:
+    // (a) el operador cambió el rol → tools/fsm del rol nuevo; (b) backfill
+    // implícito de agentes viejos con tools_allowed=NULL al editarlos (acción
+    // explícita del operador, no un backfill masivo silencioso); (c) el default
+    // (rol bloqueado en 'sales') siempre queda con el set de ventas. Espejo de
+    // agent_templates.py — misma fuente que createAgent.
+    const guardrails = guardrailsForRole(finalRole)
     const updatePayload: Record<string, unknown> = {
       name, role: finalRole, role_description, strict_guardrails,
+      tools_allowed: guardrails.tools_allowed,
+      fsm_states_allowed: guardrails.fsm_states_allowed,
     }
     if (fallbackRoles !== null) {
       updatePayload.fallback_for_roles = fallbackRoles
@@ -449,7 +466,14 @@ export default async function AiAgentsPage() {
         deleteAgent={deleteAgent}
       />
 
-      <BotPreview />
+      <BotPreview
+        agents={agentsList.map(a => ({
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          is_default: a.is_default,
+        }))}
+      />
     </div>
   )
 }

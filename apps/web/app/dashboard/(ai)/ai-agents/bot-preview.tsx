@@ -12,6 +12,27 @@ interface PreviewResult {
   agent_name: string
 }
 
+interface PreviewAgent {
+  id?: string
+  name: string
+  role?: string | null
+  is_default?: boolean | null
+}
+
+interface Props {
+  // Agentes del tenant para el selector. Si hay 0 o 1, no se muestra selector
+  // y el preview prueba el default (comportamiento previo intacto).
+  agents?: PreviewAgent[]
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  sales:     'Ventas',
+  support:   'Soporte',
+  marketing: 'Marketing',
+  claims:    'Reclamos',
+  custom:    'Personalizado',
+}
+
 const EXAMPLE_MESSAGES = [
   '¿Tienen envíos a Medellín?',
   '¿Cuál es la política de devoluciones?',
@@ -19,8 +40,11 @@ const EXAMPLE_MESSAGES = [
   '¿Aceptan pagos contra entrega?',
 ]
 
-export function BotPreview() {
+export function BotPreview({ agents = [] }: Props) {
+  const withId = agents.filter((a): a is PreviewAgent & { id: string } => !!a.id)
+  const defaultAgentId = (withId.find(a => a.is_default) ?? withId[0])?.id ?? ''
   const [message,  setMessage]  = useState('')
+  const [agentId,  setAgentId]  = useState<string>(defaultAgentId)
   const [result,   setResult]   = useState<PreviewResult | null>(null)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
@@ -36,7 +60,9 @@ export function BotPreview() {
       const res  = await fetch('/api/ai/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        // agent_id solo si hay selector activo (>1 agente); si no, el backend
+        // prueba el default.
+        body: JSON.stringify({ message: text, ...(withId.length > 1 && agentId ? { agent_id: agentId } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Error desconocido')
@@ -66,6 +92,34 @@ export function BotPreview() {
           <span>20 pruebas/hora · No envía mensajes reales</span>
         </div>
       </div>
+
+      {/* Selector de agente — solo con multi-agente (>1). Con 1 agente el
+          preview prueba el default sin ruido de UI. */}
+      {withId.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground mr-0.5">Probar agente:</span>
+          {withId.map(a => {
+            const role = a.role ?? 'sales'
+            const active = a.id === agentId
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setAgentId(a.id)}
+                disabled={loading}
+                className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors disabled:opacity-50 ${
+                  active
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                }`}
+              >
+                {a.name}
+                <span className="ml-1 text-[10px] text-muted-foreground/70">· {ROLE_LABEL[role] ?? role}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Ejemplos rápidos */}
       <div className="flex flex-wrap gap-1.5">

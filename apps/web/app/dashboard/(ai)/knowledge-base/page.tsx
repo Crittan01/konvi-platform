@@ -108,6 +108,12 @@ export default async function KnowledgeBasePage(
   const user = await getCachedUser()
   if (!user) redirect('/login')
   const { tenantId, role } = await getCachedTenantMeta()
+  // Módulo exclusivo owner/manager (paridad con require_write_role del router
+  // /api/v1/knowledge-base y con el sidebar, que ya oculta el link a operators).
+  // Sin este guard, un operator podía cargar la ruta por URL directa en
+  // solo-lectura — inconsistente con "quién puede escribir es quién ve el módulo".
+  // Patrón canónico: mismo redirect que integrations/wompi/page.tsx.
+  if (role === 'operator') redirect('/dashboard')
   const canWrite = role === 'owner' || role === 'manager'
   const supabase = await createClient()
   const q   = searchParams?.q ?? ''
