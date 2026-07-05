@@ -23,9 +23,16 @@ import { type EmailOtpType } from '@supabase/supabase-js'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
+import { WEB_APP_URL } from '@/lib/runtime-env'
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
+  const { searchParams } = new URL(request.url)
+  // BUG PROD (fix 2026-07-05): NO usar el origin de request.url. En Render el
+  // servicio corre detrás del proxy en el puerto interno 10000, así que
+  // request.url = http://localhost:10000 → todos los redirects de recovery/OTP
+  // mandaban a localhost:10000 (recuperación de contraseña rota para todos).
+  // Usamos el host público explícito (APP_URL, no spoofeable por headers).
+  const origin = WEB_APP_URL
   const code      = searchParams.get('code')
   const tokenHash = searchParams.get('token_hash')
   const type      = searchParams.get('type') as EmailOtpType | null
