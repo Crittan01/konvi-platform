@@ -424,13 +424,24 @@ async def patch_contact(
                 headers={"Idempotency-Replayed": "true"},
             )
 
-        data = {k: v for k, v in patch.model_dump().items() if v is not None}
+        # Decisión F2 (fix data-bug de edición): semántica de PRESENCIA de campo.
+        # `exclude_unset=True` distingue "campo enviado como null/'' (limpiar)" de
+        # "campo ausente (no tocar)". Antes se filtraba `if v is not None`, así que
+        # enviar null NUNCA limpiaba notes/email/documento/dirección: el operador
+        # creía haber borrado un dato y quedaba guardado. Ahora un campo presente
+        # con valor null → SET NULL en la fila (PATCH real).
+        data = patch.model_dump(exclude_unset=True)
         # A9 — campos de control del flujo de consent (NO columnas de la tabla):
         # los consume _compute_consent_update vía el objeto `patch`, no van al UPDATE.
         for _ctl in ("consent_evidence_note", "renewed_consent",
                      "renewed_consent_evidence", "consent_attachment"):
             data.pop(_ctl, None)
-        if not data:
+        # Hay trabajo si quedan columnas para actualizar, o si el patch trae flujo
+        # de consent (consent_given) o solo metadata de adjunto (consent_attachment).
+        _has_consent_work = (
+            patch.consent_given is not None or patch.consent_attachment is not None
+        )
+        if not data and not _has_consent_work:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
         # Rev. 68 — validación cruzada document si se incluye alguno en el patch.
@@ -484,6 +495,15 @@ async def patch_contact(
                 actor_email=_extract_user_info(request)[1],
                 now_iso=now_iso,
             ))
+        elif patch.consent_attachment:
+            # Decisión F2 — el 2º update post-create del adjunto de evidencia
+            # (metadata subida client-side) ahora pasa por este PATCH auditado en
+            # vez de una escritura directa a Supabase. No toca el estado de consent;
+            # solo mergea la metadata en el consent_evidence existente.
+            merged = dict(current.get("consent_evidence") or {})
+            merged.pop("attachment_url", None)  # limpiar legacy
+            merged.update(patch.consent_attachment)
+            data["consent_evidence"] = merged
 
         result = (
             supabase.table("contacts")
@@ -529,12 +549,166 @@ async def patch_contact(
 
 
 # ─── Consentimiento WhatsApp (Ley 1581) ──────────────────────────────────────
-# F107/F121 — Endpoints POST /{id}/consent y /{id}/reactivate-consent ELIMINADOS:
-# eran código muerto (0 callers HTTP). El registro de consent vive en las rutas
-# activas: el bot escribe vía RecordConsentTool (agentic/tools/contact.py) y la web
-# vía reactivateConsentAction (server action → consent_audit_log + contacts). El
-# endpoint reactivate-consent además double-contaba en vw_consent_events_unified
-# (audit_log del decorator + consent_audit_log) → al removerlo se cierra F121.
+# F107/F121 — Endpoint POST /{id}/consent ELIMINADO (código muerto). El registro
+# inicial de consent vive en las rutas activas: el bot vía RecordConsentTool
+# (agentic/tools/contact.py) y la web vía create/patch de este router.
+
+
+class ReactivateConsent(BaseModel):
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
+@router.post("/{contact_id}/reactivate-consent", response_model=dict)
+async def reactivate_consent(
+    contact_id: str,
+    body: ReactivateConsent,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """Reactiva consent tras soft opt-out (STOP WhatsApp). owner-only (Art. 11).
+
+    Decisión F2: esta mutación de dato de consentimiento (sensible Habeas Data)
+    vivía en un server action con escritura DIRECTA vía admin client, sin
+    rate-limit, idempotencia ni el pipeline auditado del módulo. Ahora pasa por
+    el API: RL_WRITE + idempotency + consent_audit_log append-only + sync Inbox.
+
+    NO usa el decorator @audit_log (que escribiría en audit_log): el registro
+    canónico es consent_audit_log. El decorator duplicaría el evento en
+    vw_consent_events_unified (F121). Un solo insert = un solo evento.
+
+    PII intacta (NO anonimiza): solo limpia consent_revoked_at + reason.
+    Idempotente: si el consent ya está activo, es no-op.
+    """
+    from lib.phone import hash_phone
+
+    idem_session = None
+    try:
+        request_hash = payload_fingerprint(
+            {"contact_id": contact_id, **body.model_dump(mode="json")}
+        )
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
+        _uid, _email = _extract_user_info(request)
+
+        current_res = (
+            supabase.table("contacts")
+            .select("phone, consent_revoked_at, consent_revoked_reason")
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        if not current_res or not current_res.data:
+            raise HTTPException(status_code=404, detail="Contacto no encontrado")
+        contact = current_res.data
+
+        if not contact.get("consent_revoked_at"):
+            body_ok = {
+                "ok": True,
+                "reactivated": False,
+                "message": "Consent ya estaba activo (no-op)",
+                "conversations_reactivated": 0,
+            }
+            finalize_idempotency(
+                supabase=supabase, tenant_id=tenant_id, session=idem_session,
+                status_code=200, body=body_ok,
+            )
+            return body_ok
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Audit ANTES del UPDATE (append-only inmutable — Habeas Data Art. 9).
+        try:
+            supabase.table("consent_audit_log").insert({  # tenant_filter:exempt:payload_includes_tenant_id
+                "tenant_id": tenant_id,
+                "contact_id": contact_id,
+                "phone_hash": hash_phone(contact.get("phone")) if contact.get("phone") else None,
+                "event": "granted",
+                "source": "tenant_console",
+                "actor_email": _email,
+                "actor_user_id": _uid,
+                "evidence": {
+                    "trigger": "manual_reactivate",
+                    "reason": body.reason,
+                    "previous_revoked_reason": contact.get("consent_revoked_reason"),
+                    "reactivated_at": now_iso,
+                },
+            }).execute()
+        except Exception as audit_exc:
+            logger.error(
+                "[REACTIVATE] audit insert falló tenant=%s contact=%s: %s",
+                tenant_id, contact_id, audit_exc,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo registrar audit log. Reactivación abortada.",
+            )
+
+        upd = (
+            supabase.table("contacts")
+            .update({"consent_revoked_at": None, "consent_revoked_reason": None})
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not upd.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Audit registrado pero update falló. Estado inconsistente — reportar.",
+            )
+
+        # Sync Inbox: conversations opted_out → bot_active (design simétrico
+        # STOP→opted_out / Reactivar→bot_active). No crítico: no aborta si falla.
+        conversations_reactivated = 0
+        phone = contact.get("phone")
+        if phone:
+            try:
+                conv = (
+                    supabase.table("conversations")
+                    .update({"status": "bot_active"})
+                    .eq("tenant_id", tenant_id)
+                    .eq("customer_phone", phone)
+                    .eq("status", "opted_out")
+                    .execute()
+                )
+                conversations_reactivated = len(conv.data or [])
+            except Exception as conv_exc:
+                logger.warning(
+                    "[REACTIVATE] sync conversations falló (no crítico): %s", conv_exc,
+                )
+
+        body_ok = {
+            "ok": True,
+            "reactivated": True,
+            "message": "Consent reactivado. Marketing puede reanudarse al cliente.",
+            "conversations_reactivated": conversations_reactivated,
+        }
+        finalize_idempotency(
+            supabase=supabase, tenant_id=tenant_id, session=idem_session,
+            status_code=200, body=body_ok,
+        )
+        return body_ok
+    except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
+        raise
+    except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
+        logger.error("Error reactivando consent %s: %s", contact_id, e)
+        raise HTTPException(status_code=500, detail="Error al reactivar consent")
 
 
 # ─── Soft-delete con anonimización (Q3: retención Ley 1581) ───────────────────────
@@ -670,7 +844,8 @@ async def delete_contact(
     - Anonimiza: name=NULL, address=NULL, notes=NULL
     - Conserva: phone (lista de supresión), tenant_id, consent_revoked_at, deleted_at
     - Si el contacto tiene órdenes: el registro anonónimo se retiene (Cod. Comercio Art. 60)
-    - Si no tiene órdenes: marcado para purge físico después de 30 días (cron job)
+    - Si no tiene órdenes: queda anonimizado; la purga física está pendiente de un
+      proceso programado (aún NO automatizado — services/cron es Fase 13)
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
@@ -718,7 +893,10 @@ async def delete_contact(
             "retention_note": (
                 "Registro retenido 10 años por órdenes vinculadas (Cod. Comercio Art. 60)"
                 if has_orders else
-                "Marcado para purge en 30 días"
+                # Decisión F2: NO prometer "30 días" sin cron que lo cumpla. El
+                # registro queda anonimizado; la purga física es manual/pendiente
+                # de un proceso programado (services/cron es Fase 13).
+                "Anonimizado; purga física pendiente de proceso programado (no automática aún)"
             ),
         }
     except HTTPException:

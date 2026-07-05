@@ -5,7 +5,6 @@ import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
-import { hashPhone } from '@/lib/crypto/phone-hash'
 import { uploadConsentEvidence } from './_components/helpers/upload-evidence'
 
 // Rev. 102 — module-level scope.
@@ -111,7 +110,7 @@ export default async function ContactsPage(
   // Sem 5 perf: cached comparte con DashboardLayout.
   const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
   await getCachedUser()
-  const { tenantId, role } = await getCachedTenantMeta()
+  const { tenantId, role, email: userEmail } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
   const supabase = await createClient()
 
@@ -148,6 +147,29 @@ export default async function ContactsPage(
       loadError = error.message || 'No se pudieron cargar los contactos.'
     } else {
       contacts = Array.isArray(data) ? (data as unknown as Contact[]) : []
+    }
+  }
+
+  // Decisión F2 (Habeas Data Ley 1581 Art. 9): registrar el acceso de consola
+  // al LISTADO de PII. Best-effort — un solo row-resumen por carga (no uno por
+  // contacto). Degrada en SILENCIO si la columna contact_id aún es NOT NULL
+  // (migración 20260704150000 la vuelve nullable): el insert falla y se ignora,
+  // sin romper el render. La tabla pii_access_log es service_role-only → admin.
+  if (tenantId && !loadError && contacts.length > 0) {
+    try {
+      const admin = createAdminClient()
+      const { error: piiLogErr } = await admin.from('pii_access_log').insert({
+        tenant_id: tenantId,
+        contact_id: null,
+        accessed_by: `user:${userEmail || 'unknown'}`,
+        purpose: 'contact_list_view',
+        fields_accessed: ['name', 'email', 'phone', 'document_number', 'address'],
+      })
+      if (piiLogErr) {
+        console.warn('[contacts] pii_access_log list-view no registrado (no crítico)', piiLogErr.message)
+      }
+    } catch (e) {
+      console.warn('[contacts] pii_access_log list-view insert lanzó (no crítico)', e)
     }
   }
 
@@ -306,36 +328,58 @@ export default async function ContactsPage(
     const newId = (inserted as { id?: string } | null)?.id
     if (newId && consentGiven && consentSource === 'in_person') {
       const result = await uploadConsentEvidence(formData, newId, m.tenant_id)
+      // Decisión F2 — el 2º write de evidencia (metadata del adjunto) pasa AHORA
+      // por PATCH /api/v1/contacts/{id} (RL + idempotency + audit + pii_access_log)
+      // en vez de un update DIRECTO a Supabase. El API mergea `consent_attachment`
+      // en el consent_evidence existente (ya contiene initialEvidence del create),
+      // así que solo enviamos los campos del adjunto.
+      let attachmentMeta: Record<string, unknown> | null = null
       if (result.status === 'uploaded') {
         // Persistimos `attachment_path` (no `attachment_url`): el bucket
         // es privado, la UI genera signed URL on-demand.
-        await sb.from('contacts').update({
-          consent_evidence: {
-            ...initialEvidence,
-            attachment_path: result.path,
-            attachment_mime: result.mime,
-            attachment_size: result.size,
-            attachment_uploaded_at: new Date().toISOString(),
-          },
-        }).eq('id', newId).eq('tenant_id', m.tenant_id)
+        attachmentMeta = {
+          attachment_path: result.path,
+          attachment_mime: result.mime,
+          attachment_size: result.size,
+          attachment_uploaded_at: new Date().toISOString(),
+        }
       } else if (result.status === 'rejected' || result.status === 'error') {
         const skipReason = result.status === 'rejected' ? result.reason : 'storage_error'
-        await sb.from('contacts').update({
-          consent_evidence: {
-            ...initialEvidence,
-            attachment_skip_reason: skipReason,
-            attachment_skip_filename: 'filename' in result ? result.filename : null,
-            attachment_skip_received_mime: 'receivedMime' in result ? result.receivedMime : null,
-            attachment_skip_storage_message: result.status === 'error' ? result.message : null,
-            attachment_skip_at: new Date().toISOString(),
-          },
-        }).eq('id', newId).eq('tenant_id', m.tenant_id)
+        attachmentMeta = {
+          attachment_skip_reason: skipReason,
+          attachment_skip_filename: 'filename' in result ? result.filename : null,
+          attachment_skip_received_mime: 'receivedMime' in result ? result.receivedMime : null,
+          attachment_skip_storage_message: result.status === 'error' ? result.message : null,
+          attachment_skip_at: new Date().toISOString(),
+        }
         console.warn(
           '[F10] Contact creado pero adjunto no se subió',
           { contactId: newId, skipReason, filename: 'filename' in result ? result.filename : null,
             receivedMime: 'receivedMime' in result ? result.receivedMime : null,
             storageMessage: result.status === 'error' ? result.message : null },
         )
+      }
+      if (attachmentMeta) {
+        // No bloqueante: el contact ya está creado. Si el PATCH del adjunto
+        // falla, se registra un warning y el operador puede reintentar editando.
+        try {
+          const patchRes = await fetch(
+            `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(newId)}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ consent_attachment: attachmentMeta }),
+              cache: 'no-store',
+            },
+          )
+          if (!patchRes.ok) {
+            console.warn('[F10] PATCH metadata de adjunto post-create falló', {
+              contactId: newId, status: patchRes.status,
+            })
+          }
+        } catch (e) {
+          console.warn('[F10] PATCH metadata de adjunto post-create network error', e)
+        }
       }
     }
     revalidatePath('/dashboard/contacts')
@@ -448,31 +492,61 @@ export default async function ContactsPage(
 
     const token = (await sb.auth.getSession()).data.session?.access_token
     if (!token) return { ok: false, error: 'Sesión expirada. Vuelve a iniciar sesión.' }
+
+    // Decisión F2 (coordinación UI+API de la semántica de presencia): el API ya
+    // distingue "campo enviado como null (limpiar)" de "campo ausente (no tocar)".
+    // Los inputs de PII se renderizan `disabled` cuando la PII está bloqueada
+    // (piiUnlocked=false) y un input disabled NO viaja en FormData. Por eso SOLO
+    // incluimos un campo en el PATCH si su input estuvo PRESENTE en el form:
+    //   • presente y vacío ('')  → null → el API limpia el campo (bug corregido).
+    //   • ausente (disabled/oculto) → OMITIDO → el API conserva el valor actual.
+    // Sin esta coordinación, editar el consent con PII bloqueada borraría
+    // name/email/notes/documento/dirección al enviarlos como null.
+    const patchBody: Record<string, unknown> = {
+      // Inputs CRUDOS del flujo de consent — el API computa la máquina de
+      // estados (guards soft-revoke/renovación + mergedEvidence + fechas).
+      consent_given:   consentGiven,
+      consent_source:  consentSource || null,
+      consent_channel: 'dashboard_console',
+      consent_notice_version: consentNoticeVersion || null,
+      consent_evidence_note: consentEvidenceNote || null,
+      consent_revoked_reason: revocationReason || null,
+      renewed_consent: renewedConsentChecked,
+      renewed_consent_evidence: renewedConsentEvidence || null,
+    }
+    if (formData.has('name')) {
+      patchBody.name = (formData.get('name') as string) || null
+    }
+    if (formData.has('email')) {
+      patchBody.email = (((formData.get('email') as string) || '').trim().toLowerCase()) || null
+    }
+    if (formData.has('notes')) {
+      patchBody.notes = (formData.get('notes') as string) || null
+    }
+    if (editShippingE164) {
+      patchBody.shipping_phone = editShippingE164
+    }
+    // DocumentFields solo se renderiza si piiUnlocked → si sus inputs no están
+    // presentes, no tocamos el documento.
+    if (formData.has('document_type') || formData.has('document_number')) {
+      patchBody.document_type = editDocType && editDocNumber ? editDocType : null
+      patchBody.document_number = editDocType && editDocNumber ? editDocNumber : null
+    }
+    // AddressSelector solo se renderiza si piiUnlocked y hay dirección/se agrega
+    // → si addr_street no viaja, conservamos la dirección actual.
+    if (formData.has('addr_street')) {
+      patchBody.address = address
+    }
+    if (consentAttachment) {
+      patchBody.consent_attachment = consentAttachment
+    }
+
     let res: Response
     try {
       res = await fetch(`${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(editContactId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          name:            (formData.get('name') as string) || null,
-          email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
-          notes:           (formData.get('notes') as string) || null,
-          ...(editShippingE164 ? { shipping_phone: editShippingE164 } : {}),
-          document_type:   editDocType && editDocNumber ? editDocType : null,
-          document_number: editDocType && editDocNumber ? editDocNumber : null,
-          address,
-          // Inputs CRUDOS del flujo de consent — el API computa la máquina de
-          // estados (guards soft-revoke/renovación + mergedEvidence + fechas).
-          consent_given:   consentGiven,
-          consent_source:  consentSource || null,
-          consent_channel: 'dashboard_console',
-          consent_notice_version: consentNoticeVersion || null,
-          consent_evidence_note: consentEvidenceNote || null,
-          consent_revoked_reason: revocationReason || null,
-          renewed_consent: renewedConsentChecked,
-          renewed_consent_evidence: renewedConsentEvidence || null,
-          ...(consentAttachment ? { consent_attachment: consentAttachment } : {}),
-        }),
+        body: JSON.stringify(patchBody),
       })
     } catch (e) {
       console.error('[editContact] network error', e)
@@ -654,7 +728,10 @@ export default async function ContactsPage(
       let payload: unknown
       try { payload = JSON.parse(text) } catch { payload = text }
       // Si fue erase, refrescamos la lista (PII anonimizada).
-      if (res.ok && (sarType === 'erase' || sarType === 'rectify')) {
+      // Decisión F2 (Habeas Data Art. 16): la rectificación se satisface con el
+      // formulario de edición (trazable vía PATCH auditado), NO con type='rectify'
+      // del SAR — la UI ya no ofrece ese tipo. Se retira el branch residual.
+      if (res.ok && sarType === 'erase') {
         revalidatePath('/dashboard/contacts')
       }
       return { ok: res.ok, status: res.status, type: sarType, payload }
@@ -663,10 +740,15 @@ export default async function ContactsPage(
     }
   }
 
-  // Rev. 105 H.4.1.x — Server action: reactivar consent tras soft opt-out
-  // (STOP keyword via WhatsApp). Limpia consent_revoked_at + reason; PII
-  // intacta (no se anonimizó). Audit log Habeas Data Art. 9 con actor +
-  // reason. Idempotente: si ya está activo, no-op.
+  // Rev. 105 / Decisión F2 — Server action: reactivar consent tras soft opt-out
+  // (STOP keyword via WhatsApp). Limpia consent_revoked_at + reason; PII intacta
+  // (no se anonimizó). Idempotente: si ya está activo, no-op.
+  //
+  // Decisión F2: ANTES esta acción mutaba la DB con admin client DIRECTO
+  // (consent_audit_log + contacts + conversations) sin rate-limit, idempotencia
+  // ni atomicidad, rompiendo la simetría de auditoría del módulo. AHORA delega al
+  // endpoint POST /api/v1/contacts/{id}/reactivate-consent (RL_WRITE + idempotency
+  // + consent_audit_log append-only + sync Inbox), igual que el resto del módulo.
   async function reactivateConsentAction(
     formData: FormData,
   ): Promise<{ ok: boolean; status: number; message: string }> {
@@ -674,8 +756,8 @@ export default async function ContactsPage(
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    // Rev. 105 H.4.1.x — owner-only (Habeas Data ART. 11). Manager NO
-    // puede reactivar consent — debe escalar al owner para que firme.
+    // owner-only (Habeas Data ART. 11). Feedback rápido UX; la API también lo
+    // enforce (require_owner_role) → defensa en profundidad.
     if (!m.tenant_id || m.role !== 'owner') {
       return {
         ok: false,
@@ -690,83 +772,54 @@ export default async function ContactsPage(
       return { ok: false, status: 400, message: 'Razón requerida (mínimo 10 caracteres)' }
     }
 
-    // Verificar contact + capturar phone para hash audit.
-    const { data: contact } = await sb.from('contacts')
-      .select('phone, consent_revoked_at, consent_revoked_reason')
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
-      .single()
-    if (!contact) {
-      return { ok: false, status: 404, message: 'Contacto no encontrado' }
-    }
-    if (!contact.consent_revoked_at) {
-      return { ok: true, status: 200, message: 'Consent ya estaba activo (no-op)' }
+    const token = (await sb.auth.getSession()).data.session?.access_token
+    if (!token) return { ok: false, status: 401, message: 'Sesión expirada — recarga la página.' }
+
+    let res: Response
+    try {
+      res = await fetch(
+        `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(contactId)}/reactivate-consent`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ reason }),
+          cache: 'no-store',
+        },
+      )
+    } catch (e) {
+      console.error('[reactivateConsent] network error', e)
+      return { ok: false, status: 502, message: 'Error de red al reactivar consent. Intenta de nuevo.' }
     }
 
-    // Audit log ANTES de UPDATE (Habeas Data Art. 9 — append-only inmutable).
-    const admin = createAdminClient()
-    const auditResult = await admin.from('consent_audit_log').insert({
-      tenant_id: m.tenant_id,
-      contact_id: contactId,
-      phone_hash: hashPhone((contact as { phone?: string | null }).phone),
-      event: 'granted',
-      source: 'tenant_console',
-      actor_email: u?.email ?? null,
-      actor_user_id: u?.id ?? null,
-      evidence: {
-        trigger: 'manual_reactivate',
-        reason,
-        previous_revoked_reason: (contact as { consent_revoked_reason?: string | null }).consent_revoked_reason,
-        reactivated_at: new Date().toISOString(),
-      },
-    })
-    if (auditResult.error) {
-      console.error('[reactivateConsent] audit log insert falló', auditResult.error)
-      return { ok: false, status: 500, message: 'No se pudo registrar audit log. Reactivación abortada.' }
+    type ReactivatePayload = {
+      message?: string
+      conversations_reactivated?: number
+      detail?: string | { message?: string }
     }
+    let payload: ReactivatePayload | null = null
+    try { payload = (await res.json()) as ReactivatePayload } catch { payload = null }
 
-    // UPDATE contacts limpiando revoke flags (PII intacta, NO anonimiza).
-    const { error: updateErr } = await sb.from('contacts')
-      .update({ consent_revoked_at: null, consent_revoked_reason: null })
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
-    if (updateErr) {
-      console.error('[reactivateConsent] update contact falló', updateErr)
-      return { ok: false, status: 500, message: 'Audit log se registró pero update falló. Estado inconsistente — reportar.' }
-    }
-
-    // Rev. 105 H.4.1.x.gov.sync — Sincronía Inbox: también vuelve
-    // conversations.status='opted_out' → 'bot_active' para que el operador
-    // vea estado consistente en ambas UIs (Contactos + Inbox). Asimetría
-    // STOP→opted_out / Reactivar→bot_active es el design simétrico correcto.
-    // El customer_phone del contact mapea a conversations.customer_phone (1:N).
-    const contactPhone = (contact as { phone?: string | null }).phone
-    let conversationsReactivated = 0
-    if (contactPhone) {
-      const { data: convData, error: convUpdateErr } = await sb.from('conversations')
-        .update({ status: 'bot_active' })
-        .eq('tenant_id', m.tenant_id)
-        .eq('customer_phone', contactPhone)
-        .eq('status', 'opted_out')
-        .select('id')
-      if (convUpdateErr) {
-        // No abortamos — el consent ya se reactivó. Solo loguear.
-        console.error('[reactivateConsent] conversations sync falló (no crítico)', convUpdateErr)
-      } else {
-        conversationsReactivated = (convData ?? []).length
+    if (!res.ok) {
+      const rawDetail = payload?.detail
+      const detailMsg = typeof rawDetail === 'string'
+        ? rawDetail
+        : (rawDetail?.message || payload?.message)
+      return {
+        ok: false,
+        status: res.status,
+        message: detailMsg || `No se pudo reactivar consent (${res.status}).`,
       }
     }
 
     revalidatePath('/dashboard/contacts')
     revalidatePath('/dashboard/inbox')
 
-    const syncMsg = conversationsReactivated > 0
-      ? ` Conversaciones reactivadas: ${conversationsReactivated} (Inbox sincronizado).`
-      : ''
+    const n = payload?.conversations_reactivated ?? 0
+    const syncMsg = n > 0 ? ` Conversaciones reactivadas: ${n} (Inbox sincronizado).` : ''
     return {
       ok: true,
       status: 200,
-      message: `Consent reactivado. Marketing puede reanudarse al cliente.${syncMsg}`,
+      message: (payload?.message || 'Consent reactivado. Marketing puede reanudarse al cliente.') + syncMsg,
     }
   }
 
