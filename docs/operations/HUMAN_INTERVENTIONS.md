@@ -15,17 +15,19 @@
 
 ---
 
-## 1. Migraciones a aplicar a producción (26 archivos, sin aplicar)
+## 1. Migraciones — ✅ 26/26 APLICADAS a producción (2026-07-05)
 
-Todas creadas como archivo, **ninguna aplicada** (ledger con drift → protocolo manual). El código
-**degrada seguro** si la migración no está (feature-detect / fallback), salvo las marcadas **GATE**.
+**COMPLETADO.** Las 26 se aplicaron con el protocolo seguro (pre-check → apply aislado →
+post-check → `migration repair`), ledger 100% sincronizado (0 solo-local en el batch `20260704`),
+post-check de objetos clave OK. Historia relevante:
+- **`153002`** tenía un bug (`array_agg(a.attname)` `name[]` vs `text[]`, error 42883) — corregido
+  (`::text`) y reaplicado.
+- **`140000`** (RLS `tenant-media`) se **reescribió** antes de aplicar: la versión original
+  restringía escritura a owner/manager y rompía el envío de imágenes del Inbox (operadores suben a
+  `inbox-attachments/{tenant_id}/…`). Versión aplicada: producto/logo `{tenant_id}/` = owner/manager;
+  Inbox `inbox-attachments/{tenant_id}/` = member-level. Reemplaza las policies manuales previas.
 
-**Protocolo (por bloque, con tu autorización explícita):**
-```bash
-supabase db query --linked < supabase/migrations/<archivo>.sql
-supabase migration repair --status applied <version>
-```
-Aplicar **en orden de timestamp**. La de storage (140000) exige revisar policies manuales previas.
+La tabla abajo queda como registro de qué habilitó cada una.
 
 | # | Migración | Qué habilita | Gate |
 |---|---|---|---|
