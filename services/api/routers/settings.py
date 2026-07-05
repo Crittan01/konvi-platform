@@ -15,7 +15,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from supabase import Client
 
 from dependencies.audit import audit_log
@@ -25,6 +25,7 @@ from dependencies.auth import (
     require_owner_role,
     require_write_role,
 )
+from dependencies.security import RL_WRITE_DEFAULT
 from vault_helper import VaultHelper
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,19 @@ class ShippingOrigin(BaseModel):
     postal_code: Optional[str] = None    # Código postal
     country: Optional[str] = None        # Código de país ISO (ej: MX, CO)
     phone: Optional[str] = None          # Teléfono de contacto
+    # F6: DANE code (5 dígitos CO) que la web persiste alineado a postal_code
+    # para la cotización Aveonline. Antes NO estaba en el contrato Pydantic →
+    # el path API auditado lo descartaba silenciosamente.
+    dane_code: Optional[str] = Field(default=None, pattern=r'^[0-9]{5}$')
+
+    # F6: el formulario web puede enviar "" (campo tocado y luego vaciado). Sin
+    # esto, "" chocaría contra el pattern de dane_code → 422. "" ≡ no provisto.
+    @field_validator('dane_code', 'postal_code', mode='before')
+    @classmethod
+    def _empty_to_none(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class SocialLinks(BaseModel):
@@ -65,6 +79,15 @@ class StoreLocation(BaseModel):
     # Rev. 71 — sede principal: el bot la menciona primero y la rotula como
     # "(principal)" en el system prompt. Solo una sede debe tener is_primary=True.
     is_primary: Optional[bool] = None
+
+    # F6: el form web envía "" para campos opcionales vaciados (phone/email).
+    # "" chocaría contra los patterns → 422 y rompería el guardado. "" ≡ None.
+    @field_validator('name', 'city', 'state', 'street', 'phone', 'email', mode='before')
+    @classmethod
+    def _empty_to_none(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class TenantPatch(BaseModel):
@@ -88,6 +111,12 @@ class TenantPatch(BaseModel):
     vision:              Optional[str] = Field(default=None, max_length=280)
     valores:             Optional[str] = Field(default=None, max_length=280)
     tono_comunicacion:   Optional[Literal['formal', 'amigable', 'cercano', 'profesional', 'juvenil']] = None
+    # F6: business_pitch — 1ª línea de identidad del bot ("Eres {agente}, {pitch}").
+    # La web lo persiste (saveFilosofia) pero antes NO estaba en el contrato.
+    business_pitch:      Optional[str] = Field(default=None, max_length=500)
+    # F6: escalation_role — rol humano al que el bot escala. La web lo persiste
+    # (saveHorarioAsesor) con esta misma whitelist; ahora en el contrato canónico.
+    escalation_role:     Optional[Literal['asesor', 'especialista', 'consultor', 'agente']] = None
     # Horario de soporte y mensajes automáticos
     support_schedule:    Optional[dict] = None
     after_hours_message: Optional[str] = None
@@ -120,7 +149,7 @@ async def get_tenant(
             .select("id, name, status, meta_waba_id, shipping_origin, logo_url, "
                     "store_type, social_links, store_locations, "
                     "nit, email_contacto, telefono_contacto, low_stock_threshold, "
-                    "mision, vision, valores, tono_comunicacion, "
+                    "mision, vision, valores, tono_comunicacion, business_pitch, "
                     "support_schedule, after_hours_message, escalation_role, created_at")
             .eq("id", tenant_id)
             .maybe_single()
@@ -136,7 +165,7 @@ async def get_tenant(
         raise HTTPException(status_code=500, detail="Error al obtener configuración")
 
 
-@router.patch("/tenant", response_model=dict)
+@router.patch("/tenant", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="settings", action="updated")
 async def patch_tenant(
     patch: TenantPatch,
@@ -145,25 +174,34 @@ async def patch_tenant(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_owner_role),
 ):
-    """Actualiza campos del tenant. Solo owner.
-    Soporta: name, meta_waba_id, shipping_origin, store_type, social_links,
-    store_locations, nit, email_contacto, telefono_contacto,
+    """Actualiza campos del tenant. Solo owner. Fuente única auditada (F6):
+    Pydantic + @audit_log + rate-limit. Las server actions de la web enrutan
+    aquí en vez de escribir directo a Supabase.
+
+    Soporta: name, meta_waba_id, shipping_origin (incl. dane_code), store_type,
+    social_links, store_locations, nit, email_contacto, telefono_contacto,
     low_stock_threshold, support_schedule, after_hours_message, escalation_role,
-    mision, vision, valores, tono_comunicacion."""
+    business_pitch, mision, vision, valores, tono_comunicacion.
+
+    Semántica PATCH real: solo se tocan los campos presentes en el body
+    (exclude_unset). Un campo enviado explícitamente como null se LIMPIA; los
+    campos omitidos quedan intactos."""
     try:
-        raw = patch.model_dump()
-        # Serializar objetos Pydantic anidados a dict
-        if raw.get("shipping_origin") is not None:
+        # exclude_unset: solo los campos que el cliente envió. Conserva null
+        # explícito (permite limpiar) y no pisa columnas no enviadas.
+        raw = patch.model_dump(exclude_unset=True)
+        # Serializar objetos Pydantic anidados a dict (solo sub-campos con valor).
+        if "shipping_origin" in raw and raw["shipping_origin"] is not None:
             raw["shipping_origin"] = {k: v for k, v in raw["shipping_origin"].items() if v is not None}
-        if raw.get("social_links") is not None:
+        if "social_links" in raw and raw["social_links"] is not None:
             raw["social_links"] = {k: v for k, v in raw["social_links"].items() if v is not None}
-        if raw.get("store_locations") is not None:
+        if "store_locations" in raw and raw["store_locations"] is not None:
             raw["store_locations"] = [
                 {k: v for k, v in loc.items() if v is not None}
                 for loc in raw["store_locations"]
                 if any(v for v in loc.values() if v)
             ]
-        data = {k: v for k, v in raw.items() if v is not None}
+        data = raw
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
@@ -191,7 +229,7 @@ async def patch_tenant(
 # directo bajo JWT de usuario con RLS, no este endpoint). La RPC se conserva intacta.
 
 
-@router.patch("/team/{member_user_id}", response_model=dict)
+@router.patch("/team/{member_user_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="team_member", action="role_changed")
 async def patch_team_member(
     member_user_id: str,
@@ -229,7 +267,7 @@ async def patch_team_member(
         raise HTTPException(status_code=500, detail="Error al cambiar rol")
 
 
-@router.delete("/team/{member_user_id}", status_code=204)
+@router.delete("/team/{member_user_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="team_member", action="deleted")
 async def remove_team_member(
     member_user_id: str,
@@ -280,7 +318,7 @@ async def get_notifications(
         raise HTTPException(status_code=500, detail="Error al obtener notificaciones")
 
 
-@router.put("/notifications/{channel}", response_model=dict)
+@router.put("/notifications/{channel}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="settings", action="updated")
 async def upsert_notification(
     channel: str,

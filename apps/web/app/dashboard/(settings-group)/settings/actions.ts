@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 // ── Auth helper compartido ────────────────────────────────────────────────────
 // Verifica que el usuario autenticado sea owner del tenant.
@@ -29,18 +30,39 @@ function revalidateSettings() {
 // eso updateTenant retorna ActionResult (no lanza) y las actions NO envuelven en try/catch.
 export type ActionResult = { ok: boolean; error?: string }
 
-async function updateTenant(tenantId: string, data: Record<string, unknown>): Promise<ActionResult> {
+// F6 — fuente única auditada: las mutaciones del tenant enrutan por el endpoint
+// PATCH /api/v1/settings/tenant (Pydantic + @audit_log + rate-limit) en vez de
+// escribir directo a Supabase. El endpoint aplica semántica PATCH (exclude_unset):
+// un campo enviado como null LIMPIA, un campo omitido queda intacto. El caller ya
+// validó owner vía getOwnerTenantId; aquí adjuntamos el access_token de sesión.
+// El param tenantId se conserva por firma (el tenant lo deriva el backend del JWT).
+async function updateTenant(_tenantId: string, data: Record<string, unknown>): Promise<ActionResult> {
   const sb = await createClient()
-  // F140: supabase-js NO lanza, retorna { error }. Sin este check, un UPDATE bloqueado (RLS/constraint)
-  // pasaba en silencio y el usuario veía "Guardado ✓" aunque no persistió.
-  const { error } = await sb.from('tenants').update(data).eq('id', tenantId)
-  if (error) {
-    // F6 observabilidad: sin este log el error nunca aparece en los logs de Render
-    // (server actions no imprimen nada por defecto) → imposible diagnosticar en prod.
-    console.error('[settings.updateTenant] tenant=%s error=%s', tenantId, error.message)
-    return { ok: false, error: `No se pudo guardar: ${error.message}` }
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session?.access_token) {
+    return { ok: false, error: 'Tu sesión expiró. Vuelve a iniciar sesión e inténtalo de nuevo.' }
   }
-  return { ok: true }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/settings/tenant`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+      // F6 observabilidad: server actions no imprimen nada por defecto en Render.
+      console.error('[settings.updateTenant] http=%s detail=%s', res.status, err.detail)
+      return { ok: false, error: `No se pudo guardar: ${err.detail || `Error ${res.status}`}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    console.error('[settings.updateTenant] excepción:', e)
+    return { ok: false, error: e instanceof Error ? e.message : 'Error de red al guardar' }
+  }
 }
 
 // ── Validadores server-side ────────────────────────────────────────────────────

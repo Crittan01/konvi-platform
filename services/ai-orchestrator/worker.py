@@ -293,7 +293,11 @@ class OrchestratorWorker:
         self._last_health_metrics_at = 0.0
         # Snapshot del último status per (tenant, provider, metric) para
         # detectar transiciones healthy → warning/critical (alerta Telegram).
+        # F7: fallback in-memory. La fuente autoritativa (survive-restart) es la
+        # RPC fn_claim_health_alert; si no existe (migración no aplicada) se
+        # degrada a este snapshot. El flag se apaga en el primer fallo de la RPC.
         self._health_status_snapshot: dict[tuple[str, str, str], str] = {}
+        self._health_alert_persistent = True
         self._metrics = {
             "poll_cycles": 0,
             "inbound_seen": 0,
@@ -2453,12 +2457,35 @@ class OrchestratorWorker:
             logger.warning("[HEALTH] Error listando tenants activos: %s", exc)
             return
 
+        # F7: incluir tenants con Telegram configurado en notification_settings
+        # (Telegram NO vive en tenant_integrations — ver _collect_telegram_health).
+        # Se une ANTES del guard para no perder tenants Telegram-only.
+        try:
+            tg_res = (
+                self.supabase.table("notification_settings")  # tenant_filter:exempt:cron_cross_tenant_health_metrics
+                .select("tenant_id")
+                .eq("channel", "telegram")
+                .eq("enabled", True)
+                .execute()
+            )
+            tg_ids = {r.get("tenant_id") for r in (tg_res.data or []) if r.get("tenant_id")}
+            tenant_ids = sorted(set(tenant_ids) | tg_ids)
+        except Exception as exc:
+            logger.warning("[HEALTH] Error listando tenants con Telegram: %s", exc)
+
         if not tenant_ids:
             return
 
         for tenant_id in tenant_ids:
             try:
                 metrics = collect_all_for_tenant(self.supabase, str(tenant_id))
+                # F7 — Telegram health-check: collect_telegram (health_metrics.py)
+                # lee tenant_integrations, pero la config de Telegram vive en
+                # notification_settings desde la unificación rev.109 → nunca
+                # reportaba. Complementamos aquí SOLO si el collector no emitió
+                # ninguna métrica de Telegram (evita duplicar si se arregla allá).
+                if not any(getattr(m, "provider", None) == "telegram" for m in metrics):
+                    metrics = metrics + self._collect_telegram_health(str(tenant_id))
                 upsert_metrics(self.supabase, str(tenant_id), metrics)
                 # Detectar transiciones para alertar Telegram operador.
                 await self._notify_health_transitions(str(tenant_id), metrics)
@@ -2479,11 +2506,10 @@ class OrchestratorWorker:
 
         transitions = []
         for m in metrics:
-            key = (tenant_id, m.provider, m.metric)
-            prev_status = self._health_status_snapshot.get(key)
-            self._health_status_snapshot[key] = m.status
-            # Notificar solo si transicionó hacia peor (no en cada ciclo).
-            if prev_status in {None, "healthy", "unknown"} and m.status in {"warning", "critical"}:
+            # F7: claim persistente (survive-restart). Fallback in-memory si la
+            # migración no está aplicada. Ambos comparten la MISMA semántica:
+            # alertar solo al pasar de {None,healthy,unknown} a {warning,critical}.
+            if self._claim_health_alert(tenant_id, m.provider, m.metric, m.status):
                 transitions.append(m)
 
         if not transitions:
@@ -2517,3 +2543,147 @@ class OrchestratorWorker:
                 "[HEALTH] notify_escalation_async falló tenant=%s: %s",
                 tenant_id, exc,
             )
+
+    def _claim_health_alert(
+        self, tenant_id: str, provider: str, metric: str, status: str,
+    ) -> bool:
+        """F7 — decide si alertar por (tenant, provider, metric) SIN re-spamear
+        tras un restart del worker.
+
+        Fuente autoritativa: RPC fn_claim_health_alert (estado persistente en
+        provider_health_alert_dedup). Si la RPC/tabla no existe (migración no
+        aplicada), degrada al snapshot in-memory con la MISMA semántica:
+        alertar solo al pasar de {None,healthy,unknown} a {warning,critical}.
+        """
+        key = (tenant_id, provider, metric)
+        if self._health_alert_persistent:
+            try:
+                res = self.supabase.rpc(
+                    "fn_claim_health_alert",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_provider": provider,
+                        "p_metric": metric,
+                        "p_status": status,
+                    },
+                ).execute()
+                val = res.data
+                if isinstance(val, list):
+                    val = val[0] if val else False
+                if isinstance(val, dict):
+                    val = next(iter(val.values()), False)
+                # Mantener el snapshot in-memory en sync por si la RPC cae luego.
+                self._health_status_snapshot[key] = status
+                return bool(val)
+            except Exception as exc:
+                logger.warning(
+                    "[HEALTH] fn_claim_health_alert no disponible (%s) — "
+                    "fallback dedup in-memory (re-alertará tras restart)", exc,
+                )
+                self._health_alert_persistent = False
+
+        prev_status = self._health_status_snapshot.get(key)
+        self._health_status_snapshot[key] = status
+        return prev_status in {None, "healthy", "unknown"} and status in {"warning", "critical"}
+
+    def _collect_telegram_health(self, tenant_id: str) -> list:
+        """F7 — Telegram health-check leyendo notification_settings (NO
+        tenant_integrations).
+
+        Desde la unificación rev.109 la config de Telegram (bot_token cifrado en
+        Vault + enabled) vive en notification_settings, por lo que collect_telegram
+        de health_metrics.py — que consulta tenant_integrations — nunca reportaba.
+        Replicamos aquí getWebhookInfo con la misma semántica de estado.
+
+        Best-effort y self-contained: cualquier fallo NO rompe el ciclo de salud.
+        """
+        try:
+            from health_metrics import HealthMetric  # noqa: PLC0415
+        except ImportError:
+            return []
+
+        try:
+            res = (
+                self.supabase.table("notification_settings")
+                .select("enabled, config")
+                .eq("tenant_id", tenant_id)
+                .eq("channel", "telegram")
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+        except Exception as exc:
+            logger.warning("[HEALTH] Telegram: error leyendo notification_settings tenant=%s: %s", tenant_id, exc)
+            return []
+
+        if not rows or not rows[0].get("enabled"):
+            return []
+
+        config = rows[0].get("config") or {}
+        secret_id = config.get("bot_token_secret_id")
+        bot_token = None
+        if secret_id:
+            try:
+                from vault_helper import VaultHelper  # noqa: PLC0415
+                bot_token = VaultHelper(self.supabase).read_secret(secret_id)
+            except Exception as exc:
+                logger.warning("[HEALTH] Telegram: error resolviendo bot_token tenant=%s: %s", tenant_id, exc)
+
+        if not bot_token:
+            return [HealthMetric(
+                provider="telegram",
+                metric="config",
+                value="missing bot_token",
+                status="critical",
+                detail={"reason": "bot_token no resoluble desde Vault"},
+            )]
+
+        try:
+            import httpx  # noqa: PLC0415
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo")
+                if resp.status_code != 200:
+                    return [HealthMetric(
+                        provider="telegram",
+                        metric="api_reachability",
+                        value=f"HTTP {resp.status_code}",
+                        status="critical",
+                        detail={"body": resp.text[:200]},
+                    )]
+                data = resp.json()
+        except Exception as exc:
+            return [HealthMetric(
+                provider="telegram",
+                metric="api_reachability",
+                value=f"error: {type(exc).__name__}",
+                status="critical",
+                detail={"error": str(exc)[:200]},
+            )]
+
+        info = data.get("result") or {}
+        pending = int(info.get("pending_update_count") or 0)
+        last_error = info.get("last_error_message")
+
+        if pending >= 50:
+            status = "critical"
+        elif pending >= 10:
+            status = "warning"
+        else:
+            status = "healthy" if not last_error else "warning"
+
+        metrics = [HealthMetric(
+            provider="telegram",
+            metric="pending_update_count",
+            value=str(pending),
+            threshold="<10 deseado · ≥50 crítico",
+            status=status,
+            detail={"webhook_info": info},
+        )]
+        if last_error:
+            metrics.append(HealthMetric(
+                provider="telegram",
+                metric="last_webhook_error",
+                value=str(last_error)[:200],
+                status="warning",
+            ))
+        return metrics

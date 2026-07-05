@@ -125,9 +125,12 @@ const NAV_ITEMS: NavItem[] = [
       { kind: 'leaf', href: '/dashboard/settings/security',         label: 'Seguridad',         icon: Shield,    roles: ['owner', 'manager', 'operator'] },
       // Rev. 109 J.2.11 — Salud integraciones per-tenant.
       { kind: 'leaf', href: '/dashboard/settings/health',           label: 'Salud integraciones', icon: Activity, roles: ['owner', 'manager'] },
-      // Rev. 102 — Habeas Data per-tenant.
-      { kind: 'leaf', href: '/dashboard/settings/legal',            label: 'Legal',             icon: Scale,     roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/settings/retention',        label: 'Retención datos',   icon: Archive,   roles: ['owner'] },
+      // Rev. 102 — Habeas Data per-tenant. F6: visible a owner+manager, coherente
+      // con la RLS (retention_policies / tenant_legal_acceptance permiten
+      // modify a owner+manager) y con el gate de las páginas. El sidebar owner-only
+      // solo ocultaba funcionalidad ya accesible al manager.
+      { kind: 'leaf', href: '/dashboard/settings/legal',            label: 'Legal',             icon: Scale,     roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/settings/retention',        label: 'Retención datos',   icon: Archive,   roles: ['owner', 'manager'] },
       // Rev. 109 J.2.4.4 — Cerrar cuenta (owner-only, destructive).
       { kind: 'leaf', href: '/dashboard/settings/account-closure',  label: 'Cerrar cuenta',     icon: Trash2,    roles: ['owner'] },
     ],
