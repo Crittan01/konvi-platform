@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BrainCircuit, Sparkles, AlertTriangle, CheckCircle2, ChevronRight, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -33,12 +33,40 @@ const PRIORITY_STYLES: Record<Prioridad, { dot: string; text: string; badge: str
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AiInsightPanel({ module, label = module }: Props) {
-  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  // 'init' = cargando el último análisis persistido (decisión F4) antes de
+  // decidir entre 'idle' y 'done'. Evita gastar tokens al re-montar/navegar.
+  const [state, setState] = useState<'init' | 'idle' | 'loading' | 'done' | 'error'>('init')
   const [insight, setInsight] = useState<InsightResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [restored, setRestored] = useState(false)
+
+  // Restaurar el último análisis guardado (GET, no consume Gemini). Si no hay
+  // (o la persistencia aún no está disponible) → estado 'idle'.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/insights?module=${encodeURIComponent(module)}`)
+        if (!res.ok) { if (!cancelled) setState('idle'); return }
+        const data = await res.json() as { insight: InsightResult | null }
+        if (cancelled) return
+        if (data.insight) {
+          setInsight(data.insight)
+          setRestored(true)
+          setState('done')
+        } else {
+          setState('idle')
+        }
+      } catch {
+        if (!cancelled) setState('idle')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [module])
 
   async function generate() {
     setState('loading')
+    setRestored(false)
     setErrorMsg(null)
     try {
       const res = await fetch('/api/insights', {
@@ -57,6 +85,16 @@ export default function AiInsightPanel({ module, label = module }: Props) {
       setErrorMsg(e instanceof Error ? e.message : 'Error desconocido')
       setState('error')
     }
+  }
+
+  // ── Init: restaurando análisis guardado (placeholder sutil, evita salto) ────
+  if (state === 'init') {
+    return (
+      <div
+        className="w-full h-[54px] rounded-xl border border-dashed border-primary/20 bg-primary/5 animate-pulse"
+        aria-hidden="true"
+      />
+    )
   }
 
   // ── Idle ──────────────────────────────────────────────────────────────────
@@ -126,6 +164,11 @@ export default function AiInsightPanel({ module, label = module }: Props) {
         <div className="flex items-center gap-2">
           <BrainCircuit className="h-4 w-4 text-primary" />
           <p className="text-sm font-semibold text-foreground">Análisis IA — {label}</p>
+          {restored && (
+            <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5">
+              guardado
+            </span>
+          )}
           {insight.tokens_used && (
             <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5">
               ~{insight.tokens_used} tokens

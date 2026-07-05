@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createClient } from '@/utils/supabase/server'
 import { bogotaWindowUTC } from '@/lib/date-window'
+import { PAID_ORDER_STATUSES } from '@/app/dashboard/finance/lib/pnl'
+
+// Ingreso reconocido (canónico, = Finanzas): pago confirmado en adelante.
+const RECOGNIZED_STATUSES: ReadonlySet<string> = new Set(PAID_ORDER_STATUSES)
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -74,7 +78,7 @@ Analiza los siguientes pedidos.
 DATOS DE PEDIDOS:
 ${JSON.stringify(data, null, 2)}
 
-Considera: pedidos pendientes de confirmar, tasa de conversión, patrones de cancelación.
+Considera: pedidos pendientes de confirmar, tasa de conversión, patrones de cancelación. NOTA sobre dinero: 'recognized_revenue' es el INGRESO reconocido (pago confirmado en adelante) — úsalo como la cifra de ingreso; 'gross_sales' es ventas brutas (incluye pedidos sin pago) y es SECUNDARIA — nunca la llames ingreso.
 
 ${jsonSpec}`,
 
@@ -96,7 +100,7 @@ Analiza las siguientes métricas del negocio. El payload incluye el período act
 DATOS DE MÉTRICAS:
 ${JSON.stringify(data, null, 2)}
 
-Considera: variación vs. período previo (usa los campos *_prev), eficiencia del canal WhatsApp, tasa conversación → venta.
+Considera: variación vs. período previo (usa los campos *_prev, incl. recognized_revenue_prev_30d si no es null), eficiencia del canal WhatsApp, tasa conversación → venta. NOTA sobre dinero: 'recognized_revenue' es el INGRESO reconocido canónico (pago confirmado en adelante); 'gross_sales' es ventas brutas (incluye pedidos sin pago) y es SECUNDARIA — nunca la llames ingreso.
 
 ${jsonSpec}`,
   }
@@ -105,6 +109,42 @@ ${jsonSpec}`,
 }
 
 // ── Fetcher de datos por módulo ───────────────────────────────────────────────
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+type OrdersSummary = {
+  orders_total: number
+  orders_non_cancelled: number
+  orders_cancelled: number
+  gross_sales: number
+  recognized_revenue: number
+  delivered_revenue: number
+  by_status: Record<string, number>
+}
+
+// Agregación EXACTA de pedidos vía RPC (sin cap 1000 de PostgREST). Feature-
+// detected: si el RPC no existe (error) o falla → null y el caller cae al
+// cálculo client-side acotado por ventana.
+async function ordersSummaryRpc(
+  supabase: SupabaseServerClient, from: string | null, to: string | null
+): Promise<OrdersSummary | null> {
+  try {
+    const { data, error } = await supabase.rpc('metrics_orders_summary', { p_from: from, p_to: to })
+    if (error || !Array.isArray(data) || !data[0]) return null
+    const r = data[0] as Record<string, unknown>
+    return {
+      orders_total: Number(r.orders_total ?? 0),
+      orders_non_cancelled: Number(r.orders_non_cancelled ?? 0),
+      orders_cancelled: Number(r.orders_cancelled ?? 0),
+      gross_sales: Number(r.gross_sales ?? 0),
+      recognized_revenue: Number(r.recognized_revenue ?? 0),
+      delivered_revenue: Number(r.delivered_revenue ?? 0),
+      by_status: (r.by_status as Record<string, number>) ?? {},
+    }
+  } catch {
+    return null
+  }
+}
 
 async function fetchModuleData(
   module: InsightModule,
@@ -138,24 +178,31 @@ async function fetchModuleData(
   }
 
   if (module === 'orders') {
-    const [totalRes, prevTotalRes, rowsRes] = await Promise.all([
+    const [totalRes, prevTotalRes, rowsRes, summary] = await Promise.all([
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', curFrom),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', prevFrom).lt('created_at', curFrom),
       supabase.from('orders').select('status, total_amount', { count: 'exact' }).eq('tenant_id', tenantId).gte('created_at', curFrom),
+      ordersSummaryRpc(supabase, curFrom, null),
     ])
     const rows = rowsRes.data ?? []
-    const byStatus = rows.reduce((acc: Record<string, number>, o) => {
+    const byStatus = summary?.by_status ?? rows.reduce((acc: Record<string, number>, o) => {
       const s = (o as { status: string }).status
       acc[s] = (acc[s] ?? 0) + 1
       return acc
     }, {})
+    // Canónico: ingreso reconocido = confirmed+ ; ventas brutas = no canceladas (secundaria).
+    const grossFallback = rows.filter(o => (o as { status: string }).status !== 'cancelled')
+      .reduce((s, o) => s + Number((o as { total_amount: number }).total_amount || 0), 0)
+    const recognizedFallback = rows.filter(o => RECOGNIZED_STATUSES.has((o as { status: string }).status))
+      .reduce((s, o) => s + Number((o as { total_amount: number }).total_amount || 0), 0)
     return {
       total_orders: totalRes.count ?? rows.length,
       total_orders_prev_30d: prevTotalRes.count ?? 0,
       by_status: byStatus,
-      revenue_non_cancelled: rows.filter(o => (o as { status: string }).status !== 'cancelled')
-        .reduce((s, o) => s + Number((o as { total_amount: number }).total_amount || 0), 0),
-      revenue_is_approximate: (rowsRes.count ?? 0) > rows.length && rows.length >= MAX_ROWS,
+      recognized_revenue: summary?.recognized_revenue ?? recognizedFallback, // dinero comprometido (canónico)
+      gross_sales: summary?.gross_sales ?? grossFallback,                     // secundaria: NO es ingreso
+      revenue_is_exact: summary !== null,
+      revenue_is_approximate: summary === null && (rowsRes.count ?? 0) > rows.length && rows.length >= MAX_ROWS,
       period_days: 30,
     }
   }
@@ -181,6 +228,7 @@ async function fetchModuleData(
   const [
     msgCurRes, msgPrevRes, msgInRes, ordCurRes, ordPrevRes,
     convTotalRes, convBotRes, convHumanRes, revRowsRes,
+    summaryCur, summaryPrev,
   ] = await Promise.all([
     supabase.from('messages').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', curFrom),
     supabase.from('messages').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', prevFrom).lt('created_at', curFrom),
@@ -191,13 +239,17 @@ async function fetchModuleData(
     supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', curFrom).eq('status', 'bot_active'),
     supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', curFrom).eq('status', 'human_takeover'),
     supabase.from('orders').select('status, total_amount', { count: 'exact' }).eq('tenant_id', tenantId).gte('created_at', curFrom),
+    ordersSummaryRpc(supabase, curFrom, null),
+    ordersSummaryRpc(supabase, prevFrom, curFrom),
   ])
 
   const msgCur = msgCurRes.count ?? 0
   const ordCur = ordCurRes.count ?? 0
   const convTotal = convTotalRes.count ?? 0
   const revRows = revRowsRes.data ?? []
-  const revenue = revRows.filter(o => (o as { status: string }).status !== 'cancelled')
+  const grossFallback = revRows.filter(o => (o as { status: string }).status !== 'cancelled')
+    .reduce((s, o) => s + Number((o as { total_amount: number }).total_amount || 0), 0)
+  const recognizedFallback = revRows.filter(o => RECOGNIZED_STATUSES.has((o as { status: string }).status))
     .reduce((s, o) => s + Number((o as { total_amount: number }).total_amount || 0), 0)
 
   return {
@@ -207,8 +259,13 @@ async function fetchModuleData(
     messages_inbound: msgInRes.count ?? 0,
     orders_total: ordCur,
     orders_total_prev_30d: ordPrevRes.count ?? 0,
-    revenue_non_cancelled: revenue,
-    revenue_is_approximate: (revRowsRes.count ?? 0) > revRows.length && revRows.length >= MAX_ROWS,
+    // Canónico: 'ingreso' = recognized_revenue (confirmed+). gross_sales es
+    // secundaria (no canceladas, incluye checkout sin pago) — nunca 'ingreso'.
+    recognized_revenue: summaryCur?.recognized_revenue ?? recognizedFallback,
+    recognized_revenue_prev_30d: summaryPrev?.recognized_revenue ?? null,
+    gross_sales: summaryCur?.gross_sales ?? grossFallback,
+    revenue_is_exact: summaryCur !== null,
+    revenue_is_approximate: summaryCur === null && (revRowsRes.count ?? 0) > revRows.length && revRows.length >= MAX_ROWS,
     conversations_total: convTotal,
     bot_active: convBotRes.count ?? 0,
     human_takeover: convHumanRes.count ?? 0,
@@ -355,10 +412,70 @@ export async function POST(req: NextRequest) {
       Sentry.captureException(e, { extra: { where: 'insights.audit_log', module: insightModule, tenantId } })
     }
 
+    // 8. Persistencia del último análisis por tenant/módulo (decisión F4): evita
+    //    regenerar/gastar tokens al navegar. Best-effort + feature-detect: si la
+    //    tabla ai_insights aún no existe, se registra y se sigue (el panel cae a
+    //    idle sin persistencia).
+    try {
+      const { error: upsertErr } = await supabase.from('ai_insights').upsert({
+        tenant_id: tenantId,
+        module: insightModule,
+        result,
+        tokens_used: tokensUsed ?? null,
+        generated_by: user.id,
+        generated_at: result.generated_at,
+      }, { onConflict: 'tenant_id,module' })
+      if (upsertErr) {
+        Sentry.captureMessage('insights: persistencia no disponible', {
+          level: 'info', extra: { code: upsertErr.code, module: insightModule, tenantId },
+        })
+      }
+    } catch (e) {
+      Sentry.captureException(e, { extra: { where: 'insights.persist', module: insightModule, tenantId } })
+    }
+
     return NextResponse.json(result)
 
   } catch (err) {
     Sentry.captureException(err, { extra: { where: 'insights.POST', module: insightModule, tenantId } })
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
+  }
+}
+
+// ── GET: último análisis persistido por módulo (decisión F4) ────────────────────
+// El panel lo consulta al montar para restaurar el último insight sin gastar
+// tokens. Devuelve { insight: null } si no hay (o si la tabla no existe todavía).
+export async function GET(req: NextRequest) {
+  let tenantId: string | undefined
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const meta = (user.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!meta.tenant_id) return NextResponse.json({ error: 'Tenant no configurado' }, { status: 403 })
+    if (!['owner', 'manager'].includes(meta.role ?? ''))
+      return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
+    tenantId = meta.tenant_id
+
+    const moduleParam = new URL(req.url).searchParams.get('module')
+    const validModules: InsightModule[] = ['inventory', 'orders', 'contacts', 'metrics']
+    if (!validModules.includes(moduleParam as InsightModule))
+      return NextResponse.json({ error: 'Módulo no válido' }, { status: 400 })
+
+    // Feature-detect: si la tabla no existe, `error` viene set → insight: null.
+    const { data, error } = await supabase
+      .from('ai_insights')
+      .select('result')
+      .eq('tenant_id', tenantId)
+      .eq('module', moduleParam)
+      .maybeSingle()
+
+    if (error || !data) return NextResponse.json({ insight: null })
+    return NextResponse.json({ insight: (data as { result: InsightResult }).result })
+
+  } catch (err) {
+    Sentry.captureException(err, { extra: { where: 'insights.GET', tenantId } })
+    return NextResponse.json({ insight: null })
   }
 }

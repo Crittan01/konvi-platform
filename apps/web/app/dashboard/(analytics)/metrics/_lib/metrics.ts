@@ -12,10 +12,19 @@
  *  - agrupación temporal SIEMPRE en hora Colombia (date-window)
  */
 import { COLOMBIA_UTC_OFFSET_MIN } from '@/lib/date-window'
+// Definición canónica de ingreso reconocido — fuente única compartida con
+// Finanzas (decisión F4). NO redefinir el set aquí: importarlo evita drift.
+import { PAID_ORDER_STATUSES } from '@/app/dashboard/finance/lib/pnl'
 
 // PostgREST corta en max_rows (supabase/config.toml → 1000) SIN error.
 // Toda query que traiga filas para agregar debe compararse contra este cap.
 export const MAX_ROWS = 1000
+
+// Ingreso reconocido = pago confirmado en adelante (confirmed/processing/
+// shipped/delivered). Canónico y alineado con Finanzas (PAID_ORDER_STATUSES).
+// «Ventas brutas» (no canceladas) es SECUNDARIA y nunca debe llamarse ingreso.
+export { PAID_ORDER_STATUSES }
+const RECOGNIZED_STATUSES: ReadonlySet<string> = new Set(PAID_ORDER_STATUSES)
 
 // ── Estados de pedido (fuente única del módulo) ─────────────────────────────
 export const ORDER_STATUS_LABELS: Record<string, string> = {
@@ -89,9 +98,11 @@ const num = (v: number | string | null | undefined): number => {
 // ── Pedidos ─────────────────────────────────────────────────────────────────
 export type OrderAggregate = {
   byStatus: Record<string, number>
-  /** Ingresos de pedidos NO cancelados (incluye pending/pending_payment). */
+  /** Ventas brutas: pedidos NO cancelados (incluye pending/pending_payment). Secundaria. */
   revenue: number
-  /** Ingresos SOLO de pedidos entregados (dinero realizado). */
+  /** Ingreso reconocido (canónico): pago confirmado en adelante (confirmed+). */
+  recognizedRevenue: number
+  /** Ingresos SOLO de pedidos entregados (dinero ya realizado). */
   deliveredRevenue: number
   cancelledCount: number
 }
@@ -99,13 +110,36 @@ export type OrderAggregate = {
 export function aggregateOrders(rows: OrderRow[]): OrderAggregate {
   const byStatus: Record<string, number> = {}
   let revenue = 0
+  let recognizedRevenue = 0
   let deliveredRevenue = 0
   for (const o of rows) {
     byStatus[o.status] = (byStatus[o.status] ?? 0) + 1
     if (o.status !== 'cancelled') revenue += num(o.total_amount)
+    if (RECOGNIZED_STATUSES.has(o.status)) recognizedRevenue += num(o.total_amount)
     if (o.status === 'delivered') deliveredRevenue += num(o.total_amount)
   }
-  return { byStatus, revenue, deliveredRevenue, cancelledCount: byStatus['cancelled'] ?? 0 }
+  return { byStatus, revenue, recognizedRevenue, deliveredRevenue, cancelledCount: byStatus['cancelled'] ?? 0 }
+}
+
+// ── Resumen exacto vía RPC metrics_orders_summary (feature-detected) ─────────
+export type OrdersSummary = {
+  orders_total: number
+  orders_non_cancelled: number
+  orders_cancelled: number
+  gross_sales: number
+  recognized_revenue: number
+  delivered_revenue: number
+  by_status: Record<string, number>
+}
+
+/**
+ * Variación porcentual redondeada de `current` vs `previous`. Devuelve null si
+ * la base previa no es comparable (≤ 0 o no finita) → la UI omite la comparativa
+ * en vez de mostrar un ∞% engañoso.
+ */
+export function pctDelta(current: number, previous: number): number | null {
+  if (!Number.isFinite(previous) || previous <= 0) return null
+  return Math.round(((current - previous) / previous) * 100)
 }
 
 /** Tasa conversión = pedidos no cancelados / conversaciones (misma ventana). */
