@@ -6,8 +6,15 @@ import { Plus, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createIdempotencyKey } from '@/lib/idempotency'
+
+// Rev. 108 Fase B — método de pago del pedido manual.
+//   • credit → link Wompi (default). Con auto_confirm=false arranca en 'pending'.
+//   • cod    → contraentrega: el backend crea el pedido 'confirmed' y descuenta
+//              inventario de una vez (el courier recauda al entregar).
+type PaymentMethod = 'credit' | 'cod'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -59,6 +66,8 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
   const [items, setItems] = useState<LineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit')
+  const [autoConfirm, setAutoConfirm] = useState(false)
 
   const subtotal = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
   const grandTotal = subtotal + shippingCost
@@ -132,6 +141,9 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
       contact_id: contactId || null,
       notes: notes || null,
       shipping_cost: shippingCost,
+      payment_method: paymentMethod,
+      // COD ya arranca 'confirmed' en backend → auto_confirm sólo aplica a credit.
+      auto_confirm: paymentMethod === 'credit' ? autoConfirm : false,
       items: items.map(it => ({
         product_id: it.productId,
         variation_id: it.variationId,
@@ -161,6 +173,8 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
         setContactId('')
         setNotes('')
         setShippingCost(0)
+        setPaymentMethod('credit')
+        setAutoConfirm(false)
         onCreated()
       }
     } catch {
@@ -334,6 +348,63 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
             onChange={e => setNotes(e.target.value)}
             placeholder="Instrucciones especiales..."
           />
+        </div>
+
+        {/* Método de pago (Rev. 108 Fase B) */}
+        <div className="space-y-2">
+          <Label>Método de pago</Label>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Método de pago">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={paymentMethod === 'credit'}
+              onClick={() => setPaymentMethod('credit')}
+              className={`rounded-lg border px-3 py-2 text-xs text-left transition-colors ${
+                paymentMethod === 'credit'
+                  ? 'border-primary/50 bg-primary/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              <span className="block font-medium">Pago en línea</span>
+              <span className="block text-[11px] text-muted-foreground">Link de pago Wompi</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={paymentMethod === 'cod'}
+              onClick={() => setPaymentMethod('cod')}
+              className={`rounded-lg border px-3 py-2 text-xs text-left transition-colors ${
+                paymentMethod === 'cod'
+                  ? 'border-emerald-700/50 bg-emerald-500/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              <span className="block font-medium">Contraentrega (COD)</span>
+              <span className="block text-[11px] text-muted-foreground">El courier recauda</span>
+            </button>
+          </div>
+
+          {paymentMethod === 'cod' ? (
+            <p className="text-[11px] text-muted-foreground leading-snug px-1">
+              El pedido se crea <span className="font-medium text-foreground">confirmado</span> y
+              descuenta inventario de inmediato. La guía contraentrega se genera desde el listado.
+            </p>
+          ) : (
+            <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs font-medium">Confirmar de inmediato</p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Descuenta inventario ahora. Déjalo apagado para cobrar primero con link Wompi.
+                </p>
+              </div>
+              <Switch
+                checked={autoConfirm}
+                onCheckedChange={setAutoConfirm}
+                aria-label="Confirmar el pedido de inmediato"
+                className="mt-0.5 shrink-0"
+              />
+            </div>
+          )}
         </div>
 
         {error && <p className="text-xs text-red-700">{error}</p>}

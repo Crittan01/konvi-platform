@@ -22,9 +22,10 @@ from supabase import Client
 
 from dependencies.audit import audit_log
 from dependencies.auth import (
+    WRITE_ROLES,
+    get_current_role,
     get_current_tenant,
     get_service_client,
-    require_write_role,
 )
 from dependencies.idempotency import (
     abort_idempotency,
@@ -131,11 +132,18 @@ async def create_order(
     # header + X-Tenant-Id (orchestrator → api).
     tenant_id: str = Depends(get_tenant_id_internal_or_user),
     supabase: Client = Depends(get_service_client_internal_or_user),
-    _role: str = Depends(require_write_internal_or_user),
+    # F2 RBAC (business_call founder-aprobado): operator es la persona principal
+    # del módulo Pedidos → puede CREAR pedidos (crear no mueve dinero irreversible:
+    # COD/credit arrancan pending/confirmed sin refund). get_role_internal_or_user
+    # admite owner|manager|operator (RUNTIME_ROLES) y sigue devolviendo 'owner' al
+    # tráfico internal-service. Las operaciones con dinero irreversible (cancelar
+    # confirmado→refund, payment-link) permanecen owner/manager (ver patch_order y
+    # create_payment_link).
+    _role: str = Depends(get_role_internal_or_user),
     _plan: object = Depends(PLAN_ORDERS_CREATE),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
-    """Crea pedido con ítems. Calcula total automáticamente. Solo owner/manager."""
+    """Crea pedido con ítems. Calcula total automáticamente. owner/manager/operator."""
     idem_session = None
     try:
         request_hash = payload_fingerprint(order.model_dump(mode="json"))
@@ -340,16 +348,22 @@ async def patch_order(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # F2 RBAC (business_call founder-aprobado): operator puede avanzar estado y
+    # editar notas (opera el módulo), PERO cancelar un pedido dispara refund/void
+    # de dinero → esa transición queda gateada a owner/manager (check inline abajo).
+    role: str = Depends(get_current_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """
-    Cambia estado y/o notas del pedido. Solo owner/manager.
+    Cambia estado y/o notas del pedido. owner/manager/operator (cancelar: solo
+    owner/manager — mueve dinero).
 
     Lógica especial:
     - pending → confirmed: decrementa stock de cada variante de los ítems del pedido
       e inserta registros en stock_movements con reason='sale'.
     """
+    if role not in {"owner", "manager", "operator"}:
+        raise HTTPException(status_code=403, detail="Permiso insuficiente")
     try:
         data = {k: v for k, v in patch.model_dump().items() if v is not None}
         if not data:
@@ -360,6 +374,14 @@ async def patch_order(
             raise HTTPException(
                 status_code=422,
                 detail=f"Estado inválido. Válidos: {', '.join(sorted(VALID_STATUSES))}"
+            )
+
+        # F2 RBAC: cancelar mueve dinero (refund/void Wompi) e inventario → solo
+        # owner/manager. Operator opera el ciclo forward pero no cancela.
+        if new_status == "cancelled" and role not in WRITE_ROLES:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo owner o manager pueden cancelar un pedido (implica reembolso).",
             )
 
         # Verificar estado actual antes de actualizar

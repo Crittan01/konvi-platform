@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import OrdersManager from './_components/orders-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
@@ -19,40 +20,98 @@ type Order = {
   order_items: OrderItem[]
 }
 
-// Estados persistidos por el backend (VALID_STATUSES en orders.py). Se usan
-// para pedir el conteo real por estado con head:true (COUNT agregado, no
-// full-table fetch → antes se traían TODAS las filas solo para contarlas en JS).
+// Estados persistidos por el backend (VALID_STATUSES en orders.py).
 const STATUS_KEYS = [
   'pending', 'pending_payment', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled',
 ] as const
+const VALID_STATUS_SET = new Set<string>(STATUS_KEYS)
 
-// Cota defensiva del payload SSR de los selects del formulario (patrón
-// data-fetching: acotar listados). Los tenants objetivo están muy por debajo;
-// a mayor escala el picker requiere typeahead server-side (ver needs_founder).
 const FORM_SELECT_LIMIT = 1000
+// D7 — página server-side. Fija el tope de filas por página y elimina el cap
+// client-side de 100 que dejaba inseleccionables los pedidos antiguos.
+const ORDERS_PER_PAGE = 20
 
-export default async function OrdersPage() {
-  // Sem 5 perf: cached.
+export default async function OrdersPage(props: {
+  searchParams: Promise<{
+    status?: string; q?: string; page?: string; contact_id?: string; id?: string
+  }>
+}) {
+  const sp = await props.searchParams
+
+  // D8 — deep-link por id: redirige a la vista de detalle (consumidor natural
+  // de los enlaces desde Reclamos / Contactos).
+  if (sp.id) redirect(`/dashboard/orders/${sp.id}`)
+
   const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
-  const canWrite = role === 'owner' || role === 'manager'
+  // D1 (RBAC) — operator opera el módulo (crear/avanzar). Dinero irreversible
+  // (cancelar, link de pago, guía) queda en owner/manager.
+  const canWrite = ['owner', 'manager', 'operator'].includes(role)
+  const canManageMoney = ['owner', 'manager'].includes(role)
   const supabase = await createClient()
+
+  // ── Parámetros de filtro/paginación ───────────────────────────────────────
+  const status = sp.status && VALID_STATUS_SET.has(sp.status) ? sp.status : 'all'
+  const q = (sp.q ?? '').replace(/[%_]/g, '').trim().slice(0, 60)
+  const contactId = sp.contact_id || null
+  const parsedPage = parseInt(sp.page ?? '1', 10)
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
+  const offset = (page - 1) * ORDERS_PER_PAGE
 
   let orders: Order[] = []
   let products: Product[] = []
   let contacts: Contact[] = []
   let counts: Record<string, number> = {}
+  let filteredCount = 0
+  let contactName: string | null = null
   let loadError: string | null = null
 
   if (tenantId) {
-    const [ordersRes, productsRes, contactsRes, allCountRes, ...statusCountRes] = await Promise.all([
-      supabase
-        .from('orders')
-        .select('id, status, total_amount, discount_amount, shipping_cost, notes, created_at, payment_method, contacts(id, phone, name), order_items(title, quantity, unit_price)')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(100),
+    // D7 — búsqueda server-side por contacto (nombre/teléfono). Resolvemos los
+    // contact_id que coinciden y filtramos pedidos por ese conjunto. Dos ilike
+    // en lugar de .or() para seguir el patrón del repo (audit/page.tsx).
+    let searchContactIds: string[] | null = null
+    if (q) {
+      const [byName, byPhone] = await Promise.all([
+        supabase.from('contacts').select('id').eq('tenant_id', tenantId).ilike('name', `%${q}%`).limit(200),
+        supabase.from('contacts').select('id').eq('tenant_id', tenantId).ilike('phone', `%${q}%`).limit(200),
+      ])
+      searchContactIds = Array.from(new Set([
+        ...((byName.data as { id: string }[] | null) ?? []),
+        ...((byPhone.data as { id: string }[] | null) ?? []),
+      ].map(r => r.id)))
+    }
+
+    // Listado paginado (count exacto para la barra de paginación).
+    let listQuery = supabase
+      .from('orders')
+      .select(
+        'id, status, total_amount, discount_amount, shipping_cost, notes, created_at, payment_method, contacts(id, phone, name), order_items(title, quantity, unit_price)',
+        { count: 'exact' },
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + ORDERS_PER_PAGE - 1)
+
+    if (status !== 'all') listQuery = listQuery.eq('status', status)
+    if (contactId) listQuery = listQuery.eq('contact_id', contactId)
+    // Si hay búsqueda sin coincidencias de contacto → resultado vacío inmediato.
+    if (searchContactIds !== null) {
+      if (searchContactIds.length === 0) listQuery = listQuery.eq('contact_id', '00000000-0000-0000-0000-000000000000')
+      else listQuery = listQuery.in('contact_id', searchContactIds)
+    }
+
+    // Conteos por estado (badges). Lente persistente = tenant + contacto; el
+    // texto de búsqueda no afecta las pestañas (reflejan la distribución real).
+    const countBase = () => {
+      let cq = supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId)
+      if (contactId) cq = cq.eq('contact_id', contactId)
+      return cq
+    }
+
+    const [listRes, productsRes, contactsRes, allCountRes, ...statusCountRes] = await Promise.all([
+      listQuery,
       supabase
         .from('products')
         .select('id, title, product_variations(id, price, attributes)')
@@ -66,32 +125,31 @@ export default async function OrdersPage() {
         .eq('tenant_id', tenantId)
         .order('name')
         .limit(FORM_SELECT_LIMIT),
-      supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId),
-      ...STATUS_KEYS.map(s =>
-        supabase
-          .from('orders')
-          .select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-          .eq('status', s),
-      ),
+      countBase(),
+      ...STATUS_KEYS.map(s => countBase().eq('status', s)),
     ])
 
-    // Patrón data-fetching: surfacear el error de lectura, NO renderizar un
-    // falso-0 (una lista vacía por fallo de red se veía idéntica a "sin pedidos").
-    if (ordersRes.error) {
+    if (listRes.error) {
       loadError = 'No se pudieron cargar los pedidos. Reintenta en unos segundos.'
     }
 
     counts = { all: allCountRes.count ?? 0 }
     STATUS_KEYS.forEach((s, i) => { counts[s] = statusCountRes[i]?.count ?? 0 })
 
-    orders = (ordersRes.data as unknown as Order[]) || []
+    orders = (listRes.data as unknown as Order[]) || []
+    filteredCount = listRes.count ?? 0
     products = (productsRes.data as Product[]) || []
     contacts = (contactsRes.data as Contact[]) || []
+
+    // D9 — nombre del contacto para el banner de filtro.
+    if (contactId) {
+      const { data: c } = await supabase
+        .from('contacts').select('name, phone').eq('id', contactId).eq('tenant_id', tenantId).maybeSingle()
+      if (c) contactName = c.name || c.phone
+    }
   }
+
+  const totalPages = Math.max(1, Math.ceil(filteredCount / ORDERS_PER_PAGE))
 
   // ── Server Actions ────────────────────────────────────────────────────────
   async function updateOrderStatus(formData: FormData) {
@@ -99,9 +157,8 @@ export default async function OrdersPage() {
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    // F2: no-op silencioso → throw. Antes un rol insuficiente o sesión expirada
-    // dejaba morir el spinner sin feedback; ahora el cliente captura y muestra toast.
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+    // D1: operator puede avanzar estado / editar; cancelar (refund) es owner/manager.
+    if (!m.tenant_id || !['owner', 'manager', 'operator'].includes(m.role ?? '')) {
       throw new Error('No tienes permisos para actualizar el pedido.')
     }
 
@@ -109,12 +166,14 @@ export default async function OrdersPage() {
     const isCancel = formData.get('cancel') === 'true'
     const nextStatus = formData.get('next_status') as string
 
+    if (isCancel && !['owner', 'manager'].includes(m.role ?? '')) {
+      throw new Error('Solo owner o manager pueden cancelar un pedido (implica reembolso).')
+    }
+
     const { data: { session: s } } = await sb.auth.getSession()
     const token = s?.access_token
     if (!token) throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.')
 
-    // F2.2: cancel y avance de estado pasan AMBOS por la API. El cancel antes escribía directo a
-    // Supabase (sin @audit_log ni validación de transición); ahora reusa el mismo PATCH auditado.
     const targetStatus = isCancel ? 'cancelled' : nextStatus
     try {
       const ctrl = new AbortController()
@@ -126,9 +185,6 @@ export default async function OrdersPage() {
         signal: ctrl.signal,
       })
       clearTimeout(timeout)
-      // F139: NO tragar el fallo (antes: sin check de res.ok + catch vacío) — una transición inválida
-      // (400/409), RBAC (403) o timeout dejaban al operador sin ningún aviso (el spinner terminaba y se
-      // repintaba el mismo estado). Lanzar lo surface vía el error boundary.
       if (!res.ok) throw new Error((await res.text()).slice(0, 200) || `Error ${res.status}`)
     } catch (e) {
       throw e instanceof Error ? e : new Error('No se pudo actualizar el pedido (timeout o red)')
@@ -137,9 +193,7 @@ export default async function OrdersPage() {
     revalidatePath('/dashboard/orders')
   }
 
-  // Rev. 108 Fase B — Generar guía Aveonline manualmente desde Inbox.
-  // Aplicación principal: órdenes COD (que no disparan wompi_webhook).
-  // Owner + manager.
+  // Generar guía Aveonline manualmente (COD). owner + manager (genera costos).
   async function generateShippingGuide(
     formData: FormData,
   ): Promise<{ ok: boolean; message?: string; tracking?: string }> {
@@ -212,7 +266,16 @@ export default async function OrdersPage() {
       contacts={contacts}
       role={role}
       canWrite={canWrite}
+      canManageMoney={canManageMoney}
       counts={counts}
+      filteredCount={filteredCount}
+      currentPage={page}
+      totalPages={totalPages}
+      perPage={ORDERS_PER_PAGE}
+      status={status}
+      query={q}
+      contactId={contactId}
+      contactName={contactName}
       loadError={loadError}
       updateStatusAction={updateOrderStatus}
       generateShippingGuideAction={generateShippingGuide}
