@@ -200,6 +200,43 @@ def _validate_attr_value(d: dict, key: str, value) -> None:
             raise HTTPException(status_code=422, detail=f"'{key}' debe ser Sí/No (recibido '{sval}').")
 
 
+def _contract_labels(supabase: Client, tenant_id: str, category_id: Optional[str]) -> set:
+    """Etiquetas (normalizadas) de los atributos PRODUCT-LEVEL gobernados por el contrato de la categoría.
+    Vacío si no hay categoría o la categoría no tiene contrato (backward-compat)."""
+    if not category_id:
+        return set()
+    defs = (
+        supabase.table("product_attribute_definitions")
+        .select("label")
+        .eq("tenant_id", tenant_id)
+        .eq("product_category_id", category_id)
+        .eq("is_variant_axis", False)
+        .execute()
+    )
+    return {_norm_attr(d["label"]) for d in (defs.data or [])}
+
+
+def _merge_product_attributes(
+    supabase: Client, tenant_id: str, category_id: Optional[str], existing: Optional[dict], incoming: Optional[dict]
+) -> dict:
+    """Merge product-level attributes SIN pérdida de datos (fix data-loss del drawer 'Información').
+
+    El editor del contrato solo reenvía las etiquetas gobernadas por el contrato de la categoría; un PATCH
+    que REEMPLAZARA products.attributes destruiría en silencio los pares legacy KAIU pre-F7 (fuera de
+    contrato). Semántica del merge:
+      - se PRESERVAN las claves existentes NO gobernadas por el contrato (legacy),
+      - las claves del contrato reflejan `incoming` (así vaciar un valor sí lo limpia, sin re-fantasmas).
+    Sin contrato (categoría sin defs) → merge puro: todo lo existente se preserva y `incoming` sobrescribe."""
+    labels = _contract_labels(supabase, tenant_id, category_id)
+    merged: dict = {}
+    for k, v in (existing or {}).items():
+        if _norm_attr(k) not in labels:
+            merged[k] = v
+    for k, v in (incoming or {}).items():
+        merged[k] = v
+    return merged
+
+
 def _validate_attributes_against_contract(
     supabase: Client, tenant_id: str, category_id: Optional[str], attributes: Optional[dict]
 ) -> None:
@@ -478,20 +515,27 @@ async def patch_product(
         if "category_id" in data:
             _assert_category_owned(supabase, tenant_id, data["category_id"])
         # ADR-0029 D4: si el patch toca attributes (o reasigna categoría), valida contra el contrato de la
-        # categoría EFECTIVA (la del patch si se reasigna; si no, la actual del producto).
+        # categoría EFECTIVA (la del patch si se reasigna; si no, la actual del producto) y MERGE (no reemplaza)
+        # para no destruir pares legacy fuera de contrato (fix data-loss silencioso del drawer 'Información').
         if "attributes" in data:
+            incoming = data["attributes"] or {}
             eff_cat = data["category_id"] if "category_id" in data else None
+            # Se necesita el estado actual: la categoría efectiva (si no se reasigna) y los attributes existentes
+            # (para preservar los legacy). Una sola lectura sirve para ambos.
+            cur = (
+                supabase.table("products")
+                .select("category_id, attributes")
+                .eq("id", product_id)
+                .eq("tenant_id", tenant_id)
+                .maybe_single()
+                .execute()
+            )
+            curd = cur.data or {}
             if eff_cat is None:
-                cur = (
-                    supabase.table("products")
-                    .select("category_id")
-                    .eq("id", product_id)
-                    .eq("tenant_id", tenant_id)
-                    .maybe_single()
-                    .execute()
-                )
-                eff_cat = (cur.data or {}).get("category_id")
-            _validate_attributes_against_contract(supabase, tenant_id, eff_cat, data["attributes"])
+                eff_cat = curd.get("category_id")
+            existing_attrs = curd.get("attributes") or {}
+            _validate_attributes_against_contract(supabase, tenant_id, eff_cat, incoming)
+            data["attributes"] = _merge_product_attributes(supabase, tenant_id, eff_cat, existing_attrs, incoming)
 
         result = (
             supabase.table("products")

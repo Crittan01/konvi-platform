@@ -461,6 +461,28 @@ export default async function CatalogPage() {
     // El ledger debe cuadrar: se registra el delta EFECTIVO (newStock - prevStock), no el solicitado.
     // Restar 50 a un stock de 10 asienta delta=-10 (clamp a 0), no -50 → la suma reconcilia con el stock.
     const effectiveDelta = newStock - prevStock
+
+    // Semántica de inventario (business_call): un ajuste manual NO puede dejar el físico por debajo de lo
+    // RESERVADO por carritos activos del bot (si no, el bot vendería stock que ya no existe → oversell).
+    // Solo aplica a salidas (delta<0). Fail-open si la consulta de reservas falla: no bloquea operaciones.
+    if (delta < 0) {
+      const { data: resRows, error: resErr } = await sb
+        .from('stock_reservations')
+        .select('qty')
+        .eq('tenant_id', m.tenant_id)
+        .eq('variation_id', variationId)
+        .eq('status', 'active')
+        .gt('expires_at', new Date().toISOString())
+      if (resErr) {
+        console.warn('[catalog:adjustStock] no se pudo verificar reservas activas (fail-open)', { variationId, error: resErr.message })
+      } else {
+        const reserved = (resRows ?? []).reduce((acc, r) => acc + ((r as { qty: number }).qty ?? 0), 0)
+        if (newStock < reserved) {
+          return fail(`No puedes bajar el stock físico a ${newStock} u.: hay ${reserved} u. reservadas en carritos activos. Libera las reservas o ajusta una cantidad menor.`)
+        }
+      }
+    }
+
     const { data: { session: s } } = await sb.auth.getSession()
     // NOTA F2.2: update + insert no son transaccionales aquí (escritura directa a Supabase, sin RPC/audit
     // API). Se hace el update primero; solo si cuadra se asienta el movimiento, para no dejar un asiento
@@ -489,6 +511,19 @@ export default async function CatalogPage() {
       revalidatePath('/dashboard/catalog')
       return fail('Stock actualizado, pero no se pudo registrar el movimiento en el historial.')
     }
+    // Cobertura de auditoría (F4): el ajuste de inventario alimenta el trail cross-cutting (módulo Auditoría),
+    // no solo stock_movements. entity_type reutilizado ('variation', ya etiquetado) — sin tipo huérfano.
+    // Best-effort: si falla el asiento de auditoría NO se revierte el ajuste (el stock ya cambió y quedó en el ledger).
+    const { error: auditErr } = await sb.from('audit_log').insert({
+      tenant_id: m.tenant_id,
+      user_id: u?.id ?? null,
+      user_email: u?.email ?? null,
+      action: 'updated',
+      entity_type: 'variation',
+      entity_id: variationId,
+      payload: { change: 'stock_adjustment', delta: effectiveDelta, new_stock: newStock, reason },
+    })
+    if (auditErr) console.error('[catalog:adjustStock] no se pudo asentar el evento de auditoría', { variationId, error: auditErr.message })
     revalidatePath('/dashboard/catalog')
     return ok(effectiveDelta === delta
       ? `Stock ajustado (${effectiveDelta > 0 ? '+' : ''}${effectiveDelta}).`
@@ -508,6 +543,18 @@ export default async function CatalogPage() {
       console.error('[catalog:saveThreshold] fallo update', { error: error.message })
       return fail('No se pudo guardar el umbral. Intenta de nuevo.')
     }
+    // Cobertura de auditoría (F4): el umbral de alerta es configuración del catálogo. entity_type 'settings'
+    // (ya etiquetado en el módulo Auditoría) — best-effort, no revierte el cambio si el asiento falla.
+    const { error: auditErr } = await sb.from('audit_log').insert({
+      tenant_id: m.tenant_id,
+      user_id: u?.id ?? null,
+      user_email: u?.email ?? null,
+      action: 'updated',
+      entity_type: 'settings',
+      entity_id: m.tenant_id,
+      payload: { change: 'low_stock_threshold', low_stock_threshold: val },
+    })
+    if (auditErr) console.error('[catalog:saveThreshold] no se pudo asentar el evento de auditoría', { error: auditErr.message })
     revalidatePath('/dashboard/catalog')
     return ok('Umbral de alerta actualizado.')
   }

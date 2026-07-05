@@ -348,6 +348,36 @@ export function ProductEditDrawer({
     return () => { cancelled = true }
   }, [open, product.category_id, tenantId])
 
+  // Stock reservado por variante (carritos activos del bot). Semántica de inventario (business_call):
+  // el operador ve FÍSICO (stock_quantity) + RESERVADO (SUM reservas activas) + DISPONIBLE (físico − reservado)
+  // para no vender stock atado a un carrito. Degrada seguro: si la tabla/RLS falla → {} (0 reservado, no rompe).
+  const [reservedByVar, setReservedByVar] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!open) { setReservedByVar({}); return }
+    const varIds = (product.product_variations ?? []).map(v => v.id)
+    if (varIds.length === 0) { setReservedByVar({}); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sb = createClient()
+        const { data, error } = await sb
+          .from('stock_reservations')
+          .select('variation_id, qty')
+          .eq('tenant_id', tenantId)
+          .in('variation_id', varIds)
+          .eq('status', 'active')
+          .gt('expires_at', new Date().toISOString())
+        if (error || cancelled) return
+        const acc: Record<string, number> = {}
+        for (const r of (data as { variation_id: string; qty: number }[]) ?? []) {
+          acc[r.variation_id] = (acc[r.variation_id] ?? 0) + (r.qty ?? 0)
+        }
+        if (!cancelled) setReservedByVar(acc)
+      } catch { /* degrada seguro: sin reservas visibles */ }
+    })()
+    return () => { cancelled = true }
+  }, [open, product.id, tenantId])
+
   const setProdAttr = (label: string, value: string) => setProdAttrs(p => ({ ...p, [label]: value }))
   // Solo se envían atributos DEFINIDOS en el contrato y no vacíos (coherente con la validación HARD;
   // los legacy fuera de contrato no se reenvían para no disparar 422). Sin contrato → no se toca attributes.
@@ -600,21 +630,35 @@ export function ProductEditDrawer({
           {/* ③ INVENTARIO */}
           <Section icon={ArrowUpDown} title="Inventario — Registrar movimiento" defaultOpen={false}>
             <p className="text-xs text-muted-foreground">Usa <strong>+</strong> para entradas (compras, devoluciones) y <strong>−</strong> para salidas (mermas, errores). Cada movimiento queda registrado.</p>
+            <p className="text-[10px] text-muted-foreground/80">
+              <strong>Físico</strong> = unidades en bodega · <strong>Reservado</strong> = atado a carritos activos del bot · <strong>Disponible</strong> = lo que se puede vender. No puedes bajar el físico por debajo de lo reservado.
+            </p>
             <div className="rounded-lg border border-border/60 divide-y divide-border/40 overflow-hidden">
-              <div className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 px-3 py-1.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase">
-                <span>Variante</span><span className="text-right">Actual</span><span>Motivo (obligatorio)</span><span className="text-center">+/−</span><span />
+              <div className="grid grid-cols-[1fr_96px_1fr_56px_44px] gap-2 px-3 py-1.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase">
+                <span>Variante</span><span className="text-right">Físico · Disp</span><span>Motivo (obligatorio)</span><span className="text-center">+/−</span><span />
               </div>
-              {vars.map(v => (
-                <ActionResultForm key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 items-center px-3 py-2">
+              {vars.map(v => {
+                const reserved  = reservedByVar[v.id] ?? 0
+                const available = Math.max(0, v.stock_quantity - reserved)
+                return (
+                <ActionResultForm key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_96px_1fr_56px_44px] gap-2 items-center px-3 py-2">
                   <input type="hidden" name="variation_id" value={v.id} />
                   <input type="hidden" name="product_id" value={product.id} />
                   <span className="text-xs font-medium truncate">{fmtAttrs(v.attributes)}</span>
-                  <span className={`text-xs font-mono text-right tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>{v.stock_quantity} u.</span>
+                  <span className="text-right leading-tight">
+                    <span className={`block text-xs font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-foreground'}`}>{v.stock_quantity} u.</span>
+                    {reserved > 0 && (
+                      <span className="block text-[10px] font-mono tabular-nums text-amber-700" title={`${reserved} u. reservadas en carritos activos`}>
+                        −{reserved} · {available} disp
+                      </span>
+                    )}
+                  </span>
                   <Input name="reason" placeholder="Ej: Compra proveedor..." required className="h-7 text-xs" />
                   <Input name="delta" type="number" placeholder="±0" required className="h-7 text-xs font-mono text-center" />
                   <SubmitButton size="sm" pendingText="..." savedText="✓" className="h-7 w-10 p-0 text-xs">OK</SubmitButton>
                 </ActionResultForm>
-              ))}
+                )
+              })}
             </div>
             {/* Historial de movimientos — cierra la promesa del árbol funcional */}
             <StockMovementHistory product={product} tenantId={tenantId} />
