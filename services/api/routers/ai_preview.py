@@ -118,12 +118,12 @@ def _run_cascade(system_prompt: str, message: str) -> Optional[str]:
     si el cascade se degradó / no está disponible (el caller traduce a 502)."""
     try:
         from google.genai import types as genai_types
-        from llm_cascade import cascade_invoke
-        from orchestrator import _get_genai_client
 
+        from lib.gemini_client import get_genai_client
+        from lib.llm_cascade import cascade_invoke
         from lib.llm_suggest import _suggest_tiers
 
-        client = _get_genai_client()
+        client = get_genai_client()
 
         def _invoke(model_name: str):
             return client.models.generate_content(

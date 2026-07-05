@@ -209,11 +209,23 @@ def main() -> None:
                     help="entrega un enlace de recuperación en vez de imprimir una contraseña temporal")
     ap.add_argument("--actor-email", help="email de quien corre el onboarding (audit trail en audit_log)")
     ap.add_argument("--allow-multi-tenant", action="store_true",
-                    help="permite provisionar aunque el owner ya sea owner de otro tenant (JWT no determinístico)")
+                    help="[DEPRECADO — ADR-0030] membresía single-tenant es política; este flag hard-falla")
     ap.add_argument("--allow-duplicate-name", action="store_true",
                     help="permite un nombre de tenant ya existente (tenants.name no es UNIQUE)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    # ADR-0030: membresía single-tenant es política (UNIQUE(user_id) en
+    # tenant_users, migración 20260704156200). El escape hatch --allow-multi-tenant
+    # contradice esa política: crear una 2ª membresía dejaría el JWT no
+    # determinístico Y bloquearía el apply de la migración F6 (su guard aborta si
+    # hay duplicados). Se hard-falla en vez de silenciosamente permitir el drift.
+    if args.allow_multi_tenant:
+        raise SystemExit(
+            "--allow-multi-tenant está deshabilitado por ADR-0030 (membresía "
+            "single-tenant). Un usuario auth = un solo tenant. Si necesitás que "
+            "opere en otro tenant, usá un usuario distinto. Ver docs/adr/"
+            "0030-single-tenant-membership.md.")
 
     name = args.tenant_name.strip()
     if not name:
@@ -237,8 +249,11 @@ def main() -> None:
     owner_id, temp_pw, recovery_link = _resolve_owner(
         sb, email=args.owner_email, user_id=args.owner_user_id, dry_run=args.dry_run, reset_link=args.reset_link)
 
-    # Idempotencia: no crear un 2º tenant para un owner que ya es owner activo (JWT no determinístico).
-    if not args.dry_run and not args.allow_multi_tenant:
+    # ADR-0030: membresía single-tenant. Guard SIEMPRE activo (no bypassable):
+    # un usuario auth pertenece a un solo tenant. Coincide con UNIQUE(user_id) de
+    # la migración 156200 y evita el JWT no determinístico
+    # (custom_access_token_hook SELECT ... LIMIT 1).
+    if not args.dry_run:
         try:
             existing_tid = _owner_already_has_tenant(sb, owner_id)
         except Exception as exc:  # noqa: BLE001
@@ -246,9 +261,9 @@ def main() -> None:
             print(f"[provision] WARN: no pude verificar membresías previas del owner ({exc}); continúo")
         if existing_tid:
             raise SystemExit(
-                f"El owner {owner_id} YA es owner activo del tenant {existing_tid}. Provisionar otro dejaría su "
-                f"JWT no determinístico (custom_access_token_hook SELECT ... LIMIT 1). Usá --allow-multi-tenant "
-                f"sólo si es intencional.")
+                f"El owner {owner_id} YA es miembro del tenant {existing_tid}. Membresía single-tenant "
+                f"es política (ADR-0030): un usuario auth = un solo tenant. Usá un usuario distinto para "
+                f"otro tenant.")
 
     if args.dry_run:
         print(f"[DRY-RUN] provision_tenant(name={name!r}, owner={owner_id}, plan={args.plan!r})")

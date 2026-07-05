@@ -223,10 +223,11 @@ async def suggest_agent_prompt(
     model_used: Optional[str] = None
     try:
         from google.genai import types as genai_types
-        from llm_cascade import cascade_invoke
-        from orchestrator import _get_genai_client
 
-        client = _get_genai_client()
+        from lib.gemini_client import get_genai_client
+        from lib.llm_cascade import cascade_invoke
+
+        client = get_genai_client()
 
         def _invoke(model_name: str):
             return client.models.generate_content(

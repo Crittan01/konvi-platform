@@ -2592,11 +2592,15 @@ class OrchestratorWorker:
                 self._health_status_snapshot[key] = status
                 return bool(val)
             except Exception as exc:
+                # NO deshabilitar permanentemente la RPC: un blip transitorio no
+                # debe volver la tabla persistente stale para siempre. Se reintenta
+                # la RPC cada ciclo; el fallback in-memory cubre SOLO el ciclo que
+                # falló (el loop de salud es infrecuente → costo despreciable, y la
+                # tabla provider_health_alert_dedup sigue siendo autoritativa).
                 logger.warning(
-                    "[HEALTH] fn_claim_health_alert no disponible (%s) — "
-                    "fallback dedup in-memory (re-alertará tras restart)", exc,
+                    "[HEALTH] fn_claim_health_alert no disponible este ciclo (%s) — "
+                    "fallback dedup in-memory por este ciclo; reintento el próximo", exc,
                 )
-                self._health_alert_persistent = False
 
         prev_status = self._health_status_snapshot.get(key)
         self._health_status_snapshot[key] = status
