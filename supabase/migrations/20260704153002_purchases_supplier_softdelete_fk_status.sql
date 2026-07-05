@@ -38,7 +38,7 @@ BEGIN
     AND t.relname = 'purchase_orders'
     AND c.contype = 'f'
     AND c.confdeltype = 'c'                       -- 'c' = ON DELETE CASCADE
-    AND (SELECT array_agg(a.attname ORDER BY a.attnum)
+    AND (SELECT array_agg(a.attname::text ORDER BY a.attnum)
          FROM unnest(c.conkey) k
          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k)
         = ARRAY['supplier_id']
