@@ -84,6 +84,22 @@ export function draftTotal(items: DraftItem[]): number {
   return items.reduce((sum, i) => sum + (Number.isFinite(i.qty) ? i.qty : 0) * (Number.isFinite(i.cost) ? i.cost : 0), 0)
 }
 
+/**
+ * Etiqueta humana citable de una OC. Con la numeración consecutiva por-tenant
+ * (migración 20260704156310) devuelve OC-001, OC-002, … El operador puede citar
+ * ese número al proveedor por teléfono/WhatsApp.
+ *
+ * Degradación segura: si `po_number` aún no existe (columna sin migrar → null),
+ * cae al prefijo del UUID ("OC 3F2A9B1C") — el comportamiento previo. Se rellena
+ * a 3 dígitos como piso visual; números ≥ 1000 se muestran completos.
+ */
+export function formatPONumber(poNumber: number | null | undefined, id: string): string {
+  if (typeof poNumber === 'number' && Number.isFinite(poNumber) && poNumber > 0) {
+    return `OC-${String(Math.floor(poNumber)).padStart(3, '0')}`
+  }
+  return `OC ${id.split('-')[0].toUpperCase()}`
+}
+
 const COP = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 })
 
 /** Formato de moneda es-CO determinista (mismo resultado en SSR y cliente). */

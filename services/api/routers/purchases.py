@@ -10,6 +10,8 @@ Endpoints:
   GET    /api/v1/purchases/                   — listar órdenes de compra       [todos]
   POST   /api/v1/purchases/                   — crear OC con items[]           [owner]
   GET    /api/v1/purchases/{po_id}            — detalle con items
+  PATCH  /api/v1/purchases/{po_id}            — editar OC en 'ordered'
+                                                (cantidades/costos/fecha)       [owner]
   POST   /api/v1/purchases/{po_id}/cancel     — cancelar OC pendiente          [owner]
   POST   /api/v1/purchases/{po_id}/receive    — marcar recibida + actualizar
                                                 stock + WAC determinístico     [owner]
@@ -78,6 +80,16 @@ class POItemCreate(BaseModel):
 class PurchaseOrderCreate(BaseModel):
     supplier_id: str
     items: List[POItemCreate] = Field(..., min_length=1)
+    expected_date: Optional[str] = None  # ISO 8601
+
+
+class PurchaseOrderUpdate(BaseModel):
+    """Edición de una OC en estado 'ordered' (corregir cantidades/costos antes de
+    recibir). `items` reemplaza el set completo de ítems (no es un merge parcial:
+    la UI reenvía la lista editada). `expected_date` opcional. Al menos uno debe
+    venir. Solo aplicable mientras la OC está 'ordered' — recibida/cancelada es
+    inmutable (el stock/WAC ya se aplicó o la OC se cerró)."""
+    items: Optional[List[POItemCreate]] = Field(default=None, min_length=1)
     expected_date: Optional[str] = None  # ISO 8601
 
 
@@ -317,6 +329,87 @@ async def get_purchase_order(
         .execute()
     )
     return {**po_res.data, "items": items_res.data or []}
+
+
+@router.patch("/{po_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="purchase_order", action="updated")
+async def update_purchase_order(
+    po_id: str,
+    body: PurchaseOrderUpdate,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),
+):
+    """Corrige una OC en estado 'ordered' (cantidades/costos/fecha) ANTES de
+    recibirla — evita el ciclo cancelar+re-digitar. Solo mutable en 'ordered':
+    recibida ya aplicó stock/WAC; cancelada está cerrada.
+
+    `items` (si viene) reemplaza el set completo: se validan las variations del
+    tenant, se recalcula total_amount server-side y se reescriben los ítems. El
+    UPDATE del encabezado lleva guard `.eq("status","ordered")` para idempotencia
+    y para no editar una OC que cambió de estado entre el GET y el PATCH (409)."""
+    if body.items is None and body.expected_date is None:
+        raise HTTPException(status_code=422, detail="No hay cambios para guardar")
+
+    # 1) La OC debe existir, pertenecer al tenant y estar en 'ordered'.
+    po_res = (
+        supabase.table("purchase_orders")
+        .select("id, status")
+        .eq("id", po_id)
+        .eq("tenant_id", tenant_id)
+        .maybe_single()
+        .execute()
+    )
+    if not po_res or not po_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
+        raise HTTPException(status_code=404, detail="OC no encontrada")
+    if po_res.data.get("status") != "ordered":
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se puede editar una OC pendiente (no recibida ni cancelada)",
+        )
+
+    header_update: dict = {}
+    if body.expected_date is not None:
+        header_update["expected_date"] = body.expected_date
+
+    # 2) Si vienen ítems: validar variations + recalcular total server-side.
+    if body.items is not None:
+        _ensure_variations_belong_to_tenant(
+            supabase, tenant_id, [i.variation_id for i in body.items]
+        )
+        header_update["total_amount"] = sum(i.quantity * i.unit_cost for i in body.items)
+
+    # 3) Actualizar encabezado con guard de estado (idempotencia + carrera GET→PATCH).
+    upd = (
+        supabase.table("purchase_orders")
+        .update(header_update)
+        .eq("id", po_id)
+        .eq("tenant_id", tenant_id)
+        .eq("status", "ordered")
+        .execute()
+    )
+    if not upd.data:
+        raise HTTPException(
+            status_code=409,
+            detail="La OC cambió de estado y ya no se puede editar. Refresca la página.",
+        )
+
+    # 4) Reemplazar ítems (delete + insert) SOLO tras confirmar el guard del header.
+    if body.items is not None:
+        supabase.table("purchase_order_items").delete().eq("po_id", po_id).eq(
+            "tenant_id", tenant_id
+        ).execute()
+        items_payload = [{
+            "tenant_id":    tenant_id,
+            "po_id":        po_id,
+            "variation_id": i.variation_id,
+            "quantity":     i.quantity,
+            "unit_cost":    i.unit_cost,
+        } for i in body.items]
+        supabase.table("purchase_order_items").insert(items_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
+
+    return upd.data[0]
 
 
 @router.post("/{po_id}/cancel", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])

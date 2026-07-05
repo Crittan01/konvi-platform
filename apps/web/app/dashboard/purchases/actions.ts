@@ -171,6 +171,45 @@ export async function createPurchaseOrder(formData: FormData): Promise<ActionRes
   return ok('Orden de compra creada.')
 }
 
+export async function editPurchaseOrder(poId: string, formData: FormData): Promise<ActionResult> {
+  if (!poId) return fail('Falta el identificador de la orden.')
+  const itemsStr = (formData.get('items') as string) || ''
+  if (!itemsStr) return fail('Agrega al menos un ítem a la orden.')
+
+  let items: Array<{ variation_id: string; quantity: number; unit_cost: number }>
+  try {
+    items = JSON.parse(itemsStr)
+  } catch {
+    return fail('Los ítems tienen un formato inválido.')
+  }
+  if (!Array.isArray(items) || !items.length) return fail('La orden debe tener al menos un ítem.')
+
+  // Mismo boundary de validación que createPurchaseOrder (qty entera > 0, costo >= 0).
+  for (const it of items) {
+    if (!it.variation_id) return fail('Hay un ítem sin producto seleccionado.')
+    if (!Number.isInteger(it.quantity) || it.quantity <= 0) {
+      return fail('La cantidad de cada ítem debe ser un número entero mayor a 0.')
+    }
+    if (typeof it.unit_cost !== 'number' || Number.isNaN(it.unit_cost) || it.unit_cost < 0) {
+      return fail('El costo de cada ítem no puede ser negativo.')
+    }
+  }
+
+  const body: Record<string, unknown> = { items }
+  // La fecha estimada solo se envía cuando trae valor (actualiza/fija). Vaciarla
+  // no está soportado por el contrato del API (expected_date None = "sin cambio").
+  const expected_str = (formData.get('expected_date') as string) || ''
+  if (expected_str) body.expected_date = new Date(expected_str).toISOString()
+
+  const res = await apiFetch(`/api/v1/purchases/${poId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return fail(await apiError(res, 'No se pudo actualizar la orden de compra.'))
+  revalidatePath('/dashboard/purchases')
+  return ok('Orden de compra actualizada.')
+}
+
 export async function cancelPurchaseOrder(poId: string): Promise<ActionResult> {
   const res = await apiFetch(`/api/v1/purchases/${poId}/cancel`, { method: 'POST' })
   if (!res.ok) return fail(await apiError(res, 'No se pudo cancelar la orden.'))

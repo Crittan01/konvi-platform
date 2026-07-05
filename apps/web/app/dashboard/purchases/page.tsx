@@ -59,17 +59,34 @@ export default async function PurchasesPage() {
     suppliersError = fallbackSuppliers.error
   }
 
-  // Purchase Orders (acotado + contador total)
-  const { data: posRes, error: posError } = await supabase
+  // Purchase Orders (acotado + contador total). Pedimos po_number (numeración
+  // consecutiva humana, migración 20260704156310). Degradación segura: si la
+  // columna aún no existe en el remote (42703), reintentamos sin ella y la UI
+  // cae al prefijo UUID.
+  const PO_ITEMS_SELECT =
+    'suppliers(id, name), ' +
+    'purchase_order_items(id, quantity, unit_cost, variation_id, product_variations(sku, products(title)))'
+  const primaryPos = await supabase
     .from('purchase_orders')
-    .select(`
-      id, status, expected_date, total_amount, created_at,
-      suppliers(id, name),
-      purchase_order_items(id, quantity, unit_cost, variation_id, product_variations(sku, products(title)))
-    `)
+    .select(`id, status, expected_date, total_amount, created_at, po_number, ${PO_ITEMS_SELECT}`)
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false })
     .limit(PO_LIMIT)
+
+  let posRes = primaryPos.data
+  let posError = primaryPos.error
+  if (posError && /po_number|column|does not exist|42703/i.test(posError.message || '')) {
+    const fallbackPos = await supabase
+      .from('purchase_orders')
+      .select(`id, status, expected_date, total_amount, created_at, ${PO_ITEMS_SELECT}`)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(PO_LIMIT)
+    // El fallback no trae po_number; lo ensanchamos al shape con po_number
+    // (queda undefined en runtime → formatPONumber cae al prefijo UUID).
+    posRes = fallbackPos.data as typeof primaryPos.data
+    posError = fallbackPos.error
+  }
 
   const { count: poTotal } = await supabase
     .from('purchase_orders')

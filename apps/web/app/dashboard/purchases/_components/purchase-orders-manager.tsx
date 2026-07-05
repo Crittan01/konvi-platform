@@ -12,12 +12,12 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
-  Plus, PackageSearch, Trash2, Check, XCircle, Search, Loader2, Info, CalendarClock, Truck,
+  Plus, PackageSearch, Trash2, Check, XCircle, Search, Loader2, Info, CalendarClock, Truck, Pencil,
 } from 'lucide-react'
-import { createPurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder } from '../actions'
+import { createPurchaseOrder, editPurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder } from '../actions'
 import {
   statusMeta, isOpenStatus, buildItemsPayload, validateDraftItems, draftTotal,
-  formatCOP, formatBogotaDate, type DraftItem,
+  formatCOP, formatBogotaDate, formatPONumber, type DraftItem,
 } from '../_lib/purchase-orders'
 import type { Supplier } from './suppliers-manager'
 
@@ -40,8 +40,10 @@ export type PurchaseOrder = {
   total_amount: number
   created_at: string
   expected_date?: string | null
+  po_number?: number | null
   suppliers?: { name: string } | null
   purchase_order_items: {
+    variation_id?: string | null
     quantity: number
     unit_cost: number
     product_variations?: {
@@ -74,9 +76,14 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
   const [selectedSupplier, setSelectedSupplier] = useState('')
   const [expectedDate, setExpectedDate] = useState('')
   const [items, setItems] = useState<DraftItem[]>([])
-  const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [isPending, startTransition] = useTransition()
+
+  // Edición inline de una OC 'ordered' (corregir cantidades/costos antes de
+  // recibir). Solo una OC en edición a la vez.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editItems, setEditItems] = useState<DraftItem[]>([])
+  const [editExpected, setEditExpected] = useState('')
 
   // Solo proveedores activos pueden recibir nuevas OCs (soft-delete F3). Un
   // proveedor desactivado conserva su historial pero no aparece en el selector.
@@ -96,18 +103,6 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
     return list
   }, [products])
 
-  const filteredVariations = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const base = q
-      ? variations.filter(
-          (v) =>
-            v.product_title.toLowerCase().includes(q) ||
-            (v.sku || '').toLowerCase().includes(q),
-        )
-      : variations
-    return base.slice(0, 40)
-  }, [variations, search])
-
   const visibleOrders = useMemo(() => {
     const f = FILTERS.find((x) => x.key === filter)!
     return orders.filter((o) => f.match(o.status))
@@ -118,30 +113,65 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
     return orders.filter((o) => f.match(o.status)).length
   }
 
-  const addItem = (vid: string) => {
-    const v = variations.find((x) => x.id === vid)
-    if (!v) return
-    if (items.some((i) => i.variation_id === vid)) {
-      toast.info('Ese producto ya está en la orden.')
-      return
-    }
-    setItems((prev) => [
-      ...prev,
-      { variation_id: v.id, product_title: v.product_title, sku: v.sku, qty: 1, cost: v.cost_price || 0 },
-    ])
-    setSearch('')
-  }
-
   const resetForm = () => {
     setShowAdd(false)
     setItems([])
     setSelectedSupplier('')
     setExpectedDate('')
-    setSearch('')
   }
 
-  const estimatedTotal = draftTotal(items)
   const validationError = validateDraftItems(selectedSupplier, items)
+
+  // Reconstruye los DraftItem editables desde los ítems persistidos de la OC.
+  // Recupera product_title/sku del catálogo (variations) cuando la variante sigue
+  // activa; si no, cae al título embebido en el ítem persistido.
+  const startEdit = (o: PurchaseOrder) => {
+    const drafts: DraftItem[] = o.purchase_order_items.map((it) => {
+      const vid = it.variation_id || ''
+      const cat = variations.find((v) => v.id === vid)
+      return {
+        variation_id: vid,
+        product_title: cat?.product_title || it.product_variations?.products?.title || 'Producto',
+        sku: cat?.sku ?? it.product_variations?.sku ?? null,
+        qty: Number(it.quantity) || 1,
+        cost: Number(it.unit_cost) || 0,
+      }
+    })
+    setEditingId(o.id)
+    setEditItems(drafts)
+    setEditExpected(o.expected_date ? o.expected_date.slice(0, 10) : '')
+    setShowAdd(false)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditItems([])
+    setEditExpected('')
+  }
+
+  const saveEdit = (o: PurchaseOrder) => {
+    const err = validateDraftItems('placeholder', editItems) // supplier no se edita aquí
+    if (err && err !== 'Selecciona un proveedor.') {
+      toast.error(err)
+      return
+    }
+    if (editItems.length === 0) {
+      toast.error('La orden debe tener al menos un ítem.')
+      return
+    }
+    const fd = new FormData()
+    fd.append('items', JSON.stringify(buildItemsPayload(editItems)))
+    if (editExpected) fd.append('expected_date', editExpected)
+    startTransition(async () => {
+      const res = await editPurchaseOrder(o.id, fd)
+      if (!res.ok) {
+        toast.error(res.error || 'No se pudo actualizar la orden.')
+        return
+      }
+      toast.success(res.message || 'Orden actualizada.')
+      cancelEdit()
+    })
+  }
 
   const completePO = () => {
     const err = validateDraftItems(selectedSupplier, items)
@@ -258,126 +288,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
               </div>
 
               <div className="pt-4 border-t">
-                <label htmlFor="po-item-search" className="text-xs font-semibold text-muted-foreground uppercase">
-                  Añadir ítems a la orden
-                </label>
-                <div className="relative mt-2">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    id="po-item-search"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar producto o SKU..."
-                    className="h-9 pl-8 text-sm"
-                    autoComplete="off"
-                  />
-                </div>
-                {search.trim() !== '' && (
-                  <div className="mt-1 border rounded-md max-h-52 overflow-y-auto bg-background shadow-sm divide-y">
-                    {filteredVariations.length === 0 && (
-                      <p className="p-3 text-xs text-muted-foreground">Sin coincidencias en el catálogo activo.</p>
-                    )}
-                    {filteredVariations.map((v) => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => addItem(v.id)}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-muted/60 flex justify-between items-center gap-2"
-                      >
-                        <span className="truncate">
-                          <span className="font-medium">{v.product_title}</span>
-                          <span className="text-muted-foreground"> · {v.sku || 'Sin SKU'}</span>
-                        </span>
-                        <span className="text-muted-foreground shrink-0 tabular-nums">
-                          Stock: {v.stock_quantity ?? 0}
-                        </span>
-                      </button>
-                    ))}
-                    {!search && variations.length > 40 && (
-                      <p className="p-2 text-[11px] text-muted-foreground">
-                        Escribe para filtrar entre {variations.length} variantes.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {items.length > 0 && (
-                  <div className="border rounded-md overflow-x-auto bg-muted/10 mt-3">
-                    <Table className="text-xs">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Producto</TableHead>
-                          <TableHead className="w-24">Cantidad</TableHead>
-                          <TableHead className="w-28">Costo unitario</TableHead>
-                          <TableHead className="w-8 sr-only">Quitar</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {items.map((it, idx) => (
-                          <TableRow key={it.variation_id}>
-                            <TableCell className="font-medium max-w-[220px]">
-                              <span className="truncate block">{it.product_title}</span>
-                              {it.sku && <span className="text-muted-foreground">{it.sku}</span>}
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                min={1}
-                                step={1}
-                                aria-label={`Cantidad de ${it.product_title}`}
-                                value={it.qty}
-                                onChange={(e) =>
-                                  setItems((cur) =>
-                                    cur.map((x, i) =>
-                                      i === idx ? { ...x, qty: Math.max(1, Math.floor(Number(e.target.value) || 0)) } : x,
-                                    ),
-                                  )
-                                }
-                                className="h-8 w-20"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                aria-label={`Costo unitario de ${it.product_title}`}
-                                value={it.cost}
-                                onChange={(e) =>
-                                  setItems((cur) =>
-                                    cur.map((x, i) =>
-                                      i === idx ? { ...x, cost: Math.max(0, Number(e.target.value) || 0) } : x,
-                                    ),
-                                  )
-                                }
-                                className="h-8 w-24"
-                              />
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    aria-label={`Quitar ${it.product_title} de la orden`}
-                                    onClick={() => setItems((cur) => cur.filter((_, i) => i !== idx))}
-                                    className="text-red-700 hover:text-red-800"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Quitar ítem</TooltipContent>
-                              </Tooltip>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    <div className="flex justify-between items-center px-3 py-2 border-t bg-muted/30 text-xs">
-                      <span className="text-muted-foreground">{items.length} ítem(s)</span>
-                      <span className="font-semibold">Total estimado: {formatCOP(estimatedTotal)}</span>
-                    </div>
-                  </div>
-                )}
+                <ItemsEditor variations={variations} items={items} onChange={setItems} idPrefix="po-new" />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -435,7 +346,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                     <p className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="font-mono cursor-help">OC {o.id.split('-')[0].toUpperCase()}</span>
+                          <span className="font-mono font-semibold text-foreground cursor-help">{formatPONumber(o.po_number, o.id)}</span>
                         </TooltipTrigger>
                         <TooltipContent>ID completo: {o.id}</TooltipContent>
                       </Tooltip>
@@ -453,20 +364,60 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                   </div>
                 </div>
 
-                <div className="bg-muted/30 p-2 rounded text-xs space-y-1 mt-2">
-                  {o.purchase_order_items.map((i, k) => (
-                    <div key={k} className="flex justify-between w-full">
-                      <span className="truncate">
-                        {i.quantity}x {i.product_variations?.products?.title || 'Producto'}{' '}
-                        ({i.product_variations?.sku || 'Sin SKU'})
-                      </span>
-                      <span className="font-mono tabular-nums text-muted-foreground ml-2">{formatCOP(i.unit_cost)}/u.</span>
+                {editingId === o.id ? (
+                  <div className="mt-2 border border-primary/40 rounded-md p-3 bg-primary/[0.03] space-y-3">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase">Editando orden</p>
+                    <ItemsEditor variations={variations} items={editItems} onChange={setEditItems} idPrefix={`po-edit-${o.id}`} />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label htmlFor={`po-edit-date-${o.id}`} className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                          <CalendarClock className="h-3 w-3" /> Fecha estimada de llegada
+                        </label>
+                        <input
+                          id={`po-edit-date-${o.id}`}
+                          type="date"
+                          aria-label="Fecha estimada de llegada"
+                          value={editExpected}
+                          onChange={(e) => setEditExpected(e.target.value)}
+                          className="w-full h-9 px-3 rounded-md border text-sm bg-background"
+                        />
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button type="button" variant="ghost" size="sm" onClick={cancelEdit} className="text-xs" disabled={isPending}>
+                        Descartar cambios
+                      </Button>
+                      <Button type="button" size="sm" onClick={() => saveEdit(o)} disabled={isPending || editItems.length === 0} className="text-xs">
+                        {isPending ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Guardando...</> : 'Guardar cambios'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-muted/30 p-2 rounded text-xs space-y-1 mt-2">
+                    {o.purchase_order_items.map((i, k) => (
+                      <div key={k} className="flex justify-between w-full">
+                        <span className="truncate">
+                          {i.quantity}x {i.product_variations?.products?.title || 'Producto'}{' '}
+                          ({i.product_variations?.sku || 'Sin SKU'})
+                        </span>
+                        <span className="font-mono tabular-nums text-muted-foreground ml-2">{formatCOP(i.unit_cost)}/u.</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                {isOpenStatus(o.status) && canWrite && (
+                {isOpenStatus(o.status) && canWrite && editingId !== o.id && (
                   <div className="mt-3 flex flex-wrap gap-2 justify-end pt-3 border-t">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => startEdit(o)}
+                      className="h-8 text-xs gap-2"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Editar
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
@@ -525,5 +476,174 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
         </div>
       </div>
     </TooltipProvider>
+  )
+}
+
+type FlatVariation = PurchaseProductVariation & { product_title: string }
+
+/**
+ * Editor de ítems reutilizable (create + edit de OC). Encapsula la búsqueda en
+ * catálogo, el alta de variantes y la tabla editable de cantidad/costo. Mantiene
+ * su propio estado de búsqueda; los ítems son controlados por el padre.
+ */
+function ItemsEditor({
+  variations,
+  items,
+  onChange,
+  idPrefix,
+}: {
+  variations: FlatVariation[]
+  items: DraftItem[]
+  onChange: (items: DraftItem[]) => void
+  idPrefix: string
+}) {
+  const [search, setSearch] = useState('')
+
+  const filteredVariations = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const base = q
+      ? variations.filter(
+          (v) =>
+            v.product_title.toLowerCase().includes(q) ||
+            (v.sku || '').toLowerCase().includes(q),
+        )
+      : variations
+    return base.slice(0, 40)
+  }, [variations, search])
+
+  const addItem = (vid: string) => {
+    const v = variations.find((x) => x.id === vid)
+    if (!v) return
+    if (items.some((i) => i.variation_id === vid)) {
+      toast.info('Ese producto ya está en la orden.')
+      return
+    }
+    onChange([
+      ...items,
+      { variation_id: v.id, product_title: v.product_title, sku: v.sku, qty: 1, cost: v.cost_price || 0 },
+    ])
+    setSearch('')
+  }
+
+  const estimatedTotal = draftTotal(items)
+
+  return (
+    <>
+      <label htmlFor={`${idPrefix}-item-search`} className="text-xs font-semibold text-muted-foreground uppercase">
+        Añadir ítems a la orden
+      </label>
+      <div className="relative mt-2">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          id={`${idPrefix}-item-search`}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar producto o SKU..."
+          className="h-9 pl-8 text-sm"
+          autoComplete="off"
+        />
+      </div>
+      {search.trim() !== '' && (
+        <div className="mt-1 border rounded-md max-h-52 overflow-y-auto bg-background shadow-sm divide-y">
+          {filteredVariations.length === 0 && (
+            <p className="p-3 text-xs text-muted-foreground">Sin coincidencias en el catálogo activo.</p>
+          )}
+          {filteredVariations.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => addItem(v.id)}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-muted/60 flex justify-between items-center gap-2"
+            >
+              <span className="truncate">
+                <span className="font-medium">{v.product_title}</span>
+                <span className="text-muted-foreground"> · {v.sku || 'Sin SKU'}</span>
+              </span>
+              <span className="text-muted-foreground shrink-0 tabular-nums">
+                Stock: {v.stock_quantity ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className="border rounded-md overflow-x-auto bg-muted/10 mt-3">
+          <Table className="text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Producto</TableHead>
+                <TableHead className="w-24">Cantidad</TableHead>
+                <TableHead className="w-28">Costo unitario</TableHead>
+                <TableHead className="w-8 sr-only">Quitar</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((it, idx) => (
+                <TableRow key={it.variation_id}>
+                  <TableCell className="font-medium max-w-[220px]">
+                    <span className="truncate block">{it.product_title}</span>
+                    {it.sku && <span className="text-muted-foreground">{it.sku}</span>}
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      aria-label={`Cantidad de ${it.product_title}`}
+                      value={it.qty}
+                      onChange={(e) =>
+                        onChange(
+                          items.map((x, i) =>
+                            i === idx ? { ...x, qty: Math.max(1, Math.floor(Number(e.target.value) || 0)) } : x,
+                          ),
+                        )
+                      }
+                      className="h-8 w-20"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      aria-label={`Costo unitario de ${it.product_title}`}
+                      value={it.cost}
+                      onChange={(e) =>
+                        onChange(
+                          items.map((x, i) =>
+                            i === idx ? { ...x, cost: Math.max(0, Number(e.target.value) || 0) } : x,
+                          ),
+                        )
+                      }
+                      className="h-8 w-24"
+                    />
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`Quitar ${it.product_title} de la orden`}
+                          onClick={() => onChange(items.filter((_, i) => i !== idx))}
+                          className="text-red-700 hover:text-red-800"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Quitar ítem</TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="flex justify-between items-center px-3 py-2 border-t bg-muted/30 text-xs">
+            <span className="text-muted-foreground">{items.length} ítem(s)</span>
+            <span className="font-semibold">Total estimado: {formatCOP(estimatedTotal)}</span>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
