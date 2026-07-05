@@ -86,3 +86,71 @@ export async function addExpense(formData: FormData): Promise<ActionResult> {
   revalidatePath('/dashboard/finance')
   return ok('Gasto registrado.')
 }
+
+/**
+ * reverseExpense — anula (reverso contable auditado) un gasto vía API (F4).
+ *
+ * NO borra la fila: el backend marca reversed_at/reversed_by/reversal_reason y
+ * el P&L la excluye. Preserva el trail (un P&L sin corrección de errores no es
+ * "verdad numérica"). La corrección se hace registrando un gasto nuevo.
+ *
+ * El endpoint POST /api/v1/expenses/{id}/reverse (RBAC owner-only + audit) es
+ * backend (services/api) — ver external_blocked. Aquí feature-detecteamos su
+ * ausencia (404/501) y damos un mensaje honesto en vez de un fallo opaco.
+ */
+export async function reverseExpense(expenseId: string, reason: string): Promise<ActionResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const m = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+
+  if (!m.tenant_id) return fail('Tu usuario no está asociado a ningún negocio.')
+  if (m.role !== 'owner') return fail('Solo el propietario puede anular gastos.')
+
+  const id = (expenseId ?? '').trim()
+  if (!id) return fail('Gasto no identificado.')
+
+  const motivo = (reason ?? '').trim()
+  if (motivo.length < 3) return fail('Indica el motivo de la anulación (mínimo 3 caracteres).')
+  if (motivo.length > 300) return fail('El motivo es demasiado largo (máximo 300 caracteres).')
+
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) return fail('Tu sesión expiró. Vuelve a iniciar sesión.')
+
+  try {
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 15000)
+    let res: Response
+    try {
+      res = await fetch(`${CORE_API_URL}/api/v1/expenses/${encodeURIComponent(id)}/reverse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ reason: motivo }),
+        signal: ctrl.signal,
+      })
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[finance.reverseExpense] API ${res.status} tenant=${m.tenant_id} exp=${id}: ${body.slice(0, 300)}`)
+      if (res.status === 403) return fail('No tienes permiso para anular gastos.')
+      if (res.status === 404) return fail('El gasto no existe o la anulación aún no está habilitada en el servidor.')
+      if (res.status === 409) return fail('Este gasto ya estaba anulado.')
+      if (res.status === 501) return fail('La anulación de gastos aún no está disponible.')
+      return fail('No se pudo anular el gasto. Intenta de nuevo en unos segundos.')
+    }
+  } catch (e) {
+    const aborted = e instanceof DOMException && e.name === 'AbortError'
+    console.error(`[finance.reverseExpense] ${aborted ? 'timeout' : 'network'} tenant=${m.tenant_id} exp=${id}:`, e)
+    return fail(
+      aborted
+        ? 'La anulación tardó demasiado. Verifica en la tabla antes de reintentar.'
+        : 'Error de red al anular el gasto. Intenta de nuevo.',
+    )
+  }
+
+  revalidatePath('/dashboard/finance')
+  return ok('Gasto anulado.')
+}

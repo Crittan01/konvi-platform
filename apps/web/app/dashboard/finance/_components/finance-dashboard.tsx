@@ -9,11 +9,10 @@ import ExpensesManager from './expenses-manager'
 import FinanceFilters from './finance-filters'
 import { DollarSign, TrendingDown, TrendingUp, Activity, HelpCircle, AlertTriangle, Download, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
-import type { PnlResult } from '../lib/pnl'
+import type { PnlResult, ExpenseRow } from '../lib/pnl'
+import { isReversed } from '../lib/pnl'
 import type { FinanceRange } from '../lib/window'
 import { formatCOP, formatCOPNegative, formatBogotaDate } from '../lib/format'
-
-type ExpenseRow = { id: string; description: string; category: string; expense_date: string; amount: number }
 
 type Props = {
   pnl: PnlResult
@@ -63,12 +62,13 @@ export default function FinanceDashboard({
       ['Margen Neto (%)', netMargin.toFixed(1)],
       [],
       ['Gastos operativos del período'],
-      ['Fecha', 'Categoría', 'Descripción', 'Monto (COP)'],
+      ['Fecha', 'Categoría', 'Descripción', 'Monto (COP)', 'Estado'],
       ...expenses.map((e) => [
         formatBogotaDate(e.expense_date),
         e.category,
         e.description,
         String(Math.round(Number(e.amount) || 0)),
+        isReversed(e) ? 'Anulado' : 'Vigente',
       ]),
     ]
     const csv = rows

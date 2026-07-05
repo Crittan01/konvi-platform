@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import FinanceDashboard from './_components/finance-dashboard'
-import { computePnl, type PnlOrder } from './lib/pnl'
+import { computePnl, type PnlOrder, type ExpenseRow } from './lib/pnl'
 import { financeWindow, parseRange } from './lib/window'
 import { Landmark, AlertTriangle } from 'lucide-react'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
@@ -13,6 +13,37 @@ export const dynamic = 'force-dynamic'
 // agregación cliente-side es incompleta → lo advertimos y (ver needs_founder)
 // hará falta un RPC de agregación en Postgres.
 const AGG_LIMIT = 1000
+
+const EXPENSE_COLS_FULL = 'id, description, category, expense_date, amount, reversed_at, reversal_reason'
+const EXPENSE_COLS_BASE = 'id, description, category, expense_date, amount'
+
+/**
+ * Lee gastos de la ventana. Feature-detect del reverso auditado (F4): las
+ * columnas reversed_at/reversal_reason existen tras la migración
+ * 20260704154200. Si aún no se aplicó (código 42703 = undefined_column), cae
+ * al set base y trata todo como vigente — así el P&L no se rompe pre-migración.
+ */
+async function fetchExpenses(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
+  win: { fromUTC: string; toUTC: string },
+) {
+  const q = (cols: string) =>
+    supabase
+      .from('expenses')
+      .select(cols)
+      .eq('tenant_id', tenantId)
+      .gte('expense_date', win.fromUTC)
+      .lte('expense_date', win.toUTC)
+      .order('expense_date', { ascending: false })
+      .limit(AGG_LIMIT)
+
+  const rich = await q(EXPENSE_COLS_FULL)
+  if (rich.error && (rich.error.code === '42703' || /reversed_at|reversal_reason/.test(rich.error.message))) {
+    return q(EXPENSE_COLS_BASE)
+  }
+  return rich
+}
 
 export default async function FinancePage(props: { searchParams: Promise<{ range?: string }> }) {
   const user = await getCachedUser()
@@ -47,14 +78,7 @@ export default async function FinancePage(props: { searchParams: Promise<{ range
       .eq('tenant_id', tenantId)
       .gte('created_at', win.fromUTC)
       .lte('created_at', win.toUTC),
-    supabase
-      .from('expenses')
-      .select('id, description, category, expense_date, amount')
-      .eq('tenant_id', tenantId)
-      .gte('expense_date', win.fromUTC)
-      .lte('expense_date', win.toUTC)
-      .order('expense_date', { ascending: false })
-      .limit(AGG_LIMIT),
+    fetchExpenses(supabase, tenantId, win),
     supabase
       .from('expenses')
       .select('id', { count: 'exact', head: true })
@@ -84,7 +108,7 @@ export default async function FinancePage(props: { searchParams: Promise<{ range
   }
 
   const orders = (ordersRes.data ?? []) as PnlOrder[]
-  const expenses = (expensesRes.data ?? []) as { id: string; description: string; category: string; expense_date: string; amount: number }[]
+  const expenses = (expensesRes.data ?? []) as unknown as ExpenseRow[]
 
   const ordersCount = ordersCountRes.count ?? orders.length
   const expensesCount = expensesCountRes.count ?? expenses.length

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computePnl, isPaidStatus, PAID_ORDER_STATUSES, type PnlOrder } from './pnl'
+import { computePnl, isPaidStatus, isReversed, PAID_ORDER_STATUSES, type PnlOrder } from './pnl'
 import { financeWindow, parseRange } from './window'
 
 const order = (status: string, total: number, items: [number, number][] = []): PnlOrder => ({
@@ -83,6 +83,39 @@ describe('OPEX por categoría', () => {
       ['marketing', 500],
     ])
     expect(r.opexByCategory[0].label).toBe('Nómina')
+  })
+})
+
+describe('reverso auditado de gastos (F4)', () => {
+  it('un gasto anulado (reversed_at) NO cuenta en OPEX ni en el desglose', () => {
+    const r = computePnl([], [
+      { category: 'marketing', amount: 100_000 },
+      { category: 'marketing', amount: 50_000, reversed_at: '2026-07-04T10:00:00Z' },
+    ])
+    expect(r.opex).toBe(100_000)
+    expect(r.opexByCategory).toEqual([{ key: 'marketing', label: 'Marketing y Publicidad', amount: 100_000 }])
+  })
+
+  it('reversed_at null/undefined sí cuenta', () => {
+    const r = computePnl([], [
+      { category: 'payroll', amount: 30_000, reversed_at: null },
+      { category: 'other', amount: 20_000 },
+    ])
+    expect(r.opex).toBe(50_000)
+  })
+
+  it('todos los gastos anulados → OPEX 0 y sin categorías', () => {
+    const r = computePnl([], [
+      { category: 'software', amount: 9_000, reversed_at: '2026-07-04T00:00:00Z' },
+    ])
+    expect(r.opex).toBe(0)
+    expect(r.opexByCategory).toEqual([])
+  })
+
+  it('isReversed detecta el trail', () => {
+    expect(isReversed({ reversed_at: '2026-07-04T00:00:00Z' })).toBe(true)
+    expect(isReversed({ reversed_at: null })).toBe(false)
+    expect(isReversed({})).toBe(false)
   })
 })
 

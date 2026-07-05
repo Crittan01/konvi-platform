@@ -11,7 +11,9 @@
  *   pending / pending_payment = carrito/checkout sin pago → NO son ingreso.
  *   cancelled = excluido. Ver PAID_ORDER_STATUSES.
  * - COGS = Σ(unit_cost · quantity) de los ítems de esos pedidos pagados.
- * - OPEX = Σ gastos operativos del período (tabla expenses).
+ * - OPEX = Σ gastos operativos del período (tabla expenses) EXCLUYENDO los
+ *   anulados (reversed_at != null). Un gasto anulado se preserva para el trail
+ *   pero no debe pesar en el beneficio (reverso contable auditado, F4).
  */
 
 /** Estados de pedido cuyo pago ya está confirmado → cuentan como ingreso. */
@@ -41,7 +43,23 @@ export type PnlOrder = {
   created_at?: string | null
   order_items: PnlOrderItem[] | null
 }
-export type PnlExpense = { category: string; amount: number | null }
+export type PnlExpense = { category: string; amount: number | null; reversed_at?: string | null }
+
+/** Fila de gasto tal como se lee/renderiza en Finanzas (incluye trail de reverso). */
+export type ExpenseRow = {
+  id: string
+  description: string
+  category: string
+  expense_date: string
+  amount: number
+  reversed_at?: string | null
+  reversal_reason?: string | null
+}
+
+/** Un gasto anulado (reverso auditado) no cuenta para el P&L. */
+export function isReversed(e: { reversed_at?: string | null }): boolean {
+  return e.reversed_at != null
+}
 
 export type OpexByCategory = { key: string; label: string; amount: number }
 
@@ -88,6 +106,7 @@ export function computePnl(orders: PnlOrder[], expenses: PnlExpense[]): PnlResul
   const opexMap = new Map<string, number>()
   let opex = 0
   for (const e of expenses) {
+    if (isReversed(e)) continue // gasto anulado: fuera del beneficio
     const amt = num(e.amount)
     opex += amt
     opexMap.set(e.category, (opexMap.get(e.category) ?? 0) + amt)
