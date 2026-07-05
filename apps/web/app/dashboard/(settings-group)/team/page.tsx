@@ -295,6 +295,20 @@ export default async function TeamPage(
           redirect('/dashboard/team?error=usuario-no-encontrado')
         }
         addedUserId = existing!.id
+        // Single-tenant membership (ADR-0030): un usuario pertenece a UN solo
+        // negocio. Si esta cuenta ya es miembro de OTRO tenant, no la reasignamos
+        // (evita membresía cruzada + JWT no-determinista). El RPC add_member_to_tenant
+        // también lo rechaza a nivel DB (defensa en profundidad); esta pre-validación
+        // sólo sirve para dar copy amigable en lugar del error genérico.
+        const { data: otherTenant } = await adminSb
+          .from('tenant_users')
+          .select('tenant_id')
+          .eq('user_id', existing!.id)
+          .neq('tenant_id', m.tenant_id)
+          .limit(1)
+        if (otherTenant?.length) {
+          redirect('/dashboard/team?error=ya-en-otro-negocio')
+        }
         const { error: rpcErr } = await adminSb.rpc('add_member_to_tenant', {
           p_user_id: existing!.id, p_tenant_id: m.tenant_id, p_role: newRole,
         })
@@ -404,9 +418,11 @@ export default async function TeamPage(
     await adminSb.auth.admin.signOut(targetId, 'global')
 
     // 3. Soft-delete en auth.users SOLO si el usuario ya no pertenece a ningún otro tenant.
-    //    deleteUser opera global sobre auth.users; si el usuario es miembro de otro tenant
-    //    (membresía multi-tenant permitida por el schema), soft-borrarlo destruiría su cuenta
-    //    en ese otro tenant. En ese caso solo lo desvinculamos de ESTE tenant.
+    //    ADR-0030 impone membresía single-tenant (UNIQUE(user_id)) → en estado consistente
+    //    nunca habrá otras membresías y este chequeo pasa a deleteUser. Se conserva como
+    //    defensa en profundidad: si el migration aún no está aplicado y un usuario tuviera
+    //    filas en otro tenant, deleteUser (global sobre auth.users) destruiría su cuenta allí;
+    //    en ese caso solo lo desvinculamos de ESTE tenant.
     let accountDeleted = false
     const { data: otherMemberships } = await adminSb
       .from('tenant_users')

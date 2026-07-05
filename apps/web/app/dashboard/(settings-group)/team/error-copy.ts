@@ -24,6 +24,9 @@ export function mapTeamError(rawError: string): string {
   if (raw.includes('ya-es-miembro')) {
     return 'Este email ya es miembro del equipo.'
   }
+  if (raw.includes('ya-en-otro-negocio')) {
+    return 'Esta persona ya tiene acceso a otro negocio en Konvi. Por ahora cada usuario pertenece a un solo negocio; usa un correo distinto o contacta a soporte.'
+  }
   if (raw.includes('miembro-no-encontrado')) {
     return 'No se encontró a ese miembro en tu equipo, o su rol no permite esta acción. Recarga la página para ver el estado actualizado.'
   }
