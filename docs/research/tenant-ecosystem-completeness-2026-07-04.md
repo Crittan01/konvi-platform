@@ -1,5 +1,7 @@
 # Mapa de Completitud del Ecosistema Tenant — Fase 0 · 2026-07-04
 
+> **⚠️ ESTADO 2026-07-05 — DOCUMENTO HISTÓRICO (Fase 0, superado).** Este es el mapa que DISPARÓ el cierre; el trabajo que propone (F1–F7 + las 114 decisiones) YA está **implementado, certificado y desplegado a producción** (`production`=`769569b6`, 26/26 migraciones aplicadas). Los porcentajes (promedio 63%) y los 661 gaps de abajo son el **punto de partida**, NO el estado actual del producto. Para el estado real: commits `D-F2…D-F7`, `docs/operations/HUMAN_INTERVENTIONS.md` y `fase0_raw/decision_brief.json`. No leer como estado vigente.
+
 > Generado por workflow multi-agente `tenant-completeness-audit` (run `wf_8d34d5b5-b1d`): 23 auditores (uno por módulo) × 8 dimensiones DoD v2 → refutación adversarial de cada gap critical/high (147 confirmados / 3 refutados) → crítico de puntos ciegos. Evidencia `file:line` en cada gap, verificada a HEAD (`develop`, post-deploy audit 2026-07-03).
 > **Lente: COMPLETITUD + UX** (¿está terminado y pulido para cualquier tenant?), NO bug-hunt — los bugs del audit 2026-07-03 ya fueron remediados y desplegados.
 
