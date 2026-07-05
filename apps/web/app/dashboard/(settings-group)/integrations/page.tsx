@@ -166,6 +166,26 @@ export default async function IntegrationsPage(
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+
+    // Fase 0 F7 (seguridad): revocar la identidad del operador en el core
+    // (service_role) ANTES de limpiar credenciales. Sin esto un ex-operador
+    // conservaría autoridad para /resolver · /estado sobre las conversaciones
+    // del tenant. RLS bloquea el DELETE directo de tenant_provider_identity
+    // desde el cliente autenticado → se delega al endpoint del API (igual
+    // patrón que disconnectMeli). El endpoint deriva el chat_id de
+    // notification_settings, por eso se invoca antes de vaciar la config.
+    const { data: { session } } = await sb.auth.getSession()
+    if (session) {
+      const res = await fetch(`${CORE_API_URL}/api/v1/integrations/telegram/identity`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (!res.ok && res.status !== 204) {
+        console.error('[disconnectTelegram] revoke identity core API', res.status)
+        redirect(`/dashboard/integrations?error=${encodeURIComponent('No se pudo revocar el acceso del operador de Telegram. Intenta de nuevo.')}`)
+      }
+    }
+
     const { data: existing } = await sb.from('notification_settings').select('config')
       .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').maybeSingle()
     const sid = (existing?.config as Record<string, string>)?.bot_token_secret_id
@@ -293,60 +313,12 @@ export default async function IntegrationsPage(
   // Nota rev. 109: testEnvia eliminado. Aveonline tiene test endpoint en
   // /integrations/aveonline (panel dedicado).
 
-  async function saveWhatsApp(formData: FormData) {
-    'use server'
-    const sb = await createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    const wabaId  = (formData.get('waba_id') as string)?.trim()
-    const phoneId = (formData.get('phone_number_id') as string)?.trim()
-    const token   = (formData.get('access_token') as string)?.trim()
-
-    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
-      .eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp').maybeSingle()
-    const existingSid = (existing?.credentials as Record<string, string>)?.access_token_secret_id
-
-    let secretId: string | null = null
-    if (existingSid) {
-      await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
-      secretId = existingSid
-    } else {
-      const { data } = await sb.rpc('pgsec_upsert_secret', {
-        p_secret: token,
-        p_name: `${m.tenant_id}/whatsapp/access_token`,
-        p_description: 'WhatsApp access token',
-      })
-      secretId = data as string | null
-    }
-
-    // ADR-0023 Phase 6: merge no-destructivo de credentials.
-    // Preserva campos Model B Direct Provider per-tenant (app_id, app_secret_secret_id,
-    // verify_token, integration_role, integration_type, webhook_url_path_segment,
-    // business_id, notes) que el form actual NO captura pero existen en DB.
-    // Sin esto, owner editando WABA + Phone + Token desde panel principal
-    // SOBRESCRIBÍA toda credentials, destruyendo el shape Model B.
-    const existingCredentials = (existing?.credentials as Record<string, unknown>) ?? {}
-    const mergedCredentials = {
-      ...existingCredentials,
-      access_token_secret_id: secretId,
-      phone_number_id: phoneId,
-      waba_id: wabaId,
-    }
-    await sb.from('tenant_integrations').upsert({
-      tenant_id:   m.tenant_id,
-      provider:    'whatsapp',
-      status:      'connected',
-      credentials: mergedCredentials,
-      meta: {
-        waba_id:          wabaId,
-        phone_id_preview: `${phoneId.slice(0, 6)}...${phoneId.slice(-4)}`,
-        token_preview:    token.length > 12 ? `${token.slice(0, 8)}...${token.slice(-4)}` : '●●●●',
-      },
-    }, { onConflict: 'tenant_id,provider' })
-    await sb.from('tenants').update({ meta_waba_id: wabaId }).eq('id', m.tenant_id)
-    revalidatePath('/dashboard/integrations')
-  }
+  // Fase 0 F6: saveWhatsApp (form de 3 campos WABA/Phone/Token) ELIMINADO.
+  // Creaba una conexión Model B INCOMPLETA (sin app_secret + verify_token) que
+  // el connector rechaza (ADR-0023 Direct Provider per-tenant). El onboarding
+  // canónico de 6 credenciales vive en /integrations/whatsapp
+  // (WhatsAppCredentialsForm → POST /api/v1/integrations/whatsapp/credentials),
+  // que ya hace merge no-destructivo y cifra app_secret + access_token en Vault.
 
   async function saveWompi(formData: FormData) {
     'use server'
@@ -528,7 +500,6 @@ export default async function IntegrationsPage(
       disconnectTelegram={disconnectTelegram}
       testTelegram={testTelegram}
       testWhatsApp={testWhatsApp}
-      saveWhatsApp={saveWhatsApp}
       disconnectWhatsApp={disconnectWhatsApp}
     />
   )

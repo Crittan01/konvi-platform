@@ -57,7 +57,8 @@ interface Props {
   disconnectTelegram: () => Promise<void>
   testTelegram: () => Promise<void>
   testWhatsApp: () => Promise<void>
-  saveWhatsApp: (fd: FormData) => Promise<void>
+  // Fase 0 F6: saveWhatsApp (form 3 campos) retirado — onboarding WhatsApp
+  // Model B se hace SOLO en /integrations/whatsapp (6 credenciales, ADR-0023).
   disconnectWhatsApp: () => Promise<void>
 }
 
@@ -124,7 +125,7 @@ export function IntegrationsManager(props: Props) {
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
     testWhatsApp,
-    saveWhatsApp, disconnectWhatsApp,
+    disconnectWhatsApp,
   } = props
 
   const router   = useRouter()
@@ -404,56 +405,29 @@ export function IntegrationsManager(props: Props) {
                   )}
                 </div>
               ) : isOwner ? (
+                /*
+                  Fase 0 F6 — ADR-0023 Model B (Direct Provider per-tenant):
+                  conectar WhatsApp exige 6 credenciales (incluye app_secret +
+                  verify_token para validar el webhook HMAC per-tenant). El form
+                  de 3 campos que vivía aquí creaba una conexión INCOMPLETA que el
+                  connector rechaza. En su lugar redirigimos al panel canónico
+                  /integrations/whatsapp, única superficie de onboarding válida.
+                */
                 <div className="space-y-3">
-                  <div className="flex justify-end">
-                    <ConfigToggle open={!!open.whatsapp} onToggle={() => toggle('whatsapp')} />
+                  <div className="rounded-lg border border-green-700/20 bg-green-500/5 p-3 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider">Conexión Direct Provider</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Tu negocio conecta su <strong className="text-foreground font-medium">propia Meta App</strong> (ADR-0023).
+                      El panel dedicado captura las <strong className="text-foreground font-medium">6 credenciales</strong> —incluyendo
+                      App Secret y Verify Token— necesarias para validar el webhook per-tenant.
+                    </p>
                   </div>
-                  {open.whatsapp && (
-                    <>
-                      <div className="rounded-lg border border-green-700/20 bg-green-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider">Pasos de configuración</p>
-                        <div className="space-y-2">
-                          <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Ve a <span className="font-mono text-foreground">developers.facebook.com</span> → My Apps → selecciona tu app de tipo <strong className="text-foreground font-medium">Business</strong>.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Menú izquierdo → <strong className="text-foreground font-medium">WhatsApp → Configuración API</strong> → copia el <strong className="text-foreground font-medium">WABA ID</strong> y el <strong className="text-foreground font-medium">Phone Number ID</strong>.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              <strong className="text-foreground font-medium">Meta Business Suite → Usuarios del sistema</strong> → crea System User (Admin) → Generar token → activa <span className="font-mono text-green-700 text-[10px]">whatsapp_business_messaging</span> y <span className="font-mono text-green-700 text-[10px]">whatsapp_business_management</span>.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <form action={saveWhatsApp} className="space-y-2.5">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-1">
-                            <Label className="text-xs">WABA ID</Label>
-                            <Input name="waba_id" placeholder="123456789…" required className="h-8 text-xs font-mono" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Phone Number ID</Label>
-                            <Input name="phone_number_id" placeholder="123456789…" required className="h-8 text-xs font-mono" />
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Token de Acceso (System User)</Label>
-                          <Input type="password" name="access_token" placeholder="EAABs…" required autoComplete="off" className="h-8 text-xs font-mono" />
-                        </div>
-                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-500 text-white">
-                          <MessageCircle className="h-3.5 w-3.5" /> Conectar WhatsApp
-                        </SubmitButton>
-                      </form>
-                    </>
-                  )}
+                  <a
+                    href="/dashboard/integrations/whatsapp"
+                    className="flex items-center justify-center gap-1.5 rounded-md h-8 text-xs font-medium bg-green-600 hover:bg-green-500 text-white transition-colors"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" /> Conectar WhatsApp
+                  </a>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>

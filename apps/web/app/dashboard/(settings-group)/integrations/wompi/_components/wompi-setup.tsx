@@ -2,11 +2,17 @@
  * Tab Setup — Wompi.
  *
  * Estructura canónica unificada (Sem 7 F2 cierre):
- *   1. Identidad — 4 API keys (public/private/events/integrity)
+ *   1. Identidad — 2 API keys (private/events)
  *   2. Webhook & Eventos — URL Wompi → Konvi
  *   3. Cumplimiento — signature + idempotency lifecycle + retry+CB
  *   4. Zona de riesgo — desconectar (deshabilitado hoy)
  *   + Banner migración
+ *
+ * Fase 0 F6: retirados los campos fantasma public_key / integrity_key. El
+ * backend (services/) solo consume private_key + events_key — 0 readers de
+ * public_key/integrity_key; se mostraban vacíos y confundían la config. El
+ * integrity_key solo aplicaría si Konvi adoptara el Widget client-side de
+ * Wompi (VALIDAR EN DOC WOMPI antes de re-introducirlos).
  */
 import { CreditCard, KeyRound, Webhook } from 'lucide-react'
 import {
@@ -22,29 +28,19 @@ type Props = {
   mode: string | null
 }
 
-function maskedPreview(value: string | null | undefined, prefix?: string): string {
-  if (!value) return ''
-  const visible = prefix && value.startsWith(prefix)
-    ? value.slice(0, prefix.length + 4)
-    : value.slice(0, 8)
-  return `${visible}…●●●●`
-}
-
 export default function WompiSetup({ connected, credentials, mode }: Props) {
   if (!connected) {
     return (
       <EmptyDisconnected
         icon={CreditCard}
         providerLabel="Wompi"
-        helpText="La conexión se realiza configurando las 4 API keys desde el panel principal de Integraciones."
+        helpText="La conexión se realiza configurando la Llave Privada y la Llave de Eventos desde el panel principal de Integraciones."
       />
     )
   }
 
-  const publicKey = credentials.public_key as string | undefined
   const privateKeySecretId = credentials.private_key_secret_id as string | undefined
   const eventsKeySecretId = credentials.events_key_secret_id as string | undefined
-  const integrityKeySecretId = credentials.integrity_key_secret_id as string | undefined
 
   return (
     <div className="space-y-5">
@@ -55,10 +51,6 @@ export default function WompiSetup({ connected, credentials, mode }: Props) {
         badge={mode ? `Modo: ${mode}` : null}
       >
         <SetupGrid>
-          <SetupField
-            label="Public key"
-            value={publicKey ? maskedPreview(publicKey, 'pub_') : null}
-          />
           <SetupField
             label="Private key"
             value={
@@ -75,18 +67,10 @@ export default function WompiSetup({ connected, credentials, mode }: Props) {
                 : null
             }
           />
-          <SetupField
-            label="Integrity key"
-            value={
-              integrityKeySecretId
-                ? `secret_${integrityKeySecretId.slice(0, 8)}…`
-                : null
-            }
-          />
         </SetupGrid>
         <p className="text-xs text-muted-foreground">
-          Las 3 claves privadas (private/events/integrity) están almacenadas
-          encriptadas en Vault Supabase.
+          La Llave Privada y la Llave de Eventos están almacenadas encriptadas
+          en Vault Supabase.
         </p>
       </SetupSection>
 

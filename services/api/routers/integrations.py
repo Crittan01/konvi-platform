@@ -380,6 +380,81 @@ async def disconnect_meli(
     )
 
 
+# ─── Telegram: revocar identidad de operador al desconectar ──────────────────
+
+
+@router.delete("/telegram/identity", status_code=204)
+@audit_log(entity_type="integration", action="disconnected")
+async def revoke_telegram_identity(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Fase 0 F7 (seguridad) — al desconectar Telegram, revoca la identidad del
+    operador en `tenant_provider_identity` (provider='telegram', chat_id).
+
+    Sin esto, un ex-operador cuyo chat_id sigue mapeado CONSERVA autoridad para
+    ejecutar comandos /resolver · /estado sobre las conversaciones del tenant
+    (hueco de escalación). El DELETE directo de esa tabla NO es posible desde el
+    cliente autenticado (RLS solo permite SELECT por GUC de tenant), por eso la
+    Console lo delega a este endpoint (service_role), igual que `disconnect_meli`.
+
+    Idempotente: 204 aunque no exista identidad. El chat_id se deriva de
+    `notification_settings` del PROPIO tenant (scoped por tenant_id) y solo se
+    revoca si la identidad pertenece a este tenant — un tenant no puede borrar la
+    identidad de otro. Solo owner/manager (paridad con save/disconnect Telegram).
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner/manager pueden desconectar Telegram",
+        )
+
+    settings_res = (
+        supabase.table("notification_settings")
+        .select("config")
+        .eq("tenant_id", tenant_id)
+        .eq("channel", "telegram")
+        .limit(1)
+        .execute()
+    )
+    cfg = (settings_res.data or [{}])[0].get("config") or {}
+    chat_id = cfg.get("chat_id")
+    if not chat_id:
+        # Nada mapeado (nunca se configuró chat_id o config ya vaciada) → no-op.
+        logger.info("[TG] revoke_identity: tenant=%s sin chat_id — no-op", tenant_id)
+        return
+
+    from lib.identity_registry import (
+        IdentityRegistryError,
+        get_identity,
+        revoke_identity,
+    )
+
+    try:
+        ident = get_identity(supabase, "telegram", chat_id)
+        # Defensa cross-tenant: solo revocamos si la identidad es de ESTE tenant.
+        # UNIQUE(provider, internal_id) ya garantiza 1:1, este check es cinturón.
+        if ident is not None and ident.tenant_id == tenant_id:
+            revoke_identity(supabase, "telegram", chat_id)
+            logger.info(
+                "[TG] identity revocada tenant=%s chat=%s (disconnect)",
+                tenant_id, chat_id,
+            )
+        else:
+            logger.info(
+                "[TG] revoke_identity: chat_id=%s no pertenece a tenant=%s — no-op",
+                chat_id, tenant_id,
+            )
+    except IdentityRegistryError as exc:
+        logger.error("[TG] revoke_identity falló tenant=%s: %s", tenant_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo revocar la identidad del operador de Telegram",
+        )
+
+
 # ─── Aveonline: listar agentes del tenant ────────────────────────────────────
 
 
