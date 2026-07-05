@@ -9,16 +9,16 @@ const item = (o: Partial<DraftItem> = {}): DraftItem => ({
 })
 
 describe('statusMeta', () => {
-  it('cubre los 5 estados del CHECK de DB con label es-CO', () => {
-    expect(statusMeta('draft').label).toBe('Borrador')
+  it('cubre los 3 estados que el backend emite con label es-CO', () => {
     expect(statusMeta('ordered').label).toBe('Solicitada / Pendiente')
-    expect(statusMeta('in_transit').label).toBe('En tránsito')
     expect(statusMeta('received').label).toBe('Recibida')
     expect(statusMeta('cancelled').label).toBe('Cancelada')
   })
-  it('no pinta in_transit ni draft como Cancelada (regresión del ternario viejo)', () => {
+  it('estados legados podados (draft/in_transit) caen a fallback neutro, no a Cancelada', () => {
+    expect(statusMeta('draft').label).toBe('draft')
+    expect(statusMeta('draft').variant).toBe('secondary')
     expect(statusMeta('in_transit').label).not.toBe('Cancelada')
-    expect(statusMeta('draft').variant).not.toBe('destructive')
+    expect(statusMeta('in_transit').variant).toBe('secondary')
   })
   it('estado desconocido cae a un fallback neutro, no a Cancelada', () => {
     expect(statusMeta('zzz').label).toBe('zzz')
@@ -27,11 +27,12 @@ describe('statusMeta', () => {
 })
 
 describe('isOpenStatus', () => {
-  it('ordered/in_transit/draft son operables; received/cancelled no', () => {
+  it('solo ordered es operable; received/cancelled y los podados no', () => {
     expect(isOpenStatus('ordered')).toBe(true)
-    expect(isOpenStatus('in_transit')).toBe(true)
     expect(isOpenStatus('received')).toBe(false)
     expect(isOpenStatus('cancelled')).toBe(false)
+    expect(isOpenStatus('in_transit')).toBe(false)
+    expect(isOpenStatus('draft')).toBe(false)
   })
 })
 

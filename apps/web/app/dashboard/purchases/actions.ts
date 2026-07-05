@@ -94,6 +94,44 @@ export async function addSupplier(formData: FormData): Promise<ActionResult> {
   return ok('Proveedor guardado.')
 }
 
+export async function updateSupplier(supplierId: string, formData: FormData): Promise<ActionResult> {
+  if (!supplierId) return fail('Falta el identificador del proveedor.')
+  const name = (formData.get('name') as string)?.trim() || ''
+  if (!name) return fail('El nombre del proveedor es requerido.')
+
+  const body: Record<string, unknown> = { name }
+  // Enviamos siempre email/phone (incluso vacíos → null) para permitir limpiarlos;
+  // el API valida el patrón cuando no son null.
+  const email = (formData.get('contact_email') as string)?.trim()
+  const phone = (formData.get('phone') as string)?.trim()
+  const leadRaw = (formData.get('lead_time_days') as string) || ''
+  if (email) body.contact_email = email
+  if (phone) body.phone = phone
+  if (leadRaw.trim() !== '') {
+    const lead = parseInt(leadRaw, 10)
+    if (!Number.isNaN(lead) && lead >= 0) body.lead_time_days = lead
+  }
+
+  const res = await apiFetch(`/api/v1/purchases/suppliers/${supplierId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return fail(await apiError(res, 'No se pudo actualizar el proveedor.'))
+  revalidatePath('/dashboard/purchases')
+  return ok('Proveedor actualizado.')
+}
+
+export async function setSupplierActive(supplierId: string, isActive: boolean): Promise<ActionResult> {
+  if (!supplierId) return fail('Falta el identificador del proveedor.')
+  const res = await apiFetch(`/api/v1/purchases/suppliers/${supplierId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive }),
+  })
+  if (!res.ok) return fail(await apiError(res, 'No se pudo cambiar el estado del proveedor.'))
+  revalidatePath('/dashboard/purchases')
+  return ok(isActive ? 'Proveedor reactivado.' : 'Proveedor desactivado.')
+}
+
 export async function createPurchaseOrder(formData: FormData): Promise<ActionResult> {
   const supplier_id = (formData.get('supplier_id') as string) || ''
   const itemsStr = (formData.get('items') as string) || ''

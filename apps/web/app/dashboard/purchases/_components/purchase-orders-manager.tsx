@@ -78,6 +78,14 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [isPending, startTransition] = useTransition()
 
+  // Solo proveedores activos pueden recibir nuevas OCs (soft-delete F3). Un
+  // proveedor desactivado conserva su historial pero no aparece en el selector.
+  // is_active ausente (columna sin migrar) = activo.
+  const activeSuppliers = useMemo(
+    () => suppliers.filter((s) => s.is_active !== false),
+    [suppliers],
+  )
+
   const variations = useMemo(() => {
     const list: (PurchaseProductVariation & { product_title: string })[] = []
     for (const p of products) {
@@ -206,7 +214,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
               {totalOrders > orders.length && ` · mostrando las ${orders.length} más recientes de ${totalOrders}`}
             </p>
           </div>
-          {canWrite && !showAdd && suppliers.length > 0 && (
+          {canWrite && !showAdd && activeSuppliers.length > 0 && (
             <Button onClick={() => setShowAdd(true)} size="sm" className="h-8 text-xs gap-1.5">
               <Plus className="h-3.5 w-3.5" /> Nueva Orden
             </Button>
@@ -229,7 +237,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                     className="w-full h-9 px-3 rounded-md border text-sm bg-background"
                   >
                     <option value="">Selecciona...</option>
-                    {suppliers.map((s) => (
+                    {activeSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -384,10 +392,12 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
           </Card>
         )}
 
-        {suppliers.length === 0 && !showAdd && canWrite && (
+        {activeSuppliers.length === 0 && !showAdd && canWrite && (
           <div className="border border-amber-700/25 bg-amber-500/10 p-4 rounded-lg">
             <p className="text-xs text-amber-800 font-medium">
-              Aún no hay proveedores registrados. Registra un proveedor en la pestaña <strong>Proveedores</strong> antes de crear una orden de compra.
+              {suppliers.length === 0
+                ? <>Aún no hay proveedores registrados. Registra un proveedor en la pestaña <strong>Proveedores</strong> antes de crear una orden de compra.</>
+                : <>Todos tus proveedores están inactivos. Reactiva uno en la pestaña <strong>Proveedores</strong> para poder crear una orden de compra.</>}
             </p>
           </div>
         )}
@@ -499,7 +509,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                   Una orden de compra registra lo que le pides a un proveedor. Al recibirla, el stock entra al inventario y se actualiza tu costo promedio.
                 </p>
               </div>
-              {canWrite && suppliers.length > 0 && (
+              {canWrite && activeSuppliers.length > 0 && (
                 <Button onClick={() => setShowAdd(true)} size="sm" className="gap-1.5">
                   <Plus className="h-3.5 w-3.5" /> Crear primera orden
                 </Button>

@@ -4,7 +4,7 @@
  * ve el operador y lo que persiste el API).
  */
 
-export type POStatus = 'draft' | 'ordered' | 'in_transit' | 'received' | 'cancelled'
+export type POStatus = 'ordered' | 'received' | 'cancelled'
 
 export type POStatusMeta = {
   label: string
@@ -12,15 +12,16 @@ export type POStatusMeta = {
 }
 
 /**
- * Mapa único de estado → label es-CO + variante de Badge. Cubre los 5 estados
- * del CHECK de DB (draft/ordered/in_transit/received/cancelled), no solo los 3
- * que emite el API hoy: si un script o un flujo futuro inserta 'draft'/'in_transit',
- * la UI lo etiqueta bien en vez de caer en el ternario a "Cancelado".
+ * F3 — ciclo de vida podado a los estados que el backend REALMENTE emite:
+ * ordered → received | cancelled. Se eliminaron 'draft' e 'in_transit' del mapa:
+ * el API nunca los produce (crea siempre en 'ordered') y la recepción es
+ * todo-o-nada, así que 'in_transit' era inalcanzable. Prometer un ciclo que el
+ * backend no cumple confunde al operador. El fallback neutro sigue etiquetando
+ * cualquier valor legado ('draft'/'in_transit' en filas viejas) con su texto
+ * crudo — nunca como "Cancelada".
  */
 const PO_STATUS_MAP: Record<POStatus, POStatusMeta> = {
-  draft: { label: 'Borrador', variant: 'outline' },
   ordered: { label: 'Solicitada / Pendiente', variant: 'info' },
-  in_transit: { label: 'En tránsito', variant: 'warning' },
   received: { label: 'Recibida', variant: 'success' },
   cancelled: { label: 'Cancelada', variant: 'destructive' },
 }
@@ -29,9 +30,10 @@ export function statusMeta(status: string): POStatusMeta {
   return PO_STATUS_MAP[status as POStatus] ?? { label: status, variant: 'secondary' }
 }
 
-/** Solo las OCs abiertas admiten recibir/cancelar. */
+/** Solo las OCs abiertas admiten recibir/cancelar. El único estado abierto real
+ *  es 'ordered' (la recepción es todo-o-nada; no hay tránsito intermedio). */
 export function isOpenStatus(status: string): boolean {
-  return status === 'ordered' || status === 'in_transit' || status === 'draft'
+  return status === 'ordered'
 }
 
 export type DraftItem = {

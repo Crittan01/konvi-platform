@@ -4,6 +4,7 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { ShoppingCart } from 'lucide-react'
 import PurchasesClient from './_components/purchases-client'
 import type { PurchaseOrder } from './_components/purchase-orders-manager'
+import type { Supplier } from './_components/suppliers-manager'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,21 +26,38 @@ export default async function PurchasesPage() {
   if (!tenantId) {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }
-  const canWrite = role === 'owner' || role === 'manager'
+  // F3 — Compras es owner-only: expone costos/márgenes del tenant y el sidebar ya
+  // lo oculta a manager (sidebar-client.tsx). Alineamos la página al mismo criterio
+  // (antes owner+manager, generaba drift con el sidebar y con el router).
+  const canWrite = role === 'owner'
   const supabase = await createClient()
 
   // Fuente única de tenant_id: el mismo valor que pasamos al cliente filtra las
   // queries (antes se leía user.app_metadata.tenant_id por separado — si divergía
   // del cached meta, se filtraba distinto de lo que veía el cliente).
 
-  // Suppliers
-  const { data: suppliersRes, error: suppliersError } = await supabase
+  // Suppliers — pedimos is_active (soft-delete F3). Degradación segura: si la
+  // columna aún no existe en el remote (migración 20260704153000 pendiente), el
+  // SELECT falla con 42703 y reintentamos sin ella; el manager de proveedores
+  // trata is_active ausente como activo.
+  const SUP_COLS_BASE = 'id, name, contact_email, phone, lead_time_days'
+  const primarySuppliers = await supabase
     .from('suppliers')
-    .select('id, name, contact_email, phone, lead_time_days')
+    .select(`${SUP_COLS_BASE}, is_active`)
     .eq('tenant_id', tenantId)
     .order('name')
 
-  const suppliers = suppliersRes || []
+  let suppliers: Supplier[] = (primarySuppliers.data as Supplier[] | null) || []
+  let suppliersError = primarySuppliers.error
+  if (suppliersError && /is_active|column|does not exist|42703/i.test(suppliersError.message || '')) {
+    const fallbackSuppliers = await supabase
+      .from('suppliers')
+      .select(SUP_COLS_BASE)
+      .eq('tenant_id', tenantId)
+      .order('name')
+    suppliers = (fallbackSuppliers.data as Supplier[] | null) || []
+    suppliersError = fallbackSuppliers.error
+  }
 
   // Purchase Orders (acotado + contador total)
   const { data: posRes, error: posError } = await supabase

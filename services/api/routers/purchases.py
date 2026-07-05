@@ -5,15 +5,22 @@ Rev. 72 — cierra el drift D2 (Purchases escribía directo a DB desde RSC).
 
 Endpoints:
   GET    /api/v1/purchases/suppliers          — listar proveedores             [todos]
-  POST   /api/v1/purchases/suppliers          — crear proveedor                [owner, manager]
+  POST   /api/v1/purchases/suppliers          — crear proveedor                [owner]
+  PATCH  /api/v1/purchases/suppliers/{id}     — editar / (des)activar          [owner]
   GET    /api/v1/purchases/                   — listar órdenes de compra       [todos]
-  POST   /api/v1/purchases/                   — crear OC con items[]           [owner, manager]
+  POST   /api/v1/purchases/                   — crear OC con items[]           [owner]
   GET    /api/v1/purchases/{po_id}            — detalle con items
-  POST   /api/v1/purchases/{po_id}/cancel     — cancelar OC pendiente          [owner, manager]
+  POST   /api/v1/purchases/{po_id}/cancel     — cancelar OC pendiente          [owner]
   POST   /api/v1/purchases/{po_id}/receive    — marcar recibida + actualizar
-                                                stock + WAC determinístico     [owner, manager]
+                                                stock + WAC determinístico     [owner]
 
-Estados PO válidos: ordered → received | cancelled.
+RBAC (F3 — cierre de drift): la escritura en Compras es owner-only, alineada con
+sidebar-client.tsx (Compras oculto a manager). El módulo expone costos/márgenes del
+tenant; ampliar a manager es una decisión de confianza reservada al founder.
+
+Estados PO válidos: ordered → received | cancelled. (Se podaron 'draft'/'in_transit':
+el backend nunca los emite y la recepción es todo-o-nada; prometer estados muertos
+confunde al operador. Ver migración 20260704153000 para el CHECK tightening opcional.)
 
 WAC (Weighted Average Cost) — fórmula determinística aplicada al recibir:
     new_cost = ((max(0, old_stock) * old_cost) + (po_qty * po_cost)) / (max(0, old_stock) + po_qty)
@@ -32,7 +39,7 @@ from dependencies.audit import audit_log
 from dependencies.auth import (
     get_current_tenant,
     get_service_client,
-    require_write_role,
+    require_owner_role,
 )
 from dependencies.security import RL_WRITE_DEFAULT
 
@@ -49,6 +56,17 @@ class SupplierCreate(BaseModel):
     contact_email: Optional[str] = Field(default=None, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     phone: Optional[str] = Field(default=None, pattern=r"^[0-9]{10}$")
     lead_time_days: Optional[int] = Field(default=0, ge=0, le=365)
+
+
+class SupplierUpdate(BaseModel):
+    """Edición parcial de proveedor. Todos los campos opcionales; se persiste solo
+    lo provisto. `is_active=False` = soft-delete (nunca hard-delete: purchase_orders
+    referencia al proveedor y borrarlo destruiría el historial de compras)."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=180)
+    contact_email: Optional[str] = Field(default=None, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    phone: Optional[str] = Field(default=None, pattern=r"^[0-9]{10}$")
+    lead_time_days: Optional[int] = Field(default=None, ge=0, le=365)
+    is_active: Optional[bool] = None
 
 
 class POItemCreate(BaseModel):
@@ -111,6 +129,7 @@ def _compute_wac(old_stock: int, old_cost: float, po_qty: int, po_cost: float) -
 @router.get("/suppliers", response_model=List[dict])
 async def list_suppliers(
     limit: int = Query(default=100, ge=1, le=500),
+    include_inactive: bool = Query(default=False),
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
@@ -122,7 +141,13 @@ async def list_suppliers(
         .limit(limit)
         .execute()
     )
-    return res.data or []
+    rows = res.data or []
+    # Filtro de activos en Python (no en el WHERE) para degradar seguro si la
+    # columna `is_active` aún no existe: r.get(..., True) → un proveedor sin la
+    # columna se trata como activo. Con la migración aplicada, filtra soft-deleted.
+    if not include_inactive:
+        rows = [r for r in rows if r.get("is_active", True)]
+    return rows
 
 
 @router.post("/suppliers", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
@@ -132,7 +157,7 @@ async def create_supplier(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    _role: str = Depends(require_owner_role),
 ):
     payload = {
         "tenant_id":      tenant_id,
@@ -144,6 +169,60 @@ async def create_supplier(
     res = supabase.table("suppliers").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     if not res.data:
         raise HTTPException(status_code=500, detail="No fue posible crear el proveedor")
+    return res.data[0]
+
+
+_MISSING_COLUMN_HINTS = ("is_active", "column", "schema cache", "pgrst204", "42703")
+
+
+@router.patch("/suppliers/{supplier_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="supplier", action="updated")
+async def update_supplier(
+    supplier_id: str,
+    body: SupplierUpdate,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),
+):
+    """Edición parcial + soft-delete (is_active). NO hard-delete: el proveedor está
+    referenciado por purchase_orders; borrarlo destruye el historial de compras."""
+    _ensure_supplier_belongs_to_tenant(supabase, tenant_id, supplier_id)
+
+    payload: dict = {}
+    if body.name is not None:
+        payload["name"] = body.name.strip()
+    if body.contact_email is not None:
+        payload["contact_email"] = body.contact_email
+    if body.phone is not None:
+        payload["phone"] = body.phone
+    if body.lead_time_days is not None:
+        payload["lead_time_days"] = body.lead_time_days
+    if body.is_active is not None:
+        payload["is_active"] = body.is_active
+
+    if not payload:
+        raise HTTPException(status_code=422, detail="No hay cambios para guardar")
+
+    try:
+        res = (
+            supabase.table("suppliers")
+            .update(payload)
+            .eq("id", supplier_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001 — degradar seguro si falta la columna is_active
+        msg = str(exc).lower()
+        if body.is_active is not None and any(h in msg for h in _MISSING_COLUMN_HINTS):
+            logger.warning("[PURCHASES] update_supplier: columna is_active ausente (migración pendiente)")
+            raise HTTPException(
+                status_code=409,
+                detail="Activar/desactivar proveedores requiere una migración pendiente. Contacta al administrador.",
+            ) from exc
+        raise
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado para este tenant")
     return res.data[0]
 
 
@@ -178,7 +257,7 @@ async def create_purchase_order(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Crea PO con items[]. Valida supplier y todas las variations del tenant.
     Total se calcula server-side (no del cliente) — defensa contra manipulación."""
@@ -247,7 +326,7 @@ async def cancel_purchase_order(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Cancela OC en estado 'ordered'. Idempotente: solo afecta filas en 'ordered'."""
     res = (
@@ -273,7 +352,7 @@ async def receive_purchase_order(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Marca OC como received + actualiza stock y WAC + crea stock_movements.
     Idempotente: el UPDATE 'ordered' → 'received' solo aplica si está en 'ordered'."""
