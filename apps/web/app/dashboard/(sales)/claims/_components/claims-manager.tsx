@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Plus, Search, HelpCircle, FileText, CheckCircle2, AlertCircle, Info } from 'lucide-react'
+import { Plus, Search, HelpCircle, FileText, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -50,6 +50,9 @@ const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> 
   cancelled:     { label: 'Cancelado',    color: 'bg-muted text-muted-foreground border-border',         dot: 'bg-muted-foreground' },
 }
 
+// Vocabulario canónico de 'reason' (decisión F2 — Opción A). Estas keys son la
+// fuente de verdad: mismas que valida el API (claims.py VALID_REASONS) y que ofrece
+// el dropdown de "Nuevo Reclamo" más abajo.
 const REASON_MAP: Record<string, string> = {
   defective:     'Producto defectuoso',
   wrong_item:    'Ítem incorrecto',
@@ -60,6 +63,10 @@ const REASON_MAP: Record<string, string> = {
 
 // Estados terminales: el ticket ya se cerró (no admite acciones sin reapertura).
 const TERMINAL = new Set(['resolved', 'refunded', 'rejected', 'cancelled'])
+
+// Terminales reabribles por un owner (decisión F2 — Opción B). 'refunded' y
+// 'resolved' quedan fuera: el guard del API los rechaza (409). Mantener alineado.
+const REOPENABLE = new Set(['rejected', 'cancelled'])
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,11 +81,13 @@ export default function ClaimsManager({
   recentOrders,
   canWrite,
   canResolve,
+  canReopen,
 }: {
   claims: Claim[]
   recentOrders: RecentOrder[]
   canWrite: boolean
   canResolve: boolean
+  canReopen: boolean
 }) {
   const confirm = useConfirm()
 
@@ -216,6 +225,30 @@ export default function ClaimsManager({
     }
   }
 
+  // F2: reabre un terminal reabrible (rejected/cancelled) → vuelve a 'open'.
+  // Owner-only en UI (canReopen) y en el API (guard 403/409). Conserva notas/historial.
+  const handleReopen = async () => {
+    if (!selectedClaim) return
+    const ok = await confirm({
+      title: `¿Reabrir el ticket ${ticketLabel(selectedClaim.ticket_number)}?`,
+      description: 'El reclamo volverá a estado Abierto y podrá gestionarse de nuevo. Se conservan las notas y el historial.',
+      confirmLabel: 'Reabrir',
+    })
+    if (!ok) return
+    setIsSubmitting(true)
+    setActionError(null)
+    try {
+      const resp = await updateClaimStatus(selectedClaim.id, 'open')
+      if (resp?.error) { setActionError(resp.error); toast.error('No se pudo reabrir el reclamo'); return }
+      setSelectedClaim({ ...selectedClaim, status: 'open' })
+      toast.success(`Ticket ${ticketLabel(selectedClaim.ticket_number)} reabierto`)
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   // ─── Detalle (reutilizado en panel desktop y Sheet móvil) ────────────────────
   const renderDetail = () => {
     if (!selectedClaim) return null
@@ -274,9 +307,19 @@ export default function ClaimsManager({
           )}
 
           {isTerminal && (
-            <span className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border shrink-0 ${STATUS_MAP[selectedClaim.status]?.color ?? STATUS_MAP.rejected.color}`}>
-              <CheckCircle2 className="w-3.5 h-3.5" /> {STATUS_MAP[selectedClaim.status]?.label ?? selectedClaim.status}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${STATUS_MAP[selectedClaim.status]?.color ?? STATUS_MAP.rejected.color}`}>
+                <CheckCircle2 className="w-3.5 h-3.5" /> {STATUS_MAP[selectedClaim.status]?.label ?? selectedClaim.status}
+              </span>
+              {canReopen && REOPENABLE.has(selectedClaim.status) && (
+                <Button
+                  size="sm" variant="outline" onClick={handleReopen} disabled={isSubmitting}
+                  className="text-xs h-8 gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reabrir
+                </Button>
+              )}
+            </div>
           )}
         </div>
 

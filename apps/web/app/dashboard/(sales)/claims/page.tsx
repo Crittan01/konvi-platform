@@ -17,6 +17,8 @@ export default async function ClaimsPage() {
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite   = ['owner', 'manager', 'operator'].includes(role)
   const canResolve = ['owner', 'manager'].includes(role)
+  // Reapertura de terminales (F2): restringida a owner (coincide con el guard del API).
+  const canReopen  = role === 'owner'
 
   // Sin tenant no hay nada que consultar: NO pintar el empty state (que se leería
   // como "tenant sin reclamos") — es un error de sesión/rol y debe surfacearse.
@@ -97,7 +99,7 @@ export default async function ClaimsPage() {
       </div>
 
       <div className="flex-1 min-h-0">
-        <ClaimsManager claims={claims} recentOrders={recentOrders} canWrite={canWrite} canResolve={canResolve} />
+        <ClaimsManager claims={claims} recentOrders={recentOrders} canWrite={canWrite} canResolve={canResolve} canReopen={canReopen} />
       </div>
     </div>
   )

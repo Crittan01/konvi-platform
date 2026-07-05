@@ -45,18 +45,24 @@ router = APIRouter(tags=["Claims"])
 # (tools/claims.py) + CHECK constraint DB (migración 20260624010000).
 VALID_STATUSES = {"open", "investigating", "resolved", "refunded", "rejected", "cancelled"}
 
-# Razones canónicas. Free-form reason aceptado pero validado en Pydantic.
-# Estos son los más comunes — se documentan para facilitar UI dropdowns.
-COMMON_REASONS = {
-    "defective_product",   # producto defectuoso
-    "wrong_item",          # artículo equivocado
-    "missing_item",        # ítem faltante
-    "shipping_damage",     # daño en envío
-    "delivery_delay",      # demora de entrega
-    "refund_request",      # solicitud de reembolso
-    "warranty_claim",      # garantía
-    "other",               # otro
-}
+# Estados terminales: el ticket ya está cerrado. Coincide con TERMINAL en la UI
+# (claims-manager.tsx). Reabrir uno de estos es una transición especial (ver abajo).
+TERMINAL_STATUSES = {"resolved", "refunded", "rejected", "cancelled"}
+
+# Terminales que un OWNER puede reabrir (decisión F2 — Opción B).
+#   - 'rejected' / 'cancelled': reversibles, sin impacto financiero → reabribles.
+#   - 'refunded': revertir un reembolso ya movió dinero → NUNCA reabrir.
+#   - 'resolved': cierre positivo → se maneja como reclamo nuevo, no se reabre.
+# Reabrir = pasar de un estado terminal a uno no-terminal ('open' / 'investigating').
+REOPENABLE_STATUSES = {"rejected", "cancelled"}
+
+# Vocabulario canónico de 'reason' (decisión F2 — Opción A). El set de la UI
+# (claims-manager.tsx REASON_MAP + dropdown de "Nuevo Reclamo") es la fuente de
+# verdad; este API lo valida en create para mantener reporting consistente.
+# El bot escribe reason en texto libre directo a DB (bypassa este router) y su
+# mapeo a estas keys vive en el orchestrator (fuera de este router). La DB NO tiene
+# CHECK sobre reason justamente para no romper esa escritura libre del bot.
+VALID_REASONS = {"defective", "wrong_item", "missing_parts", "delayed", "other"}
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -86,6 +92,29 @@ def _validate_status(status: str) -> None:
             status_code=422,
             detail=f"Status inválido '{status}'. Válidos: {sorted(VALID_STATUSES)}",
         )
+
+
+def _validate_reason(reason: str) -> None:
+    if reason not in VALID_REASONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Motivo inválido '{reason}'. Válidos: {sorted(VALID_REASONS)}",
+        )
+
+
+def _fetch_claim(supabase: Client, tenant_id: str, claim_id: str) -> dict:
+    """Lee un reclamo del tenant o lanza 404. Usado para validar transiciones."""
+    res = (
+        supabase.table("claims")
+        .select("id, status")
+        .eq("id", claim_id)
+        .eq("tenant_id", tenant_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
+        raise HTTPException(status_code=404, detail="Reclamo no encontrado")
+    return res.data
 
 
 def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: str) -> dict:
@@ -139,6 +168,7 @@ async def create_claim(
     """Crea un reclamo. Valida que el order pertenezca al tenant.
     Si customer_id no viene, se deriva del order.contact_id."""
     order = _ensure_order_belongs_to_tenant(supabase, tenant_id, body.order_id)
+    _validate_reason(body.reason.strip())
 
     customer_id = body.customer_id or order.get("contact_id")
 
@@ -189,7 +219,12 @@ async def patch_claim(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
-    """Actualiza status y/o resolution_notes. RBAC: owner+manager."""
+    """Actualiza status y/o resolution_notes. RBAC: owner+manager.
+
+    Reapertura (terminal → no-terminal): restringida a OWNER y solo desde
+    'rejected'/'cancelled'. 'refunded' nunca se reabre (el reembolso ya movió
+    dinero); 'resolved' tampoco (cierre positivo). Decisión F2 — Opción B.
+    """
     update: dict = {}
     if patch.status is not None:
         _validate_status(patch.status)
@@ -199,6 +234,35 @@ async def patch_claim(
 
     if not update:
         raise HTTPException(status_code=422, detail="Sin campos a actualizar")
+
+    # Guard de reapertura: solo si el status cambia de terminal → no-terminal.
+    if "status" in update:
+        new_status = update["status"]
+        current = _fetch_claim(supabase, tenant_id, claim_id)
+        cur_status = current.get("status")
+        is_reopen = cur_status in TERMINAL_STATUSES and new_status not in TERMINAL_STATUSES
+        if is_reopen:
+            if _role != "owner":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo el owner puede reabrir un reclamo cerrado.",
+                )
+            if cur_status == "refunded":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "No se puede reabrir un reclamo reembolsado: el reembolso ya "
+                        "movió dinero. Crea un reclamo nuevo si es necesario."
+                    ),
+                )
+            if cur_status not in REOPENABLE_STATUSES:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"No se puede reabrir un reclamo en estado '{cur_status}'. "
+                        "Solo 'rejected' o 'cancelled' se pueden reabrir."
+                    ),
+                )
 
     res = (
         supabase.table("claims")
