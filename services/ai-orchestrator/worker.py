@@ -2478,15 +2478,31 @@ class OrchestratorWorker:
 
         for tenant_id in tenant_ids:
             try:
-                metrics = collect_all_for_tenant(self.supabase, str(tenant_id))
+                # D-F7 async-hygiene — los collectors hacen HTTP síncrono
+                # (httpx.Client, timeout 10s: Graph API WhatsApp + Telegram
+                # getWebhookInfo) además de queries supabase bloqueantes. Invocarlos
+                # directo desde el event loop lo CONGELABA hasta 10-15s POR TENANT;
+                # con N tenants el heartbeat HTTP de /health (uvicorn corre en el
+                # MISMO loop, ver server.py) se ahogaba y Render marcaba unhealthy.
+                # asyncio.to_thread mueve TODO el IO bloqueante (httpx sync +
+                # supabase sync) a un worker thread → el loop respira. Se preserva
+                # la firma sync de los collectors (tests los llaman síncronos) y el
+                # await es secuencial (sin acceso concurrente al mismo supabase client).
+                metrics = await asyncio.to_thread(
+                    collect_all_for_tenant, self.supabase, str(tenant_id),
+                )
                 # F7 — Telegram health-check: collect_telegram (health_metrics.py)
                 # lee tenant_integrations, pero la config de Telegram vive en
                 # notification_settings desde la unificación rev.109 → nunca
                 # reportaba. Complementamos aquí SOLO si el collector no emitió
                 # ninguna métrica de Telegram (evita duplicar si se arregla allá).
                 if not any(getattr(m, "provider", None) == "telegram" for m in metrics):
-                    metrics = metrics + self._collect_telegram_health(str(tenant_id))
-                upsert_metrics(self.supabase, str(tenant_id), metrics)
+                    metrics = metrics + await asyncio.to_thread(
+                        self._collect_telegram_health, str(tenant_id),
+                    )
+                await asyncio.to_thread(
+                    upsert_metrics, self.supabase, str(tenant_id), metrics,
+                )
                 # Detectar transiciones para alertar Telegram operador.
                 await self._notify_health_transitions(str(tenant_id), metrics)
             except Exception as exc:
@@ -2640,6 +2656,9 @@ class OrchestratorWorker:
 
         try:
             import httpx  # noqa: PLC0415
+            # httpx.Client síncrono OK aquí: este método se invoca vía
+            # asyncio.to_thread desde _collect_health_metrics_if_due (D-F7), así el
+            # getWebhookInfo (timeout 10s) NO bloquea el event loop del worker.
             with httpx.Client(timeout=10) as client:
                 resp = client.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo")
                 if resp.status_code != 200:

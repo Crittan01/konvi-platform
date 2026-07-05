@@ -45,14 +45,23 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _format_cop(amount_cents: int | None) -> str:
-    """Formatea int cents → '$87.500 COP'."""
-    if not amount_cents:
-        return "$0 COP"
-    pesos = amount_cents // 100
-    # Punto cada 3 dígitos (formato CO)
+def _format_pesos(amount: float | int | None) -> str:
+    """Formatea un monto en PESOS → '$87.500'.
+
+    orders.total_amount ya está en PESOS (NO en centavos), igual que lo trata
+    worker.py._try_send_payment_reminder_hsm (`pesos = int(total_amount)`). El
+    formato replica el del cron: sin sufijo ' COP' (P5, UX limpio) para que el
+    template payment_reminder_v1 muestre el MISMO texto lo dispare el cron o este
+    trigger manual. Antes esta función dividía //100 tratando pesos como centavos
+    → mostraba $875 en vez de $87.500.
+    """
+    try:
+        pesos = int(amount or 0)
+    except (TypeError, ValueError):
+        pesos = 0
+    # Punto cada 3 dígitos (formato CO).
     s = f"{pesos:,}".replace(",", ".")
-    return f"${s} COP"
+    return f"${s}"
 
 
 async def main():
@@ -72,11 +81,16 @@ async def main():
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
 
-    # 1. Lookup orden
+    # 1. Lookup orden — ESQUEMA REAL (rev. D-F7):
+    #    orders NO tiene customer_name / customer_phone / order_number. El teléfono
+    #    vive en conversations.customer_phone, el nombre en contacts.name y el link
+    #    de pago en payments.checkout_url. Se replica la hidratación de
+    #    worker.py._try_send_payment_reminder_hsm (fuente probada). Antes el SELECT
+    #    referenciaba columnas inexistentes → PostgREST 400 y el trigger fallaba SIEMPRE.
     res = (
         sb.table("orders")
-        .select("id, order_number, customer_name, customer_phone, "
-                "total_amount, status")
+        .select("id, tenant_id, conversation_id, contact_id, total_amount, "
+                "status, conversations(customer_phone)")
         .eq("id", args.order_id)
         .eq("tenant_id", args.tenant_id)
         .limit(1)
@@ -89,11 +103,42 @@ async def main():
         sys.exit(2)
     order = rows[0]
 
-    customer_name = order.get("customer_name") or "cliente"
-    customer_phone = order.get("customer_phone") or ""
-    order_number = order.get("order_number") or order["id"][:8]
+    conv = order.get("conversations") or {}
+    if isinstance(conv, list):  # PostgREST puede devolver el embed como lista
+        conv = conv[0] if conv else {}
+    customer_phone = (conv.get("customer_phone") if isinstance(conv, dict) else "") or ""
     total_amount = order.get("total_amount") or 0
     status = order.get("status")
+    # order_number: orders NO tiene la columna → id corto (igual que worker.py).
+    order_number = str(order["id"])[:8].upper()
+
+    # Nombre del cliente vía contacts.name (columna real; first_name/full_name NO
+    # existen — ver worker.py F44). Se respeta el soft opt-out (consent_revoked_at):
+    # enviar un HSM proactivo a quien revocó consentimiento viola Ley 1581 Art.9 +
+    # Meta Policy, lo dispare el cron o un operador.
+    customer_name = "cliente"
+    contact_id = order.get("contact_id")
+    if contact_id:
+        contact_res = (
+            sb.table("contacts")
+            .select("name, consent_revoked_at")
+            .eq("id", contact_id)
+            .eq("tenant_id", args.tenant_id)
+            .limit(1)
+            .execute()
+        )
+        contact_rows = contact_res.data or []
+        if contact_rows:
+            if contact_rows[0].get("consent_revoked_at"):
+                logger.error(
+                    "[ERROR] contacto con soft opt-out (consent_revoked_at) — "
+                    "NO se envía HSM proactivo (Ley 1581 Art.9 + Meta Policy). "
+                    "Igual que el cron, el trigger manual respeta el opt-out."
+                )
+                sys.exit(8)
+            full = (contact_rows[0].get("name") or "").strip()
+            if full:
+                customer_name = full
 
     if status not in ("pending_payment", "pending"):
         logger.warning(
@@ -102,38 +147,38 @@ async def main():
         )
 
     if not customer_phone:
-        logger.error("[ERROR] orden sin customer_phone")
+        logger.error("[ERROR] conversación de la orden sin customer_phone")
         sys.exit(3)
 
-    # 2. Resolver checkout URL (Wompi)
+    # 2. Resolver checkout URL (Wompi) — payments.checkout_url filtrado por tenant
+    #    (ADR-0025: service_role exige filtro explícito por tenant), el más reciente.
     checkout_url = args.checkout_url_override
     if not checkout_url:
         pay_res = (
             sb.table("payments")
-            .select("checkout_url, wompi_link_url")
+            .select("checkout_url, created_at")
             .eq("order_id", args.order_id)
+            .eq("tenant_id", args.tenant_id)
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
         pay_rows = pay_res.data or []
         if pay_rows:
-            checkout_url = (
-                pay_rows[0].get("checkout_url")
-                or pay_rows[0].get("wompi_link_url")
-                or ""
-            )
+            checkout_url = (pay_rows[0].get("checkout_url") or "").strip()
     if not checkout_url:
         logger.error(
-            "[ERROR] no se pudo resolver checkout URL. "
+            "[ERROR] no se pudo resolver checkout URL desde payments.checkout_url. "
             "Pasa --checkout-url-override manualmente"
         )
         sys.exit(4)
 
-    # 3. Build params del template POSITIONAL
+    # 3. Build params del template POSITIONAL (mismo orden que worker.py:
+    #    [nombre, order_number, total, checkout_url]).
     body_params = [
         customer_name.split(" ")[0],  # primer nombre
         order_number,
-        _format_cop(total_amount),
+        _format_pesos(total_amount),
         checkout_url,
     ]
 

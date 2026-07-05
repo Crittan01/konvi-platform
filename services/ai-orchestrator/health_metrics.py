@@ -175,6 +175,12 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         )]
 
     # GET /{phone_number_id}?fields=quality_rating,messaging_limit_tier
+    # httpx.Client SÍNCRONO deliberado: estos collectors se invocan vía
+    # asyncio.to_thread desde worker._collect_health_metrics_if_due (D-F7), por lo
+    # que el IO bloqueante corre FUERA del event loop. Mantener sync mantiene un
+    # registry homogéneo (PROVIDER_COLLECTORS) y compatibilidad con los tests que
+    # los llaman síncronos. NO convertir a AsyncClient de forma aislada — dejaría
+    # los collectors de solo-DB (wompi/aveonline/meli) bloqueando igual.
     url = f"https://graph.facebook.com/v22.0/{phone_id}"
     try:
         with httpx.Client(timeout=10) as client:
@@ -369,6 +375,8 @@ def collect_telegram(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         )]
 
     try:
+        # httpx.Client síncrono deliberado — offloaded vía asyncio.to_thread en el
+        # worker (ver nota en collect_whatsapp). NO convertir a AsyncClient aislado.
         with httpx.Client(timeout=10) as client:
             res = client.get(
                 f"https://api.telegram.org/bot{bot_token}/getWebhookInfo",

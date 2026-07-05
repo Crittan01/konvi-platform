@@ -383,6 +383,61 @@ services:
         value: "5"
       - key: META_CSW_HOURS
         value: "24"
+      # ── D-F7 — Knobs de crons versionados (higiene de config) ─────────────
+      # Estos parámetros existían solo como defaults implícitos en worker.py; se
+      # exponen aquí para evitar cambios silenciosos y dar un runbook operable.
+      # Valores = default del código. Runbook + semántica: services/ai-orchestrator/README.md.
+      #
+      # Poll de anulaciones Wompi (voids) tras cancelación/expiry (R-01 sibling).
+      - key: WOMPI_VOID_POLL_ENABLED
+        value: "true"
+      - key: WOMPI_VOID_POLL_INTERVAL_SECONDS
+        value: "1800"                            # 30 min
+      - key: WOMPI_VOID_POLL_LOOKBACK_HOURS
+        value: "48"
+      # Recordatorio de carrito abandonado (HSM MARKETING cart_abandoned_24h_v1).
+      - key: CART_ABANDONED_REMINDER_ENABLED
+        value: "true"
+      - key: CART_ABANDONED_REMINDER_INTERVAL_SECONDS
+        value: "300"                             # cada 5 min
+      - key: CART_ABANDONED_THRESHOLD_HOURS
+        value: "24"                              # antigüedad mínima del carrito
+      - key: CART_ABANDONED_MAX_AGE_HOURS
+        value: "72"                              # antigüedad máxima (fuera → no se molesta)
+      - key: CART_ABANDONED_DISCOUNT_LABEL
+        value: "10%"
+      # Quiet hours (no enviar HSM de madrugada, hora Colombia). Default OFF.
+      - key: CART_ABANDONED_QUIET_HOURS_ENABLED
+        value: "false"
+      - key: CART_ABANDONED_QUIET_START_HOUR
+        value: "21"                              # 21:00 CO
+      - key: CART_ABANDONED_QUIET_END_HOUR
+        value: "8"                               # hasta 08:00 CO
+      - key: COLOMBIA_UTC_OFFSET_HOURS
+        value: "-5"
+      # Tope de envíos cart_abandoned por tenant por ciclo (anti-ráfaga).
+      - key: CART_ABANDONED_MAX_PER_TENANT_PER_CYCLE
+        value: "15"
+      # SLA de takeover humano — alerta si no hay respuesta humana en N horas.
+      - key: HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS
+        value: "600"                             # 10 min
+      - key: HUMAN_TAKEOVER_SLA_HOURS
+        value: "2"
+      # Health metrics collector per-tenant per-provider (J.2.11).
+      - key: HEALTH_METRICS_ENABLED
+        value: "true"
+      - key: HEALTH_METRICS_INTERVAL_SECONDS
+        value: "300"                             # 5 min
+      # Reclamo de mensajes 'processing' colgados (recuperación de fallos).
+      - key: STALE_PROCESSING_RECLAIM_MINUTES
+        value: "3"
+      - key: STALE_PROCESSING_SWEEP_INTERVAL_SECONDS
+        value: "60"
+      # Hard-delete de tenants (grace period expirado). ENABLED arriba (L315).
+      - key: TENANT_HARD_DELETE_INTERVAL_SECONDS
+        value: "21600"                           # 6 h
+      - key: TENANT_HARD_DELETE_BATCH_SIZE
+        value: "10"
       # ── Anti-hibernación Render Free (R-10) ───────────────────────────────
       # ANTI_HIBERNATION_PING_URL: configurar en Render Dashboard (sync: false)
       # Formato: URLs separadas por coma, ej:
