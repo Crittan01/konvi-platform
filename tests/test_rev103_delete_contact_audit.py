@@ -71,8 +71,13 @@ class DeleteContactServerActionTests(unittest.TestCase):
     def setUp(self):
         self.page_src = PAGE_TSX.read_text()
 
-    def test_imports_hash_phone_helper(self):
-        self.assertIn(
+    def test_reactivate_consent_delegates_to_api(self):
+        # Decisión F2 (aprobada): reactivateConsentAction ya NO muta la DB con
+        # admin client directo (que requería importar hashPhone en la UI para el
+        # audit). Ahora delega al endpoint auditado POST /{id}/reactivate-consent,
+        # que hashea el phone server-side. Por eso hashPhone ya no se importa acá.
+        self.assertIn('/reactivate-consent', self.page_src)
+        self.assertNotIn(
             "import { hashPhone } from '@/lib/crypto/phone-hash'",
             self.page_src,
         )
