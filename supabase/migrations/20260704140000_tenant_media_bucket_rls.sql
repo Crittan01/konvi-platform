@@ -1,27 +1,39 @@
 -- =============================================================================
--- F7 (2026-07-04) — Bucket 'tenant-media': RLS versionada (bs7/bs14 del audit).
+-- F7 (2026-07-04, reescrita 2026-07-05) — Bucket 'tenant-media': RLS versionada.
 --
--- HALLAZGO: el bucket 'tenant-media' (imágenes de producto + galería) NO tenía
--- policies de aislamiento multi-tenant en NINGUNA migración → el aislamiento
--- dependía de policies creadas a mano en el dashboard, no verificable ni
--- reproducible. Esta migración codifica el contrato.
+-- HALLAZGO ORIGINAL: el bucket 'tenant-media' NO tenía policies de aislamiento en
+-- NINGUNA migración → el aislamiento dependía de policies creadas a mano en el
+-- dashboard (`tenant_read_media`/`tenant_upload_media`/`tenant_delete_media`),
+-- no verificable ni reproducible. Esta migración codifica el contrato.
 --
--- Path convention (media-client.tsx:70 / gallery-picker-modal): {tenant_id}/{filename}
--- Bucket PÚBLICO (las fotos de producto se muestran al cliente por WhatsApp vía
--- URL pública → SELECT público es intencional). La ESCRITURA sí es tenant-scoped:
---   • INSERT/UPDATE/DELETE: solo owner|manager del tenant, en SU path {tenant_id}/.
---   • Un tenant NO puede escribir/borrar en la carpeta de otro.
+-- DECISIÓN FOUNDER (2026-07-05): versionar SIN romper. El bucket tiene DOS
+-- convenciones de path reales, con modelos de rol distintos:
 --
--- ⚠️ INTERVENCIÓN HUMANA REQUERIDA antes de aplicar:
---   RESPONSABLE: founder / DBA.
---   PASOS: (1) revisar en el Supabase dashboard si YA existen policies manuales
---     sobre storage.objects para bucket_id='tenant-media' con OTRO nombre (este
---     script solo reemplaza las de nombre 'tenant_media_*'); si existen, borrarlas
---     para evitar policies duplicadas/permisivas. (2) aplicar con el protocolo
---     seguro (supabase db query --linked). (3) `supabase migration repair
---     --status applied 20260704140000`.
---   CRITERIO DE ÉXITO: un authenticated de tenant A recibe 403 al intentar subir
---     a '{tenant_B}/x.jpg'; el operador de A lista/sube en '{tenant_A}/'.
+--   (A) Producto / logo / media library → path `{tenant_id}/…`
+--       (media-client.tsx / gallery-picker-modal / logo-upload / catalog).
+--       Escritura = owner/manager (superficies de catálogo/ajustes, ya gateadas).
+--
+--   (B) Adjuntos del Inbox → path `inbox-attachments/{tenant_id}/{conversation}/…`
+--       (attachment-uploader.tsx:107). Lo opera el rol OPERATOR (persona del
+--       Inbox) al enviar imágenes al cliente por WhatsApp → escritura MEMBER-level
+--       (cualquier miembro del tenant), NO restringida a owner/manager.
+--
+-- Se descartó la versión owner/manager-para-todo: habría bloqueado a los
+-- operadores el envío de imágenes por el Inbox. Se descartó dejar las policies
+-- manuales: no versionadas + no cubrían la convención (B).
+--
+-- Bucket PÚBLICO (las fotos se muestran al cliente por URL pública → SELECT por
+-- URL es intencional y no depende de RLS). La ESCRITURA sí es tenant-scoped:
+-- cada tenant solo escribe en SU carpeta ({tenant_id}/ o inbox-attachments/{tenant_id}/).
+-- service_role (cron/API/offboarding purge) bypassa RLS → no afectado.
+--
+-- Resolución de identidad: JWT `app_metadata.tenant_id` + `app_metadata.role`
+-- (mismo criterio que 20260704156010_f6_rls_role_hardening — fuente única del
+-- rol/tenant en sesión). Idempotente (DROP IF EXISTS + CREATE).
+--
+-- ⚠️ Reemplaza las policies manuales `tenant_*_media` por las versionadas
+--   `tenant_media_*`. Si existen OTRAS policies manuales con nombre distinto sobre
+--   storage.objects para bucket_id='tenant-media', revisarlas en el dashboard.
 -- =============================================================================
 
 -- Asegura el bucket (público, límite e imágenes) — idempotente.
@@ -38,63 +50,62 @@ ON CONFLICT (id) DO UPDATE
         allowed_mime_types = EXCLUDED.allowed_mime_types,
         public             = EXCLUDED.public;
 
--- ── INSERT: solo owner/manager del tenant, en su path {tenant_id}/. ──────────
-DROP POLICY IF EXISTS "tenant_media_write" ON storage.objects;
-CREATE POLICY "tenant_media_write" ON storage.objects
-    FOR INSERT TO authenticated
-    WITH CHECK (
-        bucket_id = 'tenant-media'
-        AND (storage.foldername(name))[1] = (
-            SELECT tenant_id::text FROM public.tenant_users
-            WHERE user_id = auth.uid() LIMIT 1
-        )
-        AND EXISTS (
-            SELECT 1 FROM public.tenant_users
-            WHERE user_id = auth.uid() AND role IN ('owner', 'manager')
-        )
-    );
+-- Retira las policies manuales previas (nombre divergente) para que NO se OR-combinen
+-- con las versionadas (RLS es permisiva: dejarlas anularía el endurecimiento por rol).
+DROP POLICY IF EXISTS "tenant_read_media"   ON storage.objects;
+DROP POLICY IF EXISTS "tenant_upload_media" ON storage.objects;
+DROP POLICY IF EXISTS "tenant_delete_media" ON storage.objects;
+-- Y las versionadas (idempotencia ante reejecución).
+DROP POLICY IF EXISTS "tenant_media_select_member"     ON storage.objects;
+DROP POLICY IF EXISTS "tenant_media_write_privileged"  ON storage.objects;
+DROP POLICY IF EXISTS "tenant_media_update_privileged" ON storage.objects;
+DROP POLICY IF EXISTS "tenant_media_delete_privileged" ON storage.objects;
+DROP POLICY IF EXISTS "tenant_media_inbox_write"       ON storage.objects;
 
--- ── UPDATE: solo owner/manager del tenant, en su path (upsert/replace). ──────
-DROP POLICY IF EXISTS "tenant_media_update" ON storage.objects;
-CREATE POLICY "tenant_media_update" ON storage.objects
-    FOR UPDATE TO authenticated
-    USING (
-        bucket_id = 'tenant-media'
-        AND (storage.foldername(name))[1] = (
-            SELECT tenant_id::text FROM public.tenant_users
-            WHERE user_id = auth.uid() LIMIT 1
-        )
-        AND EXISTS (
-            SELECT 1 FROM public.tenant_users
-            WHERE user_id = auth.uid() AND role IN ('owner', 'manager')
-        )
-    );
-
--- ── DELETE: solo owner/manager del tenant, en su path. ──────────────────────
-DROP POLICY IF EXISTS "tenant_media_delete" ON storage.objects;
-CREATE POLICY "tenant_media_delete" ON storage.objects
-    FOR DELETE TO authenticated
-    USING (
-        bucket_id = 'tenant-media'
-        AND (storage.foldername(name))[1] = (
-            SELECT tenant_id::text FROM public.tenant_users
-            WHERE user_id = auth.uid() LIMIT 1
-        )
-        AND EXISTS (
-            SELECT 1 FROM public.tenant_users
-            WHERE user_id = auth.uid() AND role IN ('owner', 'manager')
-        )
-    );
-
--- ── SELECT (list, authenticated): miembro del tenant lista SU carpeta. ──────
+-- ── (A) Producto/logo/media — SELECT (list) por miembro del tenant. ──────────
 -- (La lectura de la imagen por URL sigue siendo pública — bucket public=true.)
-DROP POLICY IF EXISTS "tenant_media_list" ON storage.objects;
-CREATE POLICY "tenant_media_list" ON storage.objects
+CREATE POLICY "tenant_media_select_member" ON storage.objects
     FOR SELECT TO authenticated
     USING (
         bucket_id = 'tenant-media'
-        AND (storage.foldername(name))[1] = (
-            SELECT tenant_id::text FROM public.tenant_users
-            WHERE user_id = auth.uid() LIMIT 1
-        )
+        AND (storage.foldername(name))[1] = (auth.jwt() -> 'app_metadata' ->> 'tenant_id')
+    );
+
+-- ── (A) Producto/logo/media — INSERT solo owner/manager, en su carpeta. ──────
+CREATE POLICY "tenant_media_write_privileged" ON storage.objects
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'tenant-media'
+        AND (storage.foldername(name))[1] = (auth.jwt() -> 'app_metadata' ->> 'tenant_id')
+        AND (auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'manager')
+    );
+
+-- ── (A) Producto/logo/media — UPDATE (upsert/replace) owner/manager. ─────────
+CREATE POLICY "tenant_media_update_privileged" ON storage.objects
+    FOR UPDATE TO authenticated
+    USING (
+        bucket_id = 'tenant-media'
+        AND (storage.foldername(name))[1] = (auth.jwt() -> 'app_metadata' ->> 'tenant_id')
+        AND (auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'manager')
+    );
+
+-- ── (A) Producto/logo/media — DELETE owner/manager. ─────────────────────────
+CREATE POLICY "tenant_media_delete_privileged" ON storage.objects
+    FOR DELETE TO authenticated
+    USING (
+        bucket_id = 'tenant-media'
+        AND (storage.foldername(name))[1] = (auth.jwt() -> 'app_metadata' ->> 'tenant_id')
+        AND (auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'manager')
+    );
+
+-- ── (B) Adjuntos del Inbox — INSERT MEMBER-level (operadores envían imágenes). ─
+-- Path: inbox-attachments/{tenant_id}/{conversation}/…  → foldername[1]='inbox-attachments',
+-- foldername[2]=tenant_id. Cualquier miembro del tenant (incl. operator) puede subir
+-- EN SU tenant; no puede escribir en la carpeta de otro tenant.
+CREATE POLICY "tenant_media_inbox_write" ON storage.objects
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'tenant-media'
+        AND (storage.foldername(name))[1] = 'inbox-attachments'
+        AND (storage.foldername(name))[2] = (auth.jwt() -> 'app_metadata' ->> 'tenant_id')
     );
