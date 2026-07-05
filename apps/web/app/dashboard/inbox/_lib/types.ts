@@ -23,6 +23,11 @@ export type AgenticState =
 export interface Conversation {
   id: string
   customer_phone: string
+  // 2026-07-04 (F2) — nombre del contacto denormalizado en el write-path del
+  // connector (contacts.profile.name de Meta). Sólo-display, alta frecuencia de
+  // lectura en la lista; evita N lookups por render. Puede ser null en rows
+  // históricos previos al backfill o si la columna aún no existe (degrada a phone).
+  contact_name?: string | null
   status: 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
   agentic_state?: AgenticState | null  // Rev. 109 — derivado por state machine.
   created_at: string
@@ -35,6 +40,16 @@ export interface Conversation {
 // Rev. 72 — content_type tipado (cierra drift M2). Antes era `string` libre,
 // el render condicional podía silenciosamente romperse con valores nuevos.
 // 'context_snapshot' es interno (snapshots del orchestrator); el filtro `.neq` lo excluye.
+//
+// 2026-07-04 (F5/F7) — se completa el union con los content_type que ya
+// estampan worker/orchestrator pero el Inbox no reconocía:
+//   • 'template'         → outbound HSM (recordatorios/reengagement). Se renderiza
+//                          con estilo de plantilla (antes: crudo '[TEMPLATE ...]').
+//   • 'escalation_audit' → fila de auditoría de escalación (append-only).
+//   • 'sla_breach_audit' → fila de auditoría de breach de SLA (cron worker).
+// Las dos últimas NO son mensajes conversacionales: se FILTRAN del render
+// (ver NON_RENDERABLE_CONTENT_TYPES en constants.ts) — antes se pintaban como
+// burbujas vacías.
 export type MessageContentType =
   | 'text'
   | 'image'
@@ -43,7 +58,10 @@ export type MessageContentType =
   | 'document'
   | 'sticker'
   | 'location'
+  | 'template'
   | 'context_snapshot'
+  | 'escalation_audit'
+  | 'sla_breach_audit'
 
 export interface Message {
   id: string

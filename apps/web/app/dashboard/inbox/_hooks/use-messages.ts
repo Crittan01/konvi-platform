@@ -12,8 +12,10 @@
  *   - Polling fallback cada 5s si Realtime parece inactivo (sinceLastEvent > 8s).
  *   - Cursor-based pagination (loadMore) cuando el operador scrollea arriba —
  *     restaura scrollTop para no perder contexto.
- *   - Filtro R-13: snapshots de contexto interno (`context_snapshot`) NO se
- *     renderizan.
+ *   - Filtro R-13 + F7: snapshots de contexto interno (`context_snapshot`) y
+ *     filas de auditoría (`escalation_audit`, `sla_breach_audit`) NO se
+ *     renderizan (ver NON_RENDERABLE_CONTENT_TYPES). Antes se pintaban como
+ *     burbujas vacías.
  *   - Optimistic patch a `conversations.last_interaction_at` via callback
  *     `onMessageInserted` — mantiene lateral + chat sincronizados sin esperar
  *     trigger DB.
@@ -36,6 +38,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Message } from '../_lib/types'
+import {
+  NON_RENDERABLE_CONTENT_TYPES,
+  NON_RENDERABLE_CONTENT_TYPES_PG,
+} from '../_lib/constants'
 
 interface Options {
   supabase: SupabaseClient
@@ -94,7 +100,7 @@ export function useMessages(
       .from('messages')
       .select(MESSAGE_COLUMNS)
       .eq('conversation_id', conversationId)
-      .neq('content_type', 'context_snapshot')
+      .not('content_type', 'in', NON_RENDERABLE_CONTENT_TYPES_PG)
       .order('created_at', { ascending: false })
       .limit(PAGE_INITIAL)
       .then(({ data, error: qErr }) => {
@@ -123,8 +129,12 @@ export function useMessages(
         lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
           const newMsg = payload.new as Message & { content_type?: string }
-          // R-13: snapshots NO se renderizan.
-          if (newMsg.content_type === 'context_snapshot') return
+          // R-13 + F7: snapshots internos y filas de auditoría (escalation_audit,
+          // sla_breach_audit) NO se renderizan como burbuja.
+          if (
+            newMsg.content_type &&
+            (NON_RENDERABLE_CONTENT_TYPES as readonly string[]).includes(newMsg.content_type)
+          ) return
           // A6: dedupe por id (realtime + polling fallback).
           setMessages(prev =>
             prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg as Message],
@@ -151,7 +161,7 @@ export function useMessages(
           .from('messages')
           .select(MESSAGE_COLUMNS)
           .eq('conversation_id', conversationId)
-          .neq('content_type', 'context_snapshot')
+          .not('content_type', 'in', NON_RENDERABLE_CONTENT_TYPES_PG)
           .order('created_at', { ascending: false })
           .limit(PAGE_INITIAL)
           .then(({ data, error: qErr }) => {
@@ -180,7 +190,7 @@ export function useMessages(
         .from('messages')
         .select(MESSAGE_COLUMNS)
         .eq('conversation_id', conversationId)
-        .neq('content_type', 'context_snapshot')
+        .not('content_type', 'in', NON_RENDERABLE_CONTENT_TYPES_PG)
         .lt('created_at', oldest.created_at)
         .order('created_at', { ascending: false })
         .limit(PAGE_MORE)

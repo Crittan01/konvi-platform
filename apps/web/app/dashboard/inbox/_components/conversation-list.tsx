@@ -100,10 +100,15 @@ export function ConversationList({
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <div className={`h-2 w-2 rounded-full flex-shrink-0 ${st.dot}`} />
-            <span className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'} ${opts.isHistorical ? 'text-muted-foreground' : ''}`}>
+            <span
+              className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'} ${opts.isHistorical ? 'text-muted-foreground' : ''} truncate max-w-[11rem]`}
+              title={conv.contact_name ? `${conv.contact_name} · ${formatPhone(conv.customer_phone)}` : formatPhone(conv.customer_phone)}
+            >
               {opts.isHistorical
                 ? `Sesión ${timeAgo(conv.last_interaction_at ?? conv.created_at)} atrás`
-                : formatPhone(conv.customer_phone)}
+                // F2: nombre denormalizado (Meta profile.name) como etiqueta
+                // principal; degrada al teléfono si aún no se capturó.
+                : (conv.contact_name?.trim() || formatPhone(conv.customer_phone))}
             </span>
             {hasUnread && (
               <span
@@ -188,7 +193,7 @@ export function ConversationList({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar por teléfono..."
+            placeholder="Buscar por nombre o teléfono..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"

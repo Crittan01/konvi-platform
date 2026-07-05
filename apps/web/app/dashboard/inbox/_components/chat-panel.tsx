@@ -23,10 +23,11 @@
 import { useRef as _useRef } from 'react'  // unused; explicit just for clarity
 import type React from 'react'
 import {
-  AlertCircle, Bot, Check, CheckCheck, ChevronLeft, ChevronsRight,
-  Circle, Clock, Info, MessageSquare, Paperclip, Phone, Send, User,
+  AlertCircle, Bot, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronsRight,
+  Circle, Clock, FileText, Info, MessageSquare, Paperclip, Phone, Send, User,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { createClient } from '@/utils/supabase/client'
 import { renderWhatsAppFormat } from '@/lib/whatsapp-format'
 import { RotateCw } from 'lucide-react'
@@ -47,6 +48,16 @@ const MEDIA_TYPE_LABELS: Partial<Record<Message['content_type'], string>> = {
   document: 'documento',
   sticker: 'sticker',
   location: 'ubicación',
+}
+
+// 2026-07-04 (F5) — parse del content de un mensaje 'template' (HSM).
+// El worker persiste content como `[TEMPLATE <nombre>] <texto legible>`
+// (worker.py:1602). Extraemos el nombre para mostrarlo como etiqueta y dejamos
+// el resto como cuerpo. Antes el operador veía el `[TEMPLATE ...]` crudo.
+function parseTemplateContent(content: string): { name: string | null; body: string } {
+  const m = content.match(/^\s*\[TEMPLATE\s+([^\]]+)\]\s*([\s\S]*)$/)
+  if (m) return { name: m[1].trim(), body: m[2].trim() }
+  return { name: null, body: content }
 }
 
 type Status = Conversation['status']
@@ -106,6 +117,25 @@ export function ChatPanel({
   contextPanelOpen,
   onToggleContextPanel,
 }: Props) {
+  const confirm = useConfirm()
+
+  // 2026-07-04 (F2) — Cerrar conversación manual. El estado 'closed' ya existe
+  // en el contrato (CONVERSATION_STATUSES) y STATUS_CONFIG.closed promete
+  // "resolución manual"; faltaba la transición en UI. Confirmamos porque es un
+  // cambio de estado visible (aunque reversible: si el cliente vuelve a escribir
+  // el connector reabre como bot_active).
+  const handleClose = async () => {
+    if (!selectedConv) return
+    const ok = await confirm({
+      title: '¿Cerrar esta conversación?',
+      description:
+        'Quedará marcada como Cerrada (resuelta). El bot dejará de responder. Si el cliente vuelve a escribir, se reabrirá automáticamente como Bot activo.',
+      confirmLabel: 'Cerrar conversación',
+      cancelLabel: 'Cancelar',
+    })
+    if (ok) onUpdateStatus('closed')
+  }
+
   // Rev. 109 founder 2026-05-29 — Rerun IA (P0-3 backlog).
   const [rerunning, setRerunning] = useState(false)
   const [rerunNotice, setRerunNotice] = useState<string | null>(null)
@@ -226,12 +256,31 @@ export function ChatPanel({
                     className="text-amber-600 border-amber-700/30 hover:bg-amber-500/10 text-xs h-8">
                     <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
                   </Button>
+                  <Button size="sm" variant="outline" onClick={handleClose} disabled={takingOver}
+                    title="Marcar la conversación como resuelta y cerrarla. Se reabre si el cliente vuelve a escribir."
+                    className="text-slate-700 border-slate-700/30 hover:bg-slate-500/10 text-xs h-8">
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Cerrar
+                  </Button>
                 </>
               )}
               {selectedConv.status === 'human_takeover' && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
+                    className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8">
+                    <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleClose} disabled={takingOver}
+                    title="Marcar la conversación como resuelta y cerrarla. Se reabre si el cliente vuelve a escribir."
+                    className="text-slate-700 border-slate-700/30 hover:bg-slate-500/10 text-xs h-8">
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Cerrar
+                  </Button>
+                </>
+              )}
+              {selectedConv.status === 'closed' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
+                  title="Reabrir la conversación y reactivar el bot."
                   className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8">
-                  <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
+                  <Bot className="h-3.5 w-3.5 mr-1" /> Reabrir
                 </Button>
               )}
               {selectedConv.status === 'opted_out' && (
@@ -359,7 +408,32 @@ export function ChatPanel({
                       ? 'bg-card text-foreground rounded-tl-sm'
                       : 'bg-primary text-primary-foreground rounded-tr-sm border-transparent'
                   }`}>
-                    {msg.content_type === 'image' && msg.media_url ? (
+                    {msg.content_type === 'template' ? (
+                      // F5: mensaje de plantilla HSM (recordatorio/reengagement).
+                      // Antes se veía el crudo `[TEMPLATE ...]`; ahora etiqueta + cuerpo.
+                      (() => {
+                        const tpl = parseTemplateContent(msg.content || '')
+                        return (
+                          <>
+                            <div className={`mb-1.5 inline-flex items-center gap-1.5 text-[10px] font-medium rounded-md px-2 py-0.5 border ${
+                              isInbound
+                                ? 'border-border/60 bg-muted/40 text-muted-foreground'
+                                : 'border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground/90'
+                            }`}
+                              title={tpl.name ? `Plantilla aprobada por Meta: ${tpl.name}` : 'Mensaje de plantilla (HSM)'}
+                            >
+                              <FileText className="h-3 w-3 shrink-0" />
+                              Plantilla{tpl.name ? ` · ${tpl.name}` : ''}
+                            </div>
+                            {tpl.body && (
+                              <div className="whitespace-pre-wrap break-words">
+                                {renderWhatsAppFormat(tpl.body)}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()
+                    ) : msg.content_type === 'image' && msg.media_url ? (
                       <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
                         <img
                           src={msg.media_url}
@@ -381,9 +455,10 @@ export function ChatPanel({
                         </div>
                       ) : null
                     )}
-                    {msg.content && (
+                    {msg.content && msg.content_type !== 'template' && (
                       // div (no <p>): renderWhatsAppFormat emite bloques <ul>/<ol>,
                       // inválidos dentro de <p> → hydration error en React 19 / Next 15.
+                      // 'template' ya renderiza su cuerpo arriba (etiqueta + body).
                       <div className="whitespace-pre-wrap break-words">
                         {renderWhatsAppFormat(msg.content)}
                       </div>

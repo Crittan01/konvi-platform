@@ -70,6 +70,35 @@ def _normalize_phone(phone: str) -> str:
     return (phone or "").lstrip("+").strip()
 
 
+def _denormalize_contact_name(
+    supabase: Client,
+    conversation_id: str,
+    customer_name: Optional[str],
+) -> None:
+    """F2 2026-07-04 — best-effort: denormaliza `conversations.contact_name`.
+
+    Se ejecuta FUERA del path crítico de persistencia del mensaje: si la columna
+    aún no existe (migración 20260704150000 sin aplicar) o el update falla, se
+    ignora silenciosamente para NO perder el inbound. Sólo-display en la lista
+    del Inbox; degrada a `customer_phone` si queda NULL.
+    """
+    if not customer_name:
+        return
+    try:
+        (
+            supabase.table("conversations")  # tenant_filter:exempt:post_resolution_update_by_pk
+            .update({"contact_name": customer_name})
+            .eq("id", conversation_id)
+            .execute()
+        )
+    except Exception as exc:
+        # Columna aún no migrada o error transitorio — no es crítico.
+        logger.debug(
+            "No se pudo denormalizar contact_name en conv %s: %s",
+            conversation_id, exc,
+        )
+
+
 def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) -> str:
     """
     Find-or-create de conversación para el cliente.
@@ -207,6 +236,7 @@ def persist_whatsapp_message(
     media_id: Optional[str] = data.get("media_id")
     media_mime: Optional[str] = data.get("media_mime")
     content: str = data.get("content", "")
+    customer_name: Optional[str] = data.get("customer_name")
     payload: Dict[str, Any] = data.get("payload", {}) or {}
 
     if not customer_phone or (content_type == "text" and not content):
@@ -221,6 +251,9 @@ def persist_whatsapp_message(
 
         # ── 2. Find-or-Create Conversación ───────────────────────────────────
         conversation_id = _upsert_conversation(supabase, tenant_id, customer_phone)
+
+        # ── 2.1 F2: denormaliza el nombre de perfil (best-effort, sólo-display) ─
+        _denormalize_contact_name(supabase, conversation_id, customer_name)
 
         # ── 2.5 Deduplicación por meta_message_id ────────────────────────────
         # Meta puede reenviar el mismo webhook si el background task tarda

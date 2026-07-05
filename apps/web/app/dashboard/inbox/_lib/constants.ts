@@ -4,7 +4,22 @@
  * Refactor 2026-05-29 — extraído del monolito `page.tsx`.
  * Puro: server+client safe.
  */
-import type { FilterStatus } from './types'
+import type { FilterStatus, MessageContentType } from './types'
+
+// 2026-07-04 (F7) — content_type que NO deben renderizarse como burbuja en el
+// chat. Son filas internas (snapshots del orchestrator) o de auditoría
+// append-only (escalación / breach de SLA que estampan los crons). Antes se
+// pintaban como burbujas vacías. Se excluyen en el fetch (use-messages) y en el
+// handler Realtime. Mantener alineado con el union de MessageContentType.
+export const NON_RENDERABLE_CONTENT_TYPES: readonly MessageContentType[] = [
+  'context_snapshot',
+  'escalation_audit',
+  'sla_breach_audit',
+] as const
+
+// Forma que espera el filtro PostgREST `.not('content_type', 'in', '(...)')`.
+export const NON_RENDERABLE_CONTENT_TYPES_PG =
+  `(${NON_RENDERABLE_CONTENT_TYPES.join(',')})`
 
 // Rev. 109 founder 2026-05-28 — SLA threshold para escalación human_takeover.
 // Debe coincidir con worker.py HUMAN_TAKEOVER_SLA_HOURS (default 2h).

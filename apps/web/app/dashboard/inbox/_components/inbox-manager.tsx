@@ -76,7 +76,12 @@ export default function InboxManager() {
 
   // ── Filtros ────────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c => {
-    const matchesSearch = search === '' || c.customer_phone.includes(search.replace('+', ''))
+    // F2: búsqueda por teléfono O por nombre denormalizado (contact_name).
+    const q = search.trim().toLowerCase()
+    const matchesSearch =
+      q === '' ||
+      c.customer_phone.includes(search.replace('+', '')) ||
+      (c.contact_name?.toLowerCase().includes(q) ?? false)
     // 'active' = bot_active + human_takeover (accionables día-a-día).
     // 'sla_breach' = human_takeover sin respuesta humana ≥SLA_BREACH_HOURS.
     // 'all' = literalmente todas. Otros valores = match exacto al status.

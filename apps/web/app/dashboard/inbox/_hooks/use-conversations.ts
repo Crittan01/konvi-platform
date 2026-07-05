@@ -35,6 +35,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useRouter, usePathname } from 'next/navigation'
 import type { Conversation } from '../_lib/types'
+import { NON_RENDERABLE_CONTENT_TYPES } from '../_lib/constants'
 
 interface Options {
   /** Cliente Supabase compartido — pasarlo evita crear N clientes. */
@@ -92,6 +93,11 @@ export function useConversations({ supabase }: Options): Result {
   // Timestamp del último evento Realtime — para que el poll solo actúe si
   // Realtime parece inactivo.
   const lastRealtimeAt = useRef(0)
+  // F2: `contact_name` es denormalizado y puede no existir aún (migración
+  // 20260704150000 sin aplicar). Empezamos incluyéndolo; si PostgREST responde
+  // "undefined column" (42703) lo apagamos y re-fetcheamos sin él, para que la
+  // lista NUNCA se rompa por una columna pendiente de migrar.
+  const contactNameColRef = useRef(true)
 
   // URL sync — usar replace para NO empujar history (UX de panel selector).
   const syncUrlParam = useCallback((id: string | null) => {
@@ -119,20 +125,39 @@ export function useConversations({ supabase }: Options): Result {
 
   // Carga inicial (+ refresh por showArchived).
   const loadConversations = useCallback(async () => {
-    let query = supabase
-      .from('conversations')
-      .select('id, customer_phone, status, agentic_state, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
-      .order('last_interaction_at', { ascending: false })
-      // Perf: solo necesitamos el ÚLTIMO mensaje por conv para el preview —
-      // limitar el recurso embebido evita traer el historial completo de cada
-      // conv en cada carga/poll/realtime (payload crecía linealmente).
-      .order('created_at', { referencedTable: 'messages', ascending: false })
-      .limit(1, { referencedTable: 'messages' })
-      .limit(pageSizeRef.current)
-    if (!showArchivedRef.current) {
-      query = query.is('archived_at', null)
+    const buildQuery = () => {
+      // F7: pedimos content_type + los 3 más recientes (no 1) para elegir en
+      // cliente el último mensaje RENDERABLE del preview — un audit row
+      // (escalation_audit/sla_breach_audit) o context_snapshot no debe pintarse
+      // como "último mensaje". Se filtra en cliente para NO arriesgar el
+      // inner-join implícito de PostgREST sobre embedded (podría ocultar convs).
+      const msgEmbed = 'messages(content, direction, created_at, content_type)'
+      const cols = contactNameColRef.current
+        ? `id, customer_phone, contact_name, status, agentic_state, created_at, last_interaction_at, archived_at, ${msgEmbed}`
+        : `id, customer_phone, status, agentic_state, created_at, last_interaction_at, archived_at, ${msgEmbed}`
+      let q = supabase
+        .from('conversations')
+        .select(cols)
+        .order('last_interaction_at', { ascending: false })
+        // Perf: sólo los últimos mensajes por conv para el preview — limitar el
+        // recurso embebido evita traer el historial completo de cada conv en
+        // cada carga/poll/realtime (payload crecía linealmente).
+        .order('created_at', { referencedTable: 'messages', ascending: false })
+        .limit(3, { referencedTable: 'messages' })
+        .limit(pageSizeRef.current)
+      if (!showArchivedRef.current) {
+        q = q.is('archived_at', null)
+      }
+      return q
     }
-    const { data, error: qErr } = await query
+
+    let { data, error: qErr } = await buildQuery()
+
+    // F2: degradación segura si `contact_name` aún no está migrado (42703).
+    if (qErr && contactNameColRef.current && (qErr as { code?: string }).code === '42703') {
+      contactNameColRef.current = false
+      ;({ data, error: qErr } = await buildQuery())
+    }
 
     if (qErr) {
       setConversations([])
@@ -145,16 +170,20 @@ export function useConversations({ supabase }: Options): Result {
     // Si el backend devolvió la ventana completa, probablemente hay más.
     setHasMore((data?.length ?? 0) >= pageSizeRef.current)
     type RawRow = Omit<Conversation, 'last_message'> & {
-      messages?: Array<{ content: string; direction: string; created_at: string }>
+      messages?: Array<{ content: string; direction: string; created_at: string; content_type?: string }>
     }
-    const rows = ((data ?? []) as RawRow[]).map(r => {
-      const msgs = r.messages
+    // Cast vía unknown: el `.select(cols)` con string dinámico (F2 fallback)
+    // impide a supabase-js inferir el tipo de fila literal.
+    const rows = ((data ?? []) as unknown as RawRow[]).map(r => {
+      // F7: último mensaje RENDERABLE (excluye audit rows / snapshots).
+      const renderable = (r.messages ?? [])
+        .filter(m => !(m.content_type &&
+          (NON_RENDERABLE_CONTENT_TYPES as readonly string[]).includes(m.content_type)))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
       return {
         ...r,
         messages: undefined,
-        last_message: msgs && msgs.length > 0
-          ? msgs.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
-          : null,
+        last_message: renderable.length > 0 ? renderable[0] : null,
       } as Conversation
     })
 

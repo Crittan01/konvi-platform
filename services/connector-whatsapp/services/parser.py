@@ -103,6 +103,17 @@ def parse_webhook_payloads(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
                 value = change.get("value", {}) or {}
                 metadata = value.get("metadata", {}) or {}
                 phone_number_id = metadata.get("phone_number_id")
+                # F2 2026-07-04 — Meta envía `value.contacts[]` con el nombre de
+                # perfil del cliente: [{profile: {name}, wa_id}]. Lo indexamos por
+                # wa_id para denormalizar `conversations.contact_name` (sólo-display).
+                contacts = value.get("contacts", []) or []
+                name_by_wa_id: Dict[str, str] = {}
+                for contact in contacts:
+                    wa_id = contact.get("wa_id")
+                    profile = contact.get("profile", {}) or {}
+                    profile_name = (profile.get("name") or "").strip()
+                    if wa_id and profile_name:
+                        name_by_wa_id[wa_id] = profile_name
                 messages = value.get("messages", []) or []
                 for msg in messages:
                     customer_phone = msg.get("from")
@@ -127,6 +138,8 @@ def parse_webhook_payloads(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
                             "meta_waba_id": waba_account_id,
                             "destination_phone_id": phone_number_id,
                             "customer_phone": customer_phone,
+                            # F2 — nombre de perfil Meta (si vino en contacts[]).
+                            "customer_name": name_by_wa_id.get(customer_phone),
                             "meta_message_id": message_id,
                             "content_type": msg_type,
                             "content": content,
