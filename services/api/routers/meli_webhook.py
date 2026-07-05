@@ -281,6 +281,76 @@ async def _fetch_meli_resource(resource_path: str, access_token: str) -> dict | 
         return resp.json()
 
 
+# ─── Identidad de canal (source + external_order_id) ─────────────────────────
+# F3: los pedidos MeLi se correlacionan por (source='mercadolibre',
+# external_order_id=<id MeLi>) — identidad estable inmune a que el operador
+# edite las notas. Degradación segura: si la migración que añade esas columnas
+# aún no está aplicada, caemos al match legacy por `notes` (prefijo).
+
+_ORDERS_CHANNEL_COLS: dict[str, Optional[bool]] = {"available": None}
+
+
+def _orders_channel_cols_available(supabase) -> bool:
+    """Feature-detect de columnas orders.source / orders.external_order_id.
+
+    Se prueba una sola vez por proceso y se cachea. Si las columnas no existen
+    todavía (migración pendiente), el módulo sigue funcionando con el match por
+    notes — sin romper la ingesta.
+    """
+    state = _ORDERS_CHANNEL_COLS
+    if state["available"] is None:
+        try:
+            (
+                supabase.table("orders")  # tenant_filter:exempt:schema_capability_probe
+                .select("source, external_order_id")
+                .limit(1)
+                .execute()
+            )
+            state["available"] = True
+        except Exception:
+            state["available"] = False
+    return bool(state["available"])
+
+
+def _find_meli_order(supabase, tenant_id: str, meli_order_id: str):
+    """Localiza la fila orders del pedido MeLi.
+
+    Prefiere identidad estable (source + external_order_id). Cae al match por
+    prefijo de notes para pedidos legacy o si la columna no existe todavía.
+    Retorna dict {id, status} o None. Nunca lanza AttributeError sobre None
+    (postgrest 2.28.3: maybe_single() → None en 0 filas).
+    """
+    if _orders_channel_cols_available(supabase):
+        try:
+            res = (
+                supabase.table("orders")
+                .select("id, status")
+                .eq("tenant_id", tenant_id)
+                .eq("source", "mercadolibre")
+                .eq("external_order_id", str(meli_order_id))
+                .maybe_single()
+                .execute()
+            )
+            if res and res.data:
+                return res.data
+        except Exception as e:
+            logger.warning("Lookup MeLi por external_order_id falló (%s) — fallback notes", e)
+    # Fallback legacy por prefijo de notes.
+    try:
+        res = (
+            supabase.table("orders")
+            .select("id, status")
+            .eq("tenant_id", tenant_id)
+            .like("notes", f"MeLi order #{meli_order_id}%")
+            .maybe_single()
+            .execute()
+        )
+        return res.data if res else None
+    except Exception as e:
+        logger.warning("Lookup MeLi por notes falló para orden %s: %s", meli_order_id, e)
+        return None
+
+
 # ─── Procesamiento por tópico ────────────────────────────────────────────────
 
 def _resolve_variation_ids(meli_item_ids: list[str], tenant_id: str, supabase) -> dict[str, str]:
@@ -510,21 +580,14 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
     buyer_nickname  = buyer.get("nickname", "")
     notes           = f"MeLi order #{meli_order_id} · vendedor: {buyer_nickname or buyer_name}"
 
-    existing = (
-        supabase.table("orders")
-        .select("id, status")
-        .eq("tenant_id", tenant_id)
-        .eq("notes", notes)
-        .maybe_single()
-        .execute()
-    )
+    existing = _find_meli_order(supabase, tenant_id, meli_order_id)
 
-    if existing.data:
+    if existing:
         # Actualizar estado si avanzó
-        if existing.data["status"] != internal_status:
+        if existing["status"] != internal_status:
             supabase.table("orders").update({
                 "status": internal_status,
-            }).eq("id", existing.data["id"]).eq("tenant_id", tenant_id).execute()
+            }).eq("id", existing["id"]).eq("tenant_id", tenant_id).execute()
             logger.info("Orden MeLi %s → status %s (tenant %s)", meli_order_id, internal_status, tenant_id)
     else:
         # Crear contacto si hay teléfono disponible
@@ -543,6 +606,11 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
         }
         if contact_id:
             order_payload["contact_id"] = contact_id
+        # F3: identidad estable del canal — solo si la migración ya añadió las
+        # columnas (degradación segura hacia el match por notes).
+        if _orders_channel_cols_available(supabase):
+            order_payload["source"] = "mercadolibre"
+            order_payload["external_order_id"] = meli_order_id
 
         order_result = supabase.table("orders").insert(order_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
@@ -594,23 +662,15 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
         logger.info("Shipment MeLi %s sin order_id — sin acción", shipment_id)
         return
 
-    # Buscar la orden por el MeLi order ID almacenado en notes
-    notes_prefix = f"MeLi order #{meli_order_id}"
-    existing = (
-        supabase.table("orders")
-        .select("id, status")
-        .eq("tenant_id", tenant_id)
-        .like("notes", f"{notes_prefix}%")
-        .maybe_single()
-        .execute()
-    )
-
-    order_id = existing.data["id"] if existing.data else None
+    # Buscar la orden por identidad de canal (source+external_order_id) con
+    # fallback a notes — helper único, sin AttributeError sobre None.
+    existing = _find_meli_order(supabase, tenant_id, meli_order_id)
+    order_id = existing["id"] if existing else None
 
     # Actualizar estado de la orden si el shipment implica un avance
     new_order_status = MELI_SHIPMENT_ORDER_STATUS_MAP.get(shipment_status)
     if order_id and new_order_status:
-        current_status = existing.data["status"]
+        current_status = existing["status"]
         STATUS_RANK = {"pending": 0, "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5}
         if STATUS_RANK.get(new_order_status, 0) > STATUS_RANK.get(current_status, 0):
             supabase.table("orders").update({
@@ -621,9 +681,9 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
         else:
             logger.info("Shipment MeLi %s: estado %s no avanza sobre %s — omitido",
                         shipment_id, new_order_status, current_status)
-    elif not existing.data:
-        logger.warning("Shipment MeLi %s: no se encontró orden con notes like '%s%%' (tenant %s)",
-                       shipment_id, notes_prefix, tenant_id)
+    elif not existing:
+        logger.warning("Shipment MeLi %s: no se encontró orden para MeLi order #%s (tenant %s)",
+                       shipment_id, meli_order_id, tenant_id)
 
     # Persistir tracking en order_tracking (aunque la orden no haya avanzado de estado)
     if order_id and shipment_id:
@@ -661,7 +721,7 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
                 "estimated_delivery": estimated_delivery,
                 "raw":                shipment_data,
             }
-            if existing_tracking.data:
+            if existing_tracking and existing_tracking.data:  # F-doc: maybe_single() → None en 0 filas (postgrest 2.28.3)
                 supabase.table("order_tracking").update(tracking_payload).eq(
                     "id", existing_tracking.data["id"]
                 ).eq("tenant_id", tenant_id).execute()

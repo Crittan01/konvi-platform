@@ -6,10 +6,20 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import MarketplaceManager, { type MeliItem } from './_components/marketplace-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
-export default async function MarketplacePage() {
+const PAGE_SIZE = 50
+
+export default async function MarketplacePage(props: {
+  searchParams: Promise<{ offset?: string }>
+}) {
   // Sem 5 perf: cached.
   const user = await getCachedUser()
   if (!user) redirect('/login')
+
+  // F3: paginación server-side. El offset viaja por query param (?offset=) para
+  // que el pager sea navegable/compartible y el RSC re-consulte la página exacta.
+  const sp = await props.searchParams
+  const parsedOffset = Number.parseInt(sp.offset ?? '0', 10)
+  const offset = Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0
 
   const supabase = await createClient()
   // getUser() ya validó el usuario. getSession() solo extrae el token para llamar la API interna.
@@ -54,11 +64,11 @@ export default async function MarketplacePage() {
   // ── Publicaciones MeLi (desde API — datos reales de MeLi) ─────────────────
   let connected = false
   let items: MeliItem[] = []
-  let paging = { total: 0 }
+  let paging: { total: number; limit?: number; offset?: number } = { total: 0, limit: PAGE_SIZE, offset }
   let marketplaceLoadError: string | null = null
 
   try {
-    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/listings`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/listings?offset=${offset}&limit=${PAGE_SIZE}`, {
       headers: { 'Authorization': `Bearer ${session?.access_token}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(12000),
@@ -77,7 +87,7 @@ export default async function MarketplacePage() {
       const data = await res.json()
       connected = data.connected ?? false
       items     = data.items ?? []
-      paging    = data.paging ?? { total: 0 }
+      paging    = data.paging ?? { total: 0, limit: PAGE_SIZE, offset }
     }
   } catch (error) {
     console.error('Failed to fetch marketplace listings:', error)

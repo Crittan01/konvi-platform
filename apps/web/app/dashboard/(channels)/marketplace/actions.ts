@@ -108,6 +108,30 @@ export async function importFromMeli(meliId: string, categoryId?: string) {
   }
 }
 
+/**
+ * Importa en lote varias publicaciones MeLi sin vincular (F3: escala >100 items).
+ * El backend procesa cada item de forma independiente y retorna 207 con un
+ * resumen { imported, skipped, errors, summary } — un fallo parcial NO es error
+ * global, por eso 207 se trata como éxito y el detalle se muestra en el toast.
+ */
+export async function importBulkFromMeli(meliIds: string[], categoryId?: string) {
+  const token = await getToken()
+  if (!token) return { error: SESSION_EXPIRED }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/import-bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ meli_ids: meliIds, category_id: categoryId || null })
+    })
+    if (!res.ok) throw new Error(await parseApiError(res, 'No se pudieron importar las publicaciones.'))
+    revalidatePath('/dashboard/marketplace')
+    revalidatePath('/dashboard/catalog')
+    return { success: true, data: await res.json().catch(() => null) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al importar en lote' }
+  }
+}
+
 export async function syncStockFromSupabase(listingId: string) {
   const token = await getToken()
   if (!token) return { error: SESSION_EXPIRED }

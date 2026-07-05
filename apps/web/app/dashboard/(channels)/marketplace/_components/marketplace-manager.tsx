@@ -13,15 +13,19 @@ import {
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@/components/ui/tooltip'
+import { Checkbox } from '@/components/ui/checkbox'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   ExternalLink, Pause, Play, Link2, Link2Off, RefreshCw,
   Search, AlertTriangle, CheckCircle2, X, Store,
+  ChevronLeft, ChevronRight, PackagePlus, Loader2,
 } from 'lucide-react'
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import {
-  linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase, importFromMeli
+  linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase,
+  importFromMeli, importBulkFromMeli,
 } from '../actions'
 
 type MeliVariation = {
@@ -45,6 +49,7 @@ export type MeliItem = {
   sku: string | null
   product_name: string | null
   supabase_stock: number | null
+  supabase_price: number | null      // precio de catálogo (para drift vs precio MeLi)
   is_linked: boolean
   meli_condition: string | null      // 'new' | 'used' | 'not_specified'
   synced_at: string | null
@@ -71,7 +76,7 @@ type Category = {
 
 type Props = {
   items: MeliItem[]
-  paging: { total: number }
+  paging: { total: number; limit?: number; offset?: number }
   variations: Variation[]
   categories: Category[]
   canWrite: boolean
@@ -115,6 +120,19 @@ export default function MarketplaceManager({ items, paging, variations, categori
   const [variantQuery, setVariantQuery]       = useState('')
   const [actionErrors, setActionErrors]       = useState<Record<string, string>>({})
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds]         = useState<Set<string>>(new Set())
+  const [bulkCategoryId, setBulkCategoryId]   = useState('')
+  const [bulkLoading, setBulkLoading]         = useState(false)
+  const confirm = useConfirm()
+
+  // ── Paginación server-side (F3) ─────────────────────────────────────────────
+  const pageLimit  = paging.limit ?? (items.length || 50)
+  const pageOffset = paging.offset ?? 0
+  const total      = paging.total ?? items.length
+  const hasPrev    = pageOffset > 0
+  const hasNext    = pageOffset + items.length < total
+  const prevHref   = `/dashboard/marketplace?offset=${Math.max(0, pageOffset - pageLimit)}`
+  const nextHref   = `/dashboard/marketplace?offset=${pageOffset + pageLimit}`
 
   const setLoading = (id: string, on: boolean) =>
     setLoadingIds(prev => { const n = new Set(prev); if (on) { n.add(id) } else { n.delete(id) } return n })
@@ -245,6 +263,55 @@ export default function MarketplaceManager({ items, paging, variations, categori
     setLoading(meliId, false)
   }
 
+  // ── Selección masiva (F3: importar todo lo no vinculado) ────────────────────
+  const unlinkedIds = useMemo(
+    () => items.filter(i => !i.is_linked).map(i => i.meli_id),
+    [items]
+  )
+  const allUnlinkedSelected = unlinkedIds.length > 0 && unlinkedIds.every(id => selectedIds.has(id))
+
+  const toggleSelect = (meliId: string) =>
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      if (n.has(meliId)) { n.delete(meliId) } else { n.add(meliId) }
+      return n
+    })
+
+  const toggleSelectAllUnlinked = () =>
+    setSelectedIds(prev => (allUnlinkedSelected ? new Set() : new Set(unlinkedIds)))
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const handleBulkImport = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const ok = await confirm({
+      title: `Importar ${ids.length} ${ids.length === 1 ? 'publicación' : 'publicaciones'} al Catálogo`,
+      description: 'Se creará un producto por cada publicación seleccionada y se vinculará automáticamente. Podrás editar descripción e imágenes desde Productos.',
+      confirmLabel: 'Importar todo',
+    })
+    if (!ok) return
+    setBulkLoading(true)
+    const categoryId = bulkCategoryId && bulkCategoryId !== '_none' ? bulkCategoryId : undefined
+    const resp = await importBulkFromMeli(ids, categoryId)
+    setBulkLoading(false)
+    if (resp?.error) { toast.error(resp.error); return }
+    const summary = (resp?.data as { summary?: { imported: number; skipped: number; errors: number } } | null)?.summary
+    if (summary) {
+      const parts = [`${summary.imported} ${summary.imported === 1 ? 'importada' : 'importadas'}`]
+      if (summary.skipped) parts.push(`${summary.skipped} omitidas (ya vinculadas)`)
+      if (summary.errors)  parts.push(`${summary.errors} con error`)
+      if (summary.errors) {
+        toast.warning(parts.join(' · '), { description: 'Revisa las publicaciones con error e inténtalo de nuevo.' })
+      } else {
+        toast.success(parts.join(' · '), { description: 'Edita descripción e imágenes desde Productos.' })
+      }
+    } else {
+      toast.success('Publicaciones importadas al Catálogo.')
+    }
+    clearSelection()
+  }
+
   // ── Empty ─────────────────────────────────────────────────────────────────
 
   if (items.length === 0) {
@@ -315,11 +382,63 @@ export default function MarketplaceManager({ items, paging, variations, categori
         </div>
       </div>
 
+      {/* Barra de acción masiva — aparece al seleccionar publicaciones sin vincular */}
+      {canWrite && selectedIds.size > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-4 py-2.5">
+          <p className="text-sm font-medium text-foreground flex items-center gap-2">
+            <PackagePlus className="h-4 w-4 text-primary" />
+            {selectedIds.size} sin vincular {selectedIds.size === 1 ? 'seleccionada' : 'seleccionadas'}
+          </p>
+          <div className="flex flex-1 items-center gap-2 flex-wrap sm:justify-end">
+            <div className="w-full sm:w-52">
+              <Select value={bulkCategoryId} onValueChange={setBulkCategoryId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Categoría de catálogo (opcional)" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  <SelectItem value="_none">Sin categoría</SelectItem>
+                  {categories.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.display_label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button size="sm" className="h-8 text-xs gap-1.5" onClick={handleBulkImport} disabled={bulkLoading}>
+              {bulkLoading
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Importando…</>
+                : <><PackagePlus className="h-3.5 w-3.5" /> Importar {selectedIds.size} al Catálogo</>}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={clearSelection} disabled={bulkLoading}>
+              Limpiar
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card className="border-border/50 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[860px]">
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
+                {canWrite && (
+                  <th className="py-3 pl-4 pr-1 w-9">
+                    <Tooltip>
+                      <TooltipProvider delayDuration={200}>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Checkbox
+                              checked={allUnlinkedSelected}
+                              onCheckedChange={toggleSelectAllUnlinked}
+                              disabled={unlinkedIds.length === 0}
+                              aria-label="Seleccionar todas las publicaciones sin vincular"
+                            />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>Seleccionar todas las publicaciones sin vincular de esta página</TooltipContent>
+                      </TooltipProvider>
+                    </Tooltip>
+                  </th>
+                )}
                 <th className="py-3 px-4 font-medium text-left">Publicación MeLi</th>
                 <th className="py-3 px-4 font-medium text-right">Precio MeLi</th>
                 <th className="py-3 px-4 font-medium text-center">Stock MeLi</th>
@@ -336,12 +455,32 @@ export default function MarketplaceManager({ items, paging, variations, categori
                   ? item.supabase_stock - item.available_quantity
                   : null
                 const stockOutOfSync = stockDiff !== null && stockDiff !== 0
+                // F3: drift de precio (catálogo vs MeLi). El sync es manual — nunca
+                // pisamos promos nativas de MeLi automáticamente; solo lo señalamos.
+                const priceOutOfSync = item.is_linked && item.supabase_price !== null
+                  && Math.abs(item.supabase_price - item.price) >= 0.01
+                const outOfSync = stockOutOfSync || priceOutOfSync
+                const isSelected = selectedIds.has(item.meli_id)
 
                 return (
                   <tr
                     key={item.meli_id}
-                    className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''} ${rowError ? 'bg-red-500/5' : ''}`}
+                    className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''} ${rowError ? 'bg-red-500/5' : ''} ${isSelected ? 'bg-primary/5' : ''}`}
                   >
+                    {/* Selección masiva — solo publicaciones sin vincular */}
+                    {canWrite && (
+                      <td className="py-3 pl-4 pr-1 align-top">
+                        {!item.is_linked ? (
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleSelect(item.meli_id)}
+                            aria-label={`Seleccionar ${item.title ?? item.meli_id} para importar`}
+                          />
+                        ) : (
+                          <span className="block h-4 w-4" aria-hidden="true" />
+                        )}
+                      </td>
+                    )}
                     {/* Publicación */}
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
@@ -418,6 +557,14 @@ export default function MarketplaceManager({ items, paging, variations, categori
                               </span>
                             )}
                           </div>
+                          {priceOutOfSync && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[10px] text-amber-800 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                Catálogo ${item.supabase_price?.toLocaleString('es-CO')} vs MeLi ${item.price?.toLocaleString('es-CO')} (precio desincronizado)
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground italic">No vinculado</span>
@@ -441,7 +588,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                           </Tooltip>
                         )}
 
-                        {item.is_linked && stockOutOfSync && canWrite && (
+                        {item.is_linked && outOfSync && canWrite && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -525,7 +672,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-muted-foreground">
+                  <td colSpan={canWrite ? 7 : 6} className="py-12 text-center text-muted-foreground">
                     No hay publicaciones que coincidan con la búsqueda.
                   </td>
                 </tr>
@@ -535,14 +682,33 @@ export default function MarketplaceManager({ items, paging, variations, categori
         </div>
       </Card>
 
-      {paging.total > items.length && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-700/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-          <p>
-            Mostrando las primeras <strong>{items.length}</strong> de <strong>{paging.total}</strong> publicaciones.
-            Para vincular una publicación que no aparezca en esta lista, gestiónala directamente desde Mercado Libre;
-            el sync de stock funciona igual para todas las publicaciones ya vinculadas.
+      {/* Pager server-side — navega por query param (?offset=). Búsqueda y filtros
+          operan sobre la página actual. */}
+      {(hasPrev || hasNext) && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-xs text-muted-foreground">
+            Mostrando <strong>{pageOffset + 1}</strong>–<strong>{pageOffset + items.length}</strong> de <strong>{total}</strong> publicaciones
           </p>
+          <div className="flex items-center gap-2">
+            {hasPrev ? (
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1" asChild>
+                <Link href={prevHref}><ChevronLeft className="h-3.5 w-3.5" /> Anteriores</Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled>
+                <ChevronLeft className="h-3.5 w-3.5" /> Anteriores
+              </Button>
+            )}
+            {hasNext ? (
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1" asChild>
+                <Link href={nextHref}>Siguientes <ChevronRight className="h-3.5 w-3.5" /></Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled>
+                Siguientes <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

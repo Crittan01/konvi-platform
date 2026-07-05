@@ -168,15 +168,30 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/listings")
-async def get_listings(tenant_id: str = Depends(get_current_tenant)):
+async def get_listings(
+    offset: int = 0,
+    limit: int = 50,
+    tenant_id: str = Depends(get_current_tenant),
+):
     """
     Retorna los items reales de la cuenta MeLi del tenant más su estado de vinculación.
 
+    Paginación server-side (F3): `offset`/`limit` se pasan a la búsqueda de items
+    del seller. `limit` se acota a [1, 100] (tope duro de la MeLi API) y `offset`
+    a >= 0. La respuesta incluye `paging` de MeLi ({total, limit, offset}) para
+    que la UI construya el pager.
+
     Si MeLi no está conectado, retorna lista vacía con connected=False.
     Los datos de stock y precio vienen de MeLi; la vinculación con Supabase
-    se indica via variation_id si existe en marketplace_listings.
+    se indica via variation_id si existe en marketplace_listings. Para items
+    vinculados se expone `supabase_stock` y `supabase_price` (precio de catálogo)
+    para detectar drift de precio/stock sin sobrescribir promos nativas de MeLi.
     """
     supabase = _get_service_client()
+
+    # Acotar paginación a límites seguros de la MeLi API.
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
 
     # Verificar conexión MeLi
     creds = get_tenant_meli_credentials(supabase, tenant_id)
@@ -190,10 +205,10 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
     user_id = str(creds["user_id"])
 
     try:
-        # 1. Obtener IDs de items del seller (paginado — traemos hasta 100)
-        search_res = await get_user_items(user_id, access_token, limit=100, offset=0)
+        # 1. Obtener IDs de items del seller (página solicitada).
+        search_res = await get_user_items(user_id, access_token, limit=limit, offset=offset)
         item_ids = search_res.get("results", [])
-        paging = search_res.get("paging", {"total": 0, "limit": 100, "offset": 0})
+        paging = search_res.get("paging", {"total": 0, "limit": limit, "offset": offset})
 
         if not item_ids:
             return {"connected": True, "items": [], "paging": paging}
@@ -221,7 +236,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
         if linked_variation_ids:
             var_res = (
                 supabase.table("product_variations")
-                .select("id, sku, stock_quantity, products(title)")
+                .select("id, sku, stock_quantity, price, products(title)")
                 .eq("tenant_id", tenant_id)
                 .in_("id", linked_variation_ids)
                 .execute()
@@ -232,6 +247,9 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
                     "sku": v["sku"],
                     "product_name": product_name,
                     "supabase_stock": v["stock_quantity"],
+                    # F3: precio de catálogo — la UI compara vs price MeLi para
+                    # marcar drift (sync es manual, nunca pisa promos nativas).
+                    "supabase_price": float(v["price"]) if v.get("price") is not None else None,
                 }
 
         # 5. Construir respuesta normalizada
@@ -276,6 +294,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
                 "sku": var_info.get("sku"),
                 "product_name": var_info.get("product_name"),
                 "supabase_stock": var_info.get("supabase_stock"),
+                "supabase_price": var_info.get("supabase_price"),
                 "is_linked": link is not None,
             })
 
@@ -585,44 +604,47 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=502, detail="No se pudo sincronizar el stock con Mercado Libre. Intenta de nuevo.")  # F23
 
 
-@router.post("/import", status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
-@audit_log(entity_type="product", action="created")
-async def import_from_meli(
-    request: Request,
-    payload: ImportBody,
-    tenant_id: str = Depends(get_current_tenant),
-    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
-    supabase = Depends(get_service_client),
-):
+class ImportBulkBody(BaseModel):
+    # Tope de 50 por lote: acota el número de llamadas secuenciales a la MeLi API
+    # dentro de una request (evita timeouts y respeta rate-limits del proveedor).
+    meli_ids: list[str] = Field(..., min_length=1, max_length=50)
+    category_id: Optional[str] = None
+
+
+async def _assert_category_owned(category_id: Optional[str], tenant_id: str, supabase) -> None:
+    """Valida ownership de la categoría OPERATIVA (patrón multi-tenant)."""
+    if not category_id:
+        return
+    owned = (
+        supabase.table("product_categories")
+        .select("id")
+        .eq("id", category_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not owned.data:
+        raise HTTPException(status_code=422, detail="Categoría de catálogo inválida para este tenant")
+
+
+async def _import_meli_item(
+    meli_id: str,
+    category_id: Optional[str],
+    tenant_id: str,
+    access_token: str,
+    supabase,
+) -> dict:
     """
-    Importa una publicación de MeLi al catálogo interno de Supabase y la vincula.
+    Núcleo de importación: GET item MeLi → crea product + variation + listing.
 
-    Flujo en un solo click:
-      1. GET /items/{meli_id}           → trae título, precio, stock de MeLi
-      2. INSERT products                → crea producto en Supabase
-      3. INSERT product_variations      → crea variante con stock y precio de MeLi
-      4. INSERT marketplace_listings    → vincula automáticamente
+    Precondiciones (responsabilidad del caller):
+      - `meli_id` ya normalizado (strip + upper, no vacío).
+      - `category_id` ya validado como propiedad del tenant (o None).
+      - `access_token` MeLi válido.
 
-    Body: { meli_id: "MLA123456", category_id: "uuid" (opcional, categoría OPERATIVA product_categories) }
-
-    Solo importa: título, precio, stock disponible.
-    Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
+    Raise HTTPException en cualquier fallo (409 ya vinculado / SKU duplicado,
+    502 fetch, 500 escritura). Rollback atómico si falla a mitad de camino.
+    Reutilizado por el import unitario y el masivo.
     """
-
-    meli_id = payload.meli_id.strip().upper()
-    # Coherencia (ADR-0029 D2): el producto importado hereda una categoría OPERATIVA (product_categories,
-    # la que usa el bot y el listado), NO la de marketplace. platform_category_id nace null como en toda alta.
-    category_id = payload.category_id  # product_categories.id (operativa) — opcional
-
-    # Guard post-strip: whitespace-only pasa min_length=1 pero strippea a "".
-    if not meli_id:
-        raise HTTPException(status_code=400, detail="meli_id es requerido")
-
-    # Verificar credenciales MeLi
-    access_token = await get_valid_token(supabase, tenant_id)
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
-
     # Verificar que no exista ya un listing para este meli_id
     existing = (
         supabase.table("marketplace_listings")
@@ -656,18 +678,6 @@ async def import_from_meli(
 
     # Generar SKU base desde el ID de MeLi
     sku = f"ML-{meli_id}"
-
-    # Validar ownership de la categoría OPERATIVA (integridad multi-tenant, patrón _assert_category_owned).
-    if category_id:
-        owned = (
-            supabase.table("product_categories")
-            .select("id")
-            .eq("id", category_id)
-            .eq("tenant_id", tenant_id)
-            .execute()
-        )
-        if not owned.data:
-            raise HTTPException(status_code=422, detail="Categoría de catálogo inválida para este tenant")
 
     # 2. Crear producto en Supabase (category_id = operativa; platform_category_id nace null — se deriva por categoría).
     prod_payload = {
@@ -757,4 +767,117 @@ async def import_from_meli(
             "cover_image_url":  cover_image_url,
             "meli_id":          meli_id,
         }
+    }
+
+
+@router.post("/import", status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="product", action="created")
+async def import_from_meli(
+    request: Request,
+    payload: ImportBody,
+    tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
+):
+    """
+    Importa una publicación de MeLi al catálogo interno de Supabase y la vincula.
+
+    Flujo en un solo click:
+      1. GET /items/{meli_id}           → trae título, precio, stock de MeLi
+      2. INSERT products                → crea producto en Supabase
+      3. INSERT product_variations      → crea variante con stock y precio de MeLi
+      4. INSERT marketplace_listings    → vincula automáticamente
+
+    Body: { meli_id: "MLA123456", category_id: "uuid" (opcional, categoría OPERATIVA product_categories) }
+
+    Solo importa: título, precio, stock disponible.
+    Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
+    """
+    meli_id = payload.meli_id.strip().upper()
+    # Coherencia (ADR-0029 D2): el producto importado hereda una categoría OPERATIVA (product_categories,
+    # la que usa el bot y el listado), NO la de marketplace. platform_category_id nace null como en toda alta.
+    category_id = payload.category_id  # product_categories.id (operativa) — opcional
+
+    # Guard post-strip: whitespace-only pasa min_length=1 pero strippea a "".
+    if not meli_id:
+        raise HTTPException(status_code=400, detail="meli_id es requerido")
+
+    # Verificar credenciales MeLi
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
+
+    await _assert_category_owned(category_id, tenant_id, supabase)
+    return await _import_meli_item(meli_id, category_id, tenant_id, access_token, supabase)
+
+
+@router.post("/import-bulk", status_code=207, dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="product", action="created")
+async def import_bulk_from_meli(
+    request: Request,
+    payload: ImportBulkBody,
+    tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
+):
+    """
+    Importa en lote varias publicaciones MeLi sin vincular (F3: escala >100 items).
+
+    Procesa secuencialmente (respeta rate-limit MeLi). Cada item es independiente:
+    un fallo (o un item ya vinculado) no aborta el resto del lote. Comparte
+    exactamente la misma lógica atómica que el import unitario (`_import_meli_item`),
+    incluida la validación de categoría y el rollback por item.
+
+    Body: { meli_ids: ["MCO123", ...] (1..50), category_id: "uuid" (opcional) }
+    Retorna 207 con resumen { imported, skipped, errors, summary }.
+    """
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
+
+    category_id = payload.category_id
+    await _assert_category_owned(category_id, tenant_id, supabase)
+
+    # Normalizar + dedup preservando orden.
+    seen: set[str] = set()
+    ids: list[str] = []
+    for raw in payload.meli_ids:
+        mid = (raw or "").strip().upper()
+        if mid and mid not in seen:
+            seen.add(mid)
+            ids.append(mid)
+    if not ids:
+        raise HTTPException(status_code=400, detail="No hay publicaciones válidas para importar")
+
+    imported: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+    for mid in ids:
+        try:
+            result = await _import_meli_item(mid, category_id, tenant_id, access_token, supabase)
+            imported.append({
+                "meli_id":      mid,
+                "variation_id": result["variation_id"],
+                "sku":          result["imported"]["sku"],
+                "title":        result["imported"]["title"],
+            })
+        except HTTPException as he:
+            # 409 = ya vinculado / SKU duplicado → skip esperable (no es error).
+            bucket = skipped if he.status_code == 409 else errors
+            bucket.append({"meli_id": mid, "reason": str(he.detail)})
+        except Exception as e:
+            logger.error("Import masivo MeLi %s falló (tenant %s): %s", mid, tenant_id, e)
+            errors.append({"meli_id": mid, "reason": "Error inesperado al importar"})
+
+    return {
+        "ok":       True,
+        "imported": imported,
+        "skipped":  skipped,
+        "errors":   errors,
+        "summary": {
+            "total":    len(ids),
+            "imported": len(imported),
+            "skipped":  len(skipped),
+            "errors":   len(errors),
+        },
     }
