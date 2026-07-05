@@ -52,8 +52,16 @@ interface Props {
   shippingOrigin: ShippingOrigin | null
   orderId?:       string | null
   destDefaults?:  Record<string, string> | null
+  // Valor declarado por defecto: order.total_amount cuando se cotiza sobre un
+  // pedido; null → default de cotización libre ($50.000). Ver decisión F2.
+  defaultDeclaredValue?: number | null
   onQuoted?:      () => void
 }
+
+// Default de cotización libre (sin pedido). Debe coincidir con el fallback del
+// backend (services/api/routers/shipping.py: `declared_total ... or 50000`)
+// para que el estimado mostrado no diverja de la guía real que factura Aveonline.
+const FREE_QUOTE_DECLARED_VALUE = 50000
 
 // ─── GeoSelector — solo departamento + ciudad (mínimo para cotizar) ──────────
 
@@ -138,7 +146,12 @@ function readGeo(formData: FormData, prefix: string) {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function ShippingQuoteForm({ shippingOrigin, orderId = null, destDefaults = null, onQuoted = () => {} }: Props) {
+export default function ShippingQuoteForm({ shippingOrigin, orderId = null, destDefaults = null, defaultDeclaredValue = null, onQuoted = () => {} }: Props) {
+  // Default del input de valor declarado: total del pedido (si aplica) o el
+  // fallback de cotización libre. Opcional: el operador puede sobrescribirlo.
+  const declaredValueDefault = defaultDeclaredValue && defaultDeclaredValue > 0
+    ? Math.round(defaultDeclaredValue)
+    : FREE_QUOTE_DECLARED_VALUE
   const [open, setOpen]               = useState(!!orderId)
   const [submitting, setSubmitting]   = useState(false)
   const [error, setError]             = useState<string | null>(null)
@@ -172,6 +185,14 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
     if (!origin.dane_code || origin.dane_code.length !== 5) { setError('Origen inválido: selecciona una ciudad con código DANE válido.'); setSubmitting(false); return }
     if (!dest.dane_code   || dest.dane_code.length !== 5)   { setError('Destino inválido: selecciona una ciudad con código DANE válido.'); setSubmitting(false); return }
 
+    // Valor declarado: input opcional. Vacío o inválido → cae al default
+    // (total del pedido o $50.000). El backend reparte declaredValueCop y usa
+    // 50000 si viene 0/ausente, así que enviamos siempre un entero positivo.
+    const declaredRaw = parseInt(formData.get('declared_value') as string, 10)
+    const declaredValueCop = Number.isFinite(declaredRaw) && declaredRaw > 0
+      ? declaredRaw
+      : declaredValueDefault
+
     const payload = {
       order_id:    orderId,
       origin,
@@ -182,6 +203,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
         width:           parseFloat(formData.get('width')  as string)  || 10,
         height:          parseFloat(formData.get('height') as string)  || 10,
         insuranceAmount: 0,
+        declaredValueCop,
       }],
     }
 
@@ -365,6 +387,31 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                   <Label className="text-xs">Alto (cm)</Label>
                   <Input name="height" type="number" step="1" min="1" defaultValue="10" className="h-8 text-xs" required />
                 </div>
+              </div>
+
+              {/* Valor declarado — opcional. Default: total del pedido (si se
+                  cotiza sobre uno) o $50.000 en cotización libre. Reduce la
+                  divergencia entre el estimado y la guía real de Aveonline
+                  (que valora sobre este monto). */}
+              <div className="space-y-1">
+                <Label htmlFor="declared_value" className="text-xs flex items-center gap-1.5">
+                  <DollarSign className="h-3 w-3 shrink-0" /> Valor declarado (COP)
+                </Label>
+                <Input
+                  id="declared_value"
+                  name="declared_value"
+                  type="number"
+                  step="1000"
+                  min="0"
+                  inputMode="numeric"
+                  defaultValue={declaredValueDefault}
+                  className="h-8 text-xs"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {orderId
+                    ? 'Tomado del total del pedido. Ajústalo si el contenido asegurable difiere.'
+                    : 'Base del seguro/valoración del transportador. Por defecto $50.000.'}
+                </p>
               </div>
             </div>
 

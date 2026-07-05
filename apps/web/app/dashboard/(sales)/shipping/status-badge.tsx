@@ -9,10 +9,11 @@ import { Info } from 'lucide-react'
 //  - Webhook Aveonline (fn_record_shipment_tracking_event): pending, exception, returned
 //  - Wompi webhook: simulated (guía simulada), pending_generation (guía falló)
 // Antes estos 5 últimos se renderizaban como texto crudo en inglés con color fallback.
-const STATUS_META: Record<
-  string,
-  { label: string; color: string; hint?: string }
-> = {
+export type StatusMeta = { label: string; color: string; hint?: string }
+
+// Catálogo canónico compartido — reutilizado por StatusBadge y el timeline de
+// tracking (shipment-timeline.tsx) para no divergir en labels es-CO/colores.
+export const STATUS_META: Record<string, StatusMeta> = {
   quoted:     { label: 'Cotizado',        color: 'bg-yellow-500/15 text-yellow-700 border-yellow-700/30' },
   labeled:    { label: 'Etiquetado',      color: 'bg-blue-500/15 text-blue-700 border-blue-700/30' },
   picked_up:  { label: 'Recolectado',     color: 'bg-purple-500/15 text-purple-700 border-purple-700/30' },
@@ -46,11 +47,15 @@ const STATUS_META: Record<
   },
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const meta = STATUS_META[status] ?? {
+export function getStatusMeta(status: string): StatusMeta {
+  return STATUS_META[status] ?? {
     label: status,
     color: 'bg-muted text-muted-foreground border-border',
   }
+}
+
+export function StatusBadge({ status }: { status: string }) {
+  const meta = getStatusMeta(status)
 
   const chip = (
     <span

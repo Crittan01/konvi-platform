@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { Truck, Package, AlertCircle, ExternalLink, Clock, Info, FileDown, MapPin, Lock } from 'lucide-react'
 import ShippingQuoteForm from './shipping-quote-form'
 import { StatusBadge } from './status-badge'
+import { ShipmentTimeline, type TrackingEvent } from './shipment-timeline'
 import Link from 'next/link'
 
 type Shipment = {
@@ -48,6 +49,12 @@ export default async function ShippingPage(
   let activeProviderConnected = false
   let shippingOrigin: ShippingOrigin | null = null
   let destDefaults: Record<string, string> | null = null
+  // Timeline de tracking: eventos físicos del courier agrupados por shipment_id.
+  // Se degrada a {} si la tabla/RLS no está disponible (no rompe el historial).
+  let eventsByShipment: Record<string, TrackingEvent[]> = {}
+  // Valor declarado por defecto del cotizador: order.total_amount cuando se
+  // cotiza sobre un pedido; null → el formulario cae a $50.000 (default backend).
+  let defaultDeclaredValue: number | null = null
   // Surfacear error de lectura del historial (data-fetching pattern:
   // nunca falso-0 — si la query falla el operador debe verlo, no un "0 envíos").
   let shipmentsError = false
@@ -112,14 +119,45 @@ export default async function ShippingPage(
       i => i.provider === 'aveonline' && i.status === 'connected',
     )
 
-    // Si viene de un pedido, buscar la dirección del contacto
+    // Timeline de tracking — eventos físicos reportados por el courier para
+    // los envíos en ventana. Filtramos huérfanos (shipment_id NULL) usando
+    // `.in('shipment_id', ids)`. Degrada a {} si falla (tabla nueva / RLS sin
+    // migración app_current_tenant aplicada → SELECT retorna 0 rows o error).
+    const shipmentIds = shipments.map(s => s.id)
+    if (shipmentIds.length > 0) {
+      try {
+        const eventsRes = await supabase
+          .from('shipment_tracking_events')
+          .select('id, shipment_id, raw_status, internal_status, description, occurred_at, received_at')
+          .eq('tenant_id', tenantId)
+          .in('shipment_id', shipmentIds)
+          .order('received_at', { ascending: false })
+          .limit(500)
+        if (!eventsRes.error && Array.isArray(eventsRes.data)) {
+          for (const ev of eventsRes.data as TrackingEvent[]) {
+            if (!ev.shipment_id) continue // guard extra contra huérfanos
+            ;(eventsByShipment[ev.shipment_id] ??= []).push(ev)
+          }
+        }
+      } catch {
+        eventsByShipment = {}
+      }
+    }
+
+    // Si viene de un pedido, buscar la dirección del contacto + total del pedido
+    // (para pre-cargar el valor declarado del cotizador).
     if (searchParams?.order) {
       const orderRes = await supabase
         .from('orders')
-        .select('contacts(name, phone, address)')
+        .select('total_amount, contacts(name, phone, address)')
         .eq('id', searchParams.order)
         .eq('tenant_id', tenantId)
         .single()
+      const orderTotal = (orderRes.data as { total_amount?: number | string | null } | null)?.total_amount
+      const parsedTotal = orderTotal != null ? Number(orderTotal) : NaN
+      if (Number.isFinite(parsedTotal) && parsedTotal > 0) {
+        defaultDeclaredValue = Math.round(parsedTotal)
+      }
       const raw     = orderRes.data as { contacts: unknown } | null
       const contact = raw?.contacts
         ? (Array.isArray(raw.contacts) ? raw.contacts[0] : raw.contacts) as { name?: string; phone?: string; address?: Record<string, string> }
@@ -218,6 +256,7 @@ export default async function ShippingPage(
           shippingOrigin={shippingOrigin}
           orderId={searchParams?.order ?? null}
           destDefaults={destDefaults}
+          defaultDeclaredValue={defaultDeclaredValue}
         />
       )}
 
@@ -325,6 +364,8 @@ export default async function ShippingPage(
                       )}
                     </div>
                   </div>
+                  {/* Timeline de tracking (eventos físicos del courier) */}
+                  <ShipmentTimeline events={eventsByShipment[s.id] ?? []} />
                 </div>
               )
             })}
