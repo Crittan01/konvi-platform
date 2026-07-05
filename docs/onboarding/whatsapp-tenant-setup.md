@@ -133,6 +133,13 @@ webhook de Meta (Paso 5) y en el panel de Konvi (Paso 6). Meta la usa para el ha
 
 ## Paso 6 — Conectar en Konvi (form de 6 campos)
 
+> ⚠️ **Pre-requisito legal (producción)**: al pegar tu **App Secret** le entregás a Konvi la custodia de una
+> credencial de TU Meta App. Para tenants **externos** en producción esto exige el **DPA tenant-Konvi**
+> aceptado (custodia de `app_secret`, Model B — `docs/legal/dpa.md` §5.bis, ADR-0023 OQ-1). Mientras la
+> cláusula de custodia esté **pendiente de cierre legal** (acción founder), la conexión en producción de un
+> tenant externo queda bloqueada. **KAIU (self) no aplica.** Coordiná el estado del DPA con el founder antes
+> de este paso.
+
 1. Konvi → **Integraciones → WhatsApp → panel completo** (form Model B).
 2. Pegá las 6 credenciales:
 
@@ -220,7 +227,8 @@ titularidad es tuya.
 - **Conversation window 24h (CSW)**: respondés gratis dentro de 24h del último mensaje del cliente; fuera de
   eso Meta cobra por template. Konvi lo respeta automáticamente.
 - **Custodia de app_secret**: al compartir tu app_secret con Konvi (para validar HMAC) aplica el DPA
-  tenant-Konvi (ADR-0023 OQ-1, template legal pendiente founder).
+  tenant-Konvi (`docs/legal/dpa.md` §5.bis, ADR-0023 OQ-1). Es **pre-requisito** en producción para tenants
+  externos (ver Paso 6); la cláusula de custodia está pendiente de cierre legal (acción founder).
 
 ---
 

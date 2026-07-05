@@ -90,6 +90,13 @@ El script imprime este checklist al final. Cada integración es **per-tenant** (
 Panel: **Integraciones → WhatsApp → panel completo** (form de 6 campos; el de 3 campos es legacy e
 insuficiente — falta `app_secret` + `verify_token`).
 
+> ⚠️ **Gate legal (tenant externo, producción)**: capturar `app_secret` implica custodia de una credencial de
+> la Meta App del tenant → exige **DPA tenant-Konvi** con la cláusula de custodia aceptada
+> (`docs/legal/dpa.md` §5.bis, ADR-0023 OQ-1). Cláusula **pendiente de cierre legal** (ver §7). Hasta el
+> cierre, no capturar `app_secret` de tenants externos en producción. **KAIU (self) exento.**
+
+- [ ] **DPA tenant-Konvi** aceptado (custodia `app_secret`, Model B) — pre-requisito de las 2 filas Vault de
+      abajo para tenants externos en producción. Estado de la cláusula: **pendiente legal** (§7).
 - [ ] `app_id`
 - [ ] `app_secret` → Vault (HMAC del webhook)
 - [ ] `verify_token` (lo elige el tenant; handshake GET)
@@ -171,7 +178,10 @@ Para deshacer una provisión de prueba, ver `docs/operations/` (offboarding) y `
 - **DNS / `WHATSAPP_CONNECTOR_URL`** (ADR-0023 OQ-4): definir el host del connector y setear el env en
   `render.yaml` para que la URL de webhook que muestra el panel sea servible. `api.konvi.co` sin DNS no puede
   servir a la vez API (wompi/telegram) y connector (whatsapp).
-- **DPA tenant-Konvi** para custodia del `app_secret` (ADR-0023 OQ-1, legal externo).
+- **DPA tenant-Konvi** para custodia del `app_secret` (ADR-0023 OQ-1, legal externo). **Bloquea onboarding de
+  tenants externos en producción** (no KAIU=self). Placeholder trazable de la cláusula:
+  `docs/legal/dpa.md` §5.bis (redacción vinculante pendiente). El gate operativo está en §3 (checklist
+  WhatsApp) y en la guía tenant Paso 6 (`docs/onboarding/whatsapp-tenant-setup.md`).
 - **Submit de plantillas HSM en UI**: hoy es admin-run (`submit_template_to_meta.py`); decidir si se expone
   al operador tenant o se mantiene como acción admin.
 
