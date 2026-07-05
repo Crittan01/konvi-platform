@@ -4,7 +4,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
-import { Download, ClipboardList, AlertTriangle, Info, RotateCw } from 'lucide-react'
+import { Download, ClipboardList, AlertTriangle, Info, RotateCw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { bogotaLocalToUTC } from '@/lib/date-window'
 import {
@@ -14,11 +14,15 @@ import {
   actionLabel,
   entityLabel,
   humanizePayload,
+  piiPurposeLabel,
+  piiFieldLabel,
+  describeActor,
 } from './audit-labels'
 
 export const dynamic = 'force-dynamic'
 
 const EXPORT_CAP = 5000
+type View = 'changes' | 'access'
 
 type AuditEntry = {
   id: string
@@ -28,6 +32,17 @@ type AuditEntry = {
   entity_id: string | null
   payload: Record<string, unknown> | null
   created_at: string
+}
+
+type PiiAccessEntry = {
+  id: string
+  contact_id: string | null
+  accessed_by: string
+  actor_user_id: string | null
+  purpose: string
+  fields_accessed: string[] | null
+  ip_address: string | null
+  accessed_at: string
 }
 
 /** Fecha 'YYYY-MM-DD' del operador (hora Colombia) → borde inferior UTC (00:00 Bogotá). */
@@ -51,9 +66,17 @@ function formatBogota(utc: string): string {
   return `${date} ${time}`
 }
 
+/** Propósitos de alto impacto legal (export/reportes) resaltados en ámbar; el resto en azul. Solo shades 700/800 (regla de paleta). */
+const SENSITIVE_PURPOSES = new Set(['data_export', 'sar_export', 'sar_export_printable', 'sic_report'])
+function purposeColor(purpose: string): string {
+  return SENSITIVE_PURPOSES.has(purpose)
+    ? 'bg-amber-500/10 text-amber-800 border border-amber-700/25'
+    : 'bg-blue-500/10 text-blue-800 border border-blue-700/25'
+}
+
 export default async function AuditPage(
   props: {
-    searchParams: Promise<{ entity?: string; page?: string; user?: string; from_date?: string; to_date?: string }>
+    searchParams: Promise<{ entity?: string; page?: string; user?: string; from_date?: string; to_date?: string; view?: string }>
   }
 ) {
   const searchParams = await props.searchParams
@@ -63,14 +86,15 @@ export default async function AuditPage(
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'
-  // Guard server-side (matriz 2026-07-02): Auditoría = owner (dato sensible: quién cambió qué). Sin esto se abre por URL.
+  // Guard server-side (matriz 2026-07-02): Auditoría = owner (dato sensible: quién cambió/accedió qué). Sin esto se abre por URL.
   if (role !== 'owner') redirect('/dashboard')
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const entityFilter = searchParams.entity ?? ''
+  const view: View = searchParams.view === 'access' ? 'access' : 'changes'
+  const entityFilter = view === 'changes' ? (searchParams.entity ?? '') : ''
   const userFilter   = searchParams.user ?? ''
   const fromDate     = searchParams.from_date ?? ''
   const toDate       = searchParams.to_date ?? ''
@@ -80,34 +104,62 @@ export default async function AuditPage(
   const offset       = (page - 1) * pageSize
   const hasFilters   = Boolean(entityFilter || userFilter || fromDate || toDate)
 
-  let query = supabase
-    .from('audit_log')
-    .select('id, user_email, action, entity_type, entity_id, payload, created_at', { count: 'exact' })
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + pageSize - 1)
-
-  if (entityFilter) query = query.eq('entity_type', entityFilter)
-  if (userFilter)   query = query.ilike('user_email', `%${userFilter}%`)
   const fromUTC = bogotaDayStartUTC(fromDate)
   const toUTC   = bogotaDayEndUTC(toDate)
-  if (fromUTC) query = query.gte('created_at', fromUTC)
-  if (toUTC)   query = query.lte('created_at', toUTC)
 
-  const { data, count, error } = await query
-  const entries = (data as AuditEntry[] | null) ?? []
-  const totalPages = Math.ceil((count ?? 0) / pageSize)
-  const total = count ?? 0
+  // ── Fetch según la vista activa ──────────────────────────────────────────
+  let entries: AuditEntry[] = []
+  let accessEntries: PiiAccessEntry[] = []
+  let count = 0
+  let error: { message: string } | null = null
 
-  // Surfacear fallo de lectura: NUNCA caer a "Sin eventos" (falso-0) ante un error de DB/RLS.
-  if (error) {
-    console.error('[audit] read failed', { tenantId, entityFilter, userFilter, fromDate, toDate, page, error: error.message })
+  if (view === 'changes') {
+    let query = supabase
+      .from('audit_log')
+      .select('id, user_email, action, entity_type, entity_id, payload, created_at', { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (entityFilter) query = query.eq('entity_type', entityFilter)
+    if (userFilter)   query = query.ilike('user_email', `%${userFilter}%`)
+    if (fromUTC) query = query.gte('created_at', fromUTC)
+    if (toUTC)   query = query.lte('created_at', toUTC)
+    const res = await query
+    entries = (res.data as AuditEntry[] | null) ?? []
+    count = res.count ?? 0
+    error = res.error
+    if (error) {
+      console.error('[audit] read failed', { tenantId, entityFilter, userFilter, fromDate, toDate, page, error: error.message })
+    }
+  } else {
+    // Accesos a PII (Habeas Data Art. 9). El cliente user PUEDE leer pii_access_log
+    // vía RLS (membresía tenant_users); el INSERT sigue siendo solo service_role.
+    let query = supabase
+      .from('pii_access_log')
+      .select('id, contact_id, accessed_by, actor_user_id, purpose, fields_accessed, ip_address, accessed_at', { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('accessed_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (userFilter) query = query.ilike('accessed_by', `%${userFilter}%`)
+    if (fromUTC) query = query.gte('accessed_at', fromUTC)
+    if (toUTC)   query = query.lte('accessed_at', toUTC)
+    const res = await query
+    accessEntries = (res.data as PiiAccessEntry[] | null) ?? []
+    count = res.count ?? 0
+    error = res.error
+    if (error) {
+      console.error('[audit/access] read failed', { tenantId, userFilter, fromDate, toDate, page, error: error.message })
+    }
   }
 
-  // Preserva filtros vigentes en enlaces (chips, paginación, export) con URL-encoding.
-  const buildHref = (overrides: Partial<Record<'entity' | 'user' | 'from_date' | 'to_date' | 'page', string>>) => {
+  const totalPages = Math.ceil(count / pageSize)
+  const total = count
+
+  // Preserva filtros + vista vigentes en enlaces (tabs, chips, paginación, export) con URL-encoding.
+  const buildHref = (overrides: Partial<Record<'entity' | 'user' | 'from_date' | 'to_date' | 'page' | 'view', string>>) => {
     const p = new URLSearchParams()
-    const eff = { entity: entityFilter, user: userFilter, from_date: fromDate, to_date: toDate, ...overrides }
+    const eff = { view, entity: entityFilter, user: userFilter, from_date: fromDate, to_date: toDate, ...overrides }
+    if (eff.view === 'access') p.set('view', 'access')
     if (eff.entity)    p.set('entity', eff.entity)
     if (eff.user)      p.set('user', eff.user)
     if (eff.from_date) p.set('from_date', eff.from_date)
@@ -125,6 +177,11 @@ export default async function AuditPage(
 
   const chips = [{ key: '', label: 'Todos' }, ...ENTITY_CHIP_ORDER.map(k => ({ key: k, label: ENTITY_LABELS[k] }))]
 
+  const tabs: Array<{ key: View; label: string; icon: typeof ClipboardList }> = [
+    { key: 'changes', label: 'Cambios', icon: ClipboardList },
+    { key: 'access',  label: 'Accesos a datos personales', icon: ShieldCheck },
+  ]
+
   return (
     <div className="space-y-5 max-w-7xl">
 
@@ -135,10 +192,14 @@ export default async function AuditPage(
             <ClipboardList className="h-5 w-5 text-primary" aria-hidden /> Auditoría
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {error ? 'Registro de cambios del equipo' : `${total} evento${total === 1 ? '' : 's'} registrado${total === 1 ? '' : 's'}`}
+            {error
+              ? (view === 'changes' ? 'Registro de cambios del equipo' : 'Registro de accesos a datos personales')
+              : view === 'changes'
+                ? `${total} evento${total === 1 ? '' : 's'} registrado${total === 1 ? '' : 's'}`
+                : `${total} acceso${total === 1 ? '' : 's'} a datos personales`}
           </p>
         </div>
-        {!error && (
+        {view === 'changes' && !error && (
           <a
             href={`/api/audit/export?${exportParams.toString()}`}
             className={cn(buttonVariants({ size: 'sm', variant: 'outline' }), 'h-8 gap-1.5 text-xs')}
@@ -148,19 +209,51 @@ export default async function AuditPage(
         )}
       </div>
 
+      {/* Tabs de vista — cambios (audit_log) vs accesos a PII (pii_access_log) */}
+      <nav aria-label="Vista de auditoría" className="flex gap-1 border-b border-border">
+        {tabs.map(t => {
+          const active = view === t.key
+          const Icon = t.icon
+          return (
+            <a
+              key={t.key}
+              href={buildHref({ view: t.key, page: '', entity: '', user: '', from_date: '', to_date: '' })}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
+                active
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden /> {t.label}
+            </a>
+          )
+        })}
+      </nav>
+
       {/* Ayuda contextual */}
       <details className="rounded-xl border border-border bg-card">
         <summary className="cursor-pointer select-none px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5">
-          <Info className="h-3.5 w-3.5" aria-hidden /> ¿Qué registra la auditoría?
+          <Info className="h-3.5 w-3.5" aria-hidden /> {view === 'changes' ? '¿Qué registra la auditoría?' : '¿Qué es el registro de accesos?'}
         </summary>
         <div className="px-4 pb-3 text-xs text-muted-foreground space-y-1.5 border-t border-border pt-2.5">
-          <p>Cada cambio hecho por tu equipo desde el panel queda registrado automáticamente: pedidos, productos, contactos, reclamos, integraciones, cupones, compras, configuración y accesos.</p>
-          <p>Las fechas se muestran en hora Colombia. La exportación a CSV respeta los filtros activos y está limitada a los {EXPORT_CAP.toLocaleString('es-CO')} eventos más recientes.</p>
+          {view === 'changes' ? (
+            <>
+              <p>Cada cambio hecho por tu equipo desde el panel queda registrado automáticamente: pedidos, productos, contactos, reclamos, integraciones, cupones, compras, configuración y accesos.</p>
+              <p>Las fechas se muestran en hora Colombia. La exportación a CSV respeta los filtros activos y está limitada a los {EXPORT_CAP.toLocaleString('es-CO')} eventos más recientes.</p>
+            </>
+          ) : (
+            <>
+              <p>Registro de cuándo se accedió a datos personales de tus contactos (nombre, teléfono, documento…), por quién y con qué propósito. Cumple el deber de trazabilidad de la Ley 1581 (Habeas Data, Art. 9).</p>
+              <p>Incluye accesos de tu equipo, del bot y de integraciones. Las fechas se muestran en hora Colombia.</p>
+            </>
+          )}
         </div>
       </details>
 
-      {/* Aviso de cap de export */}
-      {!error && total > EXPORT_CAP && (
+      {/* Aviso de cap de export (solo vista de cambios) */}
+      {view === 'changes' && !error && total > EXPORT_CAP && (
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" aria-hidden />
           <AlertTitle>La exportación se limita a {EXPORT_CAP.toLocaleString('es-CO')} eventos</AlertTitle>
@@ -175,6 +268,7 @@ export default async function AuditPage(
       <div className="rounded-xl border border-border bg-card p-4">
         <form method="GET" action="/dashboard/audit"
           className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+          {view === 'access' && <input type="hidden" name="view" value="access" />}
           <div className="space-y-1">
             <Label htmlFor="audit-from" className="text-xs text-muted-foreground">Desde</Label>
             <Input id="audit-from" type="date" name="from_date" defaultValue={fromDate} className="h-8 text-xs" />
@@ -184,15 +278,15 @@ export default async function AuditPage(
             <Input id="audit-to" type="date" name="to_date" defaultValue={toDate} className="h-8 text-xs" />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="audit-user" className="text-xs text-muted-foreground">Usuario</Label>
-            <Input id="audit-user" name="user" placeholder="email parcial..." defaultValue={userFilter} className="h-8 text-xs" />
+            <Label htmlFor="audit-user" className="text-xs text-muted-foreground">{view === 'changes' ? 'Usuario' : 'Actor'}</Label>
+            <Input id="audit-user" name="user" placeholder={view === 'changes' ? 'email parcial...' : 'user, agent, integración...'} defaultValue={userFilter} className="h-8 text-xs" />
           </div>
           {entityFilter && <input type="hidden" name="entity" value={entityFilter} />}
           <div className="flex gap-2">
             <Button type="submit" size="sm" className="h-8 text-xs flex-1">Filtrar</Button>
             {(fromDate || toDate || userFilter) && (
               <a
-                href={entityFilter ? buildHref({ user: '', from_date: '', to_date: '' }) : '/dashboard/audit'}
+                href={entityFilter ? buildHref({ user: '', from_date: '', to_date: '' }) : buildHref({ user: '', from_date: '', to_date: '', page: '' })}
                 className={cn(buttonVariants({ size: 'sm', variant: 'ghost' }), 'h-8 text-xs flex-1 text-muted-foreground')}
               >
                 Limpiar
@@ -202,26 +296,28 @@ export default async function AuditPage(
         </form>
       </div>
 
-      {/* Chips entidad — scrollable en mobile */}
-      <nav aria-label="Filtrar por tipo de entidad" className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-        {chips.map(opt => {
-          const active = entityFilter === opt.key
-          return (
-            <a key={opt.key || 'all'}
-              href={buildHref({ entity: opt.key, page: '' })}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex-shrink-0 px-3 py-1 rounded-lg text-xs font-medium border transition-all',
-                active
-                  ? 'bg-primary/15 text-primary border-primary/40'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {opt.label}
-            </a>
-          )
-        })}
-      </nav>
+      {/* Chips entidad — solo vista de cambios */}
+      {view === 'changes' && (
+        <nav aria-label="Filtrar por tipo de entidad" className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+          {chips.map(opt => {
+            const active = entityFilter === opt.key
+            return (
+              <a key={opt.key || 'all'}
+                href={buildHref({ entity: opt.key, page: '' })}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'flex-shrink-0 px-3 py-1 rounded-lg text-xs font-medium border transition-all',
+                  active
+                    ? 'bg-primary/15 text-primary border-primary/40'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {opt.label}
+              </a>
+            )
+          })}
+        </nav>
+      )}
 
       {/* Estado de error de lectura — retry, NO empty-state */}
       {error ? (
@@ -242,11 +338,76 @@ export default async function AuditPage(
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-muted/20">
           <p className="text-sm font-medium">
-            {entityFilter ? entityLabel(entityFilter) : 'Todos los eventos'}
+            {view === 'access'
+              ? 'Accesos a datos personales'
+              : entityFilter ? entityLabel(entityFilter) : 'Todos los eventos'}
           </p>
         </div>
 
-        {entries.length === 0 ? (
+        {/* ── Vista: Accesos a PII ─────────────────────────────────────────── */}
+        {view === 'access' ? (
+          accessEntries.length === 0 ? (
+            <div className="py-12 px-6 text-center space-y-1.5">
+              {hasFilters ? (
+                <>
+                  <p className="text-sm text-foreground font-medium">Sin accesos para estos filtros</p>
+                  <p className="text-xs text-muted-foreground">Ajusta el rango de fechas o el actor.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-foreground font-medium">Aún no hay accesos registrados</p>
+                  <p className="text-xs text-muted-foreground">
+                    Cuando tu equipo, el bot o una integración consulten datos personales de tus contactos, el acceso quedará registrado aquí.
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {accessEntries.map(e => {
+                const actor = describeActor(e.accessed_by)
+                const fields = e.fields_accessed ?? []
+                return (
+                  <div key={e.id}
+                    className="px-4 py-3 flex flex-col sm:flex-row gap-1.5 sm:gap-4 items-start hover:bg-muted/20 transition-colors">
+                    <div className="shrink-0 sm:w-32 text-[11px] text-muted-foreground font-mono pt-0.5">
+                      {formatBogota(e.accessed_at)}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded-full', purposeColor(e.purpose))}>
+                          {piiPurposeLabel(e.purpose)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {e.contact_id
+                            ? <>Contacto <span className="font-mono ml-0.5 opacity-50">#{e.contact_id.slice(-6)}</span></>
+                            : 'Listado de contactos'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        <span className="text-foreground/70">{actor.kind}</span>
+                        {actor.detail && <span className="font-mono ml-1 opacity-60">{actor.detail}</span>}
+                      </p>
+                      {fields.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {fields.map((f, i) => (
+                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                              {piiFieldLabel(f)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {e.ip_address && (
+                        <p className="text-[10px] text-muted-foreground/70 font-mono">IP {e.ip_address}</p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        ) : /* ── Vista: Cambios (audit_log) ──────────────────────────────── */
+        entries.length === 0 ? (
           <div className="py-12 px-6 text-center space-y-1.5">
             {hasFilters ? (
               <>

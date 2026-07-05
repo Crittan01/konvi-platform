@@ -57,6 +57,33 @@ export async function GET(request: NextRequest) {
 
   const rows = data ?? []
 
+  // Registro del acceso (PII, Habeas Data Art. 9): el export saca hasta 5000
+  // eventos con datos personales y debe dejar huella. El write es privilegiado
+  // (pii_access_log tiene INSERT solo para service_role, append-only), así que
+  // se delega a la RPC SECURITY DEFINER `log_audit_export`. Best-effort: si la
+  // migración aún no está aplicada (feature-detect) o falla, NO se bloquea la
+  // descarga — solo se pierde la traza, comportamiento degradado seguro.
+  try {
+    const filters: Record<string, string> = {}
+    if (entity)    filters.entity    = entity
+    if (userEmail) filters.user      = userEmail
+    if (fromDate)  filters.from_date = fromDate
+    if (toDate)    filters.to_date   = toDate
+    const fwd = request.headers.get('x-forwarded-for')
+    const ip = (fwd ? fwd.split(',')[0] : request.headers.get('x-real-ip'))?.trim() ?? null
+    const { error: logError } = await supabase.rpc('log_audit_export', {
+      p_row_count:  rows.length,
+      p_filters:    filters,
+      p_ip:         ip,
+      p_user_agent: request.headers.get('user-agent'),
+    })
+    if (logError) {
+      console.warn('[audit/export] access log skipped', { tenantId: meta.tenant_id, error: logError.message })
+    }
+  } catch (e) {
+    console.warn('[audit/export] access log threw', { tenantId: meta.tenant_id, error: String(e) })
+  }
+
   const header = ['Fecha (Colombia)', 'Usuario', 'Acción', 'Entidad', 'ID', 'Detalle']
   const csvRows = rows.map((r: {
     created_at: string; user_email: string | null; action: string;
