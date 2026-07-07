@@ -1,50 +1,36 @@
-<!--
-  Plantilla: Recuperación de contraseña (auth.email.template.recovery)
-  Disparada por: supabase.auth.resetPasswordForEmail(...) en
-    apps/web/app/forgot-password/forgot-password-form.tsx
-
-  {{ .ConfirmationURL }} → link PKCE construido por Supabase a partir del `redirectTo`
-                           del código (…/auth/confirm?next=/set-password). NO reescribir
-                           a mano: /auth/confirm/route.ts espera ?code= (o ?token_hash=).
-  es-CO. Sin assets externos.
--->
-<div style="margin:0;padding:0;background:#f4f4f5;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 0;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#ffffff;border-radius:14px;border:1px solid #e4e4e7;overflow:hidden;">
-          <tr>
-            <td style="padding:28px 32px 8px 32px;">
-              <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.01em;color:#1d4ed8;">Konvi</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 32px 0 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-              <h1 style="margin:0 0 12px 0;font-size:20px;line-height:1.3;font-weight:700;color:#18181b;">Restablece tu contraseña</h1>
-              <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#3f3f46;">
-                Recibimos una solicitud para restablecer la contraseña de tu cuenta en Konvi. Haz clic en el botón para elegir una nueva:
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 8px 32px;" align="left">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#1d4ed8;color:#ffffff;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:11px 22px;border-radius:9px;">Restablecer contraseña</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 28px 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-              <p style="margin:0 0 6px 0;font-size:12px;line-height:1.6;color:#71717a;">Si el botón no funciona, copia y pega este enlace:</p>
-              <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#1d4ed8;">{{ .ConfirmationURL }}</a></p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 28px 32px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;border-top:1px solid #f4f4f5;">
-              <p style="margin:16px 0 0 0;font-size:11px;line-height:1.6;color:#a1a1aa;">Si no solicitaste este cambio, ignora este correo: tu contraseña seguirá igual. El enlace caduca por seguridad.</p>
-            </td>
-          </tr>
-        </table>
-        <p style="margin:16px 0 0 0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;color:#a1a1aa;">Konvi · Enviado automáticamente, no respondas a este correo.</p>
-      </td>
-    </tr>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f2f0ec;">Crea una contraseña nueva para tu cuenta.</div>
+<div style="margin:0;padding:0;background:#f2f0ec;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f0ec;padding:36px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:16px;border:1px solid #e6e4df;overflow:hidden;">
+        <tr><td style="height:4px;background:#2e5c49;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:26px 32px 4px 32px;">
+          <span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:19px;font-weight:800;letter-spacing:-0.02em;color:#2e5c49;">Konvi</span>
+        </td></tr>
+        <tr><td style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+          <h1 style="margin:0 0 14px 0;font-size:21px;line-height:1.3;font-weight:700;color:#1a2420;">Restablece tu contraseña</h1>
+          <div style="font-size:14.5px;line-height:1.65;color:#3f4a45;">Recibimos una solicitud para restablecer la contraseña de tu cuenta de Konvi. Haz clic en el botón para crear una nueva:</div>
+        </td></tr>
+        
+          <tr><td style="padding:6px 32px 6px 32px;" align="center">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#2e5c49;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;text-decoration:none;padding:13px 30px;border-radius:10px;">Crear contraseña nueva</a>
+          </td></tr>
+        
+          <tr><td style="padding:14px 32px 4px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+            <p style="margin:0 0 6px 0;font-size:12px;line-height:1.6;color:#8a938e;">¿El botón no funciona? Copia y pega este enlace en tu navegador:</p>
+            <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#2e5c49;text-decoration:underline;">{{ .ConfirmationURL }}</a></p>
+          </td></tr>
+        
+          <tr><td style="padding:18px 32px 4px 32px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f8f5;border-radius:10px;">
+              <tr><td style="padding:12px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#3f4a45;">Si tú no pediste esto, ignora este correo — tu contraseña actual sigue siendo válida y nadie puede cambiarla sin este enlace.</td></tr>
+            </table>
+          </td></tr>
+        <tr><td style="padding:22px 32px 26px 32px;">
+          <div style="border-top:1px solid #efeeea;margin-bottom:14px;"></div>
+          <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#aab0ab;">Konvi — plataforma de conversaciones, pedidos y pagos. Enviado automáticamente; por favor no respondas a este correo. ¿Necesitas ayuda? <a href="mailto:soporte@konvi.co" style="color:#8a938e;text-decoration:underline;">soporte@konvi.co</a></p>
+        </td></tr>
+      </table>
+    </td></tr>
   </table>
 </div>
