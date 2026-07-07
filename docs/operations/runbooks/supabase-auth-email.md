@@ -107,6 +107,26 @@ recuperación de contraseña sobre todo). Las **7 de Security** son opcionales y
 > Los **subjects** SÍ se pueden automatizar por Management API (`PATCH /v1/projects/{ref}/config/auth`
 > con `mailer_subjects_*`), respetando el rate-limit de **120 req/60s**. El **contenido no** (1010).
 
+#### Notificaciones de "Security" — cuáles ACTIVAR (no todas)
+
+La sección **Security** trae 7 notificaciones **desactivadas** (`mailer_notifications_*_enabled=false`).
+**No actives todas**: solo las que apliquen a la config real de auth de Konvi (email + MFA; **sin**
+teléfono/SMS ni OAuth). Para cada una que actives → **Enable** + pega su `*_notification.html`.
+
+| Notificación (Security) | ¿Activar? | Por qué (config real) |
+|---|---|---|
+| Password changed | ✅ **SÍ** | Auth por contraseña — señal de seguridad clave |
+| Email address changed | ✅ **SÍ** | Un miembro puede cambiar su correo |
+| MFA method added | ✅ **SÍ** | MFA TOTP habilitado (`mfa_totp_enroll_enabled=true`) |
+| MFA method removed | ✅ **SÍ** | Quitar un factor MFA es sensible |
+| Phone number changed | ❌ NO | No hay auth por teléfono/SMS (`sms_provider=null`, `external_phone_enabled=false`) |
+| Sign-in method linked | ❌ NO | Solo email; sin proveedores OAuth (`external_*_enabled=false`) |
+| Sign-in method removed | ❌ NO | Igual — sin OAuth |
+
+> Si en el futuro se habilita OAuth (Google, etc.) o phone/SMS, activar también las
+> correspondientes — sus plantillas ya están listas en el repo con las variables específicas
+> (`{{ .Provider }}`, `{{ .FactorType }}`, `{{ .OldEmail }}`/`{{ .Email }}`, `{{ .OldPhone }}`/`{{ .Phone }}`).
+
 ### IH-EMAIL-03 — Custom SMTP (deliverability + rate-limit) — ✅ HECHO (2026-07-06)
 
 **COMPLETADO:** Resend con dominio `konvi.co` verified (región `sa-east-1`, SPF+DKIM+DMARC en
