@@ -48,6 +48,15 @@ MAX_TOOL_TURNS = int(os.getenv("AGENTIC_MAX_TOOL_TURNS", "8"))
 MAX_TOTAL_TOOL_CALLS = int(os.getenv("AGENTIC_MAX_TOOL_CALLS", "20"))
 AGENTIC_TEMPERATURE = float(os.getenv("AGENTIC_TEMPERATURE", "0.0"))
 AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-3.5-flash")
+# Fix latencia (2026-07-07): sin timeout, si el modelo primario se satura (503
+# "high demand"), el SDK de Gemini reintenta con backoff SIN límite → un turno
+# tardaba ~160s. Con timeout por llamada, el modelo lento falla rápido y el
+# cascade promueve al fallback (gemini-3.1-flash-lite) → respuesta en segundos.
+AGENTIC_LLM_TIMEOUT_MS = int(os.getenv("AGENTIC_LLM_TIMEOUT_MS", "30000"))  # 30s/llamada
+# thinking_budget del turno agéntico. Opcional (solo se aplica si el env está
+# seteado, para no cambiar la coherencia validada sin querer): 0 = sin thinking
+# (más rápido); un entero = presupuesto de tokens de razonamiento.
+AGENTIC_THINKING_BUDGET = os.getenv("AGENTIC_THINKING_BUDGET")  # str | None
 
 
 @dataclass
@@ -156,7 +165,10 @@ async def run_agentic_turn(
     try:
         from google import genai
         from google.genai import types as genai_types
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        client = genai.Client(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            http_options=genai_types.HttpOptions(timeout=AGENTIC_LLM_TIMEOUT_MS),
+        )
     except Exception as exc:
         return AgenticTurnResult(
             outbound_text="",
@@ -593,11 +605,16 @@ async def _gemini_generate_async(
         )
         for m in messages
     ]
-    config = genai_types.GenerateContentConfig(
+    _cfg_kwargs = dict(
         system_instruction=system_prompt,
         temperature=temperature,
         tools=tools_config,
     )
+    if AGENTIC_THINKING_BUDGET is not None:
+        _cfg_kwargs["thinking_config"] = genai_types.ThinkingConfig(
+            thinking_budget=int(AGENTIC_THINKING_BUDGET)
+        )
+    config = genai_types.GenerateContentConfig(**_cfg_kwargs)
 
     def _invoke_with_model(model_name: str):
         """Closure que `generate_with_cascade` invoca por modelo."""

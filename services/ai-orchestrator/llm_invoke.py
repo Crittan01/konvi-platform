@@ -33,7 +33,12 @@ logger = logging.getLogger("orchestrator.llm")
 DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash"
 DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_MAX_RETRIES = 8
-DEFAULT_FALLBACK_AFTER = 4
+# Fix latencia (2026-07-07): bajado de 4→2. Con timeout por llamada (~30s), probar
+# el primario 4 veces antes de fallar-over daba ~120s cuando el primario se satura
+# (503 "high demand"). Con 2, el bot promueve al fallback (gemini-3.1-flash-lite,
+# ~4s, disponible) mucho antes. Override por env GEMINI_FALLBACK_AFTER (1 = aún más
+# agresivo). El primario sano responde en el 1er intento → sin failover.
+DEFAULT_FALLBACK_AFTER = 2
 
 
 def _cfg_int(key: str, default: int) -> int:
