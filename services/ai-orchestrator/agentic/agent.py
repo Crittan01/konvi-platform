@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_TURNS = int(os.getenv("AGENTIC_MAX_TOOL_TURNS", "8"))
 MAX_TOTAL_TOOL_CALLS = int(os.getenv("AGENTIC_MAX_TOOL_CALLS", "20"))
 AGENTIC_TEMPERATURE = float(os.getenv("AGENTIC_TEMPERATURE", "0.0"))
-AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-3.5-flash")
+AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-3.1-flash-lite")
 # Fix latencia (2026-07-07): sin timeout, si el modelo primario se satura (503
 # "high demand"), el SDK de Gemini reintenta con backoff SIN límite → un turno
 # tardaba ~160s. Con timeout por llamada, el modelo lento falla rápido y el

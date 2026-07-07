@@ -19,16 +19,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Tiers canónicos familia Gemini 3.x (workhorse → rescue), igual que ai_agents.py.
-# IDs validados: son los mismos que ai-orchestrator/llm_cascade.py:_DEFAULT_TIERS
-# usa en producción (el bot real ya corre gemini-3.5-flash). Migrado desde la
-# familia 2.5 (gemini-2.5-flash se retira 2026-10-16, ai.google.dev/.../deprecations).
-# Orden calidad-first: flash primero (mejor prompt), lite como retry barato, pro
-# como rescate. Override por env GEMINI_SUGGEST_TIERS (CSV) para ajustar sin deploy.
+# Tiers canónicos Gemini (workhorse → escalación), alineados con llm_cascade._DEFAULT_TIERS.
+# Ajuste 2026-07-07: lite primero (GA, ~3s, "frontier a fracción del costo") como workhorse
+# barato; 3.5-flash como escalación (GA, frontier). Se retiró gemini-3.1-pro-preview (preview,
+# no usar en prod) y se evita gemini-2.5-flash (se retira 2026-10-16). Todos GA.
+# Override por env GEMINI_SUGGEST_TIERS (CSV) para ajustar sin deploy.
 _DEFAULT_SUGGEST_TIERS = [
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
 ]
 
 

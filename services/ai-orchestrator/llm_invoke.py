@@ -30,8 +30,12 @@ logger = logging.getLogger("orchestrator.llm")
 
 # ─── Configuración ───────────────────────────────────────────────────────────
 
-DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash"
-DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+# Primario/fallback invertidos (2026-07-07): antes primary=3.5-flash (frontier, caro
+# y hoy saturado 503) / fallback=lite. Ahora primary=3.1-flash-lite (GA, ~3s, "frontier
+# a fracción del costo") para latencia/costo del bot en alto volumen; 3.5-flash queda de
+# fallback de escalación (GA, ninguno en retiro — se evita 2.5-flash que se retira 2026-10-16).
+DEFAULT_PRIMARY_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash"
 DEFAULT_MAX_RETRIES = 8
 # Fix latencia (2026-07-07): bajado de 4→2. Con timeout por llamada (~30s), probar
 # el primario 4 veces antes de fallar-over daba ~120s cuando el primario se satura

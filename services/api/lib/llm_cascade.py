@@ -41,9 +41,8 @@ logger = logging.getLogger("orchestrator.llm.cascade")
 _DEFAULT_TIERS = [
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
     "claude-sonnet-4-5",
-]
+]  # -preview retirado 2026-07-07: sin modelos preview en prod. Todos GA + rescate Claude.
 
 
 def _env_tiers() -> list[str]:
