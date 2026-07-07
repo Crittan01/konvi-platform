@@ -56,8 +56,9 @@ class GeminiCascadeTests(unittest.TestCase):
     """Verifica que la cascada heredada de llm_invoke.py funciona dentro
     del agentic agent.py post-rev. 106."""
 
-    def test_503_primary_se_recupera_fallback_lite(self):
-        """503 sostenido en flash → switch a flash-lite → éxito."""
+    def test_503_primary_se_recupera_fallback(self):
+        """503 sostenido en el primario (lite) → escala al fallback (3.5-flash) → éxito.
+        (Ajuste 2026-07-07: primario=gemini-3.1-flash-lite, fallback/escalación=gemini-3.5-flash.)"""
         from agentic import agent as agentic_agent
 
         client = MagicMock()
@@ -65,11 +66,11 @@ class GeminiCascadeTests(unittest.TestCase):
 
         def gen_content(model, contents, config):
             call_log.append(model)
-            if model == "gemini-3.5-flash":
-                # Simula 503 todos los intentos en flash.
+            if model == "gemini-3.1-flash-lite":
+                # Simula 503 sostenido en el primario.
                 raise RuntimeError("503 UNAVAILABLE — high demand")
-            elif model == "gemini-3.1-flash-lite":
-                return _FakeResponse("Hola desde lite")
+            elif model == "gemini-3.5-flash":
+                return _FakeResponse("Hola desde flash")
             raise RuntimeError(f"unexpected model: {model}")
 
         client.models.generate_content.side_effect = gen_content
@@ -78,23 +79,22 @@ class GeminiCascadeTests(unittest.TestCase):
         with patch("llm_invoke.time.sleep", lambda s: None):
             result = _run(agentic_agent._gemini_generate_async(
                 client,
-                model="gemini-3.5-flash",
+                model="gemini-3.1-flash-lite",
                 messages=[{"role": "user", "parts": [{"text": "hola"}]}],
                 system_prompt="Eres un test bot.",
                 tools_config=[],
                 temperature=0.0,
             ))
 
-        # La cascada llamó flash al menos una vez, falló transitorio,
-        # luego intentó flash-lite y obtuvo éxito.
-        self.assertIn("gemini-3.5-flash", call_log)
+        # La cascada llamó el primario (lite), falló transitorio, luego escaló al
+        # fallback (3.5-flash) y obtuvo éxito.
         self.assertIn("gemini-3.1-flash-lite", call_log)
-        # Verificar que el fallback respondió.
+        self.assertIn("gemini-3.5-flash", call_log)
         text = "".join(
             getattr(p, "text", "") or ""
             for c in result.candidates for p in c.content.parts
         )
-        self.assertEqual(text, "Hola desde lite")
+        self.assertEqual(text, "Hola desde flash")
 
     def test_429_se_reintenta_y_pasa(self):
         """429 transitorio en intento 1, éxito en intento 2 (mismo modelo)."""
