@@ -1,6 +1,8 @@
 # Runbook — Emails de Auth de Supabase (cierre productivo)
 
-Última actualización: 2026-07-04
+Última actualización: 2026-07-06
+
+> **ESTADO 2026-07-06.** ✅ **IH-EMAIL-01 (Site URL + redirects)**, ✅ **IH-EMAIL-03 (Custom SMTP Resend + rate-limit 2→101)** y ✅ **subjects es-CO** están HECHOS y verificados en producción (`konvi.co` verified, SMTP `smtp.resend.com`/`noreply@konvi.co`, envío real OK). **Falta solo pegar el CONTENIDO de las 13 plantillas en el dashboard** → ver **IH-EMAIL-02** (el Management API bloquea escribir contenido de plantillas, error 1010; el dashboard sí acepta). Fuente de verdad del HTML: `supabase/templates/*.html` (marca verde `#2e5c49`, es-CO). Preview: publicado como Artifact en la sesión de cierre.
 
 Cierra la config productiva de los emails de autenticación (invitación de equipo,
 recuperación de contraseña, confirmación, magic link, cambio de correo). Estos emails
@@ -37,9 +39,11 @@ dashboard, copiar el HTML de `supabase/templates/*.html` tal cual.
 El proyecto hosted de producción se administra por dashboard de Supabase; estos ajustes
 **no viven en git**. Ejecutar antes de habilitar tenants productivos.
 
-### IH-EMAIL-01 — Site URL productivo + allow-list de redirects
+### IH-EMAIL-01 — Site URL productivo + allow-list de redirects — ✅ HECHO (2026-07-06)
 
-**INTERVENCION HUMANA REQUERIDA:** Sí
+Site URL = `https://konvi-web.onrender.com`; allow-list = `/auth/callback`, `/auth/confirm`, `/**`. Verificado.
+
+**INTERVENCION HUMANA REQUERIDA:** Sí (COMPLETADA)
 **RESPONSABLE:** Owner/DevOps
 **MOMENTO:** Antes del primer tenant productivo (bloqueante: sin esto los links salen a `127.0.0.1:3000`).
 **PASOS:**
@@ -53,32 +57,66 @@ El proyecto hosted de producción se administra por dashboard de Supabase; estos
 
 > Nota: `supabase/config.toml:site_url = http://127.0.0.1:3000` es SOLO para desarrollo local. No refleja producción y no debe usarse como fuente de verdad del dominio prod.
 
-### IH-EMAIL-02 — Aplicar plantillas es-CO + branding en el dashboard
+### IH-EMAIL-02 — Pegar el CONTENIDO de las 13 plantillas en el dashboard
 
-**INTERVENCION HUMANA REQUERIDA:** Sí
-**RESPONSABLE:** Owner/DevOps
-**MOMENTO:** Antes del primer invite productivo (si no, salen los defaults de Supabase en inglés).
-**PASOS:**
-1. Dashboard → Authentication → Emails (Templates).
-2. Para cada plantilla (Invite, Reset Password, Confirm signup, Magic Link, Change Email
-   Address): pegar el `subject` y el HTML desde `supabase/templates/*.html` y
-   `supabase/config.toml`. Mapa: `invite.html`→Invite, `recovery.html`→Reset Password,
-   `confirmation.html`→Confirm signup, `magic_link.html`→Magic Link,
-   `email_change.html`→Change Email Address.
-3. Verificar que el link siga siendo `{{ .ConfirmationURL }}` (ver regla de acoplamiento §1).
+**INTERVENCION HUMANA REQUERIDA:** Sí (obligatorio manual — ver "Por qué" abajo)
+**RESPONSABLE:** Owner (founder)
+**MOMENTO:** Cuando se quiera reemplazar los defaults en inglés por la marca Konvi es-CO.
+**POR QUÉ MANUAL:** el Management API de Supabase **bloquea escribir el contenido** de
+plantillas (`mailer_templates_*_content` → HTTP 403 `error code: 1010`), aunque sí permite
+los `mailer_subjects_*`. Verificado 2026-07-06 (13/13 content rechazados con presupuesto de
+rate-limit fresco). Los **subjects es-CO ya se intentaron por API**; si alguno quedó en inglés,
+se pone a mano en la misma pantalla. El **contenido va sí o sí por el dashboard.**
+
+**PASOS (por cada plantilla):**
+1. Dashboard → **Authentication → Emails**.
+2. Abrir la plantilla (columna izquierda) → en el editor:
+   - **Subject (heading):** pegar el asunto es-CO de la tabla.
+   - **Message body:** cambiar a **Source/HTML** y pegar el contenido COMPLETO del archivo
+     `supabase/templates/<archivo>.html` del repo (tal cual, sin editar).
+3. **Save**.
+4. Las 7 de **Security** vienen **DESACTIVADAS** (`mailer_notifications_*_enabled=false`).
+   Para usarlas: activar el toggle **Enable** de cada una además de pegar el contenido.
+
+**Mapa (nombre en el dashboard → archivo del repo → asunto):**
+
+| Authentication → Emails | Archivo (`supabase/templates/`) | Subject es-CO | Grupo |
+|---|---|---|---|
+| Invite user | `invite.html` | Te invitaron a un equipo en Konvi | Auth |
+| Reset password | `recovery.html` | Restablece tu contraseña de Konvi | Auth |
+| Confirm sign up | `confirmation.html` | Confirma tu cuenta en Konvi | Auth |
+| Magic link / OTP | `magic_link.html` | Tu enlace de acceso a Konvi | Auth |
+| Change email address | `email_change.html` | Confirma tu nuevo correo · Konvi | Auth |
+| Reauthentication | `reauthentication.html` | Tu código de verificación · Konvi | Auth |
+| Password changed | `password_changed_notification.html` | Tu contraseña de Konvi cambió | Security (off) |
+| Email address changed | `email_changed_notification.html` | Tu correo de Konvi cambió | Security (off) |
+| Phone number changed | `phone_changed_notification.html` | Tu teléfono de Konvi cambió | Security (off) |
+| Sign-in method linked | `identity_linked_notification.html` | Nuevo método de acceso vinculado · Konvi | Security (off) |
+| Sign-in method removed | `identity_unlinked_notification.html` | Método de acceso removido · Konvi | Security (off) |
+| MFA method added | `mfa_factor_enrolled_notification.html` | Nuevo método de verificación (MFA) · Konvi | Security (off) |
+| MFA method removed | `mfa_factor_unenrolled_notification.html` | Método de verificación (MFA) removido · Konvi | Security (off) |
+
+**PRIORIDAD:** las **6 de Auth** primero (son las que se envían hoy: invitación de equipo y
+recuperación de contraseña sobre todo). Las **7 de Security** son opcionales y van desactivadas.
+**REGLA DE ACOPLAMIENTO:** NO tocar `{{ .ConfirmationURL }}` ni las variables `{{ .Data.* }}` /
+`{{ .Token }}` / `{{ .NewEmail }}` del HTML (§1) — Supabase las reemplaza en runtime.
 **INSUMOS:** acceso admin al dashboard; archivos del repo como fuente de verdad.
-**CRITERIO DE EXITO:** invite de prueba llega en es-CO, con "Konvi" y el nombre del negocio (`{{ .Data.tenant_name }}`) visible; el botón lleva a `/auth/callback`.
+**CRITERIO DE EXITO:** un recovery de prueba llega en es-CO, marca verde Konvi, botón que abre
+`/auth/callback|/auth/confirm` y aterriza en `/set-password`.
 
-> Alternativa CLI: si el proyecto se gestiona con `supabase config push`, los bloques
-> `[auth.email.template.*]` de `config.toml` aplican las plantillas sin tocar el dashboard.
-> Verificar con el founder cuál es el modo de gestión del proyecto hosted (dashboard vs CLI)
-> antes de asumir. **VALIDAR EN DOCUMENTACION OFICIAL:** disponibilidad de `{{ .Data.* }}`
-> (user_metadata) en plantillas de invite del proyecto hosted — el HTML incluye fallback si
-> viene vacío, por lo que no rompe aunque la variable no resuelva.
+> Los **subjects** SÍ se pueden automatizar por Management API (`PATCH /v1/projects/{ref}/config/auth`
+> con `mailer_subjects_*`), respetando el rate-limit de **120 req/60s**. El **contenido no** (1010).
 
-### IH-EMAIL-03 — Custom SMTP (deliverability + rate-limit)
+### IH-EMAIL-03 — Custom SMTP (deliverability + rate-limit) — ✅ HECHO (2026-07-06)
 
-**INTERVENCION HUMANA REQUERIDA:** Sí
+**COMPLETADO:** Resend con dominio `konvi.co` verified (región `sa-east-1`, SPF+DKIM+DMARC en
+Cloudflare vía Auto configure). Supabase Custom SMTP: host `smtp.resend.com`, port `465`, user
+`resend`, pass = API key `re_*`, `admin_email = noreply@konvi.co`, `sender_name = Konvi`.
+`rate_limit_email_sent` subido de **2 → 101**. `RESEND_FROM_EMAIL = "Konvi <noreply@konvi.co>"`
+en `render.yaml` (api + orchestrator); `RESEND_API_KEY` como secreto en Render (ambos servicios).
+Envío real a Gmail verificado (Resend message id devuelto).
+
+**INTERVENCION HUMANA REQUERIDA:** Sí (COMPLETADA)
 **RESPONSABLE:** Owner/DevOps + acceso al registrar DNS
 **MOMENTO:** Antes de producción (bloqueante legal + funcional).
 **CONTEXTO:** sin SMTP propio, Supabase usa un remitente compartido con **~2-4 emails/hora**
