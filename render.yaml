@@ -199,6 +199,8 @@ services:
       # Sin la var, notifications.py loguea en lugar de enviar (fallback graceful).
       - key: RESEND_API_KEY
         sync: false
+      - key: RESEND_FROM_EMAIL
+        value: "Konvi <noreply@konvi.co>"
       # Aveonline generación REAL de guías (true=factura) vs simulado (false=dry-run).
       # Default false hasta que tenant confirme listo para prod facturar guías reales.
       - key: AVEONLINE_GENERATE_REAL_GUIDES
@@ -482,7 +484,7 @@ services:
       - key: RESEND_API_KEY
         sync: false                              # Configurar en Render Dashboard
       - key: RESEND_FROM_EMAIL
-        value: "Konvi <noreply@konvi.local>"
+        value: "Konvi <noreply@konvi.co>"
       # Rev. 109 J.2.7.4 — Sentry tracing (konvi-orchestrator project DSN).
       - key: SENTRY_DSN
         sync: false
