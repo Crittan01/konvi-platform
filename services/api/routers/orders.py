@@ -170,17 +170,37 @@ async def create_order(
         discount_amount = 0.0
         if order.conversation_id:
             try:
+                # BLOQUE A (P1): heredar el descuento SOLO de un cart no-terminal
+                # (open/checkout) Y con una redención VIVA ('applied'). Un cart
+                # 'converted'/'cancelled' conserva discount_cents stale (consume_redemption
+                # no lo limpia); sin este guard, un segundo pedido manual del operador para
+                # la misma conversación re-aplicaría el mismo descuento (doble descuento /
+                # pedido en $0). La redención 'applied' es la señal autoritativa del cupón vivo.
                 cart_res = (
                     supabase.table("conversation_carts")
-                    .select("discount_cents")
+                    .select("id, status, discount_cents")
                     .eq("tenant_id", tenant_id)
                     .eq("conversation_id", order.conversation_id)
+                    .in_("status", ["open", "checkout"])
                     .order("updated_at", desc=True)
                     .limit(1)
                     .execute()
                 )
                 if cart_res.data:
-                    discount_amount = round(int(cart_res.data[0].get("discount_cents") or 0) / 100.0, 2)
+                    _cart_row = cart_res.data[0]
+                    _dc = int(_cart_row.get("discount_cents") or 0)
+                    if _dc > 0:
+                        _red = (
+                            supabase.table("coupon_redemptions")
+                            .select("id")
+                            .eq("tenant_id", tenant_id)
+                            .eq("cart_id", _cart_row["id"])
+                            .eq("status", "applied")
+                            .limit(1)
+                            .execute()
+                        )
+                        if _red.data:
+                            discount_amount = round(_dc / 100.0, 2)
             except Exception as exc:
                 logger.warning("[ORDER] lookup descuento del cart falló conv=%s: %s", order.conversation_id, exc)
         total = max(0.0, subtotal + order.shipping_cost - discount_amount)
@@ -486,7 +506,10 @@ async def create_payment_link(
             )
 
         total_amount = float(order.get("total_amount") or 0)
-        amount_in_cents = int(total_amount * 100)
+        # BLOQUE A (P1): round, no int() — total_amount es numeric(10,2) leído como float;
+        # total_amount*100 produce X.9999998 y int() trunca 1 cent (subcobro). round()
+        # recupera los cents exactos acordados y alinea con payment_link_tool.py:438/485.
+        amount_in_cents = int(round(total_amount * 100))
 
         if amount_in_cents < 150000:  # mínimo $1.500 COP para modelo Agregador
             raise HTTPException(
