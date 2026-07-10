@@ -8,8 +8,10 @@
 -- el registro de auditoría no es confiable (viola el propósito de control).
 --
 -- FIX (dos propiedades: INMUTABILIDAD de filas escritas + NO-FORJA de atribución):
---   (1) REVOKE UPDATE, DELETE al rol `authenticated`/`anon`/PUBLIC → sin privilegio
---       de tabla, PostgREST no puede mutar filas ya escritas.
+--   (1) REVOKE UPDATE, DELETE, TRUNCATE al rol `authenticated`/`anon`/PUBLIC → sin
+--       privilegio de tabla, PostgREST no puede mutar filas ya escritas. TRUNCATE se
+--       incluye porque NO dispara triggers row-level BEFORE UPDATE/DELETE: sin revocarlo,
+--       un miembro con el grant podría vaciar el trail completo saltándose el trigger (2).
 --   (2) Trigger BEFORE UPDATE/DELETE (defensa en profundidad si alguien re-otorga el
 --       privilegio): rechaza la mutación cuando el rol del JWT es 'authenticated'/'anon'
 --       (un miembro). service_role / procesos de sistema (retención) NO se bloquean, por
@@ -33,7 +35,7 @@
 --    sigue funcional pero mutable — este cambio solo lo endurece).
 -- =============================================================================
 
-REVOKE UPDATE, DELETE ON public.audit_log FROM authenticated, anon, PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_log FROM authenticated, anon, PUBLIC;
 
 CREATE OR REPLACE FUNCTION public.reject_audit_log_mutation()
 RETURNS trigger
