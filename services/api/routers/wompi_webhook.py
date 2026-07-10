@@ -1443,15 +1443,17 @@ async def _generate_shipping_guide_async(
         Aveonline rechazó). Caller no dispara etapa 2.
     """
     # 1. Provider check.
+    tenant_real_guides = False  # BLOQUE B (item 3): default fail-safe (simulado)
     try:
         cfg = (
             supabase.table("tenant_shipping_provider_config")
-            .select("active_provider")
+            .select("active_provider, real_guides_enabled")
             .eq("tenant_id", tenant_id)
             .maybe_single()
             .execute()
         )
         provider = ((cfg.data or {}).get("active_provider") or "").lower()
+        tenant_real_guides = bool((cfg.data or {}).get("real_guides_enabled"))
     except Exception:
         provider = ""
 
@@ -1605,7 +1607,11 @@ async def _generate_shipping_guide_async(
             "cod_enabled": is_cod,
             "valorrecaudo": order_total if is_cod else 0,
         }
-        simulate = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() != "true"
+        # BLOQUE B (item 3): guía real solo si AMBOS — master global de plataforma
+        # (kill-switch) Y activación per-tenant (real_guides_enabled). Default false en
+        # ambos → simulado (fail-safe). Activar guías reales es acción founder por-tenant.
+        _master_real = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() == "true"
+        simulate = not (_master_real and tenant_real_guides)
 
         # Bug runtime KAIU 2026-05-24: Aveonline rechaza city raw
         # ("Bogotá D.C." → "No se pudo generar la guia."). Requiere
