@@ -45,6 +45,11 @@ export const STATUS_META: Record<string, StatusMeta> = {
     color: 'bg-red-500/15 text-red-700 border-red-700/30',
     hint:  'La guía no se pudo generar automáticamente. Reintenta la generación desde Ventas → Pedidos.',
   },
+  generating: {
+    label: 'Generando guía',
+    color: 'bg-amber-500/15 text-amber-700 border-amber-700/30',
+    hint:  'La guía se está generando. Si queda en este estado, la generación se interrumpió (posible timeout de Aveonline): verifica en Aveonline si la guía existe antes de reintentar, para no duplicar el cobro.',
+  },
 }
 
 export function getStatusMeta(status: string): StatusMeta {
