@@ -730,12 +730,35 @@ async def aveonline_guide_dry_run(
     }
 
     # 5. Invocar generate_guide.
+    # BLOQUE B (item 3): techo per-tenant. Aunque el operador pida simulate=False, un tenant
+    # sin real_guides_enabled (o con el master global off) NUNCA factura una guía real. La
+    # activación de guías reales es acción founder deliberada por-tenant (default fail-safe).
+    effective_simulate = req.simulate
+    if not effective_simulate:
+        try:
+            _cfg = (
+                supabase.table("tenant_shipping_provider_config")
+                .select("real_guides_enabled")
+                .eq("tenant_id", tenant_id)
+                .maybe_single()
+                .execute()
+            )
+            _tenant_real = bool((_cfg.data or {}).get("real_guides_enabled"))
+        except Exception:
+            _tenant_real = False
+        _master_real = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() == "true"
+        if not (_master_real and _tenant_real):
+            logger.info(
+                "[AVEONLINE][dry-run] tenant=%s pidió simulate=False pero no está habilitado "
+                "para guías reales → forzando simulate=True (fail-safe)", tenant_id[:8],
+            )
+            effective_simulate = True
     try:
         result = await client.generate_guide(
             origin=origin, destination=destination,
             package=package, carrier=carrier_payload,
             sender=sender, recipient=recipient,
-            simulate=req.simulate,
+            simulate=effective_simulate,
         )
     except AveonlineAuthError as exc:
         return {"ok": False, "error": str(exc), "code": "AUTH_ERROR"}
@@ -754,7 +777,8 @@ async def aveonline_guide_dry_run(
             "rate_id": rate_id,
             "origin": origin,
             "destination": destination,
-            "simulate": req.simulate,
+            "simulate": effective_simulate,
+            "simulate_requested": req.simulate,
             "warning_idagente_missing": not tenant.get("idagente"),
         },
     }

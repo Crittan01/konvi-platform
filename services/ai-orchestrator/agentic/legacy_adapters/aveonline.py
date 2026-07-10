@@ -436,6 +436,16 @@ async def quote_shipping_for_cart_aveonline(
                 cart_id=cart_row["id"],
                 tenant_id=tenant_id,
                 options=options,
+                # BLOQUE B (item 2): persistir peso/dims REALES cotizados → la guía los
+                # reusa en vez del fallback 0.5kg hardcode. Espeja el path legacy
+                # (shipping_quote_tool.py). `package` está garantizado no-None aquí
+                # (early-returns arriba). Cierra el gap del path agentic (tool primario de checkout).
+                weight_inputs={
+                    "weight_kg": round(float(package.weight_kg), 3),
+                    "length_cm": float(package.length_cm),
+                    "width_cm": float(package.width_cm),
+                    "height_cm": float(package.height_cm),
+                },
             )
             # ADR-0026 Pieza A: persistir el DESTINO cotizado (city/dane) como dato de
             # primera clase del cart. Antes la ciudad se perdía tras cotizar → el bot la

@@ -46,7 +46,10 @@ class A3ShippingColumnsTests(unittest.TestCase):
 
     def test_no_rates_snapshot_uses_quote_response(self):
         insert_idx = self.src.find('.table("shipments").insert({')
-        insert_block = self.src[insert_idx:insert_idx + 400]
+        # Ventana amplia: el insert ganó campos/comentarios (BLOQUE B item 1a: order_id) →
+        # se toma un bloque mayor para validar el invariante (quote_response, no rates_snapshot)
+        # sin depender de un offset fijo frágil.
+        insert_block = self.src[insert_idx:insert_idx + 900]
         self.assertNotIn('"rates_snapshot"', insert_block)
         self.assertIn('"quote_response"', insert_block)
 
