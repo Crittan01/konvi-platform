@@ -1,6 +1,6 @@
 # ADR-0033 — BLOQUE A: Integridad de dinero
 
-- **Estado:** En progreso (PR-1 cubre items 1–3; items 4–5 en PRs siguientes) — 2026-07-10
+- **Estado:** En progreso (PR-1 = items 1–3; PR-2 = item 5; item 4 en diseño) — 2026-07-10
 - **Contexto:** Segundo bloque de la remediación production-grade (Prompt Maestro), derivado de
   `docs/audit/production-readiness-2026-07-09.md §BLOQUE A`. Cada item se **re-verificó contra el código
   actual** (workflow read-only, no se asumió el audit) antes de tocar nada. Criterio de hecho del bloque:
@@ -49,9 +49,25 @@ descuenta. Preserva el flujo legítimo (bot / operador-confirma-cart, donde la r
 - **Validación E2E:** el wiring cupón→invalidate (inline en el dispatcher, no unit-testeable en aislamiento
   sin fragilidad) se valida con **UAT dinámico** (conversación real turn-a-turn), no scripts estáticos.
 
-## Pendiente en este bloque (PRs siguientes)
-- **Item 5 (retención legal):** el purge de contacto hace hard-delete de `orders/payments` → se hará selectivo
-  (contacto con pedidos = anonimizar PII + preservar historial; Cód. Comercio Art. 60). Retención **confirmada por founder**.
+## Decisión (PR-2 — item 5)
+
+### 5. Eliminar un contacto CON órdenes anonimiza la PII y preserva el historial (no hard-delete)
+El endpoint `POST /contacts/{id}/purge` (cableado al botón "Eliminar" del UI) ejecutaba un **hard-delete
+cascade** que borraba físicamente `orders/order_items/payments/shipments` — violando la retención de 10 años
+(Cód. Comercio Art. 60 / Estatuto Tributario Art. 632). El vector literal del audit (delete de *pedido*) no
+existe; el hard-delete real vive en el flujo de *contacto*. **Decisión (retención confirmada por founder):**
+`purge_contact_completely` se vuelve **selectivo** por `has_orders`:
+- **Con órdenes:** preserva `orders/order_items/payments/shipments`, **anonimiza** la fila `contacts`
+  (name/email/address/notes/documento→NULL, `deleted_at`) — sin borrarla, para que el FK `orders.contact_id`
+  no quede colgando — y borra igual los **vectores de contaminación del bot** (`conversation_carts`,
+  `cart_items`, `cart_events`, `messages`, `conversation_reads`, `conversations`), que fue la razón original del
+  purge (carritos huérfanos re-surtidos por el cart-recovery).
+- **Sin órdenes:** cascade físico completo (sin historial contable que retener).
+El guard `PurgeBlockedError` (link Wompi activo) y el `consent_audit_log` (phone_hash + `event=purged`) se
+conservan. `orders.conversation_id`/`contact_id` son `ON DELETE SET NULL` → borrar conversations con órdenes
+preservadas es FK-safe.
+
+## Pendiente en este bloque (item 4)
 - **Item 4 (reconciliación Wompi):** cron pull que confirme órdenes `pending_payment` pagadas cuyo webhook se
   perdió, + sweeper Wompi-aware (hoy cancela una orden pagada a los 35 min). **Dossier-first**: verificar en doc
   oficial Wompi la correlación link→transacción (`GET /v1/transactions?reference=`) antes de implementar; se

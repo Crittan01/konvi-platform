@@ -276,7 +276,16 @@ def purge_contact_completely(
     *,
     skip_wompi_guard: bool = False,
 ) -> dict:
-    """Borra el contact + TODOS sus recursos en cascade.
+    """Purga los recursos de un contact — SELECTIVO por retención legal (BLOQUE A).
+
+    Siempre borra los vectores de contaminación del bot (conversation_carts, cart_items,
+    cart_events, messages, conversation_reads, conversations) — la razón original del purge.
+    Para el historial transaccional ramifica por `has_orders`:
+      - CON órdenes: PRESERVA orders/order_items/payments/shipments y ANONIMIZA el contact
+        (name/email/address/notes/documento→NULL, deleted_at) — Cód. Comercio Art. 60 /
+        Estatuto Tributario Art. 632 (retención 10 años). La fila contact se conserva para
+        no dejar el FK `orders.contact_id` colgando.
+      - SIN órdenes: cascade físico completo (borra orders/payments/... + la fila contact).
 
     Args:
         supabase: cliente Supabase (typically service_role para bypassear RLS).
@@ -284,7 +293,8 @@ def purge_contact_completely(
         contact_id: UUID del contact a purgar.
 
     Returns:
-        dict con counts por tabla y `contact_deleted` bool al final.
+        dict con counts por tabla, `has_orders`/`retention_applied`, y
+        `contact_deleted`/`contact_anonymized` al final.
 
     Raises:
         ValueError si tenant_id o contact_id están vacíos.
@@ -345,9 +355,24 @@ def purge_contact_completely(
     summary["carts_found"] = len(cart_ids)
     summary["conversations_found"] = len(conv_ids)
 
-    # ── 1-2. payments + shipments (FK orders) ──────────────────────────
-    _exec("payments", "payments", "order_id", order_ids, in_list=True)
-    _exec("shipments", "shipments", "order_id", order_ids, in_list=True)
+    # BLOQUE A (P1) — retención legal: un contacto CON órdenes conserva su historial
+    # transaccional (Cód. Comercio Art. 60 / Estatuto Tributario Art. 632 — 10 años). El
+    # purge se vuelve SELECTIVO: siempre se borran los vectores de contaminación del bot
+    # (carts, mensajes, conversaciones — la razón original del purge), pero orders/order_items/
+    # payments/shipments se PRESERVAN y el contacto se ANONIMIZA (no se borra), para no dejar
+    # el FK colgando (orders.contact_id → contacts es ON DELETE SET NULL, pero preservar la
+    # fila mantiene la trazabilidad contable). Sin órdenes → cascade físico completo (previo).
+    has_orders = bool(order_ids)
+    summary["has_orders"] = has_orders
+    summary["retention_applied"] = has_orders
+
+    # ── 1-2. payments + shipments (FK orders) — preservados si hay retención ──
+    if has_orders:
+        summary["payments_deleted"] = 0
+        summary["shipments_deleted"] = 0
+    else:
+        _exec("payments", "payments", "order_id", order_ids, in_list=True)
+        _exec("shipments", "shipments", "order_id", order_ids, in_list=True)
 
     # ── 3-4. cart_events + cart_items (FK conversation_carts) ──────────
     _exec("cart_events", "cart_events", "cart_id", cart_ids, in_list=True)
@@ -358,9 +383,13 @@ def purge_contact_completely(
     # conversation_id huérfano también.
     _exec("carts", "conversation_carts", "contact_id", contact_id)
 
-    # ── 6-7. order_items + orders (FK conversations o contact) ─────────
-    _exec("order_items", "order_items", "order_id", order_ids, in_list=True)
-    _exec("orders", "orders", "contact_id", contact_id)
+    # ── 6-7. order_items + orders — preservados si hay retención ──────
+    if has_orders:
+        summary["order_items_deleted"] = 0
+        summary["orders_deleted"] = 0
+    else:
+        _exec("order_items", "order_items", "order_id", order_ids, in_list=True)
+        _exec("orders", "orders", "contact_id", contact_id)
 
     # ── 8. messages + conversation_reads (FK conversations) ────────────
     # Sem 7 F2 cierre — conversations NO tiene contact_id; usamos conv_ids
@@ -372,20 +401,55 @@ def purge_contact_completely(
     # DELETE por id (lista resuelta arriba via phone).
     _exec("conversations", "conversations", "id", conv_ids, in_list=True)
 
-    # ── 10. contact final ──────────────────────────────────────────────
-    try:
-        c_del = (
-            supabase.table("contacts")
-            .delete()
-            .eq("id", contact_id)
-            .eq("tenant_id", tenant_id)
-            .execute()
-        )
-        summary["contact_deleted"] = bool(c_del.data)
-    except Exception as exc:
-        logger.error("[purge_contact] DELETE contact falló: %s", exc)
+    # ── 10. contact final: anonimizar (retención) o borrar (cascade) ────
+    if has_orders:
+        # Retención: anonimizar la PII (espeja delete_contact) y CONSERVAR la fila
+        # → las órdenes preservadas mantienen su FK contact_id válido.
         summary["contact_deleted"] = False
-        summary["contact_error"] = str(exc)
+        from datetime import datetime, timezone  # noqa: PLC0415
+        _now = datetime.now(timezone.utc).isoformat()
+        try:
+            c_anon = (
+                supabase.table("contacts")
+                .update({
+                    "name": None,
+                    "email": None,
+                    "address": None,
+                    "notes": None,
+                    "document_type": None,
+                    "document_number": None,
+                    "consent_given": False,
+                    "consent_revoked_at": _now,
+                    "consent_revoked_reason": (
+                        "Eliminación solicitada — registro anonimizado y retenido por "
+                        "órdenes vinculadas (Cód. Comercio Art. 60)"
+                    ),
+                    "deleted_at": _now,
+                })
+                .eq("id", contact_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            summary["contact_deleted"] = False
+            summary["contact_anonymized"] = bool(c_anon.data)
+        except Exception as exc:
+            logger.error("[purge_contact] anonimización contact falló: %s", exc)
+            summary["contact_anonymized"] = False
+            summary["contact_error"] = str(exc)
+    else:
+        try:
+            c_del = (
+                supabase.table("contacts")
+                .delete()
+                .eq("id", contact_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            summary["contact_deleted"] = bool(c_del.data)
+        except Exception as exc:
+            logger.error("[purge_contact] DELETE contact falló: %s", exc)
+            summary["contact_deleted"] = False
+            summary["contact_error"] = str(exc)
 
     logger.info(
         "[purge_contact] tenant=%s contact=%s deleted=%s "

@@ -39,6 +39,10 @@ class _FakeQuery:
         self.calls.append(("delete",))
         return self
 
+    def update(self, data):
+        self.calls.append(("update", data))
+        return self
+
     def eq(self, col, val):
         self.calls.append(("eq", col, val))
         return self
@@ -112,26 +116,42 @@ class PurgeContactCompletelyTests(unittest.TestCase):
         self.assertEqual(out["orders_deleted"], 0)
         self.assertEqual(out["conversations_deleted"], 0)
 
-    def test_purge_con_recursos_borra_cascade(self):
-        """Contact con conversation + order + cart → cascade completo.
-
-        Sem 7 F2 cierre — conversations lookup requiere phone (resuelto
-        del contact SELECT). Sin phone, conversation_ids=[]. El test mockea
-        SELECT contacts para retornar phone."""
+    def test_contacto_con_ordenes_preserva_historial_y_anonimiza(self):
+        """BLOQUE A (retención legal): contact CON órdenes → orders/payments/shipments
+        PRESERVADOS + contact ANONIMIZADO (no borrado); pero los vectores de contaminación
+        del bot (carts/conversations) SÍ se borran. Cód. Comercio Art. 60 / E.T. Art. 632."""
         sb = _FakeSupabase()
-        # SELECT phone del contact (paso 1 del helper).
         sb.set_table("contacts", returns=[{"phone": "573125835649"}])
-        # Lookup recursos.
         sb.set_table("conversations", returns=[{"id": "conv-1"}, {"id": "conv-2"}])
         sb.set_table("orders", returns=[{"id": "ord-1"}])
         sb.set_table("conversation_carts", returns=[{"id": "cart-1"}])
-        # Resto retorna data=[] (default).
 
         out = purge_contact_completely(sb, "tenant-1", "contact-1")
         self.assertTrue(out["phone_resolved"])
         self.assertEqual(out["orders_found"], 1)
-        self.assertEqual(out["carts_found"], 1)
-        self.assertEqual(out["conversations_found"], 2)
+        self.assertTrue(out["has_orders"])
+        self.assertTrue(out["retention_applied"])
+        # historial contable PRESERVADO (no se borra)
+        self.assertEqual(out["orders_deleted"], 0)
+        self.assertEqual(out["payments_deleted"], 0)
+        self.assertEqual(out["shipments_deleted"], 0)
+        self.assertEqual(out["order_items_deleted"], 0)
+        # contact ANONIMIZADO, no borrado (preserva el FK orders.contact_id)
+        self.assertFalse(out["contact_deleted"])
+        self.assertTrue(out["contact_anonymized"])
+
+    def test_contacto_sin_ordenes_cascade_fisico(self):
+        """BLOQUE A: contact SIN órdenes (sin historial contable) → cascade físico completo,
+        incluida la fila contact (comportamiento previo al fix de retención)."""
+        sb = _FakeSupabase()
+        sb.set_table("contacts", returns=[{"phone": "573000000000"}])
+        sb.set_table("conversations", returns=[{"id": "conv-1"}])
+        # sin orders (default [])
+        out = purge_contact_completely(sb, "tenant-1", "contact-1")
+        self.assertFalse(out["has_orders"])
+        self.assertFalse(out["retention_applied"])
+        self.assertTrue(out["contact_deleted"])
+        self.assertNotIn("contact_anonymized", out)
 
     def test_summary_tiene_keys_estandares(self):
         """El dict de salida tiene contract estable."""
@@ -157,13 +177,13 @@ class PurgeContactCompletelyTests(unittest.TestCase):
         """Sem 7 F2 cierre — Bug runtime founder UAT 2026-05-19:
         DELETE silente 400 enmascaraba el problema. Ahora cuando una
         operación falla, summary['errors'] contiene el detalle. NUNCA
-        falsea count=0 sin reporte."""
+        falsea count=0 sin reporte. (Se usa conversation_carts — que se borra
+        SIEMPRE — porque payments ahora se preservan si hay órdenes.)"""
         sb = _FakeSupabase()
-        sb.set_table("orders", returns=[{"id": "o1"}])  # 1 order found
-        sb.set_table("payments", raises=Exception("permission denied"))
+        sb.set_table("contacts", returns=[{"phone": "573111111111"}])
+        sb.set_table("conversation_carts", raises=Exception("permission denied"))
         out = purge_contact_completely(sb, "tenant-1", "contact-1")
         self.assertIsInstance(out["errors"], list)
-        # Al menos el error de payments debe estar reportado.
         joined = " ".join(out["errors"])
         self.assertIn("permission denied", joined)
 
