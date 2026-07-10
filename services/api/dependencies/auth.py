@@ -202,6 +202,54 @@ async def require_owner_role(role: str = Depends(get_current_role)) -> str:
     return role
 
 
+# ─── BLOQUE 0 · MFA enforcement en el gateway (P1, 2026-07-10) ──────────────
+# El middleware de Next (F85) exige AAL2 en el servicio web, pero el gateway FastAPI
+# público NO lo hacía → un access token AAL1 (password sin completar el 2º factor)
+# podía operar contra la API directa, saltándose el MFA. enforce_mfa cierra el hueco:
+# si el JWT es aal1 y el usuario TIENE un factor MFA verificado, rechaza 401.
+_MFA_CACHE: dict = {}
+_MFA_CACHE_TTL = 60.0  # segundos (evita consultar el Auth admin en cada request)
+
+
+def _user_has_verified_mfa(sub: str) -> bool:
+    """¿El usuario tiene un factor MFA verificado? Cacheado (TTL 60s). Fail-open ante
+    error de lookup (defensa en profundidad; el gate primario es aal2 + web middleware)."""
+    import time
+    now = time.time()
+    hit = _MFA_CACHE.get(sub)
+    if hit and hit[1] > now:
+        return hit[0]
+    try:
+        resp = _get_service_client().auth.admin.get_user_by_id(sub)
+        user = getattr(resp, "user", None) or resp
+        factors = getattr(user, "factors", None) or []
+        def _status(f):
+            return getattr(f, "status", None) or (f.get("status") if isinstance(f, dict) else None)
+        has = any(_status(f) == "verified" for f in factors)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[MFA] lookup de factores falló para sub=%s (%s) — fail-open", sub, exc)
+        return False
+    _MFA_CACHE[sub] = (has, now + _MFA_CACHE_TTL)
+    return has
+
+
+async def enforce_mfa(request: Request) -> None:
+    """Dependencia: exige AAL2 si el usuario tiene MFA verificado. Aplicar en routers
+    sensibles (settings, team, integraciones, mutaciones owner). Si el user no tiene
+    MFA, aal1 es aceptable (no rompe a quien no lo activó)."""
+    payload = _extract_jwt_payload(request)
+    aal = payload.get("aal") or "aal1"
+    if aal == "aal2":
+        return
+    sub = payload.get("sub") or ""
+    if sub and _user_has_verified_mfa(sub):
+        raise HTTPException(
+            status_code=401,
+            detail=("Esta operación requiere verificación en dos pasos (MFA). "
+                    "Inicia sesión completando el segundo factor."),
+        )
+
+
 async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Client:
     """
     Retorna un cliente Supabase con service_role para el tenant autenticado.

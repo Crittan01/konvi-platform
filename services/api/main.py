@@ -16,7 +16,7 @@ init_sentry(service_name="api")
 
 from fastapi import Depends as _Depends
 
-from dependencies.auth import reject_if_tenant_deleting
+from dependencies.auth import reject_if_tenant_deleting, enforce_mfa
 from routers import (
     aveonline_webhook,
     catalog,
@@ -46,6 +46,14 @@ from routers import (
 # OPTIONS (read-only). Excluido en webhooks externos (sin JWT) y en
 # tenant_offboarding (cancel-deletion debe funcionar siempre durante grace).
 _OFFBOARDING_GATE = [_Depends(reject_if_tenant_deleting)]
+# BLOQUE 0 (P1): además del gate de offboarding, exige AAL2 si el usuario tiene MFA
+# verificado. Se aplica a routers sensibles: config (settings), credenciales (integrations),
+# dinero (expenses, purchases), export/borrado de cuenta (tenant_offboarding: export +
+# request-deletion, por-endpoint), export de PII (data_subject_request) y crédito (sic_report).
+# NO al router `mfa` (se necesita aal1-con-factor para completar el 2º factor), NI a
+# tenant_offboarding /status y /cancel-deletion (deben correr en grace/recovery), ni a
+# webhooks (sin JWT). `orders` queda DIFERIDO a decisión founder (alta frecuencia operativa).
+_MFA_GATE = [_Depends(reject_if_tenant_deleting), _Depends(enforce_mfa)]
 
 logger = logging.getLogger("api.startup")
 
@@ -234,14 +242,16 @@ app.include_router(product_categories.router, prefix="/api/v1/product-categories
 app.include_router(product_attribute_definitions.router, prefix="/api/v1/product-attribute-definitions", dependencies=_OFFBOARDING_GATE)
 app.include_router(catalog.router, prefix="/api/v1/catalog", dependencies=_OFFBOARDING_GATE)
 app.include_router(coupons.router, prefix="/api/v1/coupons", dependencies=_OFFBOARDING_GATE)
-app.include_router(expenses.router, prefix="/api/v1/expenses", dependencies=_OFFBOARDING_GATE)
+app.include_router(expenses.router, prefix="/api/v1/expenses", dependencies=_MFA_GATE)
 app.include_router(conversations.router, prefix="/api/v1/conversations", dependencies=_OFFBOARDING_GATE)
 app.include_router(orders.router, prefix="/api/v1/orders", dependencies=_OFFBOARDING_GATE)
 app.include_router(contacts.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
 # Rev. 93 — Habeas Data: Subject Access Request (SAR / ARCO).
 from routers import data_subject_request as _dsr  # noqa: E402
 
-app.include_router(_dsr.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
+# BLOQUE 0 (P1) — _MFA_GATE: el SAR exporta/imprime PII de un titular (export/portability
+# + printable HTML). Exige AAL2 si el usuario tiene MFA (bulk-PII = crown jewel).
+app.include_router(_dsr.router, prefix="/api/v1/contacts", dependencies=_MFA_GATE)
 # Rev. 109 J.2.4.4 — Tenant offboarding (export + soft-delete + cancel).
 # NO aplicar _OFFBOARDING_GATE — el owner debe poder cancelar dentro del grace.
 from routers import tenant_offboarding as _toff  # noqa: E402
@@ -254,9 +264,10 @@ app.include_router(_mfa.router, prefix="/api/v1/mfa")
 # Rev. 101 (F5) — SIC pre-cocinado.
 from routers import sic_report as _sic  # noqa: E402
 
-app.include_router(_sic.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
-app.include_router(settings.router, prefix="/api/v1/settings", dependencies=_OFFBOARDING_GATE)
-app.include_router(integrations.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
+# BLOQUE 0 (P1) — _MFA_GATE: el reporte SIC expone datos de crédito (PII sensible).
+app.include_router(_sic.router, prefix="/api/v1", dependencies=_MFA_GATE)
+app.include_router(settings.router, prefix="/api/v1/settings", dependencies=_MFA_GATE)
+app.include_router(integrations.router, prefix="/api/v1/integrations", dependencies=_MFA_GATE)
 app.include_router(shipping.router, prefix="/api/v1/shipping", dependencies=_OFFBOARDING_GATE)
 app.include_router(marketplace.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Webhooks externos NO usan _OFFBOARDING_GATE — no tienen JWT del tenant,
@@ -286,7 +297,7 @@ app.include_router(_ai_preview.router, prefix="/api/v1", dependencies=_OFFBOARDI
 app.include_router(_ai_index.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims", dependencies=_OFFBOARDING_GATE)
-app.include_router(purchases.router, prefix="/api/v1/purchases", dependencies=_OFFBOARDING_GATE)
+app.include_router(purchases.router, prefix="/api/v1/purchases", dependencies=_MFA_GATE)
 app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base", dependencies=_OFFBOARDING_GATE)
 
 # Versión/build para trazabilidad (Render expone RENDER_GIT_COMMIT).
