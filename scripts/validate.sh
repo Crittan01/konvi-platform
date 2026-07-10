@@ -331,10 +331,15 @@ if $FULL; then
   # Connector runtime lee desde tenant_integrations + Vault per-tenant.
   if [ -f ".env" ]; then
     env_missing=()
-    for var in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_JWT_SECRET \
+    for var in NEXT_PUBLIC_SUPABASE_URL \
                GEMINI_API_KEY META_APP_SECRET META_VERIFY_TOKEN WOMPI_ENV; do
       grep -q "^${var}=" .env 2>/dev/null || env_missing+=("$var")
     done
+    # Service key: canónico SUPABASE_SECRET_KEY con fallback legacy SUPABASE_SERVICE_ROLE_KEY
+    # (migración A0.2c 2026-05-31). SUPABASE_JWT_SECRET dejó de ser bloqueante: auth.py verifica
+    # vía JWKS y solo usa HS256+JWT_SECRET como fallback legacy opcional (main.py:85).
+    grep -qE "^(SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY)=" .env 2>/dev/null \
+      || env_missing+=("SUPABASE_SECRET_KEY")
     if [ "${#env_missing[@]}" -eq 0 ]; then
       _ok ".env contiene todas las vars críticas"
     else
