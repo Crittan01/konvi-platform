@@ -118,13 +118,25 @@ class CreateClaimTool:
     args_schema = CreateClaimArgs
 
     async def execute(self, args: CreateClaimArgs, ctx: ToolContext) -> ToolResult:
-        # 1. Validar que el order pertenezca al tenant.
+        # BLOQUE 0 (P1) — fail-closed: sin contacto resuelto no se puede verificar la
+        # titularidad del pedido. Radicar un reclamo requiere identidad del cliente.
+        if not ctx.contact_id:
+            return tool_failure(
+                "No puedo verificar la identidad del cliente para registrar el "
+                "reclamo. Pídele que confirme desde su número registrado.",
+                code="CLAIM_CREATE_NO_CONTACT",
+            )
+        # 1. Validar que el order pertenezca al tenant Y al cliente que lo radica.
+        #    Scopear por contact_id (patrón canónico get_recent_orders) evita que un
+        #    cliente radique un reclamo sobre el pedido de OTRO cliente del mismo tenant
+        #    conociendo su UUID → misatribución de customer_id / inyección de reclamos.
         try:
             order_res = (
                 ctx.supabase.table("orders")
                 .select("id, tenant_id, contact_id, status, total_amount")
                 .eq("id", args.order_id)
                 .eq("tenant_id", ctx.tenant_id)
+                .eq("contact_id", ctx.contact_id)
                 .limit(1)
                 .execute()
             )
@@ -253,6 +265,18 @@ class GetClaimStatusTool:
     args_schema = GetClaimStatusArgs
 
     async def execute(self, args: GetClaimStatusArgs, ctx: ToolContext) -> ToolResult:
+        # BLOQUE 0 fix P0 (2026-07-10): ticket_number es un secuencial per-tenant
+        # (1,2,3…), así que filtrar solo por tenant_id+ticket_number permitía a un
+        # cliente leer por WhatsApp el reclamo de OTRO cliente del mismo tenant
+        # (reason, resolution_notes → PII enumerable). Se scopéa por el cliente que
+        # consulta (customer_id == ctx.contact_id, poblado en create_claim). FAIL-CLOSED:
+        # sin contact_id resuelto NO se corre el query (no reintroducir la fuga).
+        if not ctx.contact_id:
+            return tool_failure(
+                "No puedo verificar la identidad del cliente para consultar el "
+                "reclamo. Pídele que confirme desde su número registrado.",
+                code="CLAIM_LOOKUP_NO_CONTACT",
+            )
         try:
             res = (
                 ctx.supabase.table("claims")
@@ -261,6 +285,7 @@ class GetClaimStatusTool:
                     "resolution_notes, created_at, updated_at"
                 )
                 .eq("tenant_id", ctx.tenant_id)
+                .eq("customer_id", ctx.contact_id)
                 .eq("ticket_number", args.ticket_number)
                 .limit(1)
                 .execute()
