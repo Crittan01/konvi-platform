@@ -27,6 +27,7 @@ from supabase import Client
 
 from dependencies.auth import (
     _get_service_client,
+    enforce_mfa,
     get_current_role,
     get_current_tenant,
 )
@@ -102,3 +103,15 @@ async def get_service_client_internal_or_user(
 ) -> Client:
     """Cliente service_role con tenant resuelto via internal-or-user."""
     return _get_service_client()
+
+
+async def enforce_mfa_internal_or_user(request: Request) -> None:
+    """MFA gate para endpoints dual-auth (BLOQUE 0).
+
+    NO-OP en llamadas service-to-service (X-Internal-Service-Secret válido → el
+    orchestrator/bot es de confianza y no tiene sesión MFA). Para llamadas de
+    usuario (JWT), aplica enforce_mfa normal (AAL2 si el user tiene factor).
+    Usar en endpoints money-movement invocados por AMBOS (ej. /orders/{id}/payment-link)."""
+    if _verify_internal_secret(request):
+        return
+    await enforce_mfa(request)
