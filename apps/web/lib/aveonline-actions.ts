@@ -164,7 +164,13 @@ export async function connectAveonline(
     secretId = newSecretId as string
   }
 
-  const expiresAt = new Date(Date.now() + tiempoToken * 1000).toISOString()
+  // BLOQUE B (item 4): Aveonline v1.0 emite el JWT con vigencia REAL de 1h (dossier §2.1),
+  // aunque `tiempoToken` pida más. Sembrar jwt_expires_at a 27.8h (tiempoToken=100000) hacía
+  // que el cliente Python confiara en un token muerto (comparte el mismo jwt_expires_at en DB)
+  // y su check proactivo _jwt_expired nunca disparara. Se capa a ≤1h, alineado con el cache del
+  // Python (min(tiempo_token, 3600)). Solo acorta la expiración cacheada → más re-auth, nunca menos.
+  const cachedTtlSec = Math.min(tiempoToken, 3600)
+  const expiresAt = new Date(Date.now() + cachedTtlSec * 1000).toISOString()
 
   const { error: upsertErr } = await sb
     .from('tenant_integrations')

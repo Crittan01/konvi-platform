@@ -325,6 +325,11 @@ async def _quote_via_aveonline(
     try:
         shipment_result = supabase.table("shipments").insert({
             "tenant_id": tenant_id,
+            # BLOQUE B (item 1a): persistir order_id cuando la cotización viene DESDE un
+            # pedido (req.order_id) → habilita el loop de reconciliación ya existente
+            # (confirm_rate → orders.shipping_cost). Antes quedaba NULL y el sync nunca
+            # disparaba. NULL para cotizaciones del estimador puro (sin pedido) — sin cambio.
+            "order_id": req.order_id,
             "status": "quoted",
             "origin_address": req.origin.model_dump(exclude_none=True),
             "destination_address": req.destination.model_dump(exclude_none=True),
