@@ -259,6 +259,81 @@ class WompiWebhookTests(unittest.TestCase):
 
     @patch("routers.orders._decrement_stock_on_confirm")
     @patch("routers.wompi_webhook._get_service_client")
+    def test_approved_reconcilia_orden_auto_cancelada_por_ttl(self, mock_get_client, mock_decrement):
+        """BLOQUE A (item 4): APPROVED tardío sobre una orden auto-cancelada por el sweeper
+        de TTL (cancelled_by_actor='system_auto') → se revierte y confirma (webhook perdido;
+        Wompi no ofrece pull por reference → única vía de recuperar el pago)."""
+        payload = WompiPayloadBuilder().with_approved_txn(
+            payment_link_id="plink-r", txn_id="txn-r"
+        ).build()
+        supabase = _make_supabase_mock({
+            "link_to_order": {"plink-r": "order-r"},
+            "orders": {
+                "order-r": {
+                    "id": "order-r", "tenant_id": "tenant-1", "status": "cancelled",
+                    "cancelled_by_actor": "system_auto", "conversation_id": "conv-r",
+                    "total_amount": 1350.0,
+                }
+            },
+            "messages_insert": [{"id": "msg-r"}],
+            "conversations": {"conv-r": {"customer_phone": "573001112233"}},
+        })
+        mock_get_client.return_value = supabase
+
+        wompi_webhook._process_wompi_event(payload)
+
+        mock_decrement.assert_called_once()  # reconciliada → confirmada + stock decrementado
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_approved_no_reconcilia_cancelacion_de_operador(self, mock_get_client, mock_decrement):
+        """Una cancelación NO-automática (operador/cliente/pipeline) NO se revierte por un
+        APPROVED tardío — solo las auto-cancelaciones del sweeper de TTL (system_auto)."""
+        payload = WompiPayloadBuilder().with_approved_txn(
+            payment_link_id="plink-o", txn_id="txn-o"
+        ).build()
+        supabase = _make_supabase_mock({
+            "link_to_order": {"plink-o": "order-o"},
+            "orders": {
+                "order-o": {
+                    "id": "order-o", "tenant_id": "tenant-1", "status": "cancelled",
+                    "cancelled_by_actor": "operator", "conversation_id": "conv-o",
+                    "total_amount": 1350.0,
+                }
+            },
+        })
+        mock_get_client.return_value = supabase
+
+        wompi_webhook._process_wompi_event(payload)
+
+        mock_decrement.assert_not_called()  # cancelación de operador → terminal, no se revierte
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_reconciliacion_respeta_guard_de_monto(self, mock_get_client, mock_decrement):
+        """La reconciliación NO baja el guard 5b: si el monto del webhook no coincide con el
+        total de la orden (link mal correlacionado / cobro parcial), NO se confirma."""
+        payload = WompiPayloadBuilder().with_approved_txn(
+            payment_link_id="plink-m", txn_id="txn-m"
+        ).build()
+        supabase = _make_supabase_mock({
+            "link_to_order": {"plink-m": "order-m"},
+            "orders": {
+                "order-m": {
+                    "id": "order-m", "tenant_id": "tenant-1", "status": "cancelled",
+                    "cancelled_by_actor": "system_auto", "conversation_id": "conv-m",
+                    "total_amount": 999.0,  # != 1350.0 (135_000 cents del webhook)
+                }
+            },
+        })
+        mock_get_client.return_value = supabase
+
+        wompi_webhook._process_wompi_event(payload)
+
+        mock_decrement.assert_not_called()  # monto mismatch → fail-closed, no confirma
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
     def test_declined_does_not_confirm(self, mock_get_client, mock_decrement):
         payload = WompiPayloadBuilder().with_declined_txn(
             payment_link_id="plink-3", txn_id="txn-3"

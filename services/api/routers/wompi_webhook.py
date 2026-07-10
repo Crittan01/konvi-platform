@@ -217,13 +217,33 @@ def _process_wompi_event(payload: dict) -> None:
     # Estados terminales: 'confirmed' (pago OK) y 'cancelled' (cliente canceló
     # o flujo descartó). Un APPROVED tardío (rev. 79) no debe reabrir una
     # orden cancelada — sería incoherente con los datos del cliente.
+    #
+    # EXCEPCIÓN — BLOQUE A (item 4) reconciliación de webhook perdido: si la orden
+    # fue auto-cancelada por el SWEEPER de TTL (`cancelled_by_actor='system_auto'`),
+    # un APPROVED tardío SÍ debe confirmarla. Es la única vía documentada de recuperar
+    # un pago cuyo webhook se perdió: Wompi no ofrece pull por reference/link (doc
+    # oficial verificada 2026-07-10), así que sin esto el sweeper cancela a los 35 min
+    # una orden realmente pagada y el reintento de Wompi (3h/24h) la encontraría en
+    # 'cancelled' → dinero perdido. Solo se revierten auto-cancels del SISTEMA (nunca
+    # de operador/cliente/pipeline), y la validación de monto/moneda (5b, abajo) protege
+    # contra reconciliaciones erróneas (link mal correlacionado, cobro parcial).
     TERMINAL_STATES = {"confirmed", "cancelled"}
-    if current_status in TERMINAL_STATES:
+    _reconcile_ttl_cancel = (
+        current_status == "cancelled"
+        and (order.get("cancelled_by_actor") or "") == "system_auto"
+    )
+    if current_status in TERMINAL_STATES and not _reconcile_ttl_cancel:
         logger.info(
             "[WOMPI] orden_estado_terminal order_id=%s txn_id=%s status=%s — idempotente, skip",
             order_id, txn_id, current_status,
         )
         return
+    if _reconcile_ttl_cancel:
+        logger.warning(
+            "[WOMPI][RECONCILE] APPROVED tardío sobre orden auto-cancelada por TTL "
+            "order_id=%s txn_id=%s — se revierte el auto-cancel y se confirma (webhook perdido)",
+            order_id, txn_id,
+        )
 
     # ── 5b. Validar monto/moneda antes de confirmar (A11 audit 2026-06-25) ───
     # Defensa payment-integrity: Wompi reporta APPROVED pero el monto cobrado
@@ -699,7 +719,9 @@ def _get_order_by_id(supabase, order_id: str):
             # F16: total_amount es OBLIGATORIO — sin él el guard de monto (5b) quedaba muerto
             # (order_total siempre None → salta la comparación → confirmaba con CUALQUIER monto) y el
             # retry post-DECLINED leía 0 → siempre "monto bajo" → nunca regeneraba link (venta perdida).
-            .select("id, tenant_id, status, conversation_id, contact_id, total_amount")
+            # BLOQUE A (item 4): cancelled_by_actor para reconciliar un APPROVED tardío
+            # contra una orden auto-cancelada por el sweeper de TTL (webhook perdido).
+            .select("id, tenant_id, status, conversation_id, contact_id, total_amount, cancelled_by_actor")
             .eq("id", order_id)
             .limit(1)
             .execute()

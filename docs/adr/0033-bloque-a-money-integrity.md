@@ -1,6 +1,6 @@
 # ADR-0033 — BLOQUE A: Integridad de dinero
 
-- **Estado:** En progreso (PR-1 = items 1–3; PR-2 = item 5; item 4 en diseño) — 2026-07-10
+- **Estado:** Aceptado — items 1–5 implementados (PR-1 = 1–3; PR-2 = 5; PR-3 = 4) — 2026-07-10
 - **Contexto:** Segundo bloque de la remediación production-grade (Prompt Maestro), derivado de
   `docs/audit/production-readiness-2026-07-09.md §BLOQUE A`. Cada item se **re-verificó contra el código
   actual** (workflow read-only, no se asumió el audit) antes de tocar nada. Criterio de hecho del bloque:
@@ -67,8 +67,29 @@ El guard `PurgeBlockedError` (link Wompi activo) y el `consent_audit_log` (phone
 conservan. `orders.conversation_id`/`contact_id` son `ON DELETE SET NULL` → borrar conversations con órdenes
 preservadas es FK-safe.
 
-## Pendiente en este bloque (item 4)
-- **Item 4 (reconciliación Wompi):** cron pull que confirme órdenes `pending_payment` pagadas cuyo webhook se
-  perdió, + sweeper Wompi-aware (hoy cancela una orden pagada a los 35 min). **Dossier-first**: verificar en doc
-  oficial Wompi la correlación link→transacción (`GET /v1/transactions?reference=`) antes de implementar; se
-  presenta el diseño al founder antes de codear.
+## Decisión (PR-3 — item 4)
+
+### 4. Un webhook APPROVED tardío reconcilia (revierte) una orden auto-cancelada por TTL
+**VALIDAR EN DOCUMENTACIÓN OFICIAL → hecho (2026-07-10):** Wompi **NO** ofrece ninguna forma documentada de
+localizar una transacción sin su `transaction_id` — no hay búsqueda por `reference`/`sku`/`payment_link_id`, y
+`GET /v1/payment_links/{id}` no expone estado de pago (solo `GET /v1/transactions/{id}` por id, con `pub_` key).
+Por tanto el "cron pull por reference" que proponía la auditoría **no es implementable** con la API documentada:
+si el webhook se pierde, nunca obtenemos el `txn_id`, así que no hay a quién consultar.
+
+**El daño real:** webhook perdido → `payments` queda `pending` → el sweeper de TTL cancela la orden a los 35 min
+(`cancelled_by_actor='system_auto'`) → el reintento de Wompi (3h/24h) la encuentra `cancelled` y `TERMINAL_STATES`
+lo bloquea → dinero entró, orden perdida.
+
+**Decisión (A2 — la única vía documentada de recuperar el pago):** en el webhook, un `APPROVED` sobre una orden
+`cancelled` cuyo `cancelled_by_actor == 'system_auto'` **revierte** el auto-cancel y confirma la orden (con el
+guard de monto/moneda 5b intacto + decremento de stock por el mismo `_confirm_order`). Solo se revierten
+auto-cancelaciones del **sistema** (nunca de operador/cliente/pipeline). Como `pending_payment` no decrementó
+stock, re-confirmar lo decrementa una sola vez. Cierra el money-loss sin depender de ningún pull y sobrevive
+toda la ventana de reintentos de Wompi (24h): cuando el webhook finalmente llega, reconcilia.
+
+**Residual declarado (no oculto):** si el webhook **nunca** llega (todos los reintentos de Wompi fallan), no hay
+API documentada para detectarlo → la reconciliación queda como **INTERVENCIÓN HUMANA** (dashboard Wompi >
+Transacciones, dossier §9). Opciones de refuerzo no implementadas (a decisión del founder): (a) capturar
+`transaction_id` vía `redirect_url` para habilitar `GET /v1/transactions/{id}` cuando el redirect llega
+(parcial: el checkout hosted de WhatsApp no siempre redirige); (b) escalar a soporte Wompi por un endpoint
+no-documentado de listado de transacciones del merchant.
