@@ -114,6 +114,42 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     @patch.object(wompi_client_module, "get_tenant_wompi_creds", return_value=_FAKE_CREDS)
     @patch.object(wompi_client_module, "create_payment_link", new_callable=AsyncMock)
+    async def test_amount_redondea_no_trunca(self, mock_wompi_create, _mock_creds):
+        """BLOQUE A (P1): total fraccionario (p.ej. cupón %) → round, NO int.
+
+        int(20004.10*100) == 2000409 (20004.10*100 == 2000409.9999998 → trunca 1 cent,
+        subcobro); round == 2000410. El bot cotiza round; la API debe cobrar lo mismo."""
+        mock_wompi_create.return_value = {
+            "link_id": "plink-r",
+            "checkout_url": "https://checkout.wompi.co/l/plink-r",
+            "active": True,
+            "amount_in_cents": 2_000_410,
+            "expires_at": "2026-04-24T20:00:00.000Z",
+        }
+        supabase = _make_supabase_mock({
+            "orders_single": {
+                "id": "order-r",
+                "status": "pending",
+                "total_amount": 20004.10,
+                "shipping_cost": 0.0,
+                "notes": None,
+                "contact_id": "c1",
+                "contacts": {"name": "Cliente", "phone": "573001112233"},
+            },
+        })
+
+        await orders.create_payment_link(
+            request=MagicMock(),
+            order_id="order-r",
+            tenant_id="tenant-1",
+            supabase=supabase,
+            _role="owner",
+        )
+
+        self.assertEqual(mock_wompi_create.await_args.kwargs["amount_in_cents"], 2_000_410)
+
+    @patch.object(wompi_client_module, "get_tenant_wompi_creds", return_value=_FAKE_CREDS)
+    @patch.object(wompi_client_module, "create_payment_link", new_callable=AsyncMock)
     async def test_order_not_found_raises_404(self, mock_wompi_create, _mock_creds):
         supabase = _make_supabase_mock({"orders_single": None})
 

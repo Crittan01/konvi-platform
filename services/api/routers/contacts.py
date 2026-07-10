@@ -723,19 +723,23 @@ async def purge_contact(
     _role: str = Depends(require_owner_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
-    """⚠️ HARD-DELETE en cascade — uso testing/admin (NO producción regular).
+    """Elimina un contacto de forma SELECTIVA con retención legal (BLOQUE A).
 
-    Sem 7 F2 cierre 2026-05-19 — fix del gap reportado por founder:
-    el server action UI `deleteContact` (apps/web) borraba SOLO la fila
-    `contacts`. Carts/conversations/orders del contact quedaban huérfanos
-    en DB y el cart-recovery flow del bot los recuperaba en próximas
-    conversaciones del mismo phone → cart contaminado.
+    Sem 7 F2 cierre 2026-05-19 — origen: el server action UI `deleteContact`
+    borraba SOLO la fila `contacts`. Carts/conversations/orders quedaban
+    huérfanos y el cart-recovery del bot los recuperaba en próximas
+    conversaciones del mismo phone → cart contaminado. Por eso el purge
+    limpia esos vectores.
 
-    Diferencia con `DELETE /{contact_id}` (anonimización soft):
-      - DELETE → anonimiza PII pero preserva el contact + orders + audit.
-        Para PRODUCCIÓN cumpliendo Habeas Data Art. 15.
-      - POST /purge → borra cascade COMPLETO (contact + conversations +
-        carts + orders + payments + shipments + messages). Para TESTING.
+    BLOQUE A (retención): el purge ya NO es un hard-delete total. Ramifica por
+    `has_orders` (ver `purge_contact_completely`):
+      - CON órdenes → anonimiza PII + PRESERVA orders/payments (Cód. Comercio
+        Art. 60 / E.T. Art. 632) + borra los vectores de contaminación del bot.
+      - SIN órdenes → cascade físico completo (no hay historial contable).
+
+    Diferencia con `DELETE /{contact_id}` (anonimización soft): DELETE anonimiza
+    la PII pero NO limpia carts/conversations; `/purge` sí los limpia (además de
+    anonimizar/preservar según órdenes). Ambos son production-safe para Habeas Data.
 
     Requiere role `owner` (no `manager` ni `operator`).
 
