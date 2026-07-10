@@ -7075,6 +7075,9 @@ async def build_and_run_orchestration(
                     INTENT_REMOVE,
                 )
                 from lib import coupons as _coupon_helpers  # noqa: PLC0415
+                from tools.cart_tool import (  # noqa: PLC0415
+                    invalidate_pending_order_on_cart_change as _invalidate_pending,
+                )
 
                 _coupon_intent = detect_coupon_intent(content)
                 if _coupon_intent:
@@ -7098,6 +7101,7 @@ async def build_and_run_orchestration(
                     _coupon_event_type: Optional[str] = None
                     _coupon_event_payload: dict = {}
                     _coupon_cart_id: Optional[str] = None
+                    _coupon_invalidated: Optional[dict] = None
 
                     if not _cart_rows:
                         # Sin cart vivo — aplicar cupón no tiene sentido aún.
@@ -7112,14 +7116,11 @@ async def build_and_run_orchestration(
                         _cart = _cart_rows[0]
                         _coupon_cart_id = _cart["id"]
 
-                        if _cart["status"] == "checkout":
-                            # Decisión 3: cupón post-payment-link → reject.
-                            # Cita+negrita per sugerencia founder.
-                            _coupon_response = (
-                                "> *El cupón debe aplicarse antes de generar el link de pago.*\n"
-                                "Si quieres usarlo, dime y cancelamos el link actual para rehacer el pedido."
-                            )
-                        elif _coupon_intent.intent == INTENT_REMOVE:
+                        # BLOQUE A (P1): aplicar/revocar cupón cambia el total. Si hay
+                        # orden pending_payment con link Wompi (amount congelado), se
+                        # invalida (helper por orden pending, no por cart.status —
+                        # 'checkout' era código muerto, nunca se escribe).
+                        if _coupon_intent.intent == INTENT_REMOVE:
                             _prev_code = _cart.get("coupon_code")
                             _prev_id = _cart.get("coupon_id")
                             _revoked = _coupon_helpers.revoke_coupon(
@@ -7136,6 +7137,10 @@ async def build_and_run_orchestration(
                                     "code": _prev_code,
                                     "reason": "user_removed",
                                 }
+                                _coupon_invalidated = _invalidate_pending(
+                                    supabase, cart_id=_coupon_cart_id,
+                                    tenant_id=tenant_id, reason="coupon_revoked",
+                                )
                             else:
                                 _coupon_response = "No tenías ningún cupón aplicado."
                         elif _coupon_intent.intent == INTENT_APPLY:
@@ -7167,9 +7172,21 @@ async def build_and_run_orchestration(
                                         "code": _result.coupon_code,
                                         "discount_cents": _result.discount_cents,
                                     }
+                                    _coupon_invalidated = _invalidate_pending(
+                                        supabase, cart_id=_coupon_cart_id,
+                                        tenant_id=tenant_id, reason="coupon_applied",
+                                    )
                                 else:
                                     # ValidationResult.user_message ya en ES.
                                     _coupon_response = _result.user_message
+
+                    if _coupon_invalidated and _coupon_response:
+                        _inv_short = str(_coupon_invalidated.get("order_id") or "")[:8].upper()
+                        _coupon_response = (
+                            f"{_coupon_response}\n\n_El link de pago anterior "
+                            f"(*#{_inv_short}*) ya no es válido; genera uno nuevo "
+                            f"con el total actualizado._"
+                        )
 
                     if _coupon_response:
                         # Emit cart_event si hubo cambio real (apply/revoke OK).

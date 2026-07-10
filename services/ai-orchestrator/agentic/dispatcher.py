@@ -1587,6 +1587,9 @@ async def _run_agentic_full(
             INTENT_REMOVE as _INTENT_REMOVE,
         )
         from lib import coupons as _coupon_helpers
+        from tools.cart_tool import (
+            invalidate_pending_order_on_cart_change as _invalidate_pending,
+        )
 
         _coupon_intent = _detect_coupon_intent(content)
         if _coupon_intent:
@@ -1606,6 +1609,7 @@ async def _run_agentic_full(
             _coupon_event_type: Optional[str] = None
             _coupon_event_payload: dict = {}
             _coupon_cart_id: Optional[str] = None
+            _coupon_invalidated: Optional[dict] = None
 
             if not _cart_rows:
                 if _coupon_intent.intent == _INTENT_APPLY:
@@ -1618,13 +1622,13 @@ async def _run_agentic_full(
             else:
                 _cart = _cart_rows[0]
                 _coupon_cart_id = _cart["id"]
-                if _cart["status"] == "checkout":
-                    _coupon_response = (
-                        "*El cupón debe aplicarse antes de generar el link "
-                        "de pago.*\nSi quieres usarlo, dime y cancelamos el "
-                        "link actual para rehacer el pedido."
-                    )
-                elif _coupon_intent.intent == _INTENT_REMOVE:
+                # BLOQUE A (P1): aplicar/revocar un cupón cambia el total del cart.
+                # Si ya hay una orden pending_payment con link Wompi (amount_in_cents
+                # congelado), debe invalidarse o el cliente paga el link viejo con un
+                # total divergente. El guard previo por cart.status=='checkout' era
+                # código muerto (ese status nunca se escribe); la señal real es la
+                # existencia de la orden pending_payment (lo que consulta el helper).
+                if _coupon_intent.intent == _INTENT_REMOVE:
                     _prev_code = _cart.get("coupon_code")
                     _prev_id = _cart.get("coupon_id")
                     _revoked = _coupon_helpers.revoke_coupon(
@@ -1638,6 +1642,10 @@ async def _run_agentic_full(
                             "coupon_id": _prev_id, "code": _prev_code,
                             "reason": "user_removed",
                         }
+                        _coupon_invalidated = _invalidate_pending(
+                            supabase, cart_id=_coupon_cart_id,
+                            tenant_id=tenant_id, reason="coupon_revoked",
+                        )
                     else:
                         _coupon_response = "No tenías ningún cupón aplicado."
                 elif _coupon_intent.intent == _INTENT_APPLY:
@@ -1663,8 +1671,20 @@ async def _run_agentic_full(
                                 "code": _result.coupon_code,
                                 "discount_cents": _result.discount_cents,
                             }
+                            _coupon_invalidated = _invalidate_pending(
+                                supabase, cart_id=_coupon_cart_id,
+                                tenant_id=tenant_id, reason="coupon_applied",
+                            )
                         else:
                             _coupon_response = _result.user_message
+
+            if _coupon_invalidated and _coupon_response:
+                _inv_short = str(_coupon_invalidated.get("order_id") or "")[:8].upper()
+                _coupon_response = (
+                    f"{_coupon_response}\n\n_El link de pago anterior "
+                    f"(*#{_inv_short}*) ya no es válido; genera uno nuevo "
+                    f"con el total actualizado._"
+                )
 
             if _coupon_response:
                 if _coupon_event_type and _coupon_cart_id:
