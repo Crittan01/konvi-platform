@@ -1552,6 +1552,7 @@ async def _generate_shipping_guide_async(
         return False
 
     # 5. Construir payload + invocar generate_guide.
+    _claim_id = None  # BLOQUE B item 5: def antes del try — el except grande lo referencia
     try:
         from integrations.aveonline_client import AveonlineClient
 
@@ -1648,6 +1649,61 @@ async def _generate_shipping_guide_async(
             or resolve_dane_from_city(addr.get("city") or "", addr.get("state"))
         )
 
+        # BLOQUE B (item 5) — claim-before-bill (idempotencia anti guía DUPLICADA facturable).
+        # Se computan los jsonb (NOT NULL de shipments) y se INSERTA una fila 'generating'
+        # ANTES de facturar. El índice único parcial (tenant_id, order_id) WHERE status IN
+        # ('generating','labeled','simulated') hace fallar un 2º INSERT concurrente/retry →
+        # esa invocación NO factura (evita cobro duplicado real por webhook doble / cron).
+        origin_addr_jsonb = {
+            "city": origin.get("city"),
+            "street": origin.get("street"),
+            "dane_code": origin.get("dane_code"),
+            "phone": tenant.get("telefono_contacto") or origin.get("phone"),
+            "name": origin.get("name") or tenant.get("name"),
+        }
+        destination_addr_jsonb = {
+            "city": addr.get("city"),
+            "street": addr.get("street"),
+            "apartment": addr.get("apartment"),
+            "tower": addr.get("tower"),
+            "building_type": addr.get("building_type"),
+            "neighborhood": addr.get("neighborhood"),
+        }
+        # Schema shipments requiere `parcels` NOT NULL. F5: peso/dims cotizados de la guía.
+        parcels_jsonb = [{
+            "weight_kg": float(_wi.get("weight_kg") or 0.5),
+            "length_cm": float(_wi.get("length_cm") or 15),
+            "width_cm": float(_wi.get("width_cm") or 10),
+            "height_cm": float(_wi.get("height_cm") or 5),
+            "declared_value_cop": int(float(order.get("total_amount") or 0)),
+            "units": 1,
+            "content": "Productos cosmética artesanal",
+        }]
+        try:
+            _claim = supabase.table("shipments").insert({
+                "tenant_id": tenant_id,
+                "order_id": order_id,
+                "carrier": selected_carrier_name or "aveonline",
+                "status": "generating",
+                "origin_address": origin_addr_jsonb,
+                "destination_address": destination_addr_jsonb,
+                "parcels": parcels_jsonb,
+            }).execute()
+            _claim_id = (_claim.data or [{}])[0].get("id")
+        except Exception as _claim_exc:
+            # unique_violation (o error DB): ya hay guía en progreso/generada para esta orden
+            # → NO facturar (idempotente). El 2º webhook/retry/cron de reconciliación cae aquí.
+            logger.info(
+                "[WOMPI][AVEONLINE] guía ya reclamada/generada order=%s — skip idempotente: %s",
+                order_id[:8], _claim_exc,
+            )
+            return False
+        if not _claim_id:
+            logger.warning(
+                "[WOMPI][AVEONLINE] claim shipment sin id order=%s — abort", order_id[:8],
+            )
+            return False
+
         # Rev. 108 fix arquitectónico — ahora función async. Antes
         # usaba asyncio.new_event_loop() + run_until_complete, lo cual
         # fallaba ("Cannot run the event loop while another loop is
@@ -1669,95 +1725,101 @@ async def _generate_shipping_guide_async(
             simulate=simulate,
         )
     except Exception as exc:
+        # Excepción al facturar. Distinguir por si HUBO dinero en juego:
+        #  - simulate=True → NO hubo cobro (guía simulada) → mover a 'pending_generation'
+        #    (fuera del índice único) para permitir reintento seguro. Evita que el caso común
+        #    (real guides OFF por default) quede varado silenciosamente.
+        #  - simulate=False (guía REAL) → un TIMEOUT pudo facturar (AMBIGUO). Money-safe: dejar
+        #    'generating' (en el índice → bloquea auto-retry) para resolución manual del operador
+        #    (verificar en Aveonline) en vez de arriesgar doble cobro. Se persiste el error para
+        #    que NO sea silencioso (el shipment queda con quote_response.error visible).
+        _ambiguous_real = not simulate
+        if _claim_id:  # None si la excepción ocurrió antes del claim (nada que actualizar)
+            try:
+                supabase.table("shipments").update({
+                    "status": "generating" if _ambiguous_real else "pending_generation",
+                    "quote_response": {
+                        "error": str(exc)[:500],
+                        "simulated": simulate,
+                        "ambiguous_bill": _ambiguous_real,
+                    },
+                }).eq("id", _claim_id).eq("tenant_id", tenant_id).execute()
+            except Exception as _upd_exc:
+                logger.warning("[WOMPI][AVEONLINE] update claim tras excepción falló: %s", _upd_exc)
         logger.warning(
-            "[WOMPI][AVEONLINE] generate_guide error order=%s: %s",
-            order_id[:8], exc,
+            "[WOMPI][AVEONLINE] generate_guide error order=%s simulate=%s (%s): %s",
+            order_id[:8], simulate,
+            "REAL ambiguo → claim 'generating', resolución manual" if _ambiguous_real
+            else "simulado → 'pending_generation', reintentable",
+            exc,
         )
         return False
-
-    # Origin/destination address dicts para satisfacer NOT NULL constraint.
-    origin_addr_jsonb = {
-        "city": origin.get("city"),
-        "street": origin.get("street"),
-        "dane_code": origin.get("dane_code"),
-        "phone": tenant.get("telefono_contacto") or origin.get("phone"),
-        "name": origin.get("name") or tenant.get("name"),
-    }
-    destination_addr_jsonb = {
-        "city": addr.get("city"),
-        "street": addr.get("street"),
-        "apartment": addr.get("apartment"),
-        "tower": addr.get("tower"),
-        "building_type": addr.get("building_type"),
-        "neighborhood": addr.get("neighborhood"),
-    }
-    # Schema shipments requiere `parcels` NOT NULL. F5: refleja el mismo peso/dims cotizados que la guía.
-    parcels_jsonb = [{
-        "weight_kg": float(_wi.get("weight_kg") or 0.5),
-        "length_cm": float(_wi.get("length_cm") or 15),
-        "width_cm": float(_wi.get("width_cm") or 10),
-        "height_cm": float(_wi.get("height_cm") or 5),
-        "declared_value_cop": int(float(order.get("total_amount") or 0)),
-        "units": 1,
-        "content": "Productos cosmética artesanal",
-    }]
 
     if not result.get("ok"):
         logger.warning(
             "[WOMPI][AVEONLINE] guía no generada order=%s code=%s err=%s",
             order_id[:8], result.get("code"), result.get("error"),
         )
-        # Persistir shipment row "pending" para que operador intervenga.
-        try:
-            supabase.table("shipments").insert({
-                "tenant_id": tenant_id,
-                "order_id": order_id,
-                # Rev. 107: persistir carrier_name real del cart si existe
-                # (SERVIENTREGA/ENVIA/etc.), fallback "aveonline" provider.
-                "carrier": selected_carrier_name or "aveonline",
-                "status": "pending_generation",
-                "origin_address": origin_addr_jsonb,
-                "destination_address": destination_addr_jsonb,
-                "parcels": parcels_jsonb,
-                "quote_response": {
-                    "error": result.get("error"),
-                    "code": result.get("code"),
-                    "simulated": simulate,
-                },
-            }).execute()
-        except Exception as exc:
-            logger.warning(
-                "[WOMPI][AVEONLINE] persist pending shipment falló: %s", exc,
-            )
+        # Aveonline respondió NOT-OK → definitivamente NO facturó → mover el claim a
+        # 'pending_generation' (fuera del índice único) para permitir un reintento seguro.
+        # 2 intentos: si el UPDATE falla, el claim quedaría 'generating' bloqueando el retry.
+        for _attempt in (1, 2):
+            try:
+                supabase.table("shipments").update({
+                    "status": "pending_generation",
+                    "quote_response": {
+                        "error": result.get("error"),
+                        "code": result.get("code"),
+                        "simulated": simulate,
+                    },
+                }).eq("id", _claim_id).eq("tenant_id", tenant_id).execute()
+                break
+            except Exception as exc:
+                logger.warning(
+                    "[WOMPI][AVEONLINE] update pending shipment falló (intento %d): %s",
+                    _attempt, exc,
+                )
         return False
 
-    # 6. Persistir shipment con tracking real.
-    try:
-        supabase.table("shipments").insert({
-            "tenant_id": tenant_id,
-            "order_id": order_id,
-            # Prioridad: carrier name del response Aveonline (más
-            # canónico) > carrier del cart > provider name fallback.
-            "carrier": (
-                result.get("carrier_name") or selected_carrier_name or "aveonline"
-            ),
-            "status": "labeled" if not simulate else "simulated",
-            "tracking_number": result.get("tracking_number"),
-            "tracking_url": result.get("tracking_url"),
-            "label_url": result.get("label_url"),
-            "origin_address": origin_addr_jsonb,
-            "destination_address": destination_addr_jsonb,
-            "parcels": parcels_jsonb,
-        }).execute()
-        logger.info(
-            "[WOMPI][AVEONLINE] guía %s order=%s tracking=%s "
-            "(simulate=%s)",
-            "SIMULADA" if simulate else "REAL",
-            order_id[:8], result.get("tracking_number"), simulate,
+    # 6. Actualizar el claim con el tracking real (labeled/simulated). La guía YA se generó/
+    #    facturó → guardar el tracking es crítico. 2 intentos; si falla una guía REAL, log a
+    #    nivel error con el tracking (recuperable) — la guía existe en Aveonline aunque la DB falle.
+    _upd_fields = {
+        # Prioridad: carrier name del response Aveonline (más canónico) >
+        # carrier del cart > provider name fallback.
+        "carrier": (
+            result.get("carrier_name") or selected_carrier_name or "aveonline"
+        ),
+        "status": "labeled" if not simulate else "simulated",
+        "tracking_number": result.get("tracking_number"),
+        "tracking_url": result.get("tracking_url"),
+        "label_url": result.get("label_url"),
+    }
+    _persisted = False
+    for _attempt in (1, 2):
+        try:
+            supabase.table("shipments").update(_upd_fields).eq(
+                "id", _claim_id).eq("tenant_id", tenant_id).execute()
+            _persisted = True
+            break
+        except Exception as exc:
+            logger.warning(
+                "[WOMPI][AVEONLINE] persist shipment err (intento %d): %s", _attempt, exc,
+            )
+    if not _persisted and not simulate:
+        # Guía REAL facturada cuyo tracking NO se persistió → recuperación manual desde este log.
+        logger.error(
+            "[WOMPI][AVEONLINE] GUÍA REAL FACTURADA sin persistir order=%s tracking=%s "
+            "label=%s (claim %s queda 'generating') — recuperar manualmente",
+            order_id[:8], result.get("tracking_number"), result.get("label_url"),
+            str(_claim_id)[:8],
         )
-    except Exception as exc:
-        logger.warning("[WOMPI][AVEONLINE] persist shipment err: %s", exc)
         return False
+    logger.info(
+        "[WOMPI][AVEONLINE] guía %s order=%s tracking=%s (simulate=%s)",
+        "SIMULADA" if simulate else "REAL",
+        order_id[:8], result.get("tracking_number"), simulate,
+    )
     return True
 
 
