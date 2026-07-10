@@ -23,6 +23,7 @@ from supabase import Client
 from dependencies.audit import audit_log
 from dependencies.auth import (
     WRITE_ROLES,
+    enforce_mfa,
     get_current_role,
     get_current_tenant,
     get_service_client,
@@ -34,6 +35,7 @@ from dependencies.idempotency import (
     payload_fingerprint,
 )
 from dependencies.internal_auth import (
+    enforce_mfa_internal_or_user,
     get_role_internal_or_user,
     get_service_client_internal_or_user,
     get_tenant_id_internal_or_user,
@@ -352,6 +354,9 @@ async def patch_order(
     # editar notas (opera el módulo), PERO cancelar un pedido dispara refund/void
     # de dinero → esa transición queda gateada a owner/manager (check inline abajo).
     role: str = Depends(get_current_role),
+    # BLOQUE 0 (P1): PATCH es user-only (no dual-auth) y su transición cancel mueve
+    # dinero → exige AAL2 si el operador tiene MFA. Step-up 1×/sesión (aal2 pasa directo).
+    _mfa: None = Depends(enforce_mfa),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """
@@ -436,6 +441,9 @@ async def create_payment_link(
     tenant_id: str = Depends(get_tenant_id_internal_or_user),
     supabase: Client = Depends(get_service_client_internal_or_user),
     _role: str = Depends(require_write_internal_or_user),
+    # BLOQUE 0 (P1): genera link de pago (money-movement). Dual-auth → guard
+    # internal-aware: NO-OP para el bot (X-Internal-Service-Secret), AAL2 para operador.
+    _mfa: None = Depends(enforce_mfa_internal_or_user),
 ):
     """
     Genera un link de pago Wompi para un pedido en estado pending o pending_payment.

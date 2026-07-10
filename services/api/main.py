@@ -52,7 +52,8 @@ _OFFBOARDING_GATE = [_Depends(reject_if_tenant_deleting)]
 # request-deletion, por-endpoint), export de PII (data_subject_request) y crédito (sic_report).
 # NO al router `mfa` (se necesita aal1-con-factor para completar el 2º factor), NI a
 # tenant_offboarding /status y /cancel-deletion (deben correr en grace/recovery), ni a
-# webhooks (sin JWT). `orders` queda DIFERIDO a decisión founder (alta frecuencia operativa).
+# webhooks (sin JWT). `orders` NO se gatea a nivel router (alta frecuencia + dual-auth bot);
+# sus endpoints money-movement (PATCH, payment-link) se gatean por-endpoint en orders.py.
 _MFA_GATE = [_Depends(reject_if_tenant_deleting), _Depends(enforce_mfa)]
 
 logger = logging.getLogger("api.startup")

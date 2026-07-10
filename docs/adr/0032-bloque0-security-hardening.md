@@ -56,18 +56,26 @@ Habeas Data) y `sic_report` (datos de crédito). **NO** se gatea: el router `mfa
 factor para completar el 2º factor), `tenant_offboarding` **/status** y **/cancel-deletion** (deben
 correr durante grace/recovery, o se crea un deadlock), ni webhooks (sin JWT). Un test de wiring a nivel
 de app fija este contrato. Usuarios sin MFA no se ven afectados.
-**DECISIÓN DIFERIDA A FOUNDER:** `orders` muta dinero/pedidos/payment-links pero es de **alta frecuencia
-operativa** y tiene GETs de lectura; gatear el router completo forzaría step-up en el flujo diario del
-operador. Recomendación: gatear solo los endpoints de movimiento de dinero (payment-link/refund), no las
-lecturas. Pendiente de aprobación en el checkpoint (no incluido en este bloque).
+**`orders` money-movement (decisión delegada por founder — "calidad primero"):** en vez de gatear el
+router completo (rompería lecturas de alta frecuencia), se gatearon **solo los endpoints que mueven
+dinero**, dejando GETs/creación intactos:
+- `PATCH /orders/{id}` (user-only; su transición *cancel* dispara refund/void) → `enforce_mfa` directo.
+- `POST /orders/{id}/payment-link` (**dual-auth**: operador *o* el orchestrator/bot vía
+  `X-Internal-Service-Secret`) → guard **`enforce_mfa_internal_or_user`** que hace **NO-OP en la llamada
+  del bot** (verificación constant-time del secret interno) y aplica AAL2 solo al operador. Esto cierra
+  el bypass money-movement **sin romper la generación automática de links del bot** (probado: test
+  unitario del skip interno + delegación). `enforce_mfa` deja pasar sesiones AAL2 sin lookup → el
+  operador con MFA hace step-up **1×/sesión**, no por acción. `create_order` y `generate-shipping-guide`
+  quedan sin gate (no mueven dinero; alto volumen del bot).
 
 ## Consecuencias
 - **Positivas:** cierra 1 P0 (fuga PII) + los P1 de seguridad; audit_log gana inmutabilidad de filas
   escritas + anti-forja de autoría; el bypass de MFA por la API directa queda cerrado para las
   operaciones sensibles, incluidos los crown jewels (borrado/export de cuenta, export de PII, crédito).
 - **Alcance NO cerrado (declarado, no oculto):** audit_log sigue permitiendo INSERT veraz/NULL de
-  miembros (falta re-routear la escritura del frontend por service_role — follow-up); `orders` queda
-  sin gate MFA a la espera de decisión founder. Ambos documentados, no asumidos como resueltos.
+  miembros (falta re-routear la escritura del frontend por service_role — follow-up). `orders` cierra
+  el money-movement (PATCH + payment-link); `create_order`/`shipping-guide` sin gate por diseño (no
+  mueven dinero). Documentado, no asumido como resuelto.
 - **Costo:** `enforce_mfa` en AAL1 hace un lookup de factores (cacheado 60s). Las 3 migraciones requieren
   aplicación manual al remote (protocolo seguro por el drift del ledger) — ver §Intervención humana.
 - **Reversible:** el scope de `enforce_mfa` puede ampliarse/reducirse por router/endpoint sin cambio de
