@@ -28,7 +28,7 @@ export const metadata = {
 
 const TABS: TabDef[] = [
   { id: 'setup',     label: 'Setup',     Icon: Settings },
-  { id: 'listings',  label: 'Listings',  Icon: Package,        comingSoon: true },
+  { id: 'listings',  label: 'Listings',  Icon: Package },
   { id: 'qa',        label: 'Q&A',       Icon: MessageCircle,  comingSoon: true },
   { id: 'messages',  label: 'Mensajes',  Icon: Inbox,          comingSoon: true },
 ]
@@ -72,10 +72,13 @@ export default async function MercadoLibrePanelPage(
   }
 
   const connected = integration?.status === 'connected'
-  const sellerId = (integration?.meta_data?.seller_id as string)
+  // El callback OAuth guarda el id del vendedor MeLi en meta.user_id (integrations.py) — NO en
+  // meta.seller_id ni credentials.seller_id (que nunca se escriben) → antes mostraba '—' en una
+  // cuenta conectada. Fallback a los campos legacy por si algún registro antiguo los tuviera.
+  const sellerId = (integration?.meta_data?.user_id as string)
+    ?? (integration?.meta_data?.seller_id as string)
     ?? (integration?.credentials?.seller_id as string)
     ?? null
-  const tokenExpiresAt = (integration?.credentials?.expires_at as string) ?? null
   const metaLine = connected
     ? `Seller ID ${sellerId ?? '—'}`
     : null
@@ -99,16 +102,26 @@ export default async function MercadoLibrePanelPage(
         <MeLiSetup
           connected={connected}
           sellerId={sellerId}
-          tokenExpiresAt={tokenExpiresAt}
         />
       )}
 
       {tab === 'listings' && (
-        <ComingSoon
-          title="Catálogo de publicaciones"
-          description="Listado de productos publicados en Mercado Libre. Sincronización con el catálogo interno + edición masiva."
-          eta="Sem 9 (H.5)"
-        />
+        <div className="rounded-lg border border-border bg-muted/20 p-6 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Package className="h-4 w-4" />
+            Catálogo de publicaciones
+          </div>
+          <p className="text-sm text-muted-foreground">
+            El gestor de publicaciones Mercado Libre (vincular, sincronizar stock, importar) está
+            disponible en el módulo Marketplace.
+          </p>
+          <a
+            href="/dashboard/marketplace"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            Abrir gestor de Marketplace
+          </a>
+        </div>
       )}
 
       {tab === 'qa' && (

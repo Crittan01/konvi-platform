@@ -19,11 +19,10 @@ import { webhookUrl } from '@/lib/webhook-urls'
 type Props = {
   connected: boolean
   sellerId: string | null
-  tokenExpiresAt: string | null
 }
 
 export default function MeLiSetup({
-  connected, sellerId, tokenExpiresAt,
+  connected, sellerId,
 }: Props) {
   if (!connected) {
     return (
@@ -35,36 +34,24 @@ export default function MeLiSetup({
     )
   }
 
-  const expiresInDays = tokenExpiresAt
-    ? Math.round(
-        (new Date(tokenExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-      )
-    : null
-
   return (
     <div className="space-y-5">
       {/* 1. Identidad */}
       <SetupSection icon={KeyRound} title="Identidad OAuth">
         <SetupGrid>
           <SetupField label="Seller ID" value={sellerId} />
+          {/* El access token MeLi dura ~6 h y se renueva solo (no es la vigencia de la conexión):
+              mostrar un countdown de días marcaba "expirado" en una integración SANA. Se muestra
+              el estado real (renovación automática); la salud de la conexión la indica el header. */}
           <SetupField
-            label="Token expira"
+            label="Access token"
             value={
-              tokenExpiresAt ? (
-                <>
-                  {new Date(tokenExpiresAt).toLocaleDateString('es-CO')}
-                  {expiresInDays !== null && expiresInDays > 0 && (
-                    <span className="text-xs text-muted-foreground font-sans">
-                      {' · en '}{expiresInDays} días
-                    </span>
-                  )}
-                  {expiresInDays !== null && expiresInDays <= 0 && (
-                    <span className="text-xs text-rose-800 font-sans">
-                      {' · expirado'}
-                    </span>
-                  )}
-                </>
-              ) : null
+              <>
+                Renovación automática
+                <span className="text-xs text-muted-foreground font-sans">
+                  {' · vence cada ~6 h, se refresca solo'}
+                </span>
+              </>
             }
           />
         </SetupGrid>
