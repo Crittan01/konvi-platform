@@ -306,6 +306,21 @@ async def meli_oauth_callback(
                 "token_type": token_data.get("token_type", "Bearer"),
             },
         }, on_conflict="tenant_id,provider").execute()
+
+        # ML reliability (ADR-0037): al RECONECTAR, resetear el contador de fallos consecutivos y
+        # limpiar cualquier lease de refresh residual. Sin esto, una integración que murió (count=3,
+        # status='error') vuelve a 'connected' arrastrando count=3 → el primer fallo de refresh
+        # post-reconnect (incluso un 400 transitorio) la re-marcaría 'error' de inmediato (la
+        # protección de "N fallos consecutivos" sería nula). Best-effort SEPARADO del upsert: si la
+        # migración de las columnas aún no se aplicó, no debe romper el callback OAuth (path crítico).
+        try:
+            supabase.table("tenant_integrations").update({
+                "refresh_fail_count": 0,
+                "refresh_lease_until": None,
+                "refresh_lease_token": None,
+            }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Error guardando tokens MeLi tenant %s: %s", tenant_id, e)
         return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=storage_failed")

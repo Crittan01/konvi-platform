@@ -1,13 +1,15 @@
 """
-BLOQUE E (MeLi reliability) — get_valid_token: fix del 401-loop + single-flight.
+ML reliability — get_valid_token: single-flight vía LEASE con FENCING TOKEN + surfacing seguro
+del 401-loop vía contador de fallos consecutivos.
 
-Verifica las rutas nuevas del refresh de token:
-  A. refresh falla + access_token YA expirado  → status='error' + retorna None (antes:
-     código muerto `if not access_token` → nunca marcaba error → 401-loop indefinido).
-  B. refresh falla + access_token aún válido (ventana 1h pre-expiry) → retorna el token,
-     NO marca error.
-  C. refresh falla/omitido porque OTRO caller ya refrescó (rotation single-use) → re-lee
-     credenciales frescas y retorna el token nuevo, sin marcar error y sin re-refrescar.
+Rutas verificadas:
+  · Lease GANADO + 400, umbral alcanzado (RPC note→True) → status='error' (RPC) + None.
+  · Lease GANADO + 400, bajo umbral (RPC note→False) → NO None, devuelve token vigente.
+  · Lease GANADO + fallo transitorio → NO cuenta el fallo (no llama note), devuelve token vigente.
+  · Lease NO DISPONIBLE (RPC ausente) → refresca sin lease, NO cuenta fallo (degradación segura).
+  · Lease PERDIDO → espera (bounded) y usa el token fresco del ganador, sin refrescar ni liberar.
+  · Happy path (lease ganado) → refresca, persiste (con reset del contador) y libera (fenced).
+  · Double-check → si otro ya refrescó, usar su token sin re-refrescar.
 """
 import asyncio
 import sys
@@ -23,16 +25,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api")
 
 import integrations.meli_client as meli_client  # noqa: E402
 
+_LEASE_TOKEN = "11111111-1111-1111-1111-111111111111"
+
 
 def _iso(delta_seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=delta_seconds)).isoformat()
 
 
 def _http_status_error(code: int) -> httpx.HTTPStatusError:
-    """Simula el error de refresh_token() (usa resp.raise_for_status())."""
     req = httpx.Request("POST", "https://api.mercadolibre.com/oauth/token")
     resp = httpx.Response(code, request=req, json={"error": "invalid_grant"})
     return httpx.HTTPStatusError(f"{code}", request=req, response=resp)
+
+
+class _Exec:
+    def __init__(self, data):
+        self._data = data
+    def execute(self):
+        return SimpleNamespace(data=self._data)
+
+
+class _RaisingExec:
+    def execute(self):
+        raise RuntimeError("rpc no disponible (migración pendiente)")
 
 
 class _FakeQuery:
@@ -40,112 +55,106 @@ class _FakeQuery:
         self.store = store
         self._op = "select"
         self._payload = None
-
     def select(self, *a, **k):
-        self._op = "select"
-        return self
-
+        self._op = "select"; return self
     def update(self, payload):
-        self._op = "update"
-        self._payload = payload
-        return self
-
+        self._op = "update"; self._payload = payload; return self
     def eq(self, *a, **k):
         return self
-
     def single(self):
         return self
-
-    def limit(self, *a, **k):
-        return self
-
     def execute(self):
         if self._op == "update":
             self.store["updates"].append(self._payload)
             return SimpleNamespace(data=[{}])
-        # select: devuelve la siguiente respuesta de la secuencia (clamp a la última)
         idx = min(self.store["select_i"], len(self.store["responses"]) - 1)
         self.store["select_i"] += 1
         return SimpleNamespace(data={"credentials": self.store["responses"][idx]})
 
 
 class _FakeSupabase:
-    def __init__(self, responses):
-        self.store = {"responses": responses, "select_i": 0, "updates": []}
-
+    def __init__(self, responses, lease="won", note_marks=False):
+        self.store = {"responses": responses, "select_i": 0, "updates": [], "rpc": []}
+        self._lease = lease           # 'won' | 'lost' | 'unavailable'
+        self._note_marks = note_marks  # ¿note_refresh_failure marca error (umbral)?
     def table(self, _name):
         return _FakeQuery(self.store)
+    def rpc(self, name, params=None):
+        self.store["rpc"].append(name)
+        if name == "rpc_meli_try_refresh_lease":
+            if self._lease == "unavailable":
+                return _RaisingExec()
+            return _Exec(_LEASE_TOKEN if self._lease == "won" else None)
+        if name == "rpc_meli_note_refresh_failure":
+            return _Exec(bool(self._note_marks))
+        return _Exec(None)  # release
 
 
-class MeliTokenRefreshReliabilityTest(unittest.TestCase):
-    def _run(self, responses, refresh_side_effect):
-        sb = _FakeSupabase(responses)
+class MeliLeaseFencingTest(unittest.TestCase):
+    def _run(self, responses, refresh_side_effect, lease="won", note_marks=False):
+        sb = _FakeSupabase(responses, lease=lease, note_marks=note_marks)
         with patch("vault_helper.VaultHelper", MagicMock()), \
+             patch.object(meli_client, "asyncio", wraps=asyncio) as _aio, \
              patch.object(meli_client, "refresh_token", new=AsyncMock(side_effect=refresh_side_effect)) as rt:
+            _aio.sleep = AsyncMock()
             token = asyncio.run(meli_client.get_valid_token(sb, "tenant-1"))
-        return token, sb.store["updates"], rt
+        return token, sb.store, rt
 
-    def _assert_no_error_marked(self, updates, msg=""):
-        self.assertFalse(
-            any(u.get("status") == "error" for u in updates),
-            msg or "NINGÚN path debe marcar 'error' (marking diferido al follow-up single-flight)",
-        )
+    def test_won_400_threshold_reached_marks_and_returns_none(self):
+        creds = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        token, store, _ = self._run([creds, creds, creds], _http_status_error(400),
+                                    lease="won", note_marks=True)
+        self.assertIsNone(token, "umbral de fallos alcanzado → None")
+        self.assertIn("rpc_meli_note_refresh_failure", store["rpc"])
+        self.assertIn("rpc_meli_release_refresh_lease", store["rpc"], "libera el lease (fenced)")
 
-    def test_transient_failure_returns_existing_token_no_error(self):
-        # Fallo TRANSITORIO (timeout) → devolver el token vigente, sin marcar error (auto-heal).
-        creds = {"access_token": "AT_OLD", "refresh_token": "RT_OLD", "expires_at": _iso(-60)}
-        token, updates, _ = self._run([creds, creds, creds], httpx.ConnectTimeout("boom"))
-        self._assert_no_error_marked(updates)
-        self.assertEqual(token, "AT_OLD", "fallo transitorio → token vigente (retry luego)")
+    def test_won_400_below_threshold_returns_token(self):
+        creds = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        token, store, _ = self._run([creds, creds, creds], _http_status_error(400),
+                                    lease="won", note_marks=False)
+        self.assertEqual(token, "AT_OLD", "bajo umbral → devolver token vigente (no marca aún)")
+        self.assertIn("rpc_meli_note_refresh_failure", store["rpc"])
 
-    def test_definitive_400_does_NOT_mark_error_marking_deferred(self):
-        # Un 400 (invalid_grant) NO marca error en este PR: distinguir muerto vs perdedor concurrente
-        # requiere single-flight real (residual money-critical). Se difiere al follow-up (ADR-0037).
-        creds = {"access_token": "AT_OLD", "refresh_token": "RT_OLD", "expires_at": _iso(-60)}
-        token, updates, _ = self._run([creds, creds, creds], _http_status_error(400))
-        self._assert_no_error_marked(
-            updates, "un 400 NO debe marcar 'error' sin single-flight (evita lockout del perdedor concurrente)")
-        self.assertEqual(token, "AT_OLD", "sin token fresco → devolver el vigente (sin regresión)")
+    def test_won_transient_does_not_count_failure(self):
+        creds = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        token, store, _ = self._run([creds, creds, creds], httpx.ConnectTimeout("boom"), lease="won")
+        self.assertEqual(token, "AT_OLD")
+        self.assertNotIn("rpc_meli_note_refresh_failure", store["rpc"],
+                         "un fallo transitorio NO cuenta hacia el umbral de error")
 
-    def test_concurrent_loser_recovers_fresh_token(self):
-        # El 'perdedor' de un refresh concurrente (400) re-lee y, si el ganador ya persistió un token
-        # válido, lo devuelve en vez de un token stale/fallido.
-        old = {"access_token": "AT_OLD", "refresh_token": "RT_OLD", "expires_at": _iso(-60)}
-        winner = {"access_token": "AT_WIN", "refresh_token": "RT_WIN", "expires_at": _iso(5 * 3600)}
-        # select #1 inicial=old (needs_refresh); #2 double-check=old (aún nadie); refresh→400;
-        # #3 re-read del except = winner (el ganador ya persistió) → devolver AT_WIN.
-        token, updates, _ = self._run([old, old, winner], _http_status_error(400))
-        self.assertEqual(token, "AT_WIN", "el perdedor debe recuperar el token del ganador")
-        self._assert_no_error_marked(updates)
+    def test_lease_unavailable_400_does_not_count(self):
+        creds = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        token, store, _ = self._run([creds, creds, creds], _http_status_error(400), lease="unavailable")
+        self.assertEqual(token, "AT_OLD")
+        self.assertNotIn("rpc_meli_note_refresh_failure", store["rpc"],
+                         "sin lease (migración pendiente) NO cuenta fallo (degradación segura)")
 
-    def test_still_valid_token_used_on_failure(self):
-        creds = {"access_token": "AT_VALID", "refresh_token": "RT", "expires_at": _iso(1800)}  # +30m
-        token, updates, _ = self._run([creds, creds, creds], _http_status_error(400))
-        self.assertEqual(token, "AT_VALID", "token aún válido debe usarse pese al refresh fallido")
-        self._assert_no_error_marked(updates)
+    def test_lease_lost_waits_and_returns_fresh(self):
+        old = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        fresh = {"access_token": "AT_WIN", "refresh_token": "RT2", "expires_at": _iso(5 * 3600)}
+        token, store, rt = self._run([old, fresh, fresh], _http_status_error(400), lease="lost")
+        self.assertEqual(token, "AT_WIN")
+        rt.assert_not_awaited()
+        self.assertNotIn("rpc_meli_release_refresh_lease", store["rpc"], "el perdedor no libera")
 
-    def test_D_success_path_refreshes_persists_and_returns_new_token(self):
-        creds = {"access_token": "AT_OLD", "refresh_token": "RT_OLD", "expires_at": _iso(-60)}
-        sb = _FakeSupabase([creds, creds])  # inicial + double-check (nadie más refrescó)
-        token_data = {"access_token": "AT_NEW", "refresh_token": "RT_NEW2", "expires_in": 21600}
+    def test_won_success_persists_resets_counter_and_releases(self):
+        creds = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        token_data = {"access_token": "AT_NEW", "refresh_token": "RT_NEW", "expires_in": 21600}
+        sb = _FakeSupabase([creds, creds], lease="won")
         with patch("vault_helper.VaultHelper", MagicMock()), \
              patch.object(meli_client, "refresh_token", new=AsyncMock(return_value=token_data)):
             token = asyncio.run(meli_client.get_valid_token(sb, "tenant-1"))
-        self.assertEqual(token, "AT_NEW", "el happy path debe retornar el token renovado")
-        # persistió las credenciales nuevas (update con expires_at) ANTES de retornar
-        self.assertTrue(
-            any("credentials" in u for u in sb.store["updates"]),
-            "debe persistir el token rotado (write-before-consume)",
-        )
+        self.assertEqual(token, "AT_NEW")
+        self.assertTrue(any(u.get("refresh_fail_count") == 0 for u in sb.store["updates"]),
+                        "el éxito resetea refresh_fail_count")
+        self.assertIn("rpc_meli_release_refresh_lease", sb.store["rpc"])
 
-    def test_C_concurrent_refresh_uses_fresh_token_no_refresh(self):
-        old = {"access_token": "AT_OLD", "refresh_token": "RT_OLD", "expires_at": _iso(-60)}
-        fresh = {"access_token": "AT_FRESH", "refresh_token": "RT_NEW", "expires_at": _iso(5 * 3600)}
-        # select #1 (inicial) = old/expirado → needs_refresh; select #2 (double-check bajo lock) = fresh
-        token, updates, rt = self._run([old, fresh], Exception("no debería llamarse"))
-        self.assertEqual(token, "AT_FRESH", "debe usar el token fresco que otro caller persistió")
-        self.assertFalse(any(u.get("status") == "error" for u in updates))
-        rt.assert_not_awaited()  # el double-check evitó el refresh redundante
+    def test_double_check_skips_refresh(self):
+        old = {"access_token": "AT_OLD", "refresh_token": "RT", "expires_at": _iso(-60)}
+        fresh = {"access_token": "AT_FRESH", "refresh_token": "RT2", "expires_at": _iso(5 * 3600)}
+        token, store, rt = self._run([old, fresh], Exception("no debería llamarse"), lease="won")
+        self.assertEqual(token, "AT_FRESH")
+        rt.assert_not_awaited()
 
 
 if __name__ == "__main__":

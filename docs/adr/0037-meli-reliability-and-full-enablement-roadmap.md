@@ -24,20 +24,37 @@ demás fallan con un token ya inválido.
 - Tests: `tests/test_meli_token_refresh_reliability.py` (6 casos). Reforzado por revisión adversarial en
   2 pasadas (12 agentes + 1 verificador).
 
-**Por qué se DIFIERE el marcado de error + el single-flight (hallazgo de la revisión adversarial):**
+**Single-flight vía LEASE en DB + marcado de error SEGURO (hallazgo de la revisión adversarial, resuelto):**
+El primer intento (asyncio.Lock + error-marking) introducía DOS regresiones que la revisión adversarial
+(12 agentes) halló:
 - Un `asyncio.Lock` a nivel módulo NO es loop-portable: `get_valid_token` corre tanto en el loop
   principal (`await`) como en loops EFÍMEROS de `asyncio.run` (path threadpool de wompi_webhook →
   orders.sync). Un Lock compartido cross-loop lanza `RuntimeError: bound to a different event loop` →
-  tragado por el `except` → `return None` → sync MeLi omitido → **oversell**. → **se eliminó el lock**.
-- Marcar `status='error'` en un fallo de refresh es intrínsecamente **racy sin single-flight real**: el
-  'perdedor' de un refresh concurrente (token ya expirado + burst) recibe un 400 (invalid_grant, token
-  ya rotado) y, antes de que el ganador persista, marcaría 'error' a una integración SANA → el filtro
-  `status='connected'` bloquea el auto-heal → sync omitido → oversell. No se puede distinguir
-  "genuinamente muerto" de "perdedor concurrente" sin serializar el refresh.
-- **Decisión quality-first:** NO shipear un marcado de error a medias en un path money-critical. El
-  surfacing del 401-loop se implementa **junto con** el single-flight cross-loop/cross-réplica (lease /
-  advisory lock en DB — misma clase que el single-flight de `sync_meli_stock`, ADR-0036) como el
-  **primer follow-up** del Bloque 1. Este PR deja el flujo estrictamente mejor que antes, sin regresión.
+  tragado por el `except` → `return None` → sync MeLi omitido → **oversell**.
+- Marcar `status='error'` en un fallo de refresh es **racy sin single-flight real**: el 'perdedor' de un
+  refresh concurrente recibe un 400 (invalid_grant, token ya rotado) y, antes de que el ganador persista,
+  marcaría 'error' a una integración SANA → el filtro `status='connected'` bloquea el auto-heal → oversell.
+
+**Fix (con migración `20260711100000`, 2 capas — la 2ª capa la exigió una 2ª revisión adversarial):**
+un **LEASE atómico en DB con FENCING TOKEN + CONTADOR de fallos consecutivos**.
+- **Single-flight:** `rpc_meli_try_refresh_lease` hace un UPDATE condicional (`WHERE lease libre/expirado`)
+  que gana EXACTAMENTE un caller (el row-lock de Postgres serializa) — cross-loop/worker/réplica — y
+  devuelve un NONCE (uuid). Solo el ganador refresca; los perdedores esperan (poll bounded; `asyncio.sleep`
+  es loop-safe, a diferencia de `asyncio.Lock`) y re-leen el token fresco. TTL 90s → un holder que crashea
+  no deadlockea.
+- **Fencing token (2ª revisión):** un lease simple con TTL NO basta — si el holder tarda > TTL (latencia
+  Vault/DB; el postgrest client timeout default es 120s), un 2º caller también gana el lease (**double-win**)
+  y reabriría el falso-positivo. El release y el conteo de fallos se hacen SOLO si el nonce sigue siendo el
+  nuestro (compare-and-set) → un holder con lease expirado/retomado NO clobbea el release ni cuenta.
+- **Contador de fallos consecutivos:** se marca `status='error'` NO en un solo 400 (ambiguo por el
+  persist-timing window) sino tras N=3 fallos CONSECUTIVOS. Un 400 falso aislado (perdedor concurrente /
+  double-win) no acumula porque el ÉXITO de un refresh RESETEA el contador; solo una integración
+  GENUINAMENTE muerta (refresh falla en cada ciclo) llega al umbral → surfacing del 401-loop (el guard
+  viejo `if not access_token` era código muerto → nunca marcaba). Inmune al double-win.
+- **Degradación segura:** si las RPC no existen (migración pendiente) → `lease_state='unavailable'` →
+  refresca sin lease, NO cuenta fallo y NO escribe `refresh_fail_count` (evita romper el persist con columna
+  inexistente). Tests: 7 casos. Migración ADITIVA PURA (columnas nullable/DEFAULT + RPCs) → aplicable antes
+  del deploy del código.
 
 ## Decisión 2 — Roadmap de habilitación completa (secuencia + gates)
 
