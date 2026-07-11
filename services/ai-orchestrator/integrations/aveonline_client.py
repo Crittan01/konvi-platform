@@ -765,7 +765,11 @@ class AveonlineClient:
             "relacion_envios": "1",
             "enviarcorreos": "1",  # Aveonline notifica al destinatario
             "cartaporte": "0",
-            "valorMinimo": 1,
+            # UAT founder 2026-07-10: valorMinimo=1 forzaba la valoración MÍNIMA de la
+            # cuenta ($10.000) pisando el valorDeclarado real (guía impresa con seguro de
+            # 10k para mercancía de $109.650) e inconsistente con el quote (valorMinimo=0
+            # en cotizarDoble). 0 = respetar el valorDeclarado enviado (dossier §3.5).
+            "valorMinimo": 0,
             "numeroFactura": "",
             "numeroBolsa": "",
             "dsfecha_vencimiento": "",

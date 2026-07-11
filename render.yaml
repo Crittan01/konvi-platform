@@ -205,6 +205,10 @@ services:
       # Default false hasta que tenant confirme listo para prod facturar guías reales.
       - key: AVEONLINE_GENERATE_REAL_GUIDES
         value: "false"
+      # UAT founder 2026-07-10: pausa (seg) antes de generar la guía en el path
+      # automático post-pago (ventana de cancelación/edición; decisión founder: 1 min).
+      - key: GUIDE_GENERATION_DELAY_SECONDS
+        value: "60"
       # Rev. 72 — Embeddings KB ahora se calculan server-side aquí (cierra drift D3).
       # Mover el valor desde el servicio web (donde estaba antes) a este.
       - key: GEMINI_API_KEY

@@ -12,6 +12,7 @@ Política de reintentos de Wompi:
 Referencia oficial: https://docs.wompi.co/en/docs/colombia/eventos/
 Algoritmo de firma validado 2026-04-24 — SHA256 simple, no HMAC.
 """
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -1414,15 +1415,22 @@ def _generate_shipping_guide(
     `_generate_shipping_guide_async` directamente con await.
     """
     import asyncio as _aio
+    # UAT founder 2026-07-10: pausa configurable ANTES de generar la guía en el path
+    # automático post-pago (ventana de cancelación/edición + evita guía "instantánea").
+    try:
+        _delay = float(os.getenv("GUIDE_GENERATION_DELAY_SECONDS", "60"))
+    except ValueError:
+        _delay = 60.0
     return _aio.run(
         _generate_shipping_guide_async(
             supabase, order_id=order_id, tenant_id=tenant_id,
+            delay_seconds=max(0.0, _delay),
         )
     )
 
 
 async def _generate_shipping_guide_async(
-    supabase, *, order_id: str, tenant_id: str,
+    supabase, *, order_id: str, tenant_id: str, delay_seconds: float = 0.0,
 ) -> bool:
     """Genera guía Aveonline tras pago APPROVED (best-effort).
 
@@ -1436,12 +1444,20 @@ async def _generate_shipping_guide_async(
     Best-effort: si falla, log warning + persiste row pending en
     shipments para que operador genere manual desde Inbox.
 
+    delay_seconds (UAT founder 2026-07-10): pausa previa SOLO en el path automático
+    post-pago (webhook la pasa desde GUIDE_GENERATION_DELAY_SECONDS, default 60s) —
+    (a) da ventana de cancelación/edición antes de generar (con guías reales = antes
+    de facturar), (b) evita la sensación "robótica" de guía instantánea. El path
+    manual del operador (orders.py) NO pasa delay (respuesta inmediata).
+
     Returns:
         True si guía generó OK + shipment persistido con tracking_number
         (caller dispara etapa 2: email "envío en camino" + WA tracking).
         False si skip (provider != aveonline / contact incompleto /
         Aveonline rechazó). Caller no dispara etapa 2.
     """
+    if delay_seconds > 0:
+        await asyncio.sleep(delay_seconds)
     # 1. Provider check.
     tenant_real_guides = False  # BLOQUE B (item 3): default fail-safe (simulado)
     try:
@@ -1597,6 +1613,26 @@ async def _generate_shipping_guide_async(
         # sale con el peso real y no sobre-declara ni dispara reajuste retroactivo. Fallback a default solo si
         # el cart no cotizó (guía sin quote previo). `sm` = shipping_meta del cart de ESTA orden (arriba).
         _wi = (sm or {}).get("weight_inputs") or {}
+        # UAT founder 2026-07-10: dscontenido de la guía era un hardcode ("Productos
+        # cosmética artesanal") inválido multi-tenant y para reclamos ante el carrier.
+        # Derivar del contenido REAL del pedido (títulos de order_items, ≤90 chars).
+        guide_content = "Pedido"
+        try:
+            _items_res = (
+                supabase.table("order_items")
+                .select("title, quantity")
+                .eq("order_id", order_id)
+                .limit(5)
+                .execute()
+            )
+            _titles = [
+                f"{int(r.get('quantity') or 1)}x {str(r.get('title') or '').strip()}"
+                for r in (_items_res.data or []) if r.get("title")
+            ]
+            if _titles:
+                guide_content = ("; ".join(_titles))[:90]
+        except Exception as _it_exc:
+            logger.debug("[WOMPI][AVEONLINE] items para dscontenido falló: %s", _it_exc)
         package = {
             "weight_kg": float(_wi.get("weight_kg") or 0.5),  # default conservador si no hay cotización
             "length_cm": float(_wi.get("length_cm") or 15),
@@ -1604,7 +1640,7 @@ async def _generate_shipping_guide_async(
             "height_cm": float(_wi.get("height_cm") or 5),
             "declared_value_cop": merchandise_cop,
             "units": 1,
-            "content": "Productos cosmética artesanal",
+            "content": guide_content,
             "cod_enabled": is_cod,
             "valorrecaudo": order_total if is_cod else 0,
         }
@@ -1670,14 +1706,16 @@ async def _generate_shipping_guide_async(
             "neighborhood": addr.get("neighborhood"),
         }
         # Schema shipments requiere `parcels` NOT NULL. F5: peso/dims cotizados de la guía.
+        # UAT founder 2026-07-10: declared_value alineado a lo REALMENTE declarado a
+        # Aveonline (merchandise_cop = mercancía sin flete), no al total con envío.
         parcels_jsonb = [{
             "weight_kg": float(_wi.get("weight_kg") or 0.5),
             "length_cm": float(_wi.get("length_cm") or 15),
             "width_cm": float(_wi.get("width_cm") or 10),
             "height_cm": float(_wi.get("height_cm") or 5),
-            "declared_value_cop": int(float(order.get("total_amount") or 0)),
+            "declared_value_cop": merchandise_cop,
             "units": 1,
-            "content": "Productos cosmética artesanal",
+            "content": guide_content,
         }]
         try:
             _claim = supabase.table("shipments").insert({
