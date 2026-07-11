@@ -593,12 +593,16 @@ def _restore_stock(
     # Inserta movement '+qty' reverso para cada movement original con
     # reason='reservation_consumed' del order.
     try:
+        # BLOQUE C item 4: reponer los decrementos por venta — tanto 'reservation_consumed'
+        # (flujo conversacional) como 'sale' (orden manual/COD directa). Antes solo cubría
+        # 'reservation_consumed' → una orden decrementada vía 'sale' NUNCA reponía stock al
+        # cancelar (inventario inflado permanente).
         movements = (
             supabase.table("stock_movements")
             .select("variation_id, delta, tenant_id")
             .eq("order_id", order_id)
             .eq("tenant_id", tenant_id)
-            .eq("reason", "reservation_consumed")
+            .in_("reason", ["reservation_consumed", "sale"])
             .execute()
         ).data or []
 
@@ -607,32 +611,31 @@ def _restore_stock(
         if items:
             target_variations = {it.variation_id for it in items}
 
-        reversed_count = 0
+        # Agregar por variación: si una variante tiene varios movimientos de decremento
+        # (p.ej. reservation_consumed + sale), sumar para reponer el total en UNA llamada
+        # (el guard idempotente 'cancellation_refund' por (order,var) colapsaría múltiples).
+        restore_by_var: dict = {}
         for mv in movements:
             var_id = mv.get("variation_id")
-            if target_variations and var_id not in target_variations:
+            if not var_id or (target_variations and var_id not in target_variations):
                 continue
-            qty_to_restore = abs(int(mv.get("delta") or 0))
-            if qty_to_restore <= 0:
-                continue
-            # Aumentar stock_quantity + insert audit movement
+            qty = abs(int(mv.get("delta") or 0))
+            if qty > 0:
+                restore_by_var[var_id] = restore_by_var.get(var_id, 0) + qty
+
+        reversed_count = 0
+        for var_id, qty_to_restore in restore_by_var.items():
+            # BLOQUE C item 4: reposición ATÓMICA e IDEMPOTENTE vía RPC. El movement
+            # 'cancellation_refund' (ON CONFLICT order_id,variation_id,reason DO NOTHING) es
+            # el guard: un retry de la cancelación NO re-repone. Reemplaza el read-modify-write
+            # en 3 llamadas separadas (no atómico, race/doble-restore-prone) previo.
             try:
-                cur_row = (
-                    supabase.table("product_variations")
-                    .select("stock_quantity").eq("id", var_id).eq("tenant_id", tenant_id).single().execute()
-                ).data
-                cur_stock = int(cur_row.get("stock_quantity") or 0)
-                new_stock = cur_stock + qty_to_restore
-                supabase.table("product_variations").update({
-                    "stock_quantity": new_stock,
-                }).eq("id", var_id).eq("tenant_id", tenant_id).execute()
-                supabase.table("stock_movements").insert({
-                    "tenant_id": tenant_id,
-                    "variation_id": var_id,
-                    "delta": qty_to_restore,
-                    "new_stock": new_stock,
-                    "reason": "cancellation_refund",
-                    "order_id": order_id,
+                supabase.rpc("rpc_stock_restore", {
+                    "p_tenant_id": tenant_id,
+                    "p_variation_id": var_id,
+                    "p_qty": qty_to_restore,
+                    "p_order_id": order_id,
+                    "p_reason": "cancellation_refund",
                 }).execute()
                 reversed_count += 1
             except Exception as exc:

@@ -819,41 +819,41 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
         )
         items = items_result.data or []
 
+        # BLOQUE C item 4: AGREGAR por variation_id ANTES de decrementar. La idempotencia del
+        # RPC es por (order_id, variation_id, 'sale'); dos líneas de order_items de la MISMA
+        # variante colapsarían al mismo key → la 2ª sería no-op y se perdería su qty. Sumamos
+        # las cantidades por variante para hacer UNA sola llamada de decremento por variante.
+        agg: dict = {}
         for item in items:
-            variation_id = item.get("variation_id")
-            quantity = item.get("quantity", 0)
-            if not variation_id or quantity <= 0:
+            _vid = item.get("variation_id")
+            _qty = item.get("quantity", 0) or 0
+            if not _vid or _qty <= 0:
                 continue
+            agg[_vid] = agg.get(_vid, 0) + int(_qty)
 
-            # Obtener stock actual
-            var_result = (
-                supabase.table("product_variations")
-                .select("id, stock_quantity")
-                .eq("id", variation_id)
-                .eq("tenant_id", tenant_id)
-                .maybe_single()
-                .execute()
-            )
-            if not var_result or not var_result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
+        for variation_id, quantity in agg.items():
+            # BLOQUE C item 4: decremento ATÓMICO e IDEMPOTENTE vía RPC. El INSERT del
+            # movement (ON CONFLICT order_id,variation_id,reason DO NOTHING) actúa de guard:
+            # un retry Wompi tardío / webhook duplicado sobre la misma (orden,variante,'sale')
+            # es NO-OP (no re-decrementa) → cierra el doble-decremento. Reemplaza el
+            # read-modify-write en 3 llamadas separadas (no atómico, race-prone) previo.
+            try:
+                _rpc = supabase.rpc("rpc_stock_decrement", {
+                    "p_tenant_id": tenant_id,
+                    "p_variation_id": variation_id,
+                    "p_qty": int(quantity),
+                    "p_order_id": order_id,
+                    "p_reason": "sale",
+                }).execute()
+                new_stock = _rpc.data if isinstance(_rpc.data, int) else None
+            except Exception as _dec_exc:
+                logger.error(
+                    "[STOCK] rpc_stock_decrement falló order=%s var=%s: %s",
+                    order_id, variation_id, _dec_exc,
+                )
                 continue
-
-            current_stock = var_result.data["stock_quantity"]
-            new_stock = current_stock - quantity
-
-            # Actualizar stock
-            supabase.table("product_variations").update(
-                {"stock_quantity": new_stock}
-            ).eq("id", variation_id).eq("tenant_id", tenant_id).execute()
-
-            # Registrar movimiento (con order_id para auditoría/idempotencia).
-            supabase.table("stock_movements").insert({
-                "tenant_id": tenant_id,
-                "variation_id": variation_id,
-                "order_id": order_id,
-                "delta": -quantity,
-                "new_stock": new_stock,
-                "reason": "sale",
-            }).execute()
+            if new_stock is None:
+                continue
 
             # Sync stock a MeLi si hay listing activo vinculado.
             # Se invoca desde context sync (background task del webhook Wompi).
