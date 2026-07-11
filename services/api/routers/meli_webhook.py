@@ -243,6 +243,15 @@ MELI_ORDER_STATUS_MAP: dict[str, str] = {
     "cancelled":          "cancelled",
 }
 
+# Rango monotónico de estados de orden (para no retroceder un pedido a un estado anterior).
+# Compartido por _process_order y _process_shipment: MeLi mantiene order.status='paid' durante
+# TODO el fulfillment, así que un orders_v2 tardío re-deriva 'confirmed' y NO debe pisar un
+# estado más avanzado (shipped/delivered) que vino de _process_shipment. 'cancelled' es terminal.
+_STATUS_RANK: dict[str, int] = {
+    "pending": 0, "pending_payment": 0, "confirmed": 1,
+    "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5,
+}
+
 # Mapeo de status MeLi (envío) → status de orden interno
 # Solo se actualiza cuando el shipment avanza — no retrocede.
 MELI_SHIPMENT_ORDER_STATUS_MAP: dict[str, str] = {
@@ -268,6 +277,52 @@ async def _find_tenant_by_meli_user(meli_user_id: str, supabase) -> str | None:
         if str(row.get("meta", {}).get("user_id", "")) == str(meli_user_id):
             return row["tenant_id"]
     return None
+
+
+# BLOQUE D item 3 (parte 2): el `resource` viene del cuerpo del webhook — que MeLi NO firma
+# (ni HMAC ni JWT; la única defensa documentada es IP allowlist) — y se usa directo en
+# `GET {MELI_API_URL}{resource}` con el access_token del seller. Sin validar, un webhook que
+# pase el allowlist de IP podría apuntar ese GET autenticado a rutas arbitrarias de la API de
+# MeLi (SSRF sobre la API del proveedor / creación de órdenes basura). Validar el `resource`
+# contra un patrón estricto por tópico ANTES de cualquier fetch cierra ese vector — defensa en
+# profundidad INDEPENDIENTE de la topología de proxies (el hardening del hop X-Forwarded-For
+# queda pendiente de verificar el nº de proxies confiables de Render, ver ADR-0036).
+# Prefijo estricto (el endpoint) + UN solo segmento sin `/`, `?` ni `#` para el id: bloquea el
+# cambio de endpoint y el path-traversal (`/orders/../users/me`, `/users/me`) — que es el vector
+# SSRF real — sin fail-closed frágil sobre el formato exacto del id (evita romper la ingesta si
+# MeLi varía el id). Un id inválido simplemente 404 en MeLi; no puede redirigir a otro recurso.
+_RESOURCE_PATTERNS: dict[str, "re.Pattern[str]"] = {
+    "orders_v2": re.compile(r"^/orders/[^/?#]+$"),
+    "items":     re.compile(r"^/items/[^/?#]+$"),
+    "shipments": re.compile(r"^/shipments/[^/?#]+$"),
+}
+
+
+def _is_valid_resource(topic: str, resource: str) -> bool:
+    """True si `resource` coincide con el patrón esperado para el tópico (que hace fetch)."""
+    pat = _RESOURCE_PATTERNS.get(topic)
+    return bool(pat and pat.match(resource or ""))
+
+
+def _schedule_meli_sync(variation_id: str, new_stock: int, supabase) -> None:
+    """Programa el push del nuevo stock a MeLi sin bloquear el decremento/reposición.
+
+    Loop-aware (mismo patrón que orders._decrement_stock_on_confirm): usa el event loop
+    activo (contexto async del webhook) o cae a un loop dedicado si no hay ninguno. Un
+    fallo del sync a MeLi NO corrompe el stock local (ya persistido atómicamente por el RPC).
+    """
+    from routers.marketplace import sync_meli_stock
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_meli_stock(variation_id, new_stock, supabase))
+    except RuntimeError:
+        try:
+            asyncio.run(sync_meli_stock(variation_id, new_stock, supabase))
+        except Exception as meli_err:
+            logger.warning(
+                "[MELI][STOCK] sync MeLi falló variation=%s (no bloquea): %s",
+                variation_id, meli_err,
+            )
 
 
 async def _fetch_meli_resource(resource_path: str, access_token: str) -> dict | None:
@@ -381,24 +436,16 @@ def _resolve_variation_ids(meli_item_ids: list[str], tenant_id: str, supabase) -
 
 
 def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> None:
-    """
-    Decrementa stock de las variantes de un pedido MeLi y sincroniza con MeLi.
-    Idempotente: si stock_movements ya tiene un registro para esta orden, no repite.
+    """Decrementa stock de un pedido MeLi (ATÓMICO e IDEMPOTENTE vía rpc_stock_decrement) +
+    sincroniza con MeLi.
+
+    BLOQUE D item 1 / item-4 continuación: reemplaza el read-modify-write en 3 llamadas
+    separadas (SELECT→UPDATE→INSERT, race-prone) y la idempotencia coarse por-orden. Ahora la
+    idempotencia es por (order_id, variation_id, 'sale') vía el índice único → un webhook MeLi
+    duplicado / re-entrega no re-decrementa (cierra el oversell cross-canal). El clamp y el ledger
+    consistente los garantiza el RPC (ADR-0035).
     """
     try:
-        # Verificar idempotencia: ya fue procesado si existe un movimiento con este order_id
-        already = (
-            supabase.table("stock_movements")
-            .select("id")
-            .eq("tenant_id", tenant_id)
-            .eq("order_id", order_id)
-            .limit(1)
-            .execute()
-        )
-        if already.data:
-            logger.info("Stock ya decrementado para orden MeLi %s — omitido", order_id)
-            return
-
         items_result = (
             supabase.table("order_items")
             .select("variation_id, quantity")
@@ -406,46 +453,85 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
             .eq("tenant_id", tenant_id)
             .execute()
         )
-
-        from routers.marketplace import sync_meli_stock
-
+        # Agregar por variación (2 líneas de la misma variante colapsarían el idempotency key).
+        agg: dict = {}
         for item in (items_result.data or []):
-            variation_id = item.get("variation_id")
-            quantity     = item.get("quantity", 0)
-            if not variation_id or quantity <= 0:
+            vid = item.get("variation_id")
+            qty = item.get("quantity", 0) or 0
+            if vid and qty > 0:
+                agg[vid] = agg.get(vid, 0) + int(qty)
+
+        for variation_id, quantity in agg.items():
+            try:
+                _rpc = supabase.rpc("rpc_stock_decrement", {
+                    "p_tenant_id": tenant_id,
+                    "p_variation_id": variation_id,
+                    "p_qty": int(quantity),
+                    "p_order_id": order_id,
+                    "p_reason": "sale",
+                }).execute()
+                new_stock = _rpc.data if isinstance(_rpc.data, int) else None
+            except Exception as _dec_exc:
+                logger.error(
+                    "[MELI][STOCK] rpc_stock_decrement falló order=%s var=%s: %s",
+                    order_id, variation_id, _dec_exc,
+                )
                 continue
-
-            var_result = (
-                supabase.table("product_variations")
-                .select("stock_quantity")
-                .eq("id", variation_id)
-                .eq("tenant_id", tenant_id)
-                .maybe_single()
-                .execute()
-            )
-            if not var_result or not var_result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
+            if new_stock is None:
                 continue
-
-            new_stock = var_result.data["stock_quantity"] - quantity
-
-            supabase.table("product_variations").update(
-                {"stock_quantity": new_stock}
-            ).eq("id", variation_id).eq("tenant_id", tenant_id).execute()
-
-            supabase.table("stock_movements").insert({
-                "tenant_id":    tenant_id,
-                "variation_id": variation_id,
-                "order_id":     order_id,
-                "delta":        -quantity,
-                "new_stock":    new_stock,
-                "reason":       "sale",
-            }).execute()
-
-            asyncio.ensure_future(sync_meli_stock(variation_id, new_stock, supabase))
+            _schedule_meli_sync(variation_id, new_stock, supabase)
             logger.info("Stock variation %s → %d (orden MeLi %s)", variation_id, new_stock, order_id)
 
     except Exception as e:
         logger.error("Error decrementando stock para orden MeLi %s: %s", order_id, e)
+
+
+def _restore_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> None:
+    """Repone stock de un pedido MeLi CANCELADO (ATÓMICO e IDEMPOTENTE vía rpc_stock_restore) +
+    sincroniza con MeLi.
+
+    BLOQUE D item 4: antes una cancelación MeLi NUNCA reponía stock → inventario inflado
+    permanente. Repone lo realmente decrementado (movimientos 'sale'/'reservation_consumed' de
+    la orden); idempotente por (order_id, variation_id, 'cancellation_refund').
+    """
+    try:
+        movements = (
+            supabase.table("stock_movements")
+            .select("variation_id, delta")
+            .eq("tenant_id", tenant_id)
+            .eq("order_id", order_id)
+            .in_("reason", ["sale", "reservation_consumed"])
+            .execute()
+        ).data or []
+        restore_by_var: dict = {}
+        for mv in movements:
+            vid = mv.get("variation_id")
+            qty = abs(int(mv.get("delta") or 0))
+            if vid and qty > 0:
+                restore_by_var[vid] = restore_by_var.get(vid, 0) + qty
+
+        for variation_id, qty in restore_by_var.items():
+            try:
+                _rpc = supabase.rpc("rpc_stock_restore", {
+                    "p_tenant_id": tenant_id,
+                    "p_variation_id": variation_id,
+                    "p_qty": int(qty),
+                    "p_order_id": order_id,
+                    "p_reason": "cancellation_refund",
+                }).execute()
+                new_stock = _rpc.data if isinstance(_rpc.data, int) else None
+            except Exception as _res_exc:
+                logger.error(
+                    "[MELI][STOCK] rpc_stock_restore falló order=%s var=%s: %s",
+                    order_id, variation_id, _res_exc,
+                )
+                continue
+            if new_stock is not None:
+                _schedule_meli_sync(variation_id, new_stock, supabase)
+                logger.info("Stock repuesto variation %s → %d (cancelación MeLi %s)", variation_id, new_stock, order_id)
+
+    except Exception as e:
+        logger.error("Error reponiendo stock para orden MeLi %s: %s", order_id, e)
 
 
 def _upsert_meli_contact(
@@ -583,12 +669,35 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
     existing = _find_meli_order(supabase, tenant_id, meli_order_id)
 
     if existing:
-        # Actualizar estado si avanzó
-        if existing["status"] != internal_status:
+        old_status = existing["status"]
+        # BLOQUE D (review B): avance de status MONOTÓNICO. Antes se pisaba el status con un
+        # UPDATE incondicional → un orders_v2 tardío (order.status='paid' persiste durante todo
+        # el fulfillment) REGRESABA shipped/delivered → confirmed, perdiendo el estado real de
+        # envío que puso _process_shipment. Solo avanzar si el rank sube; 'cancelled' es terminal.
+        advances = (
+            internal_status == "cancelled"
+            or _STATUS_RANK.get(internal_status, 0) > _STATUS_RANK.get(old_status, 0)
+        )
+        if advances and old_status != internal_status:
             supabase.table("orders").update({
                 "status": internal_status,
             }).eq("id", existing["id"]).eq("tenant_id", tenant_id).execute()
             logger.info("Orden MeLi %s → status %s (tenant %s)", meli_order_id, internal_status, tenant_id)
+
+        # BLOQUE D item 1 (review A): el decremento va DESACOPLADO del status write y NO se
+        # llavea al old_status. MeLi no garantiza orden de webhooks: un shipments puede mover la
+        # orden pending→processing (que NO decrementa) ANTES de llegar el 'paid', dejando
+        # old_status='processing' cuando se sabe pagada → el guard viejo (old in pending/*) se
+        # saltaba el decremento → oversell. Ahora decrementa la PRIMERA vez que se sabe pagada,
+        # sea cual sea el estado previo; el RPC es idempotente por (order_id, variation_id,'sale')
+        # → re-llamarlo sobre una orden ya decrementada es no-op (no doble-decremento).
+        if internal_status == "confirmed" and old_status != "cancelled":
+            _decrement_stock_for_meli_order(existing["id"], tenant_id, supabase)
+        # BLOQUE D item 4 (+ review C): cancelación desde CUALQUIER estado ya decrementado
+        # (incluye 'delivered') → reponer stock. El restore lee los movimientos 'sale' reales y
+        # es idempotente → incluir 'delivered' es seguro (no-op si no hubo decremento previo).
+        elif internal_status == "cancelled" and old_status in ("confirmed", "processing", "shipped", "delivered"):
+            _restore_stock_for_meli_order(existing["id"], tenant_id, supabase)
     else:
         # Crear contacto si hay teléfono disponible
         contact_id = _upsert_meli_contact(buyer, tenant_id, supabase, meli_order_id=meli_order_id)
@@ -671,8 +780,7 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
     new_order_status = MELI_SHIPMENT_ORDER_STATUS_MAP.get(shipment_status)
     if order_id and new_order_status:
         current_status = existing["status"]
-        STATUS_RANK = {"pending": 0, "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5}
-        if STATUS_RANK.get(new_order_status, 0) > STATUS_RANK.get(current_status, 0):
+        if _STATUS_RANK.get(new_order_status, 0) > _STATUS_RANK.get(current_status, 0):
             supabase.table("orders").update({
                 "status": new_order_status,
             }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
@@ -744,6 +852,15 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
     access_token = await meli_client.get_valid_token(supabase, tenant_id)
     if not access_token:
         logger.error("No hay token MeLi válido para tenant %s", tenant_id)
+        return
+
+    # BLOQUE D item 3: rechazar resources malformados de los tópicos que hacen fetch ANTES
+    # del GET autenticado (evita apuntar el token del seller a rutas arbitrarias de la API).
+    if topic in _RESOURCE_PATTERNS and not _is_valid_resource(topic, resource):
+        logger.warning(
+            "meli_webhook.resource_rejected topic=%s resource=%r — no coincide con el patrón esperado (posible spoof)",
+            topic, resource,
+        )
         return
 
     if topic == "orders_v2":

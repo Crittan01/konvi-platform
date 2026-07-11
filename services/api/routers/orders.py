@@ -443,6 +443,14 @@ async def patch_order(
         # ── Decremento de stock al confirmar (pending o pending_payment → confirmed) ──
         if new_status == "confirmed" and current_status in ("pending", "pending_payment"):
             _decrement_stock_on_confirm(supabase, order_id, tenant_id)
+        # ── BLOQUE D item 4: reposición de stock al CANCELAR desde un estado ya
+        #    decrementado (confirmed/processing/shipped). Antes patch_order (consola/API)
+        #    sólo decrementaba al confirmar y NUNCA reponía al cancelar → inventario
+        #    inflado permanente. Idempotente cross-path: mismo reason 'cancellation_refund'
+        #    que el webhook MeLi (_restore_stock_for_meli_order) y el pipeline orchestrator
+        #    (order_cancellation.py) → dos caminos de cancelación reponen una sola vez.
+        elif new_status == "cancelled" and current_status in ("confirmed", "processing", "shipped"):
+            _restore_stock_on_cancel(supabase, order_id, tenant_id)
 
         return result.data[0]
     except HTTPException:
@@ -879,6 +887,70 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
             "Error decrementando stock para pedido %s: %s",
             order_id, e
         )
+
+
+def _restore_stock_on_cancel(supabase: Client, order_id: str, tenant_id: str) -> None:
+    """Repone stock de las variantes de un pedido al CANCELARLO desde la consola/API.
+
+    BLOQUE D item 4: patch_order sólo decrementaba al confirmar y NUNCA reponía al
+    cancelar → inventario inflado permanente cuando un operador cancela un pedido ya
+    confirmado. Repone SÓLO lo realmente decrementado leyendo los movimientos
+    'sale'/'reservation_consumed' de la orden (no la qty de order_items, que puede
+    diferir del delta clampeado por over-sell). Idempotente por
+    (order_id, variation_id, 'cancellation_refund') vía el índice único — mismo reason
+    que el webhook MeLi (_restore_stock_for_meli_order) y el pipeline orchestrator
+    (order_cancellation.py) → dos caminos de cancelación reponen una sola vez.
+    """
+    try:
+        movements = (
+            supabase.table("stock_movements")
+            .select("variation_id, delta")
+            .eq("tenant_id", tenant_id)
+            .eq("order_id", order_id)
+            .in_("reason", ["sale", "reservation_consumed"])
+            .execute()
+        ).data or []
+        restore_by_var: dict = {}
+        for mv in movements:
+            vid = mv.get("variation_id")
+            qty = abs(int(mv.get("delta") or 0))
+            if vid and qty > 0:
+                restore_by_var[vid] = restore_by_var.get(vid, 0) + qty
+
+        for variation_id, qty in restore_by_var.items():
+            try:
+                _rpc = supabase.rpc("rpc_stock_restore", {
+                    "p_tenant_id": tenant_id,
+                    "p_variation_id": variation_id,
+                    "p_qty": int(qty),
+                    "p_order_id": order_id,
+                    "p_reason": "cancellation_refund",
+                }).execute()
+                new_stock = _rpc.data if isinstance(_rpc.data, int) else None
+            except Exception as _res_exc:
+                logger.error(
+                    "[STOCK] rpc_stock_restore falló order=%s var=%s: %s",
+                    order_id, variation_id, _res_exc,
+                )
+                continue
+            if new_stock is None:
+                continue
+
+            # Sync a MeLi (loop-aware, igual patrón que el decremento).
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(sync_meli_stock(variation_id, new_stock, supabase))
+            except RuntimeError:
+                try:
+                    asyncio.run(sync_meli_stock(variation_id, new_stock, supabase))
+                except Exception as meli_err:
+                    logger.warning(
+                        "[STOCK] Sync MeLi (restore) falló variation=%s (no bloquea): %s",
+                        variation_id, meli_err,
+                    )
+
+    except Exception as e:
+        logger.error("Error reponiendo stock (cancel) para pedido %s: %s", order_id, e)
 
 
 @router.post("/{order_id}/generate-shipping-guide", response_model=dict)
