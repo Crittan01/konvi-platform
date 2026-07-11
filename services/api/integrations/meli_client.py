@@ -24,6 +24,7 @@ Endpoints de items usados:
   - GET  /items/{item_id}                       → detalle de un item
   - PUT  /items/{item_id}                       → actualizar cantidad, precio o status
 """
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -37,6 +38,24 @@ from typing import Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _token_still_valid(expires_at_s: Optional[str]) -> bool:
+    """True si `expires_at_s` parsea a un instante AÚN futuro (token todavía usable).
+
+    Conservador: si no hay expiry o no parsea, retorna False (no lo damos por válido)
+    para NO usar un token de vigencia desconocida como si fuera bueno. Base del fix del
+    401-loop: solo marcamos la integración 'error' cuando SABEMOS que el token expiró.
+    """
+    if not expires_at_s:
+        return False
+    try:
+        exp = datetime.fromisoformat(expires_at_s)
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return exp > datetime.now(timezone.utc)
+    except Exception:
+        return False
 
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 MELI_API_URL   = "https://api.mercadolibre.com"
@@ -337,46 +356,166 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                     needs_refresh = True
 
         if needs_refresh and refresh_tok:
+            # SINGLE-FLIGHT vía LEASE atómico en DB (cross-loop/worker/réplica). Solo el ganador del
+            # lease refresca; los perdedores esperan y re-leen el token fresco. Con el lease en mano,
+            # un 400/401 del refresh es invalid_grant GENUINO (no un 'perdedor' concurrente) → es
+            # SEGURO marcar status='error' (surfacing del 401-loop; el guard viejo `if not
+            # access_token` era código muerto → nunca marcaba). Si la RPC del lease no existe aún
+            # (migración pendiente) → lease_state='unavailable' → se refresca sin lease y NO se marca
+            # error (degradación segura al comportamiento previo). asyncio.sleep es loop-safe (a
+            # diferencia de asyncio.Lock, que es loop-BOUND y rompía cross-loop).
+            lease_state = "unavailable"
+            lease_token = None
             try:
-                token_data  = await refresh_token(refresh_tok)
-                new_access  = token_data.get("access_token")
-                new_refresh = token_data.get("refresh_token", refresh_tok)
-                new_exp_in  = token_data.get("expires_in", 21600)
-                new_exp_at  = (datetime.now(timezone.utc) + timedelta(seconds=new_exp_in)).isoformat()
+                _lease = supabase.rpc("rpc_meli_try_refresh_lease", {
+                    "p_tenant_id": tenant_id, "p_provider": "mercadolibre", "p_ttl_seconds": 90,
+                }).execute()
+                lease_token = _lease.data  # fencing token (uuid) si ganó; None si perdió
+                lease_state = "won" if lease_token else "lost"
+            except Exception:
+                lease_state = "unavailable"  # RPC ausente (migración pendiente) → degradar
 
-                # Actualizar en Vault (update-or-create)
-                at_sid = creds.get("access_token_secret_id")
-                rt_sid = creds.get("refresh_token_secret_id")
-                if at_sid:
-                    vault.update_secret(at_sid, new_access)
-                else:
-                    at_sid = vault.create_secret(new_access, f"{tenant_id}/meli/access_token", "MeLi access token")
-                if rt_sid:
-                    vault.update_secret(rt_sid, new_refresh)
-                else:
-                    rt_sid = vault.create_secret(new_refresh, f"{tenant_id}/meli/refresh_token", "MeLi refresh token")
-
-                supabase.table("tenant_integrations").update({
-                    "credentials": {
-                        "access_token_secret_id":  at_sid,
-                        "refresh_token_secret_id": rt_sid,
-                        "expires_in":  new_exp_in,
-                        "expires_at":  new_exp_at,
-                    },
-                }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
-
-                logger.info("Token MeLi renovado tenant %s, expira %s", tenant_id, new_exp_at)
-                return new_access
-            except Exception as e:
-                logger.warning("No se pudo renovar token MeLi tenant %s: %s — usando token existente", tenant_id, e)
-                # Si el access_token también expiró, marcar la integración como error
-                # para que el frontend muestre "Reconectar" al operador.
-                if not access_token:
+            if lease_state == "lost":
+                # Otro caller está refrescando → esperar (bounded) y re-leer su token fresco.
+                for _ in range(8):
+                    await asyncio.sleep(0.25)
                     try:
-                        supabase.table("tenant_integrations").update(
-                            {"status": "error"}
-                        ).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
-                        logger.warning("MeLi marcada como error (refresh y token expirados) tenant %s", tenant_id)
+                        _p = (
+                            supabase.table("tenant_integrations")
+                            .select("credentials")
+                            .eq("tenant_id", tenant_id)
+                            .eq("provider", "mercadolibre")
+                            .single()
+                            .execute()
+                        )
+                        _pc = (_p.data or {}).get("credentials") or {}
+                        _pa = resolve_secret(vault, _pc, "access_token")
+                        if _pa and _pa != access_token and _token_still_valid(_pc.get("expires_at")):
+                            return _pa
+                    except Exception:
+                        pass
+                return access_token  # el holder aún no persiste → token vigente (retry luego)
+
+            # lease_state in ('won', 'unavailable') → nosotros refrescamos.
+            try:
+                # Double-check: entre la lectura inicial y el lease, otro pudo refrescar+liberar.
+                refresh_to_use = refresh_tok
+                try:
+                    _fresh = (
+                        supabase.table("tenant_integrations")
+                        .select("credentials")
+                        .eq("tenant_id", tenant_id)
+                        .eq("provider", "mercadolibre")
+                        .single()
+                        .execute()
+                    )
+                    _fresh_creds = (_fresh.data or {}).get("credentials") or {}
+                    _fresh_access = resolve_secret(vault, _fresh_creds, "access_token")
+                    if (
+                        _fresh_access and _fresh_access != access_token
+                        and _token_still_valid(_fresh_creds.get("expires_at"))
+                    ):
+                        return _fresh_access  # otro caller ya refrescó → usar su token fresco
+                    refresh_to_use = resolve_secret(vault, _fresh_creds, "refresh_token") or refresh_tok
+                except Exception:
+                    refresh_to_use = refresh_tok
+
+                try:
+                    token_data  = await refresh_token(refresh_to_use)
+                    new_access  = token_data.get("access_token")
+                    new_refresh = token_data.get("refresh_token", refresh_to_use)
+                    new_exp_in  = token_data.get("expires_in", 21600)
+                    new_exp_at  = (datetime.now(timezone.utc) + timedelta(seconds=new_exp_in)).isoformat()
+
+                    # WRITE-BEFORE-CONSUME: persistir el token rotado a Vault + DB ANTES de usarlo,
+                    # para que un crash entre la rotación MeLi y la persistencia no pierda el
+                    # refresh_token de un solo uso (que mataría la integración permanentemente).
+                    at_sid = creds.get("access_token_secret_id")
+                    rt_sid = creds.get("refresh_token_secret_id")
+                    if at_sid:
+                        vault.update_secret(at_sid, new_access)
+                    else:
+                        at_sid = vault.create_secret(new_access, f"{tenant_id}/meli/access_token", "MeLi access token")
+                    if rt_sid:
+                        vault.update_secret(rt_sid, new_refresh)
+                    else:
+                        rt_sid = vault.create_secret(new_refresh, f"{tenant_id}/meli/refresh_token", "MeLi refresh token")
+
+                    _upd = {
+                        "credentials": {
+                            "access_token_secret_id":  at_sid,
+                            "refresh_token_secret_id": rt_sid,
+                            "expires_in":  new_exp_in,
+                            "expires_at":  new_exp_at,
+                        },
+                    }
+                    # Reset del contador de fallos SOLO si la migración está aplicada (lease_state
+                    # 'won' ⇒ la RPC existe ⇒ la columna existe). Si no, omitir para no romper el
+                    # persist con una columna inexistente (degradación segura).
+                    if lease_state == "won":
+                        _upd["refresh_fail_count"] = 0
+                    supabase.table("tenant_integrations").update(_upd).eq(
+                        "tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+
+                    logger.info("Token MeLi renovado tenant %s, expira %s", tenant_id, new_exp_at)
+                    return new_access
+                except Exception as e:
+                    logger.warning(
+                        "No se pudo renovar token MeLi tenant %s: %s — evaluando", tenant_id, e,
+                    )
+                    # Recuperación graceful: re-leer; si ya hay un token válido, usarlo.
+                    try:
+                        _r = (
+                            supabase.table("tenant_integrations")
+                            .select("credentials")
+                            .eq("tenant_id", tenant_id)
+                            .eq("provider", "mercadolibre")
+                            .single()
+                            .execute()
+                        )
+                        _rc = (_r.data or {}).get("credentials") or {}
+                        _ra = resolve_secret(vault, _rc, "access_token")
+                        if _ra and _token_still_valid(_rc.get("expires_at")):
+                            return _ra
+                    except Exception:
+                        pass
+                    # FIX 401-loop (SEGURO): en un 400/401 (invalid_grant) CON el lease en mano,
+                    # registrar el fallo vía RPC FENCED. rpc_meli_note_refresh_failure marca
+                    # status='error' SOLO tras N fallos CONSECUTIVOS y solo si el fencing token sigue
+                    # siendo el nuestro → un 400 falso aislado de un 'perdedor' concurrente / un
+                    # double-win por TTL NO marca (el éxito de un refresh resetea el contador; un
+                    # holder con lease retomado no matchea el token → no cuenta). Fallo transitorio
+                    # (5xx/timeout/red/DB) o sin lease (migración pendiente) NO cuenta (degradación).
+                    _definitive = (
+                        lease_state == "won" and lease_token
+                        and isinstance(e, httpx.HTTPStatusError)
+                        and e.response is not None
+                        and e.response.status_code in (400, 401)
+                    )
+                    if _definitive:
+                        try:
+                            _marked = supabase.rpc("rpc_meli_note_refresh_failure", {
+                                "p_tenant_id": tenant_id, "p_lease_token": lease_token,
+                                "p_provider": "mercadolibre", "p_max_fails": 3,
+                            }).execute()
+                            if bool(_marked.data):
+                                logger.warning(
+                                    "MeLi marcada 'error' (refresh_token rechazado %s, N fallos consecutivos) tenant %s",
+                                    e.response.status_code, tenant_id,
+                                )
+                                return None
+                        except Exception:
+                            pass
+                    # Sin marcar (transitorio / bajo umbral / RPC falló) → devolver el token vigente.
+            finally:
+                # Release FENCED por el token: si nuestro lease expiró y fue retomado por otro,
+                # el compare-and-set no matchea → no clobbeamos al holder actual.
+                if lease_state == "won" and lease_token:
+                    try:
+                        supabase.rpc("rpc_meli_release_refresh_lease", {
+                            "p_tenant_id": tenant_id, "p_lease_token": lease_token,
+                            "p_provider": "mercadolibre",
+                        }).execute()
                     except Exception:
                         pass
 
