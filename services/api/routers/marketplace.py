@@ -60,6 +60,72 @@ class ImportBody(BaseModel):
 
 # ─── Sync utility (llamado desde otros routers) ───────────────────────────────
 
+def _resolve_variations_for_put(
+    supabase, tenant_id: str, external_id: str,
+    meli_variation_id, target_qty: int, meli_variations: list,
+) -> list | None:
+    """Construye el array de variaciones para el PUT a MeLi (que exige TODAS las variaciones).
+
+    La variación target recibe `target_qty`; las NO-target reciben la VERDAD de Supabase (stock de
+    su variación local mapeada, vía marketplace_listings→product_variations), cayendo al valor del
+    GET de MeLi solo para variaciones sin mapeo local (best-effort).
+
+    BLOQUE D item 2 / review D: compartido por el sync AUTOMÁTICO (sync_meli_stock) y el FORZADO
+    manual (sync_stock_from_supabase) para que no divergan — antes ambos ponían `else 0`, que zeraba
+    (dejaba invendibles) las variaciones nativas/no mapeadas; el review halló que el fix inicial se
+    aplicó a un solo gemelo. Echoing el GET reintroduciría deriva/lost-update entre syncs concurrentes
+    del mismo item → por eso se resuelve la verdad local del hermano.
+    """
+    if not meli_variations:
+        return None
+    if not meli_variation_id:
+        # Sin mapeo exacto: no tocar cantidades de hermanos (solo ids → MeLi conserva las suyas).
+        return [{"id": v["id"]} for v in meli_variations if v.get("id")]
+
+    sibling_ids = [
+        v["id"] for v in meli_variations
+        if v.get("id") and v["id"] != meli_variation_id
+    ]
+    authoritative: dict = {}
+    if sibling_ids:
+        _links = (
+            supabase.table("marketplace_listings")
+            .select("meli_variation_id, variation_id")
+            .eq("tenant_id", tenant_id)
+            .eq("external_id", external_id)
+            .eq("provider", "mercadolibre")
+            .in_("meli_variation_id", sibling_ids)
+            .execute()
+        ).data or []
+        _var_to_meli = {
+            lk["variation_id"]: lk["meli_variation_id"]
+            for lk in _links
+            if lk.get("variation_id") and lk.get("meli_variation_id") is not None
+        }
+        if _var_to_meli:
+            _stocks = (
+                supabase.table("product_variations")
+                .select("id, stock_quantity")
+                .eq("tenant_id", tenant_id)
+                .in_("id", list(_var_to_meli.keys()))
+                .execute()
+            ).data or []
+            for s in _stocks:
+                _mv = _var_to_meli.get(s["id"])
+                if _mv is not None:
+                    authoritative[_mv] = int(s.get("stock_quantity") or 0)
+    return [
+        {
+            "id": v["id"],
+            "available_quantity": (
+                target_qty if v["id"] == meli_variation_id
+                else authoritative.get(v["id"], int(v.get("available_quantity") or 0))
+            ),
+        }
+        for v in meli_variations if v.get("id")
+    ]
+
+
 async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     """
     Empuja stock + precio + precio tachado de una variante a MeLi si tiene listing activo.
@@ -127,19 +193,11 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             meli_variations = []
 
         if price is not None:
-            # Construir payload de variaciones para el PUT:
-            # - Si hay meli_variation_id mapeado → stock exactamente a esa variación
-            # - Si no → usar variaciones del GET (fallback: primera variación)
-            variations_for_put: list | None = None
-            if meli_variations:
-                if meli_variation_id:
-                    variations_for_put = [
-                        {"id": v["id"], "available_quantity": new_qty if v["id"] == meli_variation_id else 0}
-                        for v in meli_variations if v.get("id")
-                    ]
-                else:
-                    variations_for_put = [{"id": v["id"]} for v in meli_variations if v.get("id")]
-
+            # BLOQUE D item 2 / review D: array de variaciones vía helper compartido con el sync
+            # forzado manual (evita drift del zero-out de hermanos).
+            variations_for_put = _resolve_variations_for_put(
+                supabase, tenant_id, external_id, meli_variation_id, new_qty, meli_variations,
+            )
             await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
         else:
             await update_item_quantity(external_id, new_qty, access_token)
@@ -568,16 +626,12 @@ async def sync_stock_from_supabase(
 
         meli_variations = meli_item.get("variations") or []
 
-        # Construir payload de variaciones con mapping exacto si está disponible
-        variations_for_put: list | None = None
-        if meli_variations:
-            if meli_variation_id:
-                variations_for_put = [
-                    {"id": v["id"], "available_quantity": current_stock if v["id"] == meli_variation_id else 0}
-                    for v in meli_variations if v.get("id")
-                ]
-            else:
-                variations_for_put = [{"id": v["id"]} for v in meli_variations if v.get("id")]
+        # BLOQUE D item 2 / review D: mismo helper que el sync automático — las variaciones
+        # NO-target reciben la verdad de Supabase (o el GET si no están mapeadas), NUNCA 0.
+        # Antes este gemelo manual ponía `else 0` → zeraba variaciones nativas/no mapeadas.
+        variations_for_put = _resolve_variations_for_put(
+            supabase, tenant_id, external_id, meli_variation_id, current_stock, meli_variations,
+        )
 
         try:
             await update_item_listing(external_id, current_stock, price, original_price, access_token, variations_for_put)
