@@ -38,6 +38,24 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _token_still_valid(expires_at_s: Optional[str]) -> bool:
+    """True si `expires_at_s` parsea a un instante AÚN futuro (token todavía usable).
+
+    Conservador: si no hay expiry o no parsea, retorna False (no lo damos por válido)
+    para NO usar un token de vigencia desconocida como si fuera bueno. Base del fix del
+    401-loop: solo marcamos la integración 'error' cuando SABEMOS que el token expiró.
+    """
+    if not expires_at_s:
+        return False
+    try:
+        exp = datetime.fromisoformat(expires_at_s)
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return exp > datetime.now(timezone.utc)
+    except Exception:
+        return False
+
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 MELI_API_URL   = "https://api.mercadolibre.com"
 
@@ -337,14 +355,46 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                     needs_refresh = True
 
         if needs_refresh and refresh_tok:
+            # NOTA: sin asyncio.Lock a nivel módulo. get_valid_token corre tanto en el event loop
+            # principal (await) como en loops EFÍMEROS de asyncio.run (path threadpool de
+            # wompi_webhook → orders.sync). Un Lock compartido cross-loop lanza
+            # "RuntimeError: bound to a different event loop" → tragado → None → sync MeLi omitido
+            # (oversell). El double-check re-read + el manejo graceful del fallo hacen el flujo
+            # CORRECTO sin lock (a lo sumo un refresh redundante que el rotation resuelve). El
+            # single-flight cross-loop/cross-réplica queda como follow-up (lease/advisory en DB).
+
+            # Double-check: si otro caller ya refrescó a un token válido, usarlo y evitar el refresh.
+            refresh_to_use = refresh_tok
             try:
-                token_data  = await refresh_token(refresh_tok)
+                _fresh = (
+                    supabase.table("tenant_integrations")
+                    .select("credentials")
+                    .eq("tenant_id", tenant_id)
+                    .eq("provider", "mercadolibre")
+                    .single()
+                    .execute()
+                )
+                _fresh_creds = (_fresh.data or {}).get("credentials") or {}
+                _fresh_access = resolve_secret(vault, _fresh_creds, "access_token")
+                if (
+                    _fresh_access and _fresh_access != access_token
+                    and _token_still_valid(_fresh_creds.get("expires_at"))
+                ):
+                    return _fresh_access  # otro caller ya refrescó → usar su token fresco
+                refresh_to_use = resolve_secret(vault, _fresh_creds, "refresh_token") or refresh_tok
+            except Exception:
+                refresh_to_use = refresh_tok
+
+            try:
+                token_data  = await refresh_token(refresh_to_use)
                 new_access  = token_data.get("access_token")
-                new_refresh = token_data.get("refresh_token", refresh_tok)
+                new_refresh = token_data.get("refresh_token", refresh_to_use)
                 new_exp_in  = token_data.get("expires_in", 21600)
                 new_exp_at  = (datetime.now(timezone.utc) + timedelta(seconds=new_exp_in)).isoformat()
 
-                # Actualizar en Vault (update-or-create)
+                # WRITE-BEFORE-CONSUME: persistir el token rotado a Vault + DB ANTES de usarlo,
+                # para que un crash entre la rotación MeLi y la persistencia no pierda el
+                # refresh_token de un solo uso (que mataría la integración permanentemente).
                 at_sid = creds.get("access_token_secret_id")
                 rt_sid = creds.get("refresh_token_secret_id")
                 if at_sid:
@@ -368,17 +418,37 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                 logger.info("Token MeLi renovado tenant %s, expira %s", tenant_id, new_exp_at)
                 return new_access
             except Exception as e:
-                logger.warning("No se pudo renovar token MeLi tenant %s: %s — usando token existente", tenant_id, e)
-                # Si el access_token también expiró, marcar la integración como error
-                # para que el frontend muestre "Reconectar" al operador.
-                if not access_token:
-                    try:
-                        supabase.table("tenant_integrations").update(
-                            {"status": "error"}
-                        ).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
-                        logger.warning("MeLi marcada como error (refresh y token expirados) tenant %s", tenant_id)
-                    except Exception:
-                        pass
+                logger.warning(
+                    "No se pudo renovar token MeLi tenant %s: %s — reintento en el próximo ciclo",
+                    tenant_id, e,
+                )
+                # ¿Otro caller/worker refrescó en paralelo (rotation single-use)? Re-leer token
+                # fresco; si hay uno válido, usarlo. Esto RECUPERA al 'perdedor' de un refresh
+                # concurrente (su POST con el token ya rotado da 400) devolviéndole el token del
+                # ganador en vez de un token stale/fallido → menos 401s downstream.
+                try:
+                    _r = (
+                        supabase.table("tenant_integrations")
+                        .select("credentials")
+                        .eq("tenant_id", tenant_id)
+                        .eq("provider", "mercadolibre")
+                        .single()
+                        .execute()
+                    )
+                    _rc = (_r.data or {}).get("credentials") or {}
+                    _ra = resolve_secret(vault, _rc, "access_token")
+                    if _ra and _token_still_valid(_rc.get("expires_at")):
+                        return _ra
+                except Exception:
+                    pass
+                # NOTA — NO se marca status='error' aquí (a propósito). Distinguir un refresh_token
+                # genuinamente muerto (→ el operador debe Reconectar, fix del 401-loop) de un
+                # 'perdedor' de un refresh concurrente (integración SANA) requiere single-flight REAL
+                # (lease/advisory en DB): sin él, el 400 del perdedor marcaría 'error' a una
+                # integración sana y el filtro status='connected' bloquearía el auto-heal → sync MeLi
+                # omitido → oversell (residual money-critical hallado en revisión adversarial). El
+                # surfacing del 401-loop se implementa JUNTO con el single-flight en el follow-up
+                # (ADR-0037). Aquí se devuelve el token vigente y se reintenta luego (sin regresión).
 
         return access_token
 
