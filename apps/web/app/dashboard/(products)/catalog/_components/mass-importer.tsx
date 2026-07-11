@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
 import { buildCategoryPicker } from '../_lib/category-tree'
-import { IMPORT_COLUMNS, buildExampleRow, groupRowsToProducts } from '../_lib/import-template'
+import { IMPORT_COLUMNS, buildExampleRow, groupRowsToProducts, pickDataSheet } from '../_lib/import-template'
 
 interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string; apiUrl: string }
 
@@ -132,14 +132,23 @@ export default function MassImporter({ productCategories, onImported = () => {},
     try {
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
+      // BLOQUE C item 1: elegir la hoja de DATOS por cabeceras (no SheetNames[0], que es
+      // 'Instrucciones' en la plantilla oficial → antes leía las instrucciones y todo fallaba).
+      const ws = pickDataSheet(wb)
       const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
 
       if (rows.length === 0) throw new Error("El archivo está vacío o mal formateado.")
 
       // Agrupación + parseo puro (compartido con el test que verifica la plantilla).
-      const bulkProducts = groupRowsToProducts(rows, selectedOpCat || null)
-      if (bulkProducts.length === 0) throw new Error("No se encontraron productos válidos para importar (falta Nombre o SKU). Revisa la plantilla.")
+      const { products: bulkProducts, rejected } = groupRowsToProducts(rows, selectedOpCat || null)
+      // BLOQUE C item 2: filas rechazadas (precio inválido / falta Nombre-SKU) NUNCA se
+      // descartan en silencio. Si TODO se rechazó, abortar con el detalle.
+      if (bulkProducts.length === 0) {
+        const detail = rejected.length
+          ? ` Filas rechazadas: ${rejected.slice(0, 5).map(r => `fila ${r.row} (${r.reason})`).join('; ')}${rejected.length > 5 ? `; +${rejected.length - 5} más` : ''}.`
+          : ''
+        throw new Error(`No se importó ningún producto válido.${detail || ' Revisa la plantilla.'}`)
+      }
 
       // F2: enruta por la API (POST /products/bulk) → hereda RBAC + @audit_log + validación de ownership;
       // antes escribía DIRECTO a Supabase desde el browser (brecha de las 4 garantías).
@@ -158,8 +167,9 @@ export default function MassImporter({ productCategories, onImported = () => {},
       const result = await res.json()
       const totalVars = result.variants_upserted ?? 0
       const errCount = Array.isArray(result.errors) ? result.errors.length : 0
+      const rejNote = rejected.length ? ` \u00b7 ${rejected.length} fila(s) rechazada(s) (precio inv\u00e1lido o falta Nombre/SKU)` : ''
 
-      setSuccess(`\u00a1Importaci\u00f3n! ${result.products_created ?? 0} creados, ${result.products_reused ?? 0} reusados, ${totalVars} variantes${errCount ? ` \u00b7 ${errCount} con error (revisa la plantilla)` : ''}.`)
+      setSuccess(`\u00a1Importaci\u00f3n! ${result.products_created ?? 0} creados, ${result.products_reused ?? 0} reusados, ${totalVars} variantes${errCount ? ` \u00b7 ${errCount} con error (revisa la plantilla)` : ''}${rejNote}.`)
       
       // Pequeño timeout antes de recargar la interfaz para que vean el éxito
       setTimeout(() => {
