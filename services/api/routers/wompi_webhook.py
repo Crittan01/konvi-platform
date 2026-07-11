@@ -1622,6 +1622,7 @@ async def _generate_shipping_guide_async(
                 supabase.table("order_items")
                 .select("title, quantity")
                 .eq("order_id", order_id)
+                .eq("tenant_id", tenant_id)  # ADR-0025: filtro explícito por tenant (lint)
                 .limit(5)
                 .execute()
             )
