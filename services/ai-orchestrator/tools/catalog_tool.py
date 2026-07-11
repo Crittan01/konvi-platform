@@ -6,7 +6,10 @@ from tools.catalog_contract import CATALOG_VARIATIONS_KEY, variant_label
 
 logger = logging.getLogger("orchestrator.tools.catalog")
 
-MAX_VARIANTS_PER_PRODUCT = 6
+# BLOQUE C item 3 — mismo criterio que MAX_CATALOG_PRODUCTS: cota GENEROSA + observable, no un
+# 6 hardcode que truncaba en el PRODUCTOR/cache (variantes #7+ no ofrecidas NI vendibles porque
+# add_to_cart valida contra parsed_variants → pérdida de venta silenciosa). Env-configurable.
+MAX_VARIANTS_PER_PRODUCT = int(os.getenv("MAX_VARIANTS_PER_PRODUCT", "50"))
 # ADR-0027 Pieza 6 — cierra el bug del .limit(50) silencioso: get_tenant_catalog alimenta el
 # CACHE transaccional (add_to_cart), que NO puede estar truncado (era el bug que hacía "no
 # existe" un producto real #51+). Cota GENEROSA (no un 50 que oculta), y si se alcanza se LOGGEA
@@ -140,6 +143,17 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         catalog = []
         for product in result.data or []:
             variations = product.get("product_variations") or []
+            # Truncado OBSERVABLE (nunca silencioso): con la cota generosa (50) prácticamente
+            # ningún producto real la excede; si lo hace, se loguea (variantes excedentes NO
+            # ofrecidas al bot → subir la cota). No se reordena para preservar el orden de
+            # presentación actual (evita cambiar S/M/L a orden alfabético).
+            if len(variations) > MAX_VARIANTS_PER_PRODUCT:
+                logger.warning(
+                    "[CATALOG] tenant=%s producto=%s tiene %d variantes > MAX_VARIANTS_PER_PRODUCT=%d "
+                    "— variantes excedentes NO ofrecidas al bot (subir la cota si es real)",
+                    str(tenant_id)[:8], str(product.get("id"))[:8],
+                    len(variations), MAX_VARIANTS_PER_PRODUCT,
+                )
             parsed_variants: list[dict] = []
             prices: list[float] = []
             total_stock = 0

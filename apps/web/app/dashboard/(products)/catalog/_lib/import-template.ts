@@ -4,7 +4,41 @@
 // testearlo (un test de la plantilla atrapa el desalineado que antes le enseñaba el formato incorrecto
 // al operador).
 
+import * as XLSX from 'xlsx-js-style'
+
 export interface ImportColumn { label: string; key: string; width: number; req: boolean; desc: string }
+
+/** Fila rechazada en el import (BLOQUE C item 2 — nunca descartar en silencio). */
+export interface RejectedRow { row: number; sku: string; reason: string }
+
+/**
+ * BLOQUE C item 1 — selecciona la hoja de DATOS del workbook por sus CABECERAS,
+ * no por posición. La plantilla oficial pone 'Instrucciones' en la hoja 0, así que
+ * `SheetNames[0]` leía las instrucciones → import 100% roto. Detectar por cabeceras
+ * es backward-compatible con plantillas ya descargadas, hojas renombradas y CSV de
+ * una sola hoja. Lanza error claro si ninguna hoja tiene el contrato de columnas.
+ */
+export function pickDataSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
+  const required = [
+    IMPORT_COLUMNS.find(c => c.key === 'sku')!.label,
+    IMPORT_COLUMNS.find(c => c.key === 'nombre')!.label,
+  ]
+  const hasHeaders = (ws: XLSX.WorkSheet | undefined): boolean => {
+    if (!ws) return false
+    const firstRow = (XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || []) as unknown[]
+    const headers = firstRow.map(h => String(h ?? '').trim())
+    return required.every(r => headers.includes(r))
+  }
+  // 1. Primera hoja cuyas cabeceras cumplen el contrato.
+  const byHeaders = wb.SheetNames.find(n => hasHeaders(wb.Sheets[n]))
+  if (byHeaders) return wb.Sheets[byHeaders]
+  // 2. Fallback: primera hoja que NO sea 'Instrucciones'.
+  const byName = wb.SheetNames.find(n => n.toLowerCase() !== 'instrucciones')
+  if (byName) return wb.Sheets[byName]
+  throw new Error(
+    'El archivo no contiene la hoja de datos de la plantilla (cabeceras "SKU (Obligatorio)" y "Nombre del Producto"). Descarga la plantilla y llénala.',
+  )
+}
 
 export const IMPORT_COLUMNS: ImportColumn[] = [
   { label: 'SKU (Obligatorio)',           key: 'sku',          width: 24, req: true,  desc: 'Identificador único del producto o variante (Ej: JAB-001-20M)' },
@@ -70,7 +104,15 @@ export interface BulkProduct {
 }
 
 const num = (v: unknown): number | null => {
-  const n = parseFloat(String(v ?? ''))
+  // BLOQUE C item 2 — coerción ESTRICTA: la plantilla instruye "solo números, sin comas ni
+  // símbolos". Rechazamos formatos ambiguos en vez de truncar en silencio ("12.000"→12 con
+  // parseFloat, "$12,000"→NaN→$1). Devuelve null (fila se reporta como rechazada arriba).
+  const s = String(v ?? '').trim().replace(/^\$\s*/, '').trim()
+  if (!s) return null
+  if (/,/.test(s)) return null                       // comas → ambiguo (miles/decimal)
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) return null      // "12.000" / "1.234.567" → miles con punto
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return null         // cualquier otro token no numérico
+  const n = parseFloat(s)
   return isNaN(n) ? null : n
 }
 
@@ -83,14 +125,38 @@ const num = (v: unknown): number | null => {
 export function groupRowsToProducts(
   rows: Record<string, string>[],
   categoryId: string | null,
-): BulkProduct[] {
+): { products: BulkProduct[]; rejected: RejectedRow[] } {
   const map: Record<string, BulkProduct> = {}
   const order: string[] = []
+  const rejected: RejectedRow[] = []
 
-  for (const row of rows) {
+  for (const [i, row] of rows.entries()) {
+    const rowNum = i + 2  // +2: fila de cabeceras + índice 1-based del operador
     const pName = String(row[L.nombre] ?? '').trim()
     const sku   = String(row[L.sku] ?? '').trim()
-    if (!pName || !sku) continue
+    // Fila totalmente vacía (trailing rows de Excel) → skip silencioso. Fila con datos
+    // pero sin Nombre/SKU → se REPORTA (BLOQUE C item 2: nada se descarta en silencio).
+    const isBlank = Object.values(row).every(v => !String(v ?? '').trim())
+    if (isBlank) continue
+    if (!pName || !sku) {
+      rejected.push({ row: rowNum, sku: sku || '(sin SKU)', reason: 'Falta Nombre o SKU' })
+      continue
+    }
+
+    // BLOQUE C item 2: precio normal inválido/ausente/≤0 → RECHAZAR la fila (antes: fallback
+    // silencioso a $1 → producto vendible a 1 peso). El promo solo aplica si el normal es válido.
+    const pNormal = num(row[L.precioNormal])
+    if (pNormal === null || pNormal <= 0) {
+      rejected.push({
+        row: rowNum, sku,
+        reason: `Precio Normal inválido o ausente: "${String(row[L.precioNormal] ?? '').trim()}"`,
+      })
+      continue
+    }
+    const pPromo  = num(row[L.precioPromo])
+    let price = pNormal
+    let compare_at_price: number | null = null
+    if (pPromo && pPromo > 0) { price = pPromo; compare_at_price = pNormal }
 
     if (!map[pName]) {
       map[pName] = {
@@ -102,12 +168,6 @@ export function groupRowsToProducts(
       }
       order.push(pName)
     }
-
-    const pNormal = num(row[L.precioNormal]) ?? 0
-    const pPromo  = num(row[L.precioPromo])
-    let price = pNormal > 0 ? pNormal : 1
-    let compare_at_price: number | null = null
-    if (pPromo && pPromo > 0) { price = pPromo; compare_at_price = pNormal }
 
     const attrPairs: [string, string][] = [
       [String(row[L.attrKey]  ?? '').trim() || 'Genérico', String(row[L.attrVal]  ?? '').trim() || 'Estándar'],
@@ -133,5 +193,7 @@ export function groupRowsToProducts(
     })
   }
 
-  return order.map(n => map[n])
+  // Filtrar productos que quedaron sin variantes (todas sus filas rechazadas).
+  const products = order.map(n => map[n]).filter(p => p.variations.length > 0)
+  return { products, rejected }
 }
