@@ -14,7 +14,15 @@ const config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-inter)', 'system-ui', '-apple-system', 'sans-serif'],
+        // BLOQUE E: incluir las fuentes de emoji a color en el stack `sans`. `body` usa
+        // `font-sans` (layout.tsx) y Tailwind lo resuelve a ESTA lista → sin las fuentes de
+        // emoji, pisaba el stack de `html` (fix A7 en globals.css) y los emojis se veían como
+        // "tofu" (□). Mantener sincronizado con el stack de `html` en globals.css.
+        sans: [
+          'var(--font-inter)', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto',
+          'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla',
+          'sans-serif',
+        ],
       },
       colors: {
         // F1 2026-07-04: se ELIMINÓ el recode global de emerald/amber 300-500

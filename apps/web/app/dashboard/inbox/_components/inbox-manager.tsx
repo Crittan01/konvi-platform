@@ -13,6 +13,7 @@ import type {
   Message,
 } from '../_lib/types'
 import { isSlaBreach } from '../_lib/format'
+import { errorDetailToString } from '../_lib/errors'
 import { useConversationContext } from '../_hooks/use-conversation-context'
 import { useConversations } from '../_hooks/use-conversations'
 import { useMessages } from '../_hooks/use-messages'
@@ -228,7 +229,7 @@ export default function InboxManager() {
         setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, status } : c))
       } else {
         const err = await res.json().catch(() => ({ detail: 'Error al actualizar estado' }))
-        setStatusError(err.detail || 'Error al actualizar estado')
+        setStatusError(errorDetailToString(err?.detail, 'Error al actualizar estado'))
       }
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') {
@@ -265,7 +266,9 @@ export default function InboxManager() {
       clearTimeout(timeout)
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-        setSendError(err.detail || 'No se pudo enviar')
+        // BLOQUE E: `detail` puede ser un objeto ({code, message}) — p.ej. ventana 24h Meta.
+        // Setear el objeto crudo crasheaba el Inbox al renderizarlo. Normalizar a string.
+        setSendError(errorDetailToString(err?.detail, 'No se pudo enviar'))
       } else {
         setReplyText('')
         // Optimistic insert: el backend devuelve el message insertado.

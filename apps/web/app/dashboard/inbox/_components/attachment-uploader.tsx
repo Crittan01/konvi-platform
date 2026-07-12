@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Paperclip, X, Loader2, ImageIcon } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import { errorDetailToString } from '../_lib/errors'
 
 interface Props {
   conversationId: string | null
@@ -131,7 +132,9 @@ export function AttachmentUploader({ conversationId, onSent, disabled }: Props) 
       )
       if (!res.ok) {
         const data = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-        throw new Error(data.detail || `HTTP ${res.status}`)
+        // BLOQUE E: `detail` puede ser objeto ({code, message}) — normalizar a string legible
+        // (antes `new Error(obj)` producía "[object Object]" en la UI).
+        throw new Error(errorDetailToString(data?.detail, `HTTP ${res.status}`))
       }
 
       // Éxito — close + refresh por Realtime (no necesitamos optimistic push).
