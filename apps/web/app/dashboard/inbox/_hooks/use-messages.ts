@@ -66,7 +66,7 @@ interface Result {
 }
 
 const MESSAGE_COLUMNS =
-  'id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason, delivery_status, delivered_at, read_at, failed_at, delivery_error'
+  'id, direction, content, content_type, media_url, media_id, media_mime, created_at, processed, processing_status, skip_reason, delivery_status, delivered_at, read_at, failed_at, delivery_error'
 const PAGE_INITIAL = 100
 const PAGE_MORE = 50
 const POLLING_FALLBACK_THRESHOLD_MS = 8000

@@ -21,7 +21,7 @@ from typing import List, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from supabase import Client
 
@@ -64,6 +64,102 @@ class AgentImageRequest(BaseModel):
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+# Mimes INERTES que es seguro renderizar inline en el origen del dashboard (imagen/audio/video/pdf).
+# Cualquier otro (text/html, image/svg+xml, xhtml, …) se sirve como octet-stream + attachment.
+_SAFE_INLINE_MEDIA_MIMES: frozenset[str] = frozenset({
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "audio/mpeg", "audio/ogg", "audio/aac", "audio/mp4", "audio/amr", "audio/wav",
+    "video/mp4", "video/3gpp",
+    "application/pdf",
+})
+
+
+def _get_tenant_wa_access_token(tenant_id: str, supabase: Client) -> str:
+    """access_token de WhatsApp del tenant (Model B, Vault) — solo si status=connected.
+    Espejo de whatsapp_sender._get_tenant_wa_credentials (orchestrator)."""
+    try:
+        res = (
+            supabase.table("tenant_integrations")
+            .select("credentials, status")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "whatsapp")
+            .single()
+            .execute()
+        )
+        if not res.data or res.data.get("status") != "connected":
+            return ""
+        from vault_helper import VaultHelper, resolve_secret
+        vault = VaultHelper(supabase)
+        return resolve_secret(vault, res.data.get("credentials", {}), "access_token") or ""
+    except Exception:
+        return ""
+
+
+@router.get("/media/{media_id}")
+async def get_inbound_media(
+    media_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Proxy de media INBOUND de WhatsApp: baja el binario de Meta Cloud API con el token del
+    tenant y lo sirve al operador. El `media_url` que Meta entrega en el webhook es TEMPORAL
+    (~5 min) y requiere Bearer → no es cargable directo desde el navegador → antes el operador
+    solo veía "[Imagen recibida]"/"previsualización no disponible".
+
+    SEGURIDAD (doble aislamiento):
+      1. El `media_id` DEBE pertenecer a un mensaje de ESTE tenant (query tenant-scoped) →
+         un operador no puede pedir media de otro tenant aunque adivine el id.
+      2. El token es per-tenant (Model B) → aunque se saltara (1), el token de un tenant solo
+         resuelve media de su propia Meta App.
+    """
+    # 1) media_id ∈ mensajes del tenant (aislamiento).
+    msg = (
+        supabase.table("messages")
+        .select("id, media_mime")
+        .eq("tenant_id", tenant_id)
+        .eq("media_id", media_id)
+        .limit(1)
+        .execute()
+    )
+    if not msg.data:
+        raise HTTPException(status_code=404, detail="Media no encontrado")
+
+    # 2) Token WhatsApp del tenant (Vault).
+    access_token = _get_tenant_wa_access_token(tenant_id, supabase)
+    if not access_token:
+        raise HTTPException(status_code=409, detail="WhatsApp no conectado para este tenant")
+
+    # 3) Descargar de Meta (2-step + caché + límites) — reusa el cliente del orchestrator.
+    from integrations.meta_media import fetch_media_bytes, MediaDownloadError
+    try:
+        data, mime = await fetch_media_bytes(media_id, access_token)
+    except MediaDownloadError as e:
+        logger.warning("[MEDIA] descarga falló media_id=%s tenant=%s: %s", media_id, tenant_id, e)
+        raise HTTPException(status_code=502, detail="No se pudo obtener el media de Meta")
+
+    mime = mime or (msg.data[0].get("media_mime") or "application/octet-stream")
+    # SEGURIDAD (XSS): el media viene de un CLIENTE de WhatsApp (un "documento" puede ser HTML/SVG
+    # con <script>). NUNCA servir un content-type ACTIVO inline en el MISMO origen del dashboard →
+    # al abrirlo el operador ejecutaría JS con su sesión. Allowlist de tipos inertes renderizables
+    # inline (imagen/audio/video/pdf); cualquier otro → octet-stream + attachment (fuerza descarga,
+    # nunca render/ejecución). El header lo reenvía la ruta Next.js al navegador.
+    base_mime = (mime or "").split(";")[0].strip().lower()
+    if base_mime in _SAFE_INLINE_MEDIA_MIMES:
+        out_mime, disposition = base_mime, "inline"
+    else:
+        out_mime, disposition = "application/octet-stream", f'attachment; filename="media-{media_id}"'
+    return Response(
+        content=data,
+        media_type=out_mime,
+        headers={
+            "Content-Disposition": disposition,
+            "X-Content-Type-Options": "nosniff",
+            # Media inmutable por media_id; caché breve y PRIVADA (datos del cliente).
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
 
 @router.get("/stats")
 async def get_inbox_stats(
