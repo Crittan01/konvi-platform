@@ -3411,8 +3411,13 @@ def _resolve_and_persist_agentic_state(
         _cart_row = (
             supabase.table("conversation_carts")
             .select(
+                # BLOQUE J-3 (audit): + requires_requote. El resolver
+                # (build_context_from_records → resolver.py) lo usa para enrutar a
+                # SHIPPING_QUOTE cuando el cliente agregó/cambió items tras cotizar
+                # (hallazgo founder 2026-06-26). Sin la columna en el SELECT quedaba
+                # siempre falsy → la re-cotización NUNCA se disparaba (gate inerte).
                 "id, status, payment_method, shipping_cents, shipping_meta, "
-                "converted_order_id"
+                "converted_order_id, requires_requote"
             )
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
