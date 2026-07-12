@@ -393,6 +393,34 @@ _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re
 _EMAIL_SEARCH_REGEX = re.compile(r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b", flags=re.IGNORECASE)
 
 
+def _resolve_contact_email_update(
+    llm_email: Optional[str], content: Optional[str], current_email: Optional[str],
+) -> Optional[str]:
+    """BLOQUE G (fix UAT 2026-07-12 + review) — email a persistir en un turno de checkout.
+
+    Bug original: el cliente manda el email "desnudo" ("ana@x.com"), el LLM avanza al
+    pago (el gate (email|doc) ya está satisfecho por el documento) SIN llamar save_email
+    → contacts.email queda NULL → el link online (Wompi exige email) falla.
+
+    Reglas (devuelve el email normalizado a persistir, o None):
+      · Si el LLM extrajo un email válido (el cliente lo dio) → ese (puede actualizar).
+      · Si NO, y TODO el mensaje ES un email (match anclado) → fallback DESNUDO, pero
+        SOLO si no hay email guardado (nunca pisa). El match anclado evita capturar un
+        email de TERCERO mencionado en una frase ("mi amigo juan@x.com me recomendó",
+        "me llegó de noreply@aveonline.com") — incidente Ley 1581 + checkout roto.
+    """
+    candidate = (llm_email or "").strip() or None
+    is_bare_fallback = False
+    if not candidate and content and _EMAIL_REGEX.match(content.strip()):
+        candidate = content.strip()
+        is_bare_fallback = True
+    if not candidate or not _EMAIL_REGEX.match(candidate):
+        return None
+    if is_bare_fallback and current_email:
+        return None  # no pisar un email existente con un fallback desnudo
+    return candidate.lower()
+
+
 def _normalize_text_simple(text: str) -> str:
     """Normaliza para comparación: minúsculas, sin acentos."""
     nfkd = unicodedata.normalize("NFKD", text.lower())
@@ -10336,10 +10364,18 @@ async def build_and_run_orchestration(
             getattr(parsed, "extracted_shipping_phone", None)
             or _detect_shipping_phone_update(content or "", history or [])
         )
+        # BLOQUE G (fix UAT 2026-07-12 + review): resuelve el email a persistir. Cubre
+        # el bug del email "desnudo" (el LLM avanza sin llamar save_email) SIN capturar
+        # un email de TERCERO mencionado mid-conversación ni pisar uno ya guardado.
+        # Lógica pura + testeada en _resolve_contact_email_update.
+        _current_email = contact_record.get("email") if isinstance(contact_record, dict) else None
+        _email_to_persist = _resolve_contact_email_update(
+            getattr(parsed, "extracted_email", None), content, _current_email,
+        )
         if contact_id and _consent_ok and (
             parsed.extracted_name
             or parsed.extracted_direction
-            or parsed.extracted_email
+            or _email_to_persist
             or _has_doc_extract
             or _shipping_phone_extracted
         ):
@@ -10350,8 +10386,8 @@ async def build_and_run_orchestration(
                 _ship_digits = re.sub(r"\D", "", str(_shipping_phone_extracted))
                 if len(_ship_digits) >= 10 and _ship_digits[-10] != "0":
                     update_data["shipping_phone"] = f"+57{_ship_digits[-10:]}"
-            if parsed.extracted_email and _EMAIL_REGEX.match(str(parsed.extracted_email).strip()):
-                update_data["email"] = str(parsed.extracted_email).strip().lower()
+            if _email_to_persist:
+                update_data["email"] = _email_to_persist
             if parsed.extracted_name and str(parsed.extracted_name).strip():
                 update_data["name"] = " ".join(str(parsed.extracted_name).split())
             # Rev. 68 — documento.

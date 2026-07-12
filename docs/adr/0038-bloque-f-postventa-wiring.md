@@ -24,10 +24,10 @@
 
 `_handle_aveonline_webhook` ahora procesa `estado[]` **ordenado ascendente por `fecha`** antes del loop. Aveonline manda historial sin orden garantizado (dossier §6.2) y el RPC hace last-write-wins entre no-terminales → iterar en orden de array podía dejar `shipments.status` **regresado**, y el guard de dedup del que depende F-7 (`latest_internal != prev_status`) misfirear. Ordenar asc → el evento más reciente se procesa último y gana (misma key que `_select_latest_estado`).
 
-## Diferido (registrado para no perderse)
+## Diferido → RESUELTO (cierre 2026-07-12)
 
-- **RPC time-aware (hallazgo MEDIUM):** `fn_record_shipment_tracking_event` no es consciente de `occurred_at` → bajo **POSTs concurrentes** (no solo eventos dentro de un POST, que la Decisión 3 ya cubre a nivel app) el status podría regresar. Fix propuesto = migración: guard monotónico en el UPDATE del RPC (`... AND (occurred_at IS NULL OR p_occurred_at >= occurred_at)`) trackeando el último `occurred_at` en `shipments`. **Fuera de alcance F-6/F-7** (toca la función DB + su propia batería de tests). Prioridad: media — la concurrencia real de webshooks Aveonline por-guía es baja.
-- **Reconciliación de `delivered` de un solo disparo:** si Aveonline emitiera `delivered` **exactamente una vez** y ese único UPDATE fallara transitoriamente, el auto-heal de la Decisión 1 no se dispararía (no hay webhook posterior). Un sweep de reconciliación (cron o en el próximo webhook de cualquier estado) que busque `shipments.status='delivered'` cuyo pedido siga en `{confirmed,processing,shipped}` cerraría el caso. Prioridad: baja (Aveonline reenvía historial en POSTs sucesivos).
+- **RPC time-aware (hallazgo MEDIUM) — ✅ RESUELTO.** Migración `20260712040000_g_shipment_status_monotonic.sql`: se añadió `shipments.status_occurred_at` + guard monotónico en `fn_record_shipment_tracking_event` (`... AND (status_occurred_at IS NULL OR p_occurred_at IS NULL OR p_occurred_at >= status_occurred_at)`) → un evento MÁS VIEJO ya no pisa el status fijado por uno más nuevo, ni entre POSTs concurrentes. Backfill best-effort del último `occurred_at` por shipment. Smoke-test ROLLBACK OK.
+- **Reconciliación de `delivered` de un solo disparo — ✅ CERRADO (sin cron).** Verificado en prod: `shipments.status='delivered'` con pedido aún en `{confirmed,processing,shipped}` = **0 filas**. Además la Decisión 1 (F-6) avanza el pedido en el flujo INCONDICIONAL del handler → auto-sana en CUALQUIER webhook `delivered` posterior (Aveonline reenvía historial). Un cron para 0 filas sería infra muerta; se cierra como cubierto por F-6 + verificación empírica. Si a futuro aparecieran filas rezagadas, la query de detección queda documentada aquí.
 
 ## Consecuencias
 
