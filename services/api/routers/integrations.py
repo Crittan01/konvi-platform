@@ -139,7 +139,12 @@ async def upsert_whatsapp_credentials(
         "meta": {"integration_type": "direct_provider"},  # ADR-0023 Model B
     }, on_conflict="tenant_id,provider").execute()
 
-    webhook_base = os.getenv("WHATSAPP_CONNECTOR_URL", "https://api.konvi.co").rstrip("/")
+    # El webhook WhatsApp lo sirve el servicio CONNECTOR (konvi-connector.onrender.com), NO la API.
+    # Antes el default era api.konvi.co (NXDOMAIN, sin DNS) → rompía el handshake Meta día-1 y el
+    # onboarding self-service Model B. Default al host LIVE del connector; overridable por
+    # WHATSAPP_CONNECTOR_URL cuando el DNS entre (connector.konvi.co, ADR-0023 OQ-4). DEBE coincidir
+    # con el frontend (CONNECTOR_WEBHOOK_HOST en webhook-urls.ts).
+    webhook_base = os.getenv("WHATSAPP_CONNECTOR_URL", "https://konvi-connector.onrender.com").rstrip("/")
     return {
         "status": "connected",
         "provider": "whatsapp",
