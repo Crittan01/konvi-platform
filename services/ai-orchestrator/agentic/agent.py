@@ -447,6 +447,34 @@ async def run_agentic_turn(
         for fc in function_calls:
             tool_name = fc["name"]
             tool_args = fc["args"]
+            # BLOQUE J-3 (audit): enforcement en RUNTIME de allowed_tools. El filtro
+            # de arriba solo le DICE a Gemini qué tools tiene declarados; si el LLM
+            # invoca uno FUERA de su subset (hallucinación / drift entre el subset
+            # per-state y lo declarado), aquí se bloquea ANTES de ejecutar —
+            # defense-in-depth, no depender de la adherencia del modelo. Cierra el
+            # bypass de guardrails per-tenant/per-state a nivel de ejecución.
+            if allowed_tools is not None and tool_name not in allowed_tools:
+                logger.warning(
+                    "[AGENTIC] tool '%s' FUERA de allowed_tools (%d permitidos) — "
+                    "bloqueado en runtime (no ejecutado)",
+                    tool_name, len(allowed_tools),
+                )
+                result_data = {
+                    "error": (
+                        f"Tool '{tool_name}' no está disponible en este estado de "
+                        "la conversación."
+                    ),
+                    "code": "TOOL_NOT_ALLOWED",
+                }
+                tool_call_log.append({
+                    "turn": turn_idx, "tool": tool_name,
+                    "args": tool_args, "result": result_data,
+                })
+                total_tool_calls += 1
+                function_responses.append({
+                    "function_response": {"name": tool_name, "response": result_data},
+                })
+                continue
             tool = get_tool(tool_name)
             if tool is None:
                 result_data = {

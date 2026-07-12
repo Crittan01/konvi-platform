@@ -166,12 +166,36 @@ class ToolsSubsetTests(unittest.TestCase):
         self.assertIn("record_consent", all_tools)
 
     def test_subsets_are_all_drawn_from_known_set(self):
-        """Defensive: tools subset no nombran tools fantasma."""
-        known = all_known_tool_names()
+        """Defensive: tools subset no nombran tools fantasma.
+
+        BLOQUE J-3 (audit): antes comparaba contra all_known_tool_names() = unión de
+        los propios subsets → CIRCULAR (nunca podía fallar). Ahora compara contra el
+        REGISTRY real de tools registrados; si un subset per-state nombra un tool que
+        no existe en el registry (drift / rename), agent.py lo descartaría en silencio
+        al filtrar las declaraciones — este test lo caza en CI.
+        """
+        # Importar cada módulo de tool dispara su register_tool() al import (el
+        # registry se puebla por import, no por un loader central — igual que en
+        # runtime). La lista de módulos se DERIVA del filesystem (no hardcode) para
+        # que un tool nuevo no requiera tocar este test ni cause un falso 'fantasma'.
+        import importlib
+        import pkgutil
+        import agentic.tools as _tools_pkg
+        for _mod in pkgutil.iter_modules(_tools_pkg.__path__):
+            if _mod.name in ("base", "registry"):
+                continue  # infra, no tools
+            importlib.import_module(f"agentic.tools.{_mod.name}")
+        from agentic.tools.registry import all_tools
+        registry = {t.name for t in all_tools()}
+        self.assertGreater(len(registry), 0, "registry vacío — ¿imports de tools?")
         for state in AgenticState:
             subset = tools_for_state(state)
             for tool in subset:
-                self.assertIn(tool, known, f"{state.value}: {tool} fantasma")
+                self.assertIn(
+                    tool, registry,
+                    f"{state.value}: '{tool}' en el subset NO está en el registry "
+                    "(tool fantasma — agent.py lo descartaría en silencio)",
+                )
 
 
 if __name__ == "__main__":
