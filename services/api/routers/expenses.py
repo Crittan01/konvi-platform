@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from dependencies.audit import audit_log
-from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.auth import get_current_tenant, get_service_client, require_owner_role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Expenses"])
@@ -33,9 +33,11 @@ async def create_expense(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # BLOQUE F-2: registrar gastos = OWNER-ONLY (decisión founder). Antes require_write_role
+    # permitía manager, contradiciendo la matriz de roles para datos financieros.
+    _role: str = Depends(require_owner_role),
 ):
-    """Registra un gasto. Solo owner/manager. `expense_date` por defecto = ahora."""
+    """Registra un gasto. Solo owner. `expense_date` por defecto = ahora."""
     try:
         result = supabase.table("expenses").insert({
             "tenant_id": tenant_id,

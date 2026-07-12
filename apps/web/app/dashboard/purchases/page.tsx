@@ -26,9 +26,10 @@ export default async function PurchasesPage() {
   if (!tenantId) {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }
-  // F3 — Compras es owner-only: expone costos/márgenes del tenant y el sidebar ya
-  // lo oculta a manager (sidebar-client.tsx). Alineamos la página al mismo criterio
-  // (antes owner+manager, generaba drift con el sidebar y con el router).
+  // BLOQUE F-1: Compras expone costos/márgenes → OWNER-ONLY (decisión founder). Guard server-side
+  // (antes solo `canWrite`, la página cargaba para manager/operator y leía datos vía RLS). Ahora
+  // alineado en las 3 capas: redirect aquí + RLS SELECT owner-only (20260711120000) + API GET owner.
+  if (role !== 'owner') redirect('/dashboard')
   const canWrite = role === 'owner'
   const supabase = await createClient()
 
