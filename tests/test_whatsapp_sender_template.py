@@ -80,14 +80,26 @@ class _FakeQuery:
         return self
 
     def single(self):
+        self._single = True
+        return self
+
+    def maybe_single(self):
+        # BLOQUE J: el código usa maybe_single() (devuelve None en 0 filas en vez
+        # de lanzar). El fake lo espeja: data=dict|None.
+        self._single = True
+        self._maybe = True
         return self
 
     def execute(self):
         rows = [r for r in self._store if all(r.get(k) == v for k, v in self._filters.items())]
         if self._limit_n is not None:
             rows = rows[: self._limit_n]
-        # `.single()` retorna dict (no lista) — simulamos comportamiento
-        return SimpleNamespace(data=rows[0] if (rows and self._limit_n is None and "tenant_id" in self._filters and len(self._filters) >= 2) else rows)
+        # `.single()`/`.maybe_single()` retornan dict (no lista).
+        if getattr(self, "_single", False) or (
+            self._limit_n is None and "tenant_id" in self._filters and len(self._filters) >= 2
+        ):
+            return SimpleNamespace(data=rows[0] if rows else None)
+        return SimpleNamespace(data=rows)
 
 
 class _FakeSupabase:
