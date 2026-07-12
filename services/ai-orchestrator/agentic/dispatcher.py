@@ -2106,19 +2106,50 @@ async def _run_agentic_full(
                 if _img_result.image_link:
                     # Rev. 109 fix BUG 27: send_whatsapp_message firma real es
                     # (to_phone, image_link, image_caption) — no media_url.
+                    _img_meta_id = None
                     try:
                         from whatsapp_sender import send_whatsapp_message
-                        await send_whatsapp_message(
+                        _img_meta_id = await send_whatsapp_message(
                             tenant_id=tenant_id,
                             supabase=supabase,
                             to_phone=customer_phone,
                             image_link=_img_result.image_link,
                             image_caption=_img_result.image_caption or "",
                         )
+                        # BLOQUE H P0-2: persistir la imagen enviada para que
+                        # el Inbox del operador refleje lo que el cliente
+                        # recibió (antes este path enviaba sin persistir).
+                        if _img_meta_id:
+                            from agentic.tools.media import (
+                                persist_sent_image_message,
+                            )
+                            persist_sent_image_message(
+                                supabase, tenant_id=tenant_id,
+                                conversation_id=conversation_id,
+                                image_url=_img_result.image_link,
+                                caption=_img_result.image_caption or "",
+                                meta_message_id=_img_meta_id,
+                                tool_tag="pre_llm.image_request",
+                            )
                     except Exception as _img_exc:
                         logger.warning(
                             "[AGENTIC_PRE_LLM] image_send falló conv=%s: %s",
                             conversation_id[:8], _img_exc,
+                        )
+                    # BLOQUE H P0-2 (review Fable): si el envío de la imagen
+                    # falló, NO dejar al cliente sin respuesta — enviar un texto
+                    # honesto (paridad con el tool_failure del tool agentic, que
+                    # ordena al LLM disculparse). Antes se marcaba PROCESSED y el
+                    # cliente que pidió la foto no recibía NADA.
+                    if not _img_meta_id:
+                        await _send_outbound_text(
+                            supabase=supabase, conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            text=(
+                                "Disculpa, no pude enviarte la foto en este "
+                                "momento. ¿Quieres que te describa el producto "
+                                "o te comparta los detalles por texto?"
+                            ),
                         )
                 elif _img_result.response_text:
                     await _send_outbound_text(

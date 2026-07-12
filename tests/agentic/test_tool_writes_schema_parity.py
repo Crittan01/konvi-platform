@@ -51,10 +51,25 @@ def _load_env_if_available() -> bool:
             "SUPABASE_URL",
             os.environ.get("NEXT_PUBLIC_SUPABASE_URL", ""),
         )
-    return bool(
-        os.environ.get("SUPABASE_URL")
-        and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    )
+        # BLOQUE H: Supabase renombró las llaves — la service_role canónica del
+        # repo es `SUPABASE_SECRET_KEY` (validate.sh: "canónico SUPABASE_SECRET_KEY
+        # con fallback legacy SUPABASE_SERVICE_ROLE_KEY"). Este test buscaba solo
+        # el nombre legacy, ausente de `.env` → NUNCA corría de verdad (su razón
+        # de existir, cazar drift de schema, estaba muerta). Mapear la canónica.
+        _secret = os.environ.get("SUPABASE_SECRET_KEY", "")
+        if _secret:
+            os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", _secret)
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+    # BLOQUE H: rechazar valores centinela dummy. Muchos tests hacen
+    # `os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")`
+    # para poder importar módulos del orchestrator; en el suite completo esa
+    # key dummy filtra a este módulo (orden de colección) y hacía que el probe
+    # intentara conectar a Supabase con credencial inválida → 401 ERROR en vez
+    # de skip limpio. Una service key real (JWT o sb_secret_...) es larga (>40).
+    _DUMMY_KEYS = {"service-role", "service_role", "test", "test-secret", "x"}
+    if key in _DUMMY_KEYS or len(key) < 40:
+        return False
+    return bool(os.environ.get("SUPABASE_URL") and key)
 
 
 _DB_AVAILABLE = _load_env_if_available()
@@ -75,11 +90,18 @@ def _get_real_columns(table: str) -> set[str]:
     Retorna None si no se puede determinar el schema (test se skipea).
     """
     from supabase import create_client
-    sb = create_client(
-        os.environ["SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-    )
-    res = sb.table(table).select("*").limit(1).execute()
+    # BLOQUE H (review Fable): envolver la conexión/SELECT en try/except → un
+    # fallo de red o de creds produce skip limpio (return None), NO 5 ERROR que
+    # tornarían rojo el suite/validate.sh. El test valida schema cuando la DB
+    # está accesible; cuando no, se salta.
+    try:
+        sb = create_client(
+            os.environ["SUPABASE_URL"],
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        )
+        res = sb.table(table).select("*").limit(1).execute()
+    except Exception:
+        return None
     if res.data:
         return set(res.data[0].keys())
     # Tabla vacía — probe insert + delete. Para tablas con FK a tenants

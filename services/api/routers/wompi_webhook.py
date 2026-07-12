@@ -839,6 +839,13 @@ def _notify_client_refund_completed(
     hábiles típicos post-VOIDED.
 
     Envía WhatsApp + email + actualiza audit refund_completed_at.
+
+    SST de este flujo. Existe una RÉPLICA en el orchestrator
+    (services/ai-orchestrator/refund_notifications.py) usada por el cron backup
+    del worker (MA-9), porque este módulo NO es importable desde el proceso
+    orchestrator (rootDir distinto en Render). Si editas el copy WhatsApp/email
+    o el composer, propaga el cambio allá. La réplica tiene semántica de
+    reintento (devuelve bool) y guard de idempotencia por refund_status.
     """
     try:
         # Webhook processing: descubre el tenant del order (ref del webhook).
@@ -857,6 +864,22 @@ def _notify_client_refund_completed(
     cancellation_id = order.get("cancellation_id")
     short_id = order_id[:8].upper()
     amount_fmt = f"${amount_in_cents / 100:,.0f}".replace(",", ".")
+
+    # BLOQUE H (review Fable): idempotencia cross-path con el cron backup del
+    # orchestrator. Si el reembolso ya fue marcado 'completed' (p.ej. el poll
+    # del worker notificó primero), NO re-notificar — el WhatsApp no tiene
+    # Idempotency-Key propia y el cliente recibiría el mensaje duplicado.
+    if cancellation_id and tenant_id:
+        try:
+            _cx = (
+                supabase.table("order_cancellations")  # tenant_filter:exempt:webhook_resolution_lookup
+                .select("refund_status")
+                .eq("id", cancellation_id).single().execute()
+            ).data
+            if (_cx or {}).get("refund_status") == "completed":
+                return
+        except Exception:
+            pass
 
     # WhatsApp.
     if conversation_id and tenant_id:

@@ -156,12 +156,16 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 
 async def _send_email_via_resend(
     *, to: str, subject: str, html: str, text: str | None = None,
+    idempotency_key: str | None = None,
 ) -> bool:
     """Rev. 94 — Envío real vía Resend API.
 
     Si `RESEND_API_KEY` no está configurada, fallback a logger (no falla
     el flujo). Resend free tier: 100 emails/día — suficiente para
     notificaciones críticas operacionales.
+
+    `idempotency_key` (BLOQUE H): opcional, para callers con reintento
+    (ej. cron backup VOIDED) — Resend dedupe 24h, máx 256 chars.
 
     Docs: https://resend.com/docs/api-reference/emails/send-email
     """
@@ -185,6 +189,8 @@ async def _send_email_via_resend(
         "Authorization": f"Bearer {RESEND_API_KEY}",
         "Content-Type": "application/json",
     }
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key[:256]
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(
@@ -197,9 +203,13 @@ async def _send_email_via_resend(
             "[EMAIL][ERROR] status=%s body=%s",
             res.status_code, res.text[:200],
         )
-        # 4xx (bad request, invalid key) — no retry; 5xx — retry.
-        if res.status_code < 500:
-            return True
+        # BLOQUE H (review Fable HIGH): el bool es "¿el email fue ACEPTADO
+        # (2xx)?" — verdad de entrega, no "¿reintentar?". Antes devolvía True
+        # en cualquier 4xx (incl. 429 rate-limit del free tier 100/día); en el
+        # path donde el email GOBIERNA (refund sin conversación) eso marcaba
+        # "cliente notificado" sin haberlo notificado → sync VOIDED + audit
+        # 'completed' falso. Ahora solo 2xx = entregado; el caller decide si
+        # reintentar (el cron de refund reintenta el próximo ciclo).
         return False
     except Exception as exc:
         logger.error("[EMAIL] Resend unreachable: %s", exc)
