@@ -209,6 +209,62 @@ async def get_claim(
     return res.data
 
 
+def _notify_client_claim_outcome(supabase, *, claim: dict, tenant_id: str, enabled: bool = True) -> None:
+    """BLOQUE F-5: notifica al cliente por WhatsApp cuando su reclamo se RESUELVE o RECHAZA.
+
+    Antes los paths de mutación (resolve/patch) solo escribían a DB → el cliente NUNCA se enteraba,
+    aunque la UI se lo afirmaba al operador. Reusa el patrón best-effort de wompi_webhook
+    (_enqueue_whatsapp_outbound): encola el mensaje y la ventana 24h de Meta la aplica el downstream
+    (si el cliente escribió hace >24h la entrega falla igual que en las notifs de pago/envío). NUNCA
+    rompe la mutación (best-effort). `claim` es la fila YA actualizada (incluye status/notes/order_id).
+    `enabled` deja al caller (patch_claim) notificar solo en la TRANSICIÓN sin añadir una rama propia.
+    """
+    if not enabled:
+        return
+    try:
+        status = (claim or {}).get("status")
+        if status not in ("resolved", "rejected"):
+            return
+        order_id = claim.get("order_id")
+        if not order_id:
+            return
+        order = (
+            supabase.table("orders")
+            .select("conversation_id")
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1)
+            .execute()
+        ).data
+        conversation_id = (order or [{}])[0].get("conversation_id")
+        if not conversation_id:
+            return  # sin conversación WhatsApp (p.ej. pedido MeLi/consola) → no hay canal
+
+        ticket = claim.get("ticket_number")
+        notes = (claim.get("resolution_notes") or "").strip()
+        ref = f"#{ticket}" if ticket else f"del pedido #{str(order_id)[:8].upper()}"
+        if status == "resolved":
+            text = (
+                f"✅ *Reclamo resuelto*\n\nTu reclamo {ref} fue resuelto."
+                + (f"\n\n{notes}" if notes else "")
+                + "\n\nGracias por tu paciencia. Si necesitas algo más, escríbenos."
+            )
+        else:  # rejected
+            text = (
+                f"Hemos revisado tu reclamo {ref}."
+                + (f"\n\n{notes}" if notes else "")
+                + "\n\nSi tienes dudas o nueva información, escríbenos y lo revisamos."
+            )
+
+        from routers.wompi_webhook import _enqueue_whatsapp_outbound
+        _enqueue_whatsapp_outbound(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            text=text, log_tag="CLAIM_WA_OUTCOME",
+        )
+    except Exception as exc:
+        logger.warning("[CLAIMS] notif cliente falló claim=%s: %s", (claim or {}).get("id"), exc)
+
+
 @router.patch("/{claim_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="updated")
 async def patch_claim(
@@ -235,11 +291,14 @@ async def patch_claim(
     if not update:
         raise HTTPException(status_code=422, detail="Sin campos a actualizar")
 
+    # F-5: notificar al cliente SOLO en la transición a un outcome (resolved/rejected), no en cada patch.
+    _notify_outcome = False
     # Guard de reapertura: solo si el status cambia de terminal → no-terminal.
     if "status" in update:
         new_status = update["status"]
         current = _fetch_claim(supabase, tenant_id, claim_id)
         cur_status = current.get("status")
+        _notify_outcome = new_status in ("resolved", "rejected") and cur_status != new_status
         is_reopen = cur_status in TERMINAL_STATUSES and new_status not in TERMINAL_STATUSES
         if is_reopen:
             if _role != "owner":
@@ -273,6 +332,7 @@ async def patch_claim(
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Reclamo no encontrado")
+    _notify_client_claim_outcome(supabase, claim=res.data[0], tenant_id=tenant_id, enabled=_notify_outcome)
     return res.data[0]
 
 
@@ -287,6 +347,7 @@ async def resolve_claim(
     _role: str = Depends(require_write_role),
 ):
     """Atajo: marca status=resolved + persiste resolution_notes obligatoria."""
+    prev = _fetch_claim(supabase, tenant_id, claim_id)  # status previo + 404 si no existe
     res = (
         supabase.table("claims")
         .update({
@@ -299,4 +360,10 @@ async def resolve_claim(
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Reclamo no encontrado")
+    # F-5: notificar SOLO en la transición real a 'resolved' (idempotente: repetir /resolve —o
+    # PATCH-resolve seguido de /resolve— NO re-notifica al cliente).
+    _notify_client_claim_outcome(
+        supabase, claim=res.data[0], tenant_id=tenant_id,
+        enabled=(prev.get("status") != "resolved"),
+    )
     return res.data[0]
