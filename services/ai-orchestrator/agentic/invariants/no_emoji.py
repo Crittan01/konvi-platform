@@ -26,7 +26,7 @@ from agentic.invariants.base import (
 #   • 📋 = marcador inicio del *Resumen* de pedido.
 #   • 🚚 = marcador *Envío* o *Seguimiento*.
 #   • ✅ = marcador *Pago confirmado* (post-Wompi APPROVED).
-_ALLOWED_EMOJIS = {"📋", "🚚", "✅"}
+_ALLOWED_EMOJIS = {"📋", "🚚", "✅", "💵"}
 
 # Rango Unicode amplio de emojis decorativos.
 # Cubre: emoticons (1F600-1F64F), symbols (2600-27BF, 2B00-2BFF),

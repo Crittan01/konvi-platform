@@ -53,7 +53,7 @@ circuit = _load_module("circuit", PKG_PATH / "circuit.py")
 idemp = _load_module("idempotency", PKG_PATH / "idempotency.py")
 
 # F.1 webhook_framework — F.2 reusa TokenBucket de aquí. NO usamos sys.path
-# ni namespace packages porque test_envia_webhook_processor.py inyecta `lib`
+# ni namespace packages porque otros tests del suite pueden inyectar `lib`
 # como ModuleType simple (no-package) en sys.modules, lo que rompería
 # `from lib.webhook_framework.rate_limit import ...`. En lugar de eso,
 # cargamos via importlib loader (igual patrón que el resto del archivo) y

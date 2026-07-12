@@ -154,8 +154,8 @@ class SecretGenerationTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.environ.get("SLOW_TESTS") == "1" or True,  # bcrypt rotation tests siempre activos
-    "bcrypt tests are slow but critical — siempre run",
+    os.environ.get("SLOW_TESTS") == "1",  # el gate (validate.sh) exporta SLOW_TESTS=1
+    "bcrypt rotation tests lentos — habilitar con SLOW_TESTS=1 (el gate lo hace)",
 )
 class RotationTests(unittest.TestCase):
     """Tests con bcrypt real. Tarda ~0.3s por test pero es crítico para

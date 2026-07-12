@@ -6,8 +6,8 @@
 
 | Elemento | Versión real |
 |---------|-------------|
-| Next.js | **14.2.35** (App Router, Server Actions, Server Components) |
-| React | ^18 |
+| Next.js | **15.5.20** (App Router, Server Actions, Server Components) |
+| React | ^19 |
 | TypeScript | ^5 |
 | TailwindCSS | ^3.3.0 |
 | `@supabase/ssr` | ^0.10.0 |
@@ -26,7 +26,7 @@
 | supabase-py | 2.28.3 |
 | httpx | 0.28.1 |
 | PyJWT | 2.10.1 |
-| GEMINI_MODEL | `gemini-2.5-flash` |
+| GEMINI_MODEL | `gemini-3.1-flash-lite` (prod, render.yaml) · default en código `gemini-3.5-flash` · cascade a Claude rescue |
 
 ## Infraestructura
 

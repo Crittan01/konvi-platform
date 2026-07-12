@@ -72,6 +72,12 @@ done
 # pytest no está instalado, fallback a unittest (CI debe tener pytest).
 _hdr "Python unit tests"
 
+# QW3 (auditoría 2026-07-12): habilitar los tests bcrypt-pesados (MFA recovery
+# codes + rotación de webhook secret) en el gate. Sin esto quedaban skipeados
+# por defecto (skipUnless SLOW_TESTS) → el path de seguridad de MFA no se
+# validaba en CI. Costo ~2s; el gate SIEMPRE ejerce el path crítico.
+export SLOW_TESTS=1
+
 if python3.11 -c "import pytest" 2>/dev/null; then
   if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
     python3.11 -m coverage erase 2>/dev/null || true

@@ -13,7 +13,7 @@ No sustituye el código ni la jerarquía documental de `.context/`.
 
 | Capa | Versión |
 |---|---|
-| Frontend | Next.js `14.2.35` + React `^18` + TypeScript `^5` |
+| Frontend | Next.js `15.5.20` + React `^19` + TypeScript `^5` |
 | Backend Python | FastAPI `0.128.8`, Pydantic `2.12.5`, `supabase==2.28.3` |
 | IA | `google-genai==1.47.0`, `gemini-2.5-flash` |
 | DB/Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
@@ -62,7 +62,7 @@ supabase/migrations/          # fuente canónica de esquema
 
 ## NO leer (reduce tokens ~50%)
 
-- `supabase/migrations/` — 87 SQLs. Leer solo si hay tarea explícita de migración.
+- `supabase/migrations/` — 218 SQLs. Leer solo si hay tarea explícita de migración.
 - `.context/01-state-archive.md` — historial de sesiones archivado.
 - `packages/db/migrations/` — snapshot legacy divergido, no canónico.
 - `scratch/`, `scripts/debug/` — temporales locales.
@@ -81,7 +81,7 @@ supabase/migrations/          # fuente canónica de esquema
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh             # sintaxis + ~2889 tests (pytest) + tenant lint + TypeScript + ESLint
+bash scripts/validate.sh             # sintaxis + ~3490 tests (pytest) + tenant lint + TypeScript + ESLint
 bash scripts/validate.sh --build     # + Next.js build (detecta errores que bloquean Render)
 bash scripts/validate.sh --full      # + pip-audit + coherencia vars
 bash scripts/validate.sh --coverage  # + cobertura Python (baseline 58.9%, target 70% Sem 11)

@@ -4322,32 +4322,6 @@ def _detect_building_type_from_text(text: str) -> Optional[str]:
     return None
 
 
-def _detect_conjunto_type_from_text(text: str) -> Optional[str]:
-    """Sem 7 F2 cierre 2026-05-19 — Detecta si un conjunto residencial
-    es de torres o de casas. Solo se invoca cuando ya sabemos
-    building_type='conjunto' pero falta el sub-tipo.
-
-    Returns: "torres" | "casas" | None.
-    """
-    if not text:
-        return None
-    normalized = _normalize_text_simple(text)
-    # Señales fuertes "casas":
-    if any(kw in normalized for kw in (
-        "conjunto de casas", "conjunto cerrado de casas",
-        "casas del conjunto", "es de casas", "son casas",
-        "casa #", "casa numero", "casa no", "mi casa es la",
-    )):
-        return "casas"
-    # Señales fuertes "torres":
-    if any(kw in normalized for kw in (
-        "conjunto de torres", "torres del conjunto",
-        "torre ", "bloque ", "torres y", "es de torres",
-    )):
-        return "torres"
-    return None
-
-
 # Rev. 104 (F1-2) — extraídos a fsm/address.py.
 from fsm.address import (
     normalize_building_type as _normalize_building_type,

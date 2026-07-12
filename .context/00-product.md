@@ -137,6 +137,8 @@ que una decisión formal de producto las integre o las elimine.
 |---|---|---|
 | `/dashboard/(products)/media` | Funcional, oculta | Gestor de medios (subida y listado de archivos a `tenant-media` en Supabase Storage). Pendiente decisión: ¿se integra al editor de Catálogo o queda como módulo paralelo? Hasta entonces no se enlaza desde el sidebar. |
 | `/dashboard/(products)/inventory` | Redirect 301 → `/dashboard/catalog` | Ruta legacy mantenida intencionalmente para compatibilidad con bookmarks y links externos. Definida en rev. 5. |
+| `/dashboard/account` | Redirect → `/dashboard/settings/security` | Backward-compat (rev. 109 J.2.4.3): la página de cuenta se consolidó en Settings → Seguridad (contraseña + MFA + recovery codes). Preserva bookmarks viejos + link legacy del dropdown del avatar. |
+| `/dashboard/(settings-group)/whatsapp-templates` | Redirect → `/dashboard/integrations/whatsapp?tab=plantillas` | Backward-compat: las plantillas HSM se movieron dentro del panel de la integración WhatsApp. Preserva URLs en bookmarks/emails viejos. |
 
 Política: cualquier ruta hidden debe quedar listada aquí con razón explícita.
 Si se decide eliminarla, hacerlo en una sola operación con barrido de

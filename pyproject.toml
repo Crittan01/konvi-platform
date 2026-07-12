@@ -43,6 +43,11 @@ ignore = [
 "services/ai-orchestrator/outbound/validator.py" = ["F401"]
 
 [tool.pytest.ini_options]
+# QW7 (auditoría 2026-07-12): fijar testpaths evita el INTERNALERROR de la
+# colección "bare" (pytest sin args intentaba colectar todo el árbol, incl.
+# services/ con imports que requieren env). El gate ya pasa `tests/`, pero esto
+# hace robusto cualquier `pytest` sin args.
+testpaths = ["tests"]
 # Filtros para suite limpia (0 warnings):
 #   • PydanticDeprecatedSince212 viene del paquete EXTERNO `google.genai.types`
 #     (línea 9906). Nuestro código NO usa el patrón deprecated. Se resolverá

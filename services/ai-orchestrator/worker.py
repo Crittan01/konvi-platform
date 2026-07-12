@@ -2481,13 +2481,16 @@ class OrchestratorWorker:
                 # D-F7 async-hygiene — los collectors hacen HTTP síncrono
                 # (httpx.Client, timeout 10s: Graph API WhatsApp + Telegram
                 # getWebhookInfo) además de queries supabase bloqueantes. Invocarlos
-                # directo desde el event loop lo CONGELABA hasta 10-15s POR TENANT;
-                # con N tenants el heartbeat HTTP de /health (uvicorn corre en el
-                # MISMO loop, ver server.py) se ahogaba y Render marcaba unhealthy.
-                # asyncio.to_thread mueve TODO el IO bloqueante (httpx sync +
-                # supabase sync) a un worker thread → el loop respira. Se preserva
-                # la firma sync de los collectors (tests los llaman síncronos) y el
-                # await es secuencial (sin acceso concurrente al mismo supabase client).
+                # directo desde el event loop lo CONGELABA hasta 10-15s POR TENANT.
+                # Arquitectura real (server.py): el worker corre en su PROPIO event
+                # loop en un thread de fondo; uvicorn sirve /health en el loop del
+                # thread principal. Congelar el loop del worker no bloquea a uvicorn,
+                # pero SÍ frena la actualización de last_heartbeat_ts que /health lee
+                # → el heartbeat quedaba stale y Render marcaba unhealthy. asyncio.to_thread
+                # mueve el IO bloqueante (httpx sync + supabase sync) a otro thread →
+                # el loop del worker respira y sigue latiendo. Se preserva la firma sync
+                # de los collectors (tests los llaman síncronos) y el await es secuencial
+                # (sin acceso concurrente al mismo supabase client).
                 metrics = await asyncio.to_thread(
                     collect_all_for_tenant, self.supabase, str(tenant_id),
                 )
