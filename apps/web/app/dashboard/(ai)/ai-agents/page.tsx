@@ -60,11 +60,38 @@ export default async function AiAgentsPage() {
   if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
-  const canWrite = ['owner', 'manager'].includes(meta.role ?? '')
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
+
+  // BLOQUE G-4: la PAGE es el borde de seguridad (no el sidebar). Endurecer a
+  // owner-only + capability, paridad con el gate del sidebar (roles:['owner'] +
+  // capability:'ai.agents.configure'). Antes la page permitía manager y NO validaba
+  // capability → navegación directa la bypassaba. 'el frontend no es seguridad', pero
+  // esta es una page server-side: el redirect SÍ es un gate real de acceso.
+  if (meta.role !== 'owner') redirect('/dashboard')
+
+  // Capability del plan: solo se DENIEGA si el plan la deshabilita explícitamente
+  // (fila enabled=false). Fila ausente / sin plan / error → fail-open (como el layout,
+  // no romper por un fallo transitorio). El redirect va FUERA del try (NEXT_REDIRECT).
+  let capabilityDenied = false
+  try {
+    const { data: sub } = await supabase.from('tenant_subscriptions')
+      .select('plan_code').eq('tenant_id', tenantId).maybeSingle()
+    const planCode = (sub as { plan_code?: string } | null)?.plan_code
+    if (planCode) {
+      const { data: cap } = await supabase.from('plan_capabilities')
+        .select('enabled').eq('plan_code', planCode)
+        .eq('capability_key', 'ai.agents.configure').maybeSingle()
+      capabilityDenied = (cap as { enabled?: boolean } | null)?.enabled === false
+    }
+  } catch {
+    capabilityDenied = false
+  }
+  if (capabilityDenied) redirect('/dashboard')
+
+  const canWrite = meta.role === 'owner'
 
   const [
     { data },
@@ -166,7 +193,13 @@ export default async function AiAgentsPage() {
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+    // BLOQUE G-4 (review HIGH): OWNER-ONLY, no owner+manager. Las server actions son
+    // POST invocables independientes del render de la page → el redirect de la page
+    // NO las protege, y la RLS de ai_agents es tenant-only (sin rol). Este predicado
+    // es el ÚNICO gate de rol sobre el CRUD de agentes (Prompt Maestro/guardrails/tools)
+    // → debe igualar el gate owner-only de la page/sidebar. 'el frontend no es seguridad',
+    // pero esta 'use server' action SÍ es server-side.
+    if (!m.tenant_id || m.role !== 'owner') {
       return { ok: false, error: 'Sin permisos' }
     }
     const name = (formData.get('name') as string || '').trim()
@@ -228,7 +261,13 @@ export default async function AiAgentsPage() {
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+    // BLOQUE G-4 (review HIGH): OWNER-ONLY, no owner+manager. Las server actions son
+    // POST invocables independientes del render de la page → el redirect de la page
+    // NO las protege, y la RLS de ai_agents es tenant-only (sin rol). Este predicado
+    // es el ÚNICO gate de rol sobre el CRUD de agentes (Prompt Maestro/guardrails/tools)
+    // → debe igualar el gate owner-only de la page/sidebar. 'el frontend no es seguridad',
+    // pero esta 'use server' action SÍ es server-side.
+    if (!m.tenant_id || m.role !== 'owner') {
       return { ok: false, error: 'Sin permisos' }
     }
     const id = (formData.get('id') as string || '').trim()
@@ -316,7 +355,13 @@ export default async function AiAgentsPage() {
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+    // BLOQUE G-4 (review HIGH): OWNER-ONLY, no owner+manager. Las server actions son
+    // POST invocables independientes del render de la page → el redirect de la page
+    // NO las protege, y la RLS de ai_agents es tenant-only (sin rol). Este predicado
+    // es el ÚNICO gate de rol sobre el CRUD de agentes (Prompt Maestro/guardrails/tools)
+    // → debe igualar el gate owner-only de la page/sidebar. 'el frontend no es seguridad',
+    // pero esta 'use server' action SÍ es server-side.
+    if (!m.tenant_id || m.role !== 'owner') {
       return { ok: false, error: 'Sin permisos' }
     }
     const id = (formData.get('id') as string || '').trim()
