@@ -22,15 +22,21 @@ def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, s
     WhatsApp status=connected in tenant_integrations.
     """
     try:
+        # BLOQUE J (review): maybe_single (no single) — un tenant SIN fila de
+        # integración WhatsApp es estado benigno (onboarding / tenant no-WhatsApp).
+        # .single() lanzaría PGRST116 con 0 filas → caería al except y loguearía un
+        # falso "¿Vault/DB transitorio?". maybe_single devuelve data=None → el guard
+        # `if not res.data` lo maneja limpio, y el except queda SOLO para fallos
+        # genuinos (Vault/DB), cumpliendo el objetivo de distinguirlos.
         res = (
             supabase.table("tenant_integrations")
             .select("credentials, status")
             .eq("tenant_id", tenant_id)
             .eq("provider", "whatsapp")
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not res.data:
+        if not res or not res.data:
             return "", ""
         if res.data.get("status") != "connected":
             return "", ""
@@ -40,7 +46,17 @@ def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, s
         phone_id     = creds.get("phone_number_id", "")
         access_token = resolve_secret(vault, creds, "access_token") or ""
         return phone_id, access_token
-    except Exception:
+    except Exception as exc:
+        # BLOQUE J (robustez): loguear la excepción. Antes se tragaba en silencio,
+        # con lo que un fallo TRANSITORIO de Vault/DB era indistinguible de "tenant
+        # sin credenciales" — el caller logueaba "Faltan credenciales" y el mensaje
+        # se perdía sin señal de que fue un outage recuperable. El retorno ("","")
+        # se mantiene (el caller ya lo maneja), pero ahora queda traza para diagnóstico.
+        logger.error(
+            "[META API] _get_tenant_wa_credentials error (¿Vault/DB transitorio?) "
+            "tenant=%s: %s",
+            (tenant_id or "?")[:8], exc,
+        )
         return "", ""
 
 

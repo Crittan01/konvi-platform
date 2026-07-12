@@ -50,6 +50,10 @@ HUMAN_TAKEOVER_QUEUE_ENABLED = os.getenv("HUMAN_TAKEOVER_QUEUE_ENABLED", "true")
 }
 HUMAN_TAKEOVER_QUEUE_POLL_BATCH = int(os.getenv("HUMAN_TAKEOVER_QUEUE_POLL_BATCH", "10"))
 HUMAN_TAKEOVER_QUEUE_VT_SECONDS = int(os.getenv("HUMAN_TAKEOVER_QUEUE_VT_SECONDS", "90"))
+# BLOQUE J (robustez): tope de reintentos (read_ct de pgmq) antes de dead-letter.
+# Sin esto, un evento que falla persistentemente (Telegram unreachable, todos los
+# emails Resend fallando) se re-entrega para siempre cada VT.
+HUMAN_TAKEOVER_MAX_READ_CT = int(os.getenv("HUMAN_TAKEOVER_MAX_READ_CT", "10"))
 WHATSAPP_OUTBOUND_QUEUE_ENABLED = os.getenv("WHATSAPP_OUTBOUND_QUEUE_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -826,7 +830,35 @@ class OrchestratorWorker:
             if handled:
                 self._ack_human_takeover_message(msg_id)
             else:
-                logger.warning("Takeover msg_id=%s no ACK (retry tras VT)", msg_id)
+                # BLOQUE J (robustez): dead-letter tras N reintentos. read_ct lo
+                # expone el RPC (pgmq.read incrementa el contador por lectura). Si
+                # el evento falla persistentemente, ACK (delete) + alerta para que
+                # NO se re-entregue infinitamente; el operador queda notificado del
+                # escalamiento perdido por el log/Sentry.
+                read_ct = int(event.get("read_ct") or 0)
+                if read_ct >= HUMAN_TAKEOVER_MAX_READ_CT:
+                    # NO loguear el payload crudo: lleva customer_phone (PII) y
+                    # Sentry LoggingIntegration captura ERROR sin scrub de mensaje
+                    # → violaría "NUNCA PII a Sentry" (observability._before_send).
+                    # Solo IDs no-PII para diagnóstico.
+                    logger.error(
+                        "[TAKEOVER] DEAD-LETTER msg_id=%s tras %d reintentos — "
+                        "ACK para no re-entregar. Escalamiento NO despachado por "
+                        "push (revisar canales del tenant=%s conv=%s); el operador "
+                        "aún lo ve en el Inbox (conversación en human_takeover).",
+                        msg_id, read_ct,
+                        str(payload.get("tenant_id") or "?")[:8],
+                        str(payload.get("conversation_id") or "?")[:8],
+                    )
+                    self._metrics["takeover_events_dead_lettered"] = (
+                        self._metrics.get("takeover_events_dead_lettered", 0) + 1
+                    )
+                    self._ack_human_takeover_message(msg_id)
+                else:
+                    logger.warning(
+                        "Takeover msg_id=%s no ACK (retry %d/%d tras VT)",
+                        msg_id, read_ct, HUMAN_TAKEOVER_MAX_READ_CT,
+                    )
 
     def _ack_human_takeover_message(self, msg_id: int) -> None:
         try:
@@ -1380,6 +1412,12 @@ class OrchestratorWorker:
         csw_cutoff = (now_dt - timedelta(hours=META_CSW_HOURS)).isoformat()
 
         for order in stale:
+            # BLOQUE J (robustez): latir por ítem. El loop hace hasta 50 iteraciones
+            # con I/O de red (query last-inbound + HSM send timeout 10s c/u); sin este
+            # heartbeat un ciclo lento superaba HEALTH_HEARTBEAT_STALE_SECONDS=120 →
+            # /health 503 → Render reiniciaba a mitad del batch. Mismo patrón que el
+            # poll de voids (_poll_wompi_pending_voids_if_due).
+            self.last_heartbeat_ts = time.time()
             order_id = order.get("id")
             tenant_id = order.get("tenant_id")
             conversation_id = order.get("conversation_id")
@@ -1771,6 +1809,9 @@ class OrchestratorWorker:
         carts = self._cap_per_tenant(carts, CART_ABANDONED_MAX_PER_TENANT_PER_CYCLE)
 
         for cart in carts:
+            # BLOQUE J (robustez): latir por ítem — mismo motivo que el loop de
+            # payment reminders (I/O de red por carrito, hasta 50, HSM timeout 10s).
+            self.last_heartbeat_ts = time.time()
             cart_id = cart.get("id")
             tenant_id = cart.get("tenant_id")
             conversation_id = cart.get("conversation_id")
@@ -2426,23 +2467,56 @@ class OrchestratorWorker:
                     tenant_id, exc, exc_info=True,
                 )
 
-    def _mark_outbound_failed(self, tenant_id: str, message_id: str, reason: str) -> None:
+    def _mark_outbound_failed(self, tenant_id: str, message_id: str, reason: str) -> bool:
+        """Marca un outbound como 'failed'. Devuelve True si el UPDATE quedó.
+
+        BLOQUE J (robustez + review): era la ÚNICA escritura DB del consumidor
+        outbound sin protección — un error transitorio del UPDATE propagaba y
+        abortaba el resto del batch + los crons siguientes del mismo tick. Ahora:
+        (1) retry 3x con backoff (mismo patrón que _mark_outbound_sent) para que un
+        fallo transitorio de DB casi nunca deje el row mal etiquetado; (2) si los
+        3 fallan, NO propaga (no tumba el ciclo) pero registra un log ERROR + métrica
+        `wa_outbound_mark_failed_stuck` → el mislabel deja de ser SILENCIOSO
+        (reconciliable: un row failed que quedó 'pending' tiene meta_message_id NULL).
+        El caller ACK igual (no podemos re-encolar sin arriesgar reenvío duplicado).
+        """
         if not tenant_id or not message_id:
-            return
-        (
-            self.supabase.table("messages")
-            .update(
-                {
-                    "processing_status": "failed",
-                    "processed": True,
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
-                    "last_error": reason[:1000],
-                }
-            )
-            .eq("id", message_id)
-            .eq("tenant_id", tenant_id)
-            .execute()
+            return False
+        backoffs_ms = [100, 300, 1000]
+        for attempt, delay in enumerate(backoffs_ms, start=1):
+            try:
+                (
+                    self.supabase.table("messages")
+                    .update(
+                        {
+                            "processing_status": "failed",
+                            "processed": True,
+                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "last_error": reason[:1000],
+                        }
+                    )
+                    .eq("id", message_id)
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "[OUTBOUND] mark_failed retry %s/%s msg=%s: %s",
+                    attempt, len(backoffs_ms), message_id, exc,
+                )
+                if attempt < len(backoffs_ms):
+                    time.sleep(delay / 1000.0)
+        # Los 3 fallaron: no abortar el ciclo, pero dejar señal alertable.
+        self._metrics["wa_outbound_mark_failed_stuck"] = (
+            self._metrics.get("wa_outbound_mark_failed_stuck", 0) + 1
         )
+        logger.error(
+            "[OUTBOUND] mark_failed_stuck tenant=%s msg=%s — DB UPDATE falló 3x; "
+            "el row puede quedar mal etiquetado (reconciliar por meta_message_id NULL)",
+            (tenant_id or "?")[:8], message_id,
+        )
+        return False
 
     async def _collect_health_metrics_if_due(self) -> None:
         """Rev. 109 J.2.11 — Refresca métricas de salud de las 5 integraciones
