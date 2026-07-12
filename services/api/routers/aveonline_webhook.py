@@ -683,12 +683,18 @@ async def _handle_aveonline_webhook(
             str(latest_estado.get("nombre_estado") or ""),
         )
 
-        # BLOQUE F-6 — sync de `orders.status` a 'delivered'. INCONDICIONAL respecto
-        # al guard de transición de abajo: es idempotente (rank + `.in_` race-safe)
-        # y NO depende de conversation_id ni de `inserted`. Así auto-sana si un
-        # UPDATE falló antes — el guard de transición (shipment ya terminal) nunca
-        # re-invocaría `_notify_status_change`, dejando la orden colgada en 'shipped'.
-        if latest_internal == "delivered" and order_id:
+        # Re-fetch el shipment tras procesar los eventos: el RPC ya aplicó el guard
+        # monotónico por occurred_at, así que `refreshed.status` es la AUTORIDAD del
+        # estado real (no `latest_internal`, que es el más reciente DENTRO de este
+        # POST). Se reusa abajo para la notificación.
+        refreshed = _lookup_shipment_by_tracking(supabase, tenant_id, guia) or shipment
+
+        # BLOQUE F-6 — sync de `orders.status` a 'delivered'. Gateado por el status
+        # REAL persistido del shipment (review MED): si el guard monotónico bloqueó el
+        # 'delivered' (evento viejo bajo POSTs concurrentes), la orden TAMPOCO avanza
+        # → order y shipment no divergen. Idempotente (rank + `.in_` race-safe), NO
+        # depende de conversation_id ni de `inserted` → auto-sana un UPDATE que falló.
+        if refreshed.get("status") == "delivered" and order_id:
             _advance_order_to_delivered(supabase, tenant_id, order_id, None)
 
         latest_external_id = (
@@ -705,9 +711,6 @@ async def _handle_aveonline_webhook(
             and latest_internal != prev_status
             and prev_status not in TERMINAL_STATUSES
         ):
-            # Re-fetch shipment para que tracking_url/carrier estén actualizados
-            # post `fn_record_shipment_tracking_event` (que actualiza status).
-            refreshed = _lookup_shipment_by_tracking(supabase, tenant_id, guia) or shipment
             try:
                 _notify_status_change(
                     supabase,
