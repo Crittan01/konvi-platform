@@ -15,6 +15,7 @@ import {
 } from '../../_components/setup-primitives'
 import { WhatsAppCredentialsForm } from './whatsapp-credentials-form'
 import { CopyInlineButton } from './copy-inline-button'
+import { whatsappWebhookUrl } from '@/lib/webhook-urls'
 
 type Props = {
   connected: boolean
@@ -92,10 +93,10 @@ export default function WhatsAppSetup({ connected, credentials, canWrite, tenant
           </div>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
-              https://api.konvi.co/api/v1/whatsapp/webhook/{tenantId}
+              {whatsappWebhookUrl(tenantId)}
             </code>
             <CopyInlineButton
-              value={`https://api.konvi.co/api/v1/whatsapp/webhook/${tenantId}`}
+              value={whatsappWebhookUrl(tenantId)}
             />
           </div>
         </div>
