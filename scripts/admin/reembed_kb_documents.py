@@ -35,7 +35,9 @@ sys.path.insert(0, os.path.abspath(_API))
 
 from supabase import create_client  # noqa: E402
 from dependencies.embeddings import embed_kb_document  # noqa: E402
-from lib.llm_embed import GEMINI_EMBEDDING_MODEL, EMBEDDING_DIM  # noqa: E402
+from lib.llm_embed import (  # noqa: E402
+    GEMINI_EMBEDDING_MODEL, EMBEDDING_DIM, get_embedding_model_version,
+)
 
 
 def _pgvector(values: list[float]) -> str:
@@ -89,9 +91,14 @@ def main() -> int:
             failed += 1
             print(f"  [{i}/{len(rows)}] FALLO embed doc={r['id']} tenant={r.get('tenant_id')}")
             continue
-        sb.table("kb_documents").update(
-            {"embedding": _pgvector(vec)}
-        ).eq("id", r["id"]).eq("tenant_id", r["tenant_id"]).execute()
+        # BLOQUE G-3 (fix): estampar también embedding_model_version. Antes el
+        # re-embed dejaba la versión stale/NULL → el audit de drift + el guard de
+        # query-time (match_kb_documents) no podían confiar en la columna, y un
+        # re-embed no "sanaba" el registro de versión. Ahora queda coherente.
+        sb.table("kb_documents").update({
+            "embedding": _pgvector(vec),
+            "embedding_model_version": get_embedding_model_version(),
+        }).eq("id", r["id"]).eq("tenant_id", r["tenant_id"]).execute()
         ok += 1
         if i % 25 == 0:
             print(f"  ... {i}/{len(rows)} (ok={ok} fail={failed})")

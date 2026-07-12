@@ -18,6 +18,7 @@ from tools.kb_tool import (
     _fallback_kb,
     CATEGORY_LABELS,
 )
+from llm_embed import get_embedding_model_version  # BLOQUE G-3: guard de drift
 
 TENANT_ID = "tenant-abc"
 
@@ -116,6 +117,7 @@ class TestGetTenantKbRag(unittest.IsolatedAsyncioTestCase):
                 "match_threshold": 0.5,
                 "match_count": 3,
                 "t_id": TENANT_ID,
+                "p_model_version": get_embedding_model_version(),
             }
         )
         self.assertEqual(result, docs)

@@ -141,6 +141,9 @@ export async function POST(request: NextRequest) {
           match_threshold: 0.4,
           match_count: 3,
           t_id: tenantId,
+          // BLOQUE G-3: guard de drift (paridad con el runtime del bot). Versión =
+          // `${modelo}:${dim}`, mismo formato que get_embedding_model_version().
+          p_model_version: `${EMBED_MODEL}:3072`,
         })
         if (kbRes.data?.length) {
           kbUsed  = true

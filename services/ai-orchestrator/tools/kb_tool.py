@@ -115,7 +115,7 @@ from google import genai
 # (cobertura transitorios + cache LRU + versionado). Master vive en
 # `services/ai-orchestrator/llm_embed.py` con copia byte-equal en
 # `services/api/lib/llm_embed.py` (test paridad valida coherencia).
-from llm_embed import embed_with_cascade, EmbedResult  # noqa: E402
+from llm_embed import embed_with_cascade, EmbedResult, get_embedding_model_version  # noqa: E402
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
@@ -169,9 +169,20 @@ async def get_tenant_kb_rag(supabase: Client, tenant_id: str, query: str) -> lis
                     "match_threshold": 0.5,
                     "match_count": 3,
                     "t_id": tenant_id,
+                    # BLOQUE G-3: guard de drift — excluye docs de un modelo distinto.
+                    "p_model_version": get_embedding_model_version(),
                 },
             ).execute()
             semantic_docs = result.data or []
+            if not semantic_docs:
+                # BLOQUE G-3: 0 docs tras un embed exitoso. Puede ser falta de
+                # cobertura KB O drift de versión de embedding (docs en un modelo
+                # distinto, excluidos por el guard de match_kb_documents). Se loguea
+                # para que la exclusión NO sea silenciosa (detección de drift).
+                logger.info(
+                    "[KB_RAG] 0 docs semánticos tenant=%s (cobertura o drift de embedding)",
+                    tenant_id,
+                )
         except Exception as e:
             logger.warning(f"Error realizando KB RAG para tenant {tenant_id}: {e}")
             semantic_docs = []

@@ -27,6 +27,7 @@ from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client
 from dependencies.embeddings import embed_text
+from lib.llm_embed import get_embedding_model_version
 from dependencies.security import RateLimitRule, build_rate_limit_dependency
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,8 @@ async def preview_bot_response(
                     "match_threshold": 0.4,
                     "match_count": 3,
                     "t_id": tenant_id,
+                    # BLOQUE G-3: guard de drift (paridad con el runtime del bot).
+                    "p_model_version": get_embedding_model_version(),
                 },
             ).execute()
             docs = kb_res.data or []
