@@ -8,6 +8,7 @@ from supabase import create_client, Client
 from agentic.dispatcher import dispatch_message as _agentic_dispatch_message
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
+from refund_notifications import notify_client_refund_completed
 from whatsapp_sender import (
     send_whatsapp_message,
     send_whatsapp_template,
@@ -1971,7 +1972,7 @@ class OrchestratorWorker:
                 self.supabase.table("payments")  # tenant_filter:exempt:cron_cross_tenant_wompi_void_polling
                 .select(
                     "id, tenant_id, order_id, wompi_txn_id, amount_in_cents, "
-                    "wompi_status, orders(status, cancellation_id, "
+                    "wompi_status, updated_at, orders(status, cancellation_id, "
                     "order_cancellations!orders_cancellation_id_fkey"
                     "(refund_method, refund_status))",
                 )
@@ -2011,6 +2012,34 @@ class OrchestratorWorker:
             "[WOMPI_POLL] %d candidatos void pendientes (lookback=%dh)",
             len(eligible), WOMPI_VOID_POLL_LOOKBACK_HOURS,
         )
+
+        # BLOQUE H (review Fable MEDIUM): la ventana lookback (48h por
+        # payments.updated_at) acota silenciosamente el reintento F7-14 — un
+        # fallo de notificación persistente (pgmq caído, email inválido) haría
+        # que el candidato salga de la ventana y wompi_status quede APPROVED
+        # para siempre, sin señal. Alertar cuando un candidato elegible se
+        # acerca al borde (>50% de la ventana) para que NO se pierda en silencio.
+        _stale_cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(hours=WOMPI_VOID_POLL_LOOKBACK_HOURS / 2)
+        )
+        for _p in eligible:
+            _upd = _p.get("updated_at")
+            if not _upd:
+                continue
+            try:
+                _upd_dt = datetime.fromisoformat(str(_upd).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if _upd_dt < _stale_cutoff:
+                logger.error(
+                    "[WOMPI_POLL] STUCK refund void order=%s payment=%s "
+                    "sin notificar hace >%.0fh (se acerca al age-out de %dh) — "
+                    "requiere intervención",
+                    str(_p.get("order_id"))[:8], str(_p.get("id"))[:8],
+                    WOMPI_VOID_POLL_LOOKBACK_HOURS / 2,
+                    WOMPI_VOID_POLL_LOOKBACK_HOURS,
+                )
 
         # Para cada uno: GET txn a Wompi. Si VOIDED, notificar + sincronizar.
         for p in eligible:
@@ -2054,27 +2083,24 @@ class OrchestratorWorker:
                 # reintenta el próximo ciclo. Coste: en el caso raro de crash entre
                 # notif y update, el próximo ciclo re-notifica (aviso duplicado,
                 # nunca pérdida de dinero) — preferible a nunca informar.
-                try:
-                    import sys as _sys
-                    from pathlib import Path as _Path
-                    _api_routers = (
-                        _Path(__file__).resolve().parents[1] / "api" / "routers"
-                    )
-                    if str(_api_routers) not in _sys.path:
-                        _sys.path.insert(0, str(_api_routers))
-                    from wompi_webhook import (
-                        _notify_client_refund_completed,
-                    )
-                    _notify_client_refund_completed(
-                        self.supabase, order_id=order_id,
-                        amount_in_cents=amount,
-                    )
-                except Exception as _notif_exc:
+                #
+                # BLOQUE H P0-1 (auditoría 2026-07-12): el lazy import de
+                # wompi_webhook._notify_client_refund_completed NUNCA resolvía en
+                # este proceso (ModuleNotFoundError 'dependencies' local; en Render
+                # services/api/ ni existe — rootDir=services/ai-orchestrator) → la
+                # notif fallaba SIEMPRE y el sync a VOIDED jamás ocurría. Réplica
+                # local en refund_notifications.py (devuelve bool: el canal
+                # primario gobierna; email best-effort con Idempotency-Key).
+                notified = await notify_client_refund_completed(
+                    self.supabase, order_id=order_id, tenant_id=tenant_id,
+                    amount_in_cents=amount,
+                )
+                if not notified:
                     self._metrics["wompi_void_notify_failed"] += 1
                     logger.warning(
-                        "[WOMPI_POLL] notif refund falló order=%s: %s — NO se marca "
+                        "[WOMPI_POLL] notif refund falló order=%s — NO se marca "
                         "VOIDED (sigue elegible), reintento próximo ciclo",
-                        order_id[:8], _notif_exc,
+                        order_id[:8],
                     )
                     continue
 

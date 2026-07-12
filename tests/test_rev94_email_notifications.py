@@ -75,8 +75,11 @@ class SendEmailViaResendTests(unittest.TestCase):
         self.assertEqual(body["subject"], "S")
         self.assertEqual(body["html"], "<p>h</p>")
 
-    def test_4xx_returns_true_no_retry(self):
-        # 4xx: error permanente — no reintentar (return True).
+    def test_4xx_returns_false_not_delivered(self):
+        # BLOQUE H (review Fable HIGH): el bool es "¿entregado (2xx)?", no
+        # "¿reintentar?". Un 4xx (incl. 429 rate-limit) = NO entregado → False.
+        # Antes devolvía True en 4xx, lo que en el path donde el email gobierna
+        # (refund sin conversación) marcaba 'cliente notificado' en falso.
         mock_post = AsyncMock(return_value=MagicMock(
             status_code=400, text='{"error":"bad_request"}',
         ))
@@ -91,7 +94,26 @@ class SendEmailViaResendTests(unittest.TestCase):
                         to="t@x.com", subject="S", html="<p>h</p>",
                     )
                 )
-        self.assertTrue(ok)
+        self.assertFalse(ok)
+
+    def test_429_rate_limit_returns_false(self):
+        # 429 (cuota free tier 100/día) es transitorio → NO entregado → False,
+        # para que el caller (cron refund) reintente el próximo ciclo.
+        mock_post = AsyncMock(return_value=MagicMock(
+            status_code=429, text='{"error":"rate_limit"}',
+        ))
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.object(notifications, "RESEND_API_KEY", "re_x"):
+            with patch("notifications.httpx.AsyncClient", return_value=mock_ctx):
+                ok = self.loop.run_until_complete(
+                    notifications._send_email_via_resend(
+                        to="t@x.com", subject="S", html="<p>h</p>",
+                    )
+                )
+        self.assertFalse(ok)
 
     def test_5xx_returns_false_for_retry(self):
         mock_post = AsyncMock(return_value=MagicMock(
