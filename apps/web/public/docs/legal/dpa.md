@@ -54,6 +54,44 @@ NO se usan para venta, publicidad de terceros, ni cesión no autorizada.
   (ver `incident-response.md`).
 - Eliminar o devolver datos al término del contrato.
 
+## 5.bis Custodia de credenciales técnicas del Responsable (Meta App Secret — Model B)
+
+> **PLACEHOLDER — CLÁUSULA PENDIENTE DE REDACCIÓN LEGAL VINCULANTE.**
+> Bajo el modelo Direct Provider per-tenant (ADR-0023, Model B), el Responsable
+> es titular de SU PROPIA Meta App y comparte con el Encargado el `app_secret`
+> (y el `access_token` de System User) para que el Encargado valide la firma HMAC
+> de los webhooks de WhatsApp Cloud API y envíe mensajes en nombre del Responsable.
+> Estas credenciales **no son datos personales** de titulares, pero su custodia
+> requiere cláusula contractual expresa que este template todavía NO cierra.
+
+Esta sección debe cubrir, cuando legal la redacte de forma vinculante:
+
+- Alcance de la custodia: qué credenciales entrega el Responsable (`app_secret`,
+  `access_token`) y con qué finalidad exclusiva (validación HMAC + envío en nombre
+  del Responsable). NO se usan para otro fin.
+- Medida técnica de custodia: cifrado en Supabase Vault por `tenant_id`
+  (ver `subprocessors.md` y ADR-0025 sobre ownership de secrets por tenant).
+- Responsabilidad ante fuga/compromiso: obligación de notificación (enlaza §5
+  incidentes ≤72h) y de rotación de credenciales por el Responsable.
+- Devolución/eliminación al término del contrato (enlaza §9 Terminación).
+- Reconocimiento de que el Responsable es Direct Provider titular de su Meta App;
+  Konvi NO es Partner Meta ni comparte su App (ADR-0023).
+
+<!-- TODO(OQ-1, founder+legal): reemplazar este placeholder por cláusula vinculante
+     de custodia de app_secret Model B. Trazabilidad: ADR-0023 OQ-1 · timeline Sem 12.
+     Owner: Legal externo. Hasta entonces, el onboarding de tenants EXTERNOS en
+     producción queda bloqueado (KAIU=self no aplica). -->
+
+> **INTERVENCION HUMANA REQUERIDA**
+> - **RESPONSABLE:** Founder + asesor legal externo (Ley 1581/2012).
+> - **PASOS:** (1) redactar la cláusula de custodia de `app_secret`/`access_token`
+>   Model B; (2) integrarla como sección numerada de este DPA; (3) versionar el
+>   documento; (4) registrar aceptación electrónica en `tenant_legal_acceptance`.
+> - **INSUMOS:** ADR-0023 (Model B), `subprocessors.md`, ADR-0025 (Vault ownership),
+>   `incident-response.md`.
+> - **CRITERIO DE EXITO:** cláusula vinculante firmada/aceptada por el tenant ANTES
+>   de capturar su `app_secret` en producción; este placeholder eliminado.
+
 ## 6. Subprocesadores
 
 Listados en `subprocessors.md`. Cambios notificados con 30 días previos.
