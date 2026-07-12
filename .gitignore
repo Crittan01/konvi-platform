@@ -50,6 +50,8 @@ packages/auth/node_modules/
 # ─── Scratch / Debug local ────────────────────────────────────────────────────
 # Archivos temporales de sesión y scripts ad-hoc — no son parte del producto
 scratch/
+scratch*.py
+scratch*.js
 scripts/debug/
 
 # ─── Claude Code runtime artifacts ────────────────────────────────────────────

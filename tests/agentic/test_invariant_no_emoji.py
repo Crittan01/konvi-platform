@@ -72,6 +72,17 @@ class NoDecorativeEmojiTests(unittest.TestCase):
         if result.outcome == InvariantOutcome.REWRITE:
             self.assertIn("📋", result.replacement_text)
 
+    def test_contraentrega_emoji_preserved(self):
+        """💵 es whitelist: el prompt (V2/V3) lo autoriza y payment_coherence lo
+        EMITE ('💵 *Contra entrega*') — el invariant no debe borrarlo."""
+        result = _run(self.inv.validate(
+            candidate_text="💵 *Contra entrega* — pagas al recibir. ✨",
+            **self.kw,
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("💵", result.replacement_text)
+        self.assertNotIn("✨", result.replacement_text)
+
     def test_resumen_con_mix_emojis_strip_los_decorativos(self):
         result = _run(self.inv.validate(
             candidate_text="📋 *Resumen:*\n* 1x Coco: $24.000 ✨\n¡Listo! 😊",
