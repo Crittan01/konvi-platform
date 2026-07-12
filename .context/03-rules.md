@@ -17,7 +17,7 @@ Si faltan datos → solicitar al usuario o escalar a humano. No inventar.
 
 ## WhatsApp / Meta
 
-- Solo WhatsApp Cloud API oficial (Meta v21.0). Sin librerías no oficiales.
+- Solo WhatsApp Cloud API oficial (Meta Graph API v22.0). Sin librerías no oficiales.
 - Respuestas al cliente solo con datos reales del backend — nunca inventados.
 - Cumplimiento Anti-Spam de Meta.
 

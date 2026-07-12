@@ -1,30 +1,34 @@
-# Handoff — Estado Operativo Real (2026-06-26, rev. 111)
+# Handoff — Estado Operativo Real (2026-07-12, rev. 112)
 
-Este documento describe el estado operativo real de `develop`.
+Este documento describe el estado operativo real de `develop` (= `production`).
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
-Para estado por módulo: `.context/01-state.md`.
+Para estado por módulo: `.context/01-state.md` (rev.112 = tabla bloques 0→H).
 Los documentos de `docs/deployment/` y parte de `docs/operations/` contienen
 histórico de fases previas; ante conflicto, este HANDOFF y `.context/01-state.md`
 tienen prioridad.
 
 ---
 
-## Actualización rev. 111 (2026-06-26) — finiquito Fase A + A11 DESPLEGADO
+## Actualización rev. 112 (2026-07-12) — iniciativa production-grade bloques 0→H DESPLEGADA
 
 **Lo más reciente (tiene prioridad sobre el histórico de abajo):**
 
-- **Deploy:** todo el finiquito Fase A + A11 (auditoría/UAT/closeout del Inbox) está
-  EN PRODUCCIÓN. Branches: solo `develop` y `main`, iguales (`develop = main`).
-  **Render despliega desde `develop`** (auto-deploy on-push; configurado en el
-  dashboard, NO en render.yaml). Los 4 servicios `konvi-*` corren el código actual.
-  ⚠️ Existen 4 servicios `commerce-ops-*` VIEJOS (pre-rename) en Render, 25d stale,
-  NO en render.yaml → limpiar (suspender/borrar).
-- **Migraciones:** **156 migraciones `2026*` aplicadas a prod = filesystem** (0 sin
-  aplicar, verificado 2026-06-26 contra `supabase_migrations.schema_migrations`). El
-  conteo "87" de abajo es histórico. Últimas A11 aplicadas + repaired:
-  `20260625120000_stock_rpc_tenant_scoped_expand.sql` (IDOR stock RPCs 3-arg con
-  p_tenant_id, expand-contract — NO ejecutar fase CONTRACT/DROP hasta estabilizar),
-  `20260625130000_tenants_meta_waba_id_unique.sql` (UNIQUE parcial meta_waba_id).
+- **Topología de ramas (CORREGIDO):** el deploy target es la rama **`production`**
+  (autodeploy on-push). Hoy `origin/production` == `origin/develop` == `0dbf1180`
+  (PR #53). `main` está **249 commits ATRÁS** — NO es deploy target ni está a la par de
+  develop. `develop` es la rama de integración; los PRs de cada bloque van a develop y
+  luego se despliega con `git push origin origin/develop:production`. Los 4 servicios
+  `konvi-*` corren el código actual.
+- **Deploy:** los bloques 0→H de la iniciativa production-grade (PRs #26..#53, ADRs
+  0032-0038) están EN PRODUCCIÓN (múltiples deploys jul-2026). Ver `.context/01-state.md`
+  rev.112 para la tabla completa.
+- **Migraciones:** **218 archivos** en `supabase/migrations/` (rango
+  `20260406181235_initial_schema` … `20260712040000_g_shipment_status_monotonic`; 57
+  nuevas en jul-2026). Cuántas están aplicadas a prod requiere query a
+  `supabase_migrations.schema_migrations` (no verificable desde el repo). Protocolo:
+  smoke ROLLBACK → apply → `supabase migration repair --status applied <ts>`.
+- **`TENANT_HARD_DELETE_ENABLED`:** ya está `"true"` en `render.yaml` (el worker cron de
+  hard-delete Fase 2 está habilitado en el blueprint desplegado).
 - **CI:** `.github/workflows/ci.yml` corre `bash scripts/validate.sh --ci` en cada push
   a main + PRs. **Pre-deploy correr `--ci` local (NO `--build`)** — `--ci` añade ruff
   (baseline `BASELINE_RUFF_ERRORS=202`, actual 145), pytest obligatorio, coverage
@@ -44,7 +48,7 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (87 migraciones — rev. 100)
+- DB canónica: `supabase/migrations/` (218 migraciones)
 - **Habeas Data Ley 1581 end-to-end**: ✅ rev. 93–100 — audit logs append-only,
   SAR endpoint, retention policies per-tenant, PII tokenization aditiva,
   click-wrap acceptance, Resend notifications con fallback graceful.
@@ -186,7 +190,7 @@ supabase db query --linked -f supabase/migrations/<archivo>.sql
 Gate pre-deploy (= comando exacto del CI):
 
 ```bash
-bash scripts/validate.sh --ci   # pytest ~3007 + ruff + coverage + TS + build + tenant lint
+bash scripts/validate.sh --ci   # pytest ~3490 + ruff + coverage + TS + build + tenant lint
 ```
 
 Runner de tests (rev. 111): **pytest** (`python3.11 -m pytest tests/ -q`). El
