@@ -32,7 +32,7 @@ export default async function ClaimsPage() {
   const { data: claimsData, error: claimsError } = await supabase
     .from('claims')
     .select(`
-      id, ticket_number, status, reason, requested_amount, resolution_notes, created_at,
+      id, ticket_number, status, reason, requested_amount, refunded_amount, refunded_at, resolution_notes, created_at,
       orders ( id, total_amount ),
       contacts ( id, name, phone )
     `)
@@ -67,6 +67,8 @@ export default async function ClaimsPage() {
     status: c.status,
     reason: c.reason,
     requested_amount: c.requested_amount,
+    refunded_amount: (c as { refunded_amount?: number | null }).refunded_amount ?? null,
+    refunded_at: (c as { refunded_at?: string | null }).refunded_at ?? null,
     resolution_notes: c.resolution_notes,
     created_at: c.created_at
   }))

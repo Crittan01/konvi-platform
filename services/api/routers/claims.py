@@ -20,6 +20,7 @@ aislamiento. Patrón canónico `.table(X).eq('tenant_id', tid)` enforced por lin
 AST scripts/audit_tenant_filter.py (ADR-0025 — helper scoped_table eliminado).
 """
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -78,6 +79,9 @@ class ClaimCreate(BaseModel):
 class ClaimPatch(BaseModel):
     status: Optional[str] = None
     resolution_notes: Optional[str] = Field(default=None, max_length=2000)
+    # BLOQUE G-2 — monto REAL reembolsado (obligatorio al pasar a 'refunded'). Es lo
+    # que el KPI net-revenue resta; NO uses requested_amount (intención del cliente).
+    refunded_amount: Optional[float] = Field(default=None, ge=0)
 
 
 class ClaimResolve(BaseModel):
@@ -106,7 +110,7 @@ def _fetch_claim(supabase: Client, tenant_id: str, claim_id: str) -> dict:
     """Lee un reclamo del tenant o lanza 404. Usado para validar transiciones."""
     res = (
         supabase.table("claims")
-        .select("id, status")
+        .select("id, status, refunded_amount, refunded_at")
         .eq("id", claim_id)
         .eq("tenant_id", tenant_id)
         .maybe_single()
@@ -115,6 +119,44 @@ def _fetch_claim(supabase: Client, tenant_id: str, claim_id: str) -> dict:
     if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Reclamo no encontrado")
     return res.data
+
+
+def _refund_ledger_fields(
+    patch: "ClaimPatch", *, cur_status: Optional[str], new_status: Optional[str], current: dict,
+) -> dict:
+    """BLOQUE G-2 — campos refunded_* a persistir en un patch de reclamo (o {}).
+
+    El KPI net-revenue resta refunded_amount por refunded_at, no requested_amount
+    (intención, nullable). Reglas (write-once):
+      · transición a 'refunded': exige patch.refunded_amount → sella monto + fecha.
+      · corrección (sin cambio de status) de un 'refunded' con monto NULL (backfill
+        histórico sin monto): setea el monto (+ fecha si faltaba). No re-escribe.
+    Raises 422/409 según corresponda.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if new_status == "refunded" and cur_status != "refunded":
+        if patch.refunded_amount is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Indica el monto reembolsado real para marcar el reclamo reembolsado.",
+            )
+        return {"refunded_amount": patch.refunded_amount, "refunded_at": now_iso}
+    if new_status is None and patch.refunded_amount is not None:
+        if cur_status != "refunded":
+            raise HTTPException(
+                status_code=422,
+                detail="El monto reembolsado solo aplica a un reclamo ya reembolsado.",
+            )
+        if current.get("refunded_amount") is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="El monto reembolsado ya está registrado y no se puede cambiar.",
+            )
+        out: dict = {"refunded_amount": patch.refunded_amount}
+        if not current.get("refunded_at"):
+            out["refunded_at"] = now_iso
+        return out
+    return {}
 
 
 def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: str) -> dict:
@@ -288,31 +330,40 @@ async def patch_claim(
     if patch.resolution_notes is not None:
         update["resolution_notes"] = patch.resolution_notes.strip() or None
 
-    if not update:
-        raise HTTPException(status_code=422, detail="Sin campos a actualizar")
+    # BLOQUE G-2: leemos el estado actual si cambia el status O si se corrige el monto
+    # reembolsado (path de corrección de reembolsos históricos con monto NULL).
+    need_current = ("status" in update) or (patch.refunded_amount is not None)
+    current = _fetch_claim(supabase, tenant_id, claim_id) if need_current else None
+    cur_status = current.get("status") if current else None
 
     # F-5: notificar al cliente SOLO en la transición a un outcome (resolved/rejected), no en cada patch.
     _notify_outcome = False
-    # Guard de reapertura: solo si el status cambia de terminal → no-terminal.
     if "status" in update:
         new_status = update["status"]
-        current = _fetch_claim(supabase, tenant_id, claim_id)
-        cur_status = current.get("status")
         _notify_outcome = new_status in ("resolved", "rejected") and cur_status != new_status
+
+        # BLOQUE G-2: 'refunded' es FINAL — no se puede cambiar a NINGÚN otro estado.
+        # Antes refunded→resolved pasaba (terminal→terminal, no lo atrapaba is_reopen)
+        # y sacaba el reembolso del neteo del KPI (el RPC solo cuenta status='refunded').
+        if cur_status == "refunded" and new_status != "refunded":
+            raise HTTPException(
+                status_code=409,
+                detail="Un reclamo reembolsado es final; no se puede cambiar de estado.",
+            )
+
+        # BLOQUE G-2: captura del monto/fecha reales al marcar 'refunded' (write-once).
+        update.update(_refund_ledger_fields(
+            patch, cur_status=cur_status, new_status=new_status, current=current or {},
+        ))
+
+        # Guard de reapertura: terminal → no-terminal (solo owner, desde rejected/cancelled).
+        # El caso 'refunded' ya lo cortó el guard de finalidad de arriba (rama eliminada).
         is_reopen = cur_status in TERMINAL_STATUSES and new_status not in TERMINAL_STATUSES
         if is_reopen:
             if _role != "owner":
                 raise HTTPException(
                     status_code=403,
                     detail="Solo el owner puede reabrir un reclamo cerrado.",
-                )
-            if cur_status == "refunded":
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "No se puede reabrir un reclamo reembolsado: el reembolso ya "
-                        "movió dinero. Crea un reclamo nuevo si es necesario."
-                    ),
                 )
             if cur_status not in REOPENABLE_STATUSES:
                 raise HTTPException(
@@ -322,6 +373,15 @@ async def patch_claim(
                         "Solo 'rejected' o 'cancelled' se pueden reabrir."
                     ),
                 )
+    elif patch.refunded_amount is not None:
+        # BLOQUE G-2: corrección de monto en un reclamo YA 'refunded' con monto NULL
+        # (backfill histórico sin monto) — única vía sin cambiar el status.
+        update.update(_refund_ledger_fields(
+            patch, cur_status=cur_status, new_status=None, current=current or {},
+        ))
+
+    if not update:
+        raise HTTPException(status_code=422, detail="Sin campos a actualizar")
 
     res = (
         supabase.table("claims")
@@ -348,6 +408,14 @@ async def resolve_claim(
 ):
     """Atajo: marca status=resolved + persiste resolution_notes obligatoria."""
     prev = _fetch_claim(supabase, tenant_id, claim_id)  # status previo + 404 si no existe
+    # BLOQUE G-2: 'refunded' es FINAL también por esta puerta. Sin este guard, /resolve
+    # sacaba un reclamo reembolsado del neteo del KPI (el RPC solo cuenta 'refunded')
+    # → revenue sobrestimado. Simétrico con patch_claim.
+    if prev.get("status") == "refunded":
+        raise HTTPException(
+            status_code=409,
+            detail="Un reclamo reembolsado es final; no se puede cambiar de estado.",
+        )
     res = (
         supabase.table("claims")
         .update({

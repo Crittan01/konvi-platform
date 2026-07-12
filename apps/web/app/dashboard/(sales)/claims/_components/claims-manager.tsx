@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
-import { createClaim, updateClaimStatus } from '../actions'
+import { createClaim, updateClaimStatus, correctRefundAmount } from '../actions'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,9 @@ type Claim = {
   status: string
   reason: string
   requested_amount: number | null
+  // BLOQUE G-2: monto REAL reembolsado + fecha (capturado al marcar 'refunded').
+  refunded_amount: number | null
+  refunded_at: string | null
   resolution_notes: string | null
   created_at: string
 }
@@ -99,6 +102,10 @@ export default function ClaimsManager({
   const [notesDraft, setNotesDraft]       = useState('')     // F6: borrador editable de notas de resolución
   const [savingNotes, setSavingNotes]     = useState(false)
   const [actionError, setActionError]     = useState<string | null>(null)
+  // BLOQUE G-2: modal para capturar el monto REAL reembolsado al marcar 'refunded'.
+  const [refundOpen, setRefundOpen]       = useState(false)
+  const [refundAmount, setRefundAmount]   = useState('')
+  const [refundSubmitting, setRefundSubmitting] = useState(false)
 
   // Detecta viewport para decidir dónde mostrar el detalle (panel lg vs Sheet móvil).
   const [isDesktop, setIsDesktop] = useState(true)
@@ -170,14 +177,18 @@ export default function ClaimsManager({
   const handleUpdateStatus = async (status: string) => {
     if (!selectedClaim) return
 
+    // BLOQUE G-2: 'refunded' exige capturar el monto REAL reembolsado → modal dedicado
+    // (no el confirm sí/no). Pre-llena con el monto solicitado como sugerencia.
+    if (status === 'refunded') {
+      setRefundAmount(selectedClaim.requested_amount != null ? String(selectedClaim.requested_amount) : '')
+      setActionError(null)
+      setRefundOpen(true)
+      return
+    }
+
     // Transiciones terminales: confirmación previa (evita el misclick irreversible en UI).
     if (TERMINAL.has(status)) {
       const copy: Record<string, { title: string; description: string; confirmLabel: string; destructive?: boolean }> = {
-        refunded: {
-          title: `¿Marcar ticket ${ticketLabel(selectedClaim.ticket_number)} como reembolsado?`,
-          description: 'Este cambio NO transfiere dinero: solo registra el estado del ticket. Debes emitir el reembolso manualmente en Wompi si aún no lo hiciste.',
-          confirmLabel: 'Marcar reembolsado',
-        },
         rejected: {
           title: `¿Rechazar el ticket ${ticketLabel(selectedClaim.ticket_number)}?`,
           description: 'El reclamo quedará cerrado como rechazado. El cliente podrá ver este estado al consultar por WhatsApp.',
@@ -205,6 +216,38 @@ export default function ClaimsManager({
       setActionError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // BLOQUE G-2: confirma el reembolso con el monto real capturado. La API lo exige y
+  // lo resta del KPI net-revenue (refunded_amount/refunded_at write-once).
+  const submitRefund = async () => {
+    if (!selectedClaim) return
+    const amt = parseFloat(refundAmount)
+    if (!Number.isFinite(amt) || amt < 0) {
+      setActionError('Ingresa un monto reembolsado válido (≥ 0).')
+      return
+    }
+    setRefundSubmitting(true)
+    setActionError(null)
+    try {
+      // Corrección: el reclamo ya está 'refunded' (monto histórico NULL) → PATCH solo
+      // el monto. Transición: aún no reembolsado → marca 'refunded' con el monto.
+      const isCorrection = selectedClaim.status === 'refunded'
+      const resp = isCorrection
+        ? await correctRefundAmount(selectedClaim.id, amt)
+        : await updateClaimStatus(selectedClaim.id, 'refunded', notesDraft || undefined, amt)
+      if (resp?.error) { setActionError(resp.error); toast.error('No se pudo registrar el reembolso'); return }
+      setSelectedClaim({
+        ...selectedClaim, status: 'refunded', refunded_amount: amt,
+        resolution_notes: notesDraft || selectedClaim.resolution_notes,
+      })
+      setRefundOpen(false)
+      toast.success(`Ticket ${ticketLabel(selectedClaim.ticket_number)} · Reembolsado`)
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setRefundSubmitting(false)
     }
   }
 
@@ -354,6 +397,36 @@ export default function ClaimsManager({
               </p>
             </div>
           </div>
+
+          {/* BLOQUE G-2: monto REAL reembolsado (lo que resta el KPI net-revenue). */}
+          {selectedClaim.status === 'refunded' && (
+            <div className="space-y-1 rounded-lg border border-emerald-700/25 bg-emerald-500/5 p-3">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Reembolsado (real)</p>
+              {selectedClaim.refunded_amount != null ? (
+                <p className="font-medium text-sm font-mono text-emerald-700">
+                  ${selectedClaim.refunded_amount.toLocaleString('es-CO')}
+                  {selectedClaim.refunded_at && (
+                    <span className="ml-2 text-[11px] text-muted-foreground">
+                      {new Date(selectedClaim.refunded_at).toLocaleDateString('es-CO')}
+                    </span>
+                  )}
+                </p>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm text-amber-700">Monto no registrado</p>
+                  {canResolve && (
+                    <button
+                      onClick={() => { setRefundAmount(''); setActionError(null); setRefundOpen(true) }}
+                      className="text-xs text-primary underline hover:no-underline"
+                    >
+                      Registrar monto
+                    </button>
+                  )}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">Se descuenta de las ventas netas del panel.</p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Notas de resolución</Label>
@@ -523,6 +596,42 @@ export default function ClaimsManager({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* BLOQUE G-2: Dialog de reembolso — captura el monto REAL reembolsado. */}
+      <Dialog open={refundOpen} onOpenChange={(o) => { setRefundOpen(o); if (!o) setActionError(null) }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>
+              Registrar reembolso {selectedClaim ? `· ${ticketLabel(selectedClaim.ticket_number)}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Ingresa el monto <strong>realmente reembolsado</strong> en Wompi. Este valor se
+              descuenta de las <strong>ventas netas</strong> del panel. Emite el reembolso en
+              Wompi si aún no lo hiciste — este paso solo lo registra.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="refund-amount">Monto reembolsado (COP)</Label>
+              <Input
+                id="refund-amount" type="number" min="0" step="1" inputMode="numeric"
+                value={refundAmount}
+                onChange={(e) => setRefundAmount(e.target.value)}
+                placeholder="0" autoFocus
+              />
+            </div>
+            {actionError && <p className="text-sm text-red-700">{actionError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRefundOpen(false)} disabled={refundSubmitting}>
+              Cancelar
+            </Button>
+            <Button onClick={submitRefund} disabled={refundSubmitting}>
+              {refundSubmitting ? 'Guardando…' : 'Marcar reembolsado'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog crear */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>

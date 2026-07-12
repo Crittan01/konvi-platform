@@ -66,6 +66,7 @@ export default async function DashboardPage() {
     whatsappRes,
     messagesDayRes,
     ordersStatusRes,
+    revenueRes,
   ] = await Promise.all([
     // BLOQUE G-1: excluir archivadas (`archived_at IS NULL`) — paridad con el inbox
     // (use-conversations.ts). La retención per-tenant archiva conversaciones de
@@ -109,9 +110,18 @@ export default async function DashboardPage() {
       supabase.from('orders').select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId).eq('status', s),
     )),
+    // BLOQUE G-2: KPI de dinero — ventas NETAS (confirmadas − reembolsos: reclamos +
+    // RMA; cancelaciones ya salen por status). Un RPC (SECURITY INVOKER, tenant-scoped
+    // por app_current_tenant + RLS) hace el cálculo en DB → evita el fetch-all-and-sum
+    // que PostgREST trunca a 1000 filas.
+    supabase.rpc('rpc_dashboard_revenue'),
   ])
 
   // ─── Surfacear errores: un fallo RLS/red NO puede pintar "0" como verdad ─────
+  // revenueRes queda FUERA de este array a propósito: un fallo del KPI de dinero
+  // (RPC) NO debe blanquear todo el dashboard — se degrada solo (muestra "—", ver
+  // abajo), nunca un $0 falso. Los counts sí son all-or-nothing (no pintar 0 como
+  // verdad).
   const responses = [
     convRes, ordersRes, contactsRes, productsRes, activeConvRes,
     takeoverConvRes, pendingOrdersRes, lowStockRes, whatsappRes,
@@ -142,6 +152,16 @@ export default async function DashboardPage() {
     .map((status, i) => ({ status, count: ordersStatusRes[i].count ?? 0 }))
     .filter(s => s.count > 0)
 
+  // BLOQUE G-2: ventas netas (hoy + este mes). Number() defensivo (Supabase
+  // serializa numeric como string). En error → null (la card muestra "—", no un $0
+  // engañoso que parecería "sin ventas").
+  if (revenueRes.error) console.error('[dashboard] fallo KPI ventas', revenueRes.error.message)
+  const revenueRow = revenueRes.data?.[0]
+  const revenue = {
+    today: revenueRes.error ? null : Number(revenueRow?.revenue_today ?? 0),
+    month: revenueRes.error ? null : Number(revenueRow?.revenue_month ?? 0),
+  }
+
   // ─── Onboarding first-run: sin actividad todavía ────────────────────────────
   const whatsappConnected = whatsappRes.data?.status === 'connected'
   const firstRun = !readError &&
@@ -162,6 +182,7 @@ export default async function DashboardPage() {
       role={role}
       stats={stats}
       ops={ops}
+      revenue={revenue}
       lowStockThreshold={lowStockThreshold}
       messagesPerDay={messagesPerDay}
       ordersByStatus={ordersByStatus}

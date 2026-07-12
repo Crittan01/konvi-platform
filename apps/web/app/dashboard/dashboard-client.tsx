@@ -16,6 +16,7 @@ import {
   AreaChart, Area,
 } from 'recharts'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { formatCOP, formatCOPNegative } from './finance/lib/format'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,12 @@ export interface DashboardProps {
     humanTakeovers: number
     pendingOrders: number
     lowStockCount: number
+  }
+  // BLOQUE G-2: ventas confirmadas (COP) — hoy y este mes. null = no disponible
+  // (fallo del RPC) → la card muestra "—", nunca un $0 engañoso.
+  revenue: {
+    today: number | null
+    month: number | null
   }
   lowStockThreshold: number
   messagesPerDay: { day: string; total: number }[]
@@ -103,7 +110,7 @@ const TABS = ['operaciones', 'negocio'] as const
 type Tab = (typeof TABS)[number]
 
 export default function DashboardClient({
-  tenantId, tenantName, userEmail, role, stats, ops, lowStockThreshold,
+  tenantId, tenantName, userEmail, role, stats, ops, revenue, lowStockThreshold,
   messagesPerDay, ordersByStatus, quickLinks, readError, firstRun, onboarding,
 }: DashboardProps) {
   const [tab, setTab] = useState<Tab>('operaciones')
@@ -297,6 +304,12 @@ export default function DashboardClient({
           className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
         >
 
+          {/* BLOQUE G-2: dinero real a la vista en el home operativo. */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <MoneyKpiCard label="Ventas hoy" value={revenue.today} />
+            <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
+          </div>
+
           {/* Alertas operacionales */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {/* BLOQUE G-1: cada card deep-linkea con el filtro que la alerta promete
@@ -397,6 +410,14 @@ export default function DashboardClient({
           aria-labelledby="dash-tab-negocio"
           className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
         >
+
+          {/* BLOQUE G-2: dinero real — ventas NETAS (confirmadas − reembolsos). Antes
+              el tab Negocio no tenía un solo KPI de dinero, solo counts acumulados →
+              no era control de negocio real. */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <MoneyKpiCard label="Ventas hoy" value={revenue.today} />
+            <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
+          </div>
 
           {/* Totales acumulados */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -565,6 +586,28 @@ function KpiCard({ label, value }: { label: string; value: number }) {
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className="text-2xl sm:text-3xl font-bold text-primary">{value}</p>
       <p className="text-xs mt-1 text-muted-foreground">Total acumulado</p>
+    </div>
+  )
+}
+
+// BLOQUE G-2: KPI de dinero (ventas NETAS = confirmadas − reembolsos). Verde =
+// dinero, coherente con el P&L de Finanzas (netProfit emerald-700). formatCOP para
+// moneda COP consistente. Puede ser negativo si los reembolsos superan las ventas.
+function MoneyKpiCard({ label, value }: { label: string; value: number | null }) {
+  // Neto negativo (reembolsos > ventas en la ventana): rojo + signo explícito
+  // (formatCOPNegative → "-$X"), no el verde de dinero con "$-X" malformado.
+  const negative = value !== null && value < 0
+  const border = negative ? 'border-red-700/25 bg-red-500/5' : 'border-emerald-700/25 bg-emerald-500/5'
+  const text = negative ? 'text-red-700' : 'text-emerald-700'
+  return (
+    <div className={`rounded-xl border p-4 sm:p-5 shadow-sm ${border}`}>
+      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
+      <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${text}`}>
+        {value === null ? '—' : negative ? formatCOPNegative(value) : formatCOP(value)}
+      </p>
+      <p className="text-xs mt-1 text-muted-foreground">
+        {value === null ? 'No disponible' : 'Neto de reembolsos'}
+      </p>
     </div>
   )
 }
