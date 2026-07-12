@@ -143,6 +143,16 @@ export default function DashboardClient({
     }
   }, [tenantId, debouncedRefresh])
 
+  // BLOQUE G-1: polling fallback. Si el canal realtime cae ('down'/'reconnecting'),
+  // refrescar periódicamente para que el home no se congele (antes rtState='down'
+  // solo pintaba un indicador WifiOff; los datos quedaban estáticos hasta recargar).
+  // Solo activo mientras el canal NO está sano → sin costo en el camino feliz.
+  useEffect(() => {
+    if (rtState === 'connected' || !tenantId) return
+    const id = setInterval(() => router.refresh(), 30_000)
+    return () => clearInterval(id)
+  }, [rtState, tenantId, router])
+
   const totalOpsAlerts = ops.humanTakeovers + ops.pendingOrders + ops.lowStockCount
 
   // Navegación por flechas entre tabs (accesibilidad WAI-ARIA tabs).
@@ -289,8 +299,10 @@ export default function DashboardClient({
 
           {/* Alertas operacionales */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {/* BLOQUE G-1: cada card deep-linkea con el filtro que la alerta promete
+                → el operador aterriza en la vista ya filtrada (no re-buscar). */}
             <OpsCard
-              href="/dashboard/inbox"
+              href="/dashboard/inbox?status=bot_active"
               label="Conversaciones activas"
               value={ops.activeConversations}
               icon={MessageSquare}
@@ -298,7 +310,7 @@ export default function DashboardClient({
               description="Bot respondiendo"
             />
             <OpsCard
-              href="/dashboard/inbox"
+              href="/dashboard/inbox?status=human_takeover"
               label="Agente humano"
               value={ops.humanTakeovers}
               icon={UserCheck}
@@ -307,7 +319,7 @@ export default function DashboardClient({
               urgent={ops.humanTakeovers > 0}
             />
             <OpsCard
-              href="/dashboard/orders"
+              href="/dashboard/orders?status=pending"
               label="Pedidos pendientes"
               value={ops.pendingOrders}
               icon={Clock}
@@ -316,7 +328,7 @@ export default function DashboardClient({
               urgent={ops.pendingOrders > 0}
             />
             <OpsCard
-              href="/dashboard/catalog"
+              href="/dashboard/catalog?filter=low_stock"
               label="Productos con poco stock"
               value={ops.lowStockCount}
               icon={AlertTriangle}

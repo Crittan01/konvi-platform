@@ -14,6 +14,7 @@ import {
 import CatalogForm from './catalog-form'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
+import { isLowStockVariation } from '../_lib/stock'
 import type { Product, AttributeDef } from '../types'
 import type { ActionResult } from '@/lib/action-result'
 
@@ -55,7 +56,7 @@ export default function ProductsManager({
 
   const allVariations  = products.flatMap(p => p.product_variations)
   const totalUnits     = allVariations.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
-  const lowStockCount  = allVariations.filter(v => v.stock_quantity > 0 && v.stock_quantity <= threshold).length
+  const lowStockCount  = allVariations.filter(v => isLowStockVariation(v, threshold)).length
   const zeroStockCount = allVariations.filter(v => v.stock_quantity === 0).length
 
   return (

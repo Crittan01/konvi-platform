@@ -83,7 +83,9 @@ export default async function DashboardLayout({
   if (tenantId) {
     const [tenantRes, inboxRes, meliRes, integRes, subRes] = await Promise.all([
       supabase.from('tenants').select('name, logo_url').eq('id', tenantId).single(),
-      supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover'),
+      // BLOQUE G-1: excluir archivadas (paridad inbox + home) — la retención archiva
+      // conversaciones de cualquier status → el badge sobre-contaba las ya archivadas.
+      supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover').is('archived_at', null),
       supabase.from('marketplace_listings').select('status').eq('tenant_id', tenantId).eq('provider', 'mercadolibre'),
       supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'aveonline', 'mercadolibre']),
       supabase.from('tenant_subscriptions').select('plan_code').eq('tenant_id', tenantId).maybeSingle(),
