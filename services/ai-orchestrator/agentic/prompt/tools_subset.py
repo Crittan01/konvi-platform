@@ -128,8 +128,13 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "record_consent",
         "get_contact_info",
     ),
-    # Post-pago: tracking, status, nuevo pedido. Cart de la orden ya está
-    # convertido — NO cart mods (la orden es inmutable post-confirm).
+    # Post-pago: tracking, status, nuevo pedido. La orden ya confirmada es
+    # INMUTABLE — pero el cliente SÍ puede iniciar una RE-COMPRA. BLOQUE J-4
+    # (decisión founder 2026-07-12): +add_to_cart. El prompt de POST_PAYMENT
+    # ya invita a re-comprar ("cliente quiere nuevo pedido → explora catálogo")
+    # pero sin add_to_cart el path del LLM no podía materializar la compra nueva.
+    # add_to_cart aquí inicia un carrito NUEVO (conversation_cart fresco), NO
+    # modifica la orden pagada (que ya está convertida/inmutable).
     # Rev. 109 founder 2026-05-28 — post-compra es el momento canónico
     # para reclamos (producto llegó dañado, equivocado, etc.). claims
     # capability obligatoria aquí.
@@ -139,6 +144,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "kb_query",
         "list_catalog",
         "search_products",  # ADR-0027 Pieza 4 — buscar para una recompra
+        "add_to_cart",       # J-4 — re-compra: inicia carrito nuevo
         _ESCALATE,
     }) | _CLAIMS_CAPABILITY,
     # Humano takeover — sin LLM. Mantenemos escalation por consistencia.
