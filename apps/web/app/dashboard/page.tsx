@@ -67,16 +67,21 @@ export default async function DashboardPage() {
     messagesDayRes,
     ordersStatusRes,
   ] = await Promise.all([
-    supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+    // BLOQUE G-1: excluir archivadas (`archived_at IS NULL`) — paridad con el inbox
+    // (use-conversations.ts). La retención per-tenant archiva conversaciones de
+    // CUALQUIER status → sin el filtro el home y el badge sobre-cuentan vs lo que
+    // el operador ve en el Inbox.
+    supabase.from('conversations').select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId).is('archived_at', null),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
     supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
     supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
-    // Ops: conversaciones activas con bot
+    // Ops: conversaciones activas con bot (excluye archivadas — ver arriba)
     supabase.from('conversations').select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId).eq('status', 'bot_active'),
-    // Ops: conversaciones en takeover humano
+      .eq('tenant_id', tenantId).eq('status', 'bot_active').is('archived_at', null),
+    // Ops: conversaciones en takeover humano (excluye archivadas — ver arriba)
     supabase.from('conversations').select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId).eq('status', 'human_takeover'),
+      .eq('tenant_id', tenantId).eq('status', 'human_takeover').is('archived_at', null),
     // Ops: pedidos pendientes (solo 'pending'; ver needs_founder: incluir pending_payment)
     supabase.from('orders').select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId).eq('status', 'pending'),

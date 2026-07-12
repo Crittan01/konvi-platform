@@ -75,6 +75,31 @@ export default function InboxManager() {
   // Refactor paso 7/10 2026-05-29 — syncUrlParam + restore desde URL +
   // loadConversations + Realtime convs viven en useConversations.
 
+  // BLOQUE G-1: deep-link accionable desde las OpsCards del dashboard
+  // (`/dashboard/inbox?status=human_takeover`). Se siembra el filtro UNA vez al
+  // montar. Patrón `window.location.search` (no `useSearchParams` → suspende sin
+  // boundary, ver use-conversations). Solo acepta valores válidos de FilterStatus.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const raw = params.get('status')
+    if (!raw) return
+    const allowed: FilterStatus[] = [
+      'active', 'sla_breach', 'all', 'bot_active', 'human_takeover', 'closed', 'opted_out',
+    ]
+    if ((allowed as string[]).includes(raw)) {
+      setFilterStatus(raw as FilterStatus)
+    }
+    // One-shot (review fix): consumir el param y limpiarlo de la URL para que un
+    // remount (back/forward, reset de error-boundary) NO re-siembre y pise un
+    // filtro que el operador cambió después. `history.replaceState` → sin re-render
+    // Next, preserva el resto de params (p. ej. ?conv=).
+    params.delete('status')
+    const qs = params.toString()
+    window.history.replaceState(
+      null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+    )
+  }, [])
+
   // ── Filtros ────────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c => {
     // F2: búsqueda por teléfono O por nombre denormalizado (contact_name).

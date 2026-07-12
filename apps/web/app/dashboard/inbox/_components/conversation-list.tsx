@@ -224,6 +224,21 @@ export function ConversationList({
               {opt.label}
             </button>
           ))}
+          {/* BLOQUE G-1 (review fix): chip limpiable para filtros de deep-link
+              (OpsCards del dashboard: bot_active / human_takeover) que NO están en
+              FILTER_OPTIONS. Sin esto la lista se filtra pero ningún chip se resalta
+              → parece rota, sin forma de ver/limpiar el filtro. Reset → 'active'. */}
+          {!FILTER_OPTIONS.some(o => o.value === filterStatus) &&
+           STATUS_CONFIG[filterStatus as keyof typeof STATUS_CONFIG] && (
+            <button
+              onClick={() => setFilterStatus('active')}
+              title="Quitar filtro"
+              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-500/10 text-amber-700 font-medium hover:bg-amber-500/15 transition-colors"
+            >
+              {STATUS_CONFIG[filterStatus as keyof typeof STATUS_CONFIG].label}
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
           <button
             onClick={() => setShowArchived(v => !v)}
             className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, memo, useTransition } from 'react'
+import { useState, useMemo, useCallback, useEffect, memo, useTransition } from 'react'
 import Image from 'next/image'
 import { toast } from 'sonner'
 import ActionResultForm from '@/components/action-result-form'
@@ -10,9 +10,10 @@ import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   Search, LayoutGrid, List as ListIcon,
   ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X, Loader2,
-  ArrowUp, ArrowDown, ChevronsUpDown,
+  ArrowUp, ArrowDown, ChevronsUpDown, AlertTriangle,
 } from 'lucide-react'
 import { ProductEditDrawer } from './product-edit-drawer'
+import { productHasLowStock } from '../_lib/stock'
 import type { Product, Variation } from '../types'
 import type { ActionResult } from '@/lib/action-result'
 
@@ -333,6 +334,15 @@ export default function CatalogTable({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [sortBy,  setSortBy]          = useState<'title' | 'category' | 'price' | 'stock' | null>(null)
   const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('asc')
+  // BLOQUE G-1: deep-link "bajo stock" desde la OpsCard del dashboard
+  // (`/dashboard/catalog?filter=low_stock`). Se siembra una vez al montar (patrón
+  // window.location.search, no useSearchParams → suspende sin boundary).
+  const [lowStockOnly, setLowStockOnly] = useState(false)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('filter') === 'low_stock') {
+      setLowStockOnly(true)
+    }
+  }, [])
 
   const handleSort = (col: 'title' | 'category' | 'price' | 'stock') => {
     if (sortBy === col) {
@@ -356,13 +366,18 @@ export default function CatalogTable({
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    const result = q
+    let result = q
       ? products.filter(p =>
           p.title.toLowerCase().includes(q) ||
           p.description?.toLowerCase().includes(q) ||
           p.product_variations.some(v => v.sku?.toLowerCase().includes(q))
         )
       : [...products]
+
+    // BLOQUE G-1: filtro "bajo stock" — fórmula canónica compartida (_lib/stock).
+    if (lowStockOnly) {
+      result = result.filter(p => productHasLowStock(p, threshold))
+    }
 
     if (sortBy) {
       result.sort((a, b) => {
@@ -387,7 +402,7 @@ export default function CatalogTable({
       })
     }
     return result
-  }, [products, search, sortBy, sortDir, catMap])
+  }, [products, search, sortBy, sortDir, catMap, lowStockOnly, threshold])
 
   // ── Empty State ─────────────────────────────────────────────────────────────
   if (products.length === 0) {
@@ -453,6 +468,19 @@ export default function CatalogTable({
           </button>
         ))}
       </div>
+
+      {/* BLOQUE G-1: indicador limpiable del filtro "bajo stock" (deep-link OpsCard). */}
+      {lowStockOnly && (
+        <button
+          onClick={() => setLowStockOnly(false)}
+          title="Quitar filtro de bajo stock"
+          className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-amber-700/30 bg-amber-500/10 text-amber-700 text-xs font-medium whitespace-nowrap hover:bg-amber-500/15 transition-colors"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Bajo stock
+          <X className="h-3 w-3" />
+        </button>
+      )}
 
       <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">
         {filtered.length} producto{filtered.length !== 1 ? 's' : ''}
