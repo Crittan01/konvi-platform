@@ -95,6 +95,16 @@ RAW_STATE_TO_INTERNAL = {
 
 TERMINAL_STATUSES = frozenset({"delivered", "returned", "cancelled"})
 
+# BLOQUE F-6 — rank de avance de `orders.status`. Espejo del canónico en
+# meli_webhook._STATUS_RANK (mantener coherencia cross-connector). El avance a
+# 'delivered' es MONOTÓNICO: nunca regresa un estado ya alcanzado ni pisa un
+# terminal (cancelled). Un envío que llega a 'delivered' avanza la orden desde
+# confirmed/processing/shipped; desde delivered/cancelled es no-op.
+_ORDER_STATUS_RANK: dict[str, int] = {
+    "pending": 0, "pending_payment": 0, "confirmed": 1,
+    "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5,
+}
+
 
 def _map_raw_status(raw_status: str) -> str:
     """Mapea raw status Aveonline → canónico interno. Default: 'pending'."""
@@ -262,6 +272,115 @@ def _lookup_shipment_by_tracking(
         return None
 
 
+def _advance_order_to_delivered(
+    supabase_client: Any, tenant_id: str, order_id: str, current_status: Optional[str],
+) -> bool:
+    """BLOQUE F-6 — avanza `orders.status` a 'delivered' cuando el envío se entrega.
+
+    Antes de F-6 NADIE hacía este write: el shipment quedaba 'delivered' pero la
+    orden seguía 'shipped' para siempre (dashboard/analytics/estado del bot
+    desincronizados de la realidad física). Forward-only y monotónico (rank):
+    solo avanza desde confirmed/processing/shipped; desde delivered/cancelled es
+    no-op. El UPDATE re-filtra por rank en SQL (`.in_`) → race-safe frente a otro
+    webhook concurrente (doble entrega no re-escribe). Best-effort: no propaga.
+    """
+    if _ORDER_STATUS_RANK.get(current_status or "", 0) >= _ORDER_STATUS_RANK["delivered"]:
+        return False  # ya delivered/cancelled — nada que avanzar
+    # Estados desde los que 'delivered' es un avance válido: rank 1..3
+    # (confirmed, processing, shipped). Se EXCLUYEN a propósito pending(0) y
+    # pending_payment(0): representan pedidos PREPAGO IMPAGOS — marcarlos
+    # 'delivered' ocultaría el impago. NO afecta contraentrega: un pedido COD
+    # nace 'confirmed' (orders.py:248), y un prepago pagado pasa a 'confirmed'
+    # por el webhook Wompi → ambos entran al rango advanceable.
+    _delivered_rank = _ORDER_STATUS_RANK["delivered"]
+    advanceable = [s for s, r in _ORDER_STATUS_RANK.items() if 0 < r < _delivered_rank]
+    try:
+        upd = (
+            supabase_client.table("orders")
+            .update({"status": "delivered"})
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .in_("status", advanceable)
+            .execute()
+        )
+        advanced = bool(upd.data)
+        if advanced:
+            logger.info(
+                "[AVEONLINE_WH] order %s → status delivered (tenant=%s)", order_id, tenant_id,
+            )
+        return advanced
+    except Exception as e:
+        logger.warning("[AVEONLINE_WH] order advance→delivered err order=%s: %s", order_id, e)
+        return False
+
+
+def _alert_operator_shipment_issue(
+    supabase_client: Any,
+    *,
+    tenant_id: str,
+    order_id: str,
+    shipment: dict,
+    internal_status: str,
+    raw_status: str,
+) -> None:
+    """BLOQUE F-7 — alerta al OPERADOR (Telegram) ante novedad/devolución del envío.
+
+    Antes: exception solo notificaba al CLIENTE y 'returned' solo dejaba un
+    logger.info → el operador nunca se enteraba de un envío que requiere su
+    acción (contactar cliente, reintentar, gestionar devolución). Reusa el canal
+    operador del tenant (`notification_settings` channel='telegram', enabled) —
+    el mismo por el que llegan los escalamientos humanos. chat_id vive en
+    `config.chat_id` (canónico, ver notifications._send_telegram_notification).
+    Best-effort: cualquier fallo se loguea, no rompe el ACK del webhook.
+    """
+    try:
+        settings_res = (
+            supabase_client.table("notification_settings")
+            .select("config")
+            .eq("tenant_id", tenant_id)
+            .eq("channel", "telegram")
+            .eq("enabled", True)
+            .limit(1)
+            .execute()
+        )
+        config = (settings_res.data or [{}])[0].get("config") or {}
+        chat_id = config.get("chat_id") or config.get("telegram_chat_id")
+        if not chat_id:
+            logger.info(
+                "[AVEONLINE_WH] operador sin telegram tenant=%s — skip alert", tenant_id,
+            )
+            return
+
+        tracking = shipment.get("tracking_number") or ""
+        carrier = shipment.get("carrier") or "Aveonline"
+        if internal_status == "returned":
+            head = "📦 *Devolución de envío*"
+            action = "El paquete regresa. Contacta al cliente antes de re-despachar o reembolsar."
+        else:  # exception
+            head = "⚠️ *Novedad en envío*"
+            action = "El courier reportó una novedad. Gestiona (reintento / contacto cliente)."
+        text = (
+            f"{head}\n"
+            f"Pedido: `{str(order_id)[:8]}`\n"
+            f"Guía: `{tracking}` ({carrier})\n"
+            f"Estado courier: *{raw_status or internal_status}*\n\n"
+            f"{action}"
+        )
+
+        # Reuso within-service: mismo emisor que los comandos del operador. Resuelve
+        # bot_token del tenant vía Vault internamente (no cross-tenant).
+        from routers.telegram_webhook import _send_telegram_reply
+        _send_telegram_reply(int(chat_id), text, tenant_id)
+        logger.info(
+            "[AVEONLINE_WH] operador alertado tenant=%s order=%s status=%s",
+            tenant_id, order_id, internal_status,
+        )
+    except Exception as e:
+        logger.warning(
+            "[AVEONLINE_WH] operator alert err tenant=%s order=%s: %s", tenant_id, order_id, e,
+        )
+
+
 def _notify_status_change(
     supabase_client: Any,
     *,
@@ -288,7 +407,7 @@ def _notify_status_change(
     try:
         order_res = (
             supabase_client.table("orders")
-            .select("conversation_id")
+            .select("conversation_id, status")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .limit(1).execute()
@@ -298,6 +417,12 @@ def _notify_status_change(
     except Exception as e:
         logger.warning("[AVEONLINE_WH] order lookup err order=%s: %s", order_id, e)
         return
+
+    # NOTA F-6: el avance de `orders.status` a 'delivered' NO vive aquí. Este
+    # dispatch solo corre en la transición (call-site guard) y quedaría bloqueado
+    # para siempre si el UPDATE falla una vez (el shipment ya es terminal → no se
+    # re-invoca). El sync de orden se hace en `_handle_aveonline_webhook`,
+    # incondicional e idempotente, para auto-sanar en cualquier webhook posterior.
 
     carrier = shipment.get("carrier") or ""
     tracking_number = shipment.get("tracking_number") or ""
@@ -360,37 +485,54 @@ def _notify_status_change(
         except Exception as e:
             logger.warning("[AVEONLINE_WH] email delivered err: %s", e)
 
-    elif internal_status == "exception" and conversation_id:
-        try:
-            _notify_client_shipment_exception(
-                supabase_client,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                order_id=order_id,
-                carrier=carrier,
-                tracking_number=tracking_number,
-                raw_status=raw_status,
-            )
-        except Exception as e:
-            logger.warning("[AVEONLINE_WH] WA exception notif err: %s", e)
-        try:
-            # Rev. 112 GAP — nombre_estado real del courier (p. ej.
-            # "CLIENTE AUSENTE") al email, no el enum interno 'exception'.
-            _send_payment_confirmation_email(
-                supabase=supabase_client,
-                order_id=order_id, tenant_id=tenant_id,
-                template_mode="shipment_exception",
-                raw_status=raw_status,
-            )
-        except Exception as e:
-            logger.warning("[AVEONLINE_WH] email exception err: %s", e)
+    elif internal_status == "exception":
+        # La notificación al CLIENTE requiere conversación WhatsApp; la alerta al
+        # OPERADOR (F-7) NO — un pedido sin conversación (MeLi/consola) igual
+        # necesita que el operador accione la novedad. Por eso el guard
+        # `conversation_id` envuelve solo el dispatch al cliente (paridad con el
+        # branch 'returned' y con el sync de orden F-6, ambos independientes).
+        if conversation_id:
+            try:
+                _notify_client_shipment_exception(
+                    supabase_client,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    order_id=order_id,
+                    carrier=carrier,
+                    tracking_number=tracking_number,
+                    raw_status=raw_status,
+                )
+            except Exception as e:
+                logger.warning("[AVEONLINE_WH] WA exception notif err: %s", e)
+            try:
+                # Rev. 112 GAP — nombre_estado real del courier (p. ej.
+                # "CLIENTE AUSENTE") al email, no el enum interno 'exception'.
+                _send_payment_confirmation_email(
+                    supabase=supabase_client,
+                    order_id=order_id, tenant_id=tenant_id,
+                    template_mode="shipment_exception",
+                    raw_status=raw_status,
+                )
+            except Exception as e:
+                logger.warning("[AVEONLINE_WH] email exception err: %s", e)
+        # BLOQUE F-7 — el operador debe accionar la novedad (reintento/contacto).
+        # Incondicional: fuera del guard `conversation_id`.
+        _alert_operator_shipment_issue(
+            supabase_client, tenant_id=tenant_id, order_id=order_id,
+            shipment=shipment, internal_status="exception", raw_status=raw_status,
+        )
 
     elif internal_status == "returned":
-        # Devolución física — no enviamos al cliente todavía (operador debe
-        # contactar primero según política Habeas Data + UX). Solo log.
+        # Devolución física — no notificamos al cliente todavía (operador debe
+        # contactar primero según política Habeas Data + UX). BLOQUE F-7: alertamos
+        # al operador (antes solo se logueaba → la devolución quedaba invisible).
         logger.info(
-            "[AVEONLINE_WH] shipment returned order=%s — pending operator review",
+            "[AVEONLINE_WH] shipment returned order=%s — alerting operator",
             order_id,
+        )
+        _alert_operator_shipment_issue(
+            supabase_client, tenant_id=tenant_id, order_id=order_id,
+            shipment=shipment, internal_status="returned", raw_status=raw_status,
         )
 
 
@@ -513,7 +655,14 @@ async def _handle_aveonline_webhook(
             },
         )
 
-    for e in estado_list:
+    # Rev. 113 (review F-7 hardening) — procesar en orden CRONOLÓGICO ascendente.
+    # Aveonline manda historial sin orden garantizado (dossier §6.2); el RPC
+    # `fn_record_shipment_tracking_event` hace last-write-wins entre no-terminales,
+    # así que iterar en orden de array podía dejar `shipments.status` REGRESADO (un
+    # evento viejo pisando al nuevo). Ordenar asc → el más reciente se procesa
+    # último y gana. Misma key que `_select_latest_estado` (fecha string ISO-like).
+    estado_sorted = sorted(estado_list, key=lambda e: str(e.get("fecha") or ""))
+    for e in estado_sorted:
         ev = _process_estado_event(
             supabase,
             tenant_id=tenant_id,
@@ -533,6 +682,15 @@ async def _handle_aveonline_webhook(
         latest_internal = _map_raw_status(
             str(latest_estado.get("nombre_estado") or ""),
         )
+
+        # BLOQUE F-6 — sync de `orders.status` a 'delivered'. INCONDICIONAL respecto
+        # al guard de transición de abajo: es idempotente (rank + `.in_` race-safe)
+        # y NO depende de conversation_id ni de `inserted`. Así auto-sana si un
+        # UPDATE falló antes — el guard de transición (shipment ya terminal) nunca
+        # re-invocaría `_notify_status_change`, dejando la orden colgada en 'shipped'.
+        if latest_internal == "delivered" and order_id:
+            _advance_order_to_delivered(supabase, tenant_id, order_id, None)
+
         latest_external_id = (
             f"{guia}|{latest_estado.get('estado_id') or ''}|"
             f"{latest_estado.get('fecha') or ''}"
