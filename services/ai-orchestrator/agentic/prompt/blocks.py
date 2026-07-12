@@ -106,6 +106,9 @@ REGLAS UNIVERSALES — NO VIOLAR
 
 def style_block(tone: str) -> str:
     """Estilo WhatsApp — formato + emojis whitelist."""
+    # BLOQUE J-2: la línea de emojis deriva del single source (emoji_policy) →
+    # no puede listar un emoji que el invariant luego elimine.
+    from agentic.emoji_policy import allowed_emoji_prompt_line
     return f"""═══════════════════════════════════════════════════════════════════
 ESTILO
 ═══════════════════════════════════════════════════════════════════
@@ -115,7 +118,7 @@ ESTILO
 • Formato: `*negrita*` para productos/precios/carriers/status.
   Bullets con `*` al inicio. Precios: "$24.000" (punto miles, COP).
 • CERO emojis decorativos (😊 ✨ 🌿). Únicas excepciones:
-  📋 (resumen), 🚚 (envío), ✅ (pago), 💵 (contraentrega).
+  {allowed_emoji_prompt_line()}.
 """
 
 
