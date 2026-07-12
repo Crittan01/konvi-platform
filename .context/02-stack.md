@@ -49,24 +49,24 @@ Esta VM es dedicada 100% al proyecto. Todas las herramientas del sistema se inst
 
 **Regla operativa:** ejecutar servicios/tests Python con `python3.11` hasta alinear el alias `python3` al runtime objetivo.
 
-## Servicios — VM local (Render en freeze)
+## Servicios — VM local + Render productivo
 
-Render se mantiene en **freeze** hasta que se retome producción. Toda prueba corre en VM local con un `Makefile` orquestador.
+**Render está LIVE** (ya NO en freeze). La rama `production` autodespliega los 4 servicios; hubo múltiples deploys a producción en jul-2026 (iniciativa production-grade bloques 0→H). El desarrollo/UAT dinámico corre en la VM local con un `Makefile` orquestador; localhost comparte la MISMA Supabase productiva.
 
 | Comando | Acción |
 |---|---|
-| `make -C /home/ansible/commerce-ops-local up` | Levanta api + connector + orchestrator + web + tunnels ngrok |
-| `make -C /home/ansible/commerce-ops-local down` | Para todo |
-| `make -C /home/ansible/commerce-ops-local restart` | Reinicia todo |
-| `make -C /home/ansible/commerce-ops-local stop-orchestrator` | Para solo el orchestrator (ej. para recargar código) |
-| `make -C /home/ansible/commerce-ops-local start-orchestrator` | Levanta solo el orchestrator |
-| `make -C /home/ansible/commerce-ops-local status` | Estado de procesos |
-| `make -C /home/ansible/commerce-ops-local print-urls` | URLs de webhooks ngrok |
+| `make -C /home/ansible/workspaces/konvi-platform/.local up` | Levanta api + connector + orchestrator + web + tunnels ngrok |
+| `make -C /home/ansible/workspaces/konvi-platform/.local down` | Para todo |
+| `make -C /home/ansible/workspaces/konvi-platform/.local restart` | Reinicia todo |
+| `make -C /home/ansible/workspaces/konvi-platform/.local stop-orchestrator` | Para solo el orchestrator (ej. para recargar código) |
+| `make -C /home/ansible/workspaces/konvi-platform/.local start-orchestrator` | Levanta solo el orchestrator |
+| `make -C /home/ansible/workspaces/konvi-platform/.local status` | Estado de procesos |
+| `make -C /home/ansible/workspaces/konvi-platform/.local print-urls` | URLs de webhooks ngrok |
 
 **Ubicaciones:**
 
-- Logs: `/home/ansible/commerce-ops-local/logs/{orchestrator,api,connector,web}.log`
-- PIDs: `/home/ansible/commerce-ops-local/pids/`
+- Logs: `/home/ansible/workspaces/konvi-platform/.local/logs/{orchestrator,api,connector,web}.log`
+- PIDs: `/home/ansible/workspaces/konvi-platform/.local/pids/`
 - `.env` que cargan los servicios: `/home/ansible/workspaces/konvi-platform/.env` (raíz del repo)
 
 **Importante** — cambios de código en `services/ai-orchestrator/*.py` requieren reiniciar el orchestrator. Cambios en `.env` (env vars) son leídos al inicio del proceso, **excepto los flags hot-reload** (ver `USE_NEW_ORCHESTRATOR` que se relee por cada llamada).

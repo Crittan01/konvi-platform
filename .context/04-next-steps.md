@@ -1,60 +1,41 @@
-# Próximos Pasos — Estado 2026-05-08 (rev. 106 — cierre Sem 5)
+# Próximos Pasos — Estado 2026-07-12 (rev. 112 — bloques 0→H desplegados)
 
-**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md`](../docs/reports/rev106_sem5_envia_p1_complete.md).
-**Estado branch**: `phase-0-pre-prod` (107 commits ahead, sin commits a `develop`/`main`).
-**Suite tests**: 1867 verde · 0 fail · 0 flaky.
-
----
-
-## ✅ VALIDACIÓN FINAL DEL PLAN MAESTRO — 2026-07-03 — Coherencia del bot con gemini-3.5-flash (PASADA)
-
-**RESULTADO: PASADA.** La validación LIVE con gemini-3.5-flash cazó un bloqueante
-de deploy y quedó resuelto:
-- **thought_signature (Gemini 3.x)** — el modelo nuevo exige reenviar la firma en
-  el round-trip de tools; el loop la descartaba → TODO add_to_cart/quote_shipping
-  fallaba (400) → bot degradaba. Fix en `agentic/agent.py` (commit `2668cb70`) +
-  4 tests de regresión. **Verificado**: checkout end-to-end coherente (total =
-  subtotal + envío = $145.640 exacto en bot/DB/link Wompi, 0 errores).
-- **Telegram** — escalaciones con Markdown desbalanceado se perdían en silencio;
-  reintento en texto plano (mismo commit).
-- **Hydration Next 15** — `<ul>` fuera de `<p>` en el Inbox (commit `2d02a826`).
-
-**Gate LIBERADO:** el cambio de modelo (`5d388a4f`) + estos fixes + Next 15 están
-listos para merge `develop→production`. Producción sigue en gemini-2.5-flash
-hasta que el founder dispare el merge (autoDeploy).
-
-Nota: el harness estático `coherence_scenarios.py` quedó **desincronizado** con el
-flujo actual (ahora hay gate de método de pago que los scripts no responden); la
-validación se hizo dinámica (método preferido, [[feedback_no_static_uat]]).
-Pendiente menor: actualizar los turnos de los escenarios para que respondan el
-gate de pago y el harness vuelva a correr verde.
+**Estado branch**: `develop` = `origin/production` = `0dbf1180`. `main` 249 commits atrás.
+**Suite tests**: ~3490 colectados · gate `validate.sh --ci` VERDE.
+**Contexto vivo**: ver `.context/01-state.md` rev.112 (tabla PRs #26-53 / ADRs 0032-0038 / bloques 0→H).
 
 ---
 
-**(histórico) Posición en el plan.** Era la **última tarea del plan de trabajo
-maestro** (audit remediation Fases 0-6 + 4 puntos founder + upgrade Next 15 +
-normalización de modelos). Todo lo demás commiteado en `origin/develop`; esta
-validación fue el capstone (decisión founder 2026-07-03: "validar coherencia del
-bot al final del plan de trabajo maestro").
+## ✅ Gate gemini-3.5-flash + Next 15 — DISPARADO Y DESPLEGADO
 
-**Contexto.** El retiro de modelos Gemini deprecados (2026-10-16) normalizó
-`gemini-2.5-flash → gemini-3.5-flash` (commit `5d388a4f`, en `origin/develop`,
-**NO desplegado**). `origin/production` (`5a0a142f`) sigue con `gemini-2.5-flash`.
-Un cambio de modelo del bot puede alterar adherencia a prompt, tool-calling y
-coherencia FSM. **No se debe mergear `5d388a4f` a production sin validar el bot
-live con el modelo nuevo** (instrucción founder: "ajustar el bot, con pruebas
-respectivas").
+El gate de validación de coherencia con el modelo nuevo (era la última tarea del plan
+maestro previo) **ya se disparó y desplegó**. `origin/production` está a la par de
+`develop` (`0dbf1180`, 2026-07-12) e incluye la normalización de modelos. `render.yaml`
+(blueprint desplegado) tiene `GEMINI_MODEL=gemini-3.1-flash-lite` (primario) con cascade
+a Claude rescue; el default en código es `gemini-3.5-flash`. Los fixes que el gate cazó
+en su momento (thought_signature Gemini 3.x en `agentic/agent.py`, retry Telegram texto
+plano, hydration Next 15) están en producción.
 
-Nota de entanglement: en `develop` el commit del modelo `5d388a4f` va **debajo**
-del upgrade Next 15 (`e831096e`) y del harness (`450eec2b`). El próximo merge
-`develop→production` arrastra los tres juntos → correr el harness ANTES de ese
-merge, no después.
+**Pendiente menor NO bloqueante** (arrastra desde entonces): el harness estático
+`coherence_scenarios.py` sigue desincronizado con el gate de método de pago (los turnos
+de los 15 escenarios no responden la pregunta contraentrega/online que el invariant
+PaymentCoherence fuerza mid-checkout). La validación se hace dinámica
+([[feedback_no_static_uat]]). Actualizar los turnos queda en BLOQUE L (higiene tests).
+
+---
+
+## Ítems CERRADOS (ya no son pendientes — verificado 2026-07-12)
+
+- **A6.2.7** aislamiento multi-tenant (198 gaps → 0): `python3.11 scripts/audit_tenant_filter.py` → 0 gaps. CERRADO.
+- **A7** RBAC ai_agents / marketplace: cerrado en BLOQUE G-4 (PR #50, owner-only en server actions).
+- **Model B Phase 7** (Meta actions founder): el connector Model B está activo en prod y WhatsApp funciona (deploys jul-2026 + UAT prod 2026-07-10). Ya NO es bloqueante.
+- **Gate gemini**: desplegado (ver arriba).
 
 **INTERVENCIÓN HUMANA REQUERIDA** (founder — requiere stack local vivo).
 
 **INSUMOS**
 - Stack local arriba: connector `:8000` + orchestrator + DB (los logs en
-  `/home/ansible/konvi-local/logs/` son la fuente de verdad de errores runtime).
+  `/home/ansible/workspaces/konvi-platform/.local/logs/` son la fuente de verdad de errores runtime).
 - Orchestrator configurado con `GEMINI_MODEL=gemini-3.5-flash` (env local, para
   ejercer el modelo nuevo antes de que toque production).
 
@@ -658,7 +639,7 @@ Total suite: **709 tests OK** (681 → 709, +28 nuevos rev. 74).
 
 **Contexto operacional (rev. 74):**
 - **Render está en FREEZE** — no se desplega allá hasta retomar producción comercial.
-- **Toda prueba corre en VM local** levantada con `make -C /home/ansible/commerce-ops-local up`.
+- **Toda prueba corre en VM local** levantada con `make -C /home/ansible/workspaces/konvi-platform/.local up`.
 - **`USE_NEW_ORCHESTRATOR=true` ya está en `.env`** del repo. Toma efecto en el siguiente mensaje del bot — el adapter lee la var en cada llamada (hot-reload, sin restart).
 - **Pero** los cambios de código rev. 74 (`core/coordinator.py`, `core/fsm.py`, etc.) requieren reiniciar el orchestrator local para cargarse en memoria. El flag solo enruta al código que ya está cargado.
 
@@ -672,21 +653,21 @@ Total suite: **709 tests OK** (681 → 709, +28 nuevos rev. 74).
 
 2. **Reiniciar orchestrator local** para cargar código rev. 74 en memoria:
    ```bash
-   make -C /home/ansible/commerce-ops-local stop-orchestrator
-   make -C /home/ansible/commerce-ops-local start-orchestrator
+   make -C /home/ansible/workspaces/konvi-platform/.local stop-orchestrator
+   make -C /home/ansible/workspaces/konvi-platform/.local start-orchestrator
    # o equivalente:
-   # make -C /home/ansible/commerce-ops-local restart  (reinicia todo)
+   # make -C /home/ansible/workspaces/konvi-platform/.local restart  (reinicia todo)
    ```
 
 3. **Verificar que arrancó sin errores:**
    ```bash
-   tail -n 50 /home/ansible/commerce-ops-local/logs/orchestrator.log
+   tail -n 50 /home/ansible/workspaces/konvi-platform/.local/logs/orchestrator.log
    # Buscar líneas: "OrchestratorWorker started" + "[coord]" o "[v2_adapter]"
    ```
 
 4. **Validación inmediata (primer mensaje):**
    - Enviar 1 mensaje de prueba al WhatsApp del tenant dev (`+573125835649`).
-   - Tail los logs: `tail -f /home/ansible/commerce-ops-local/logs/orchestrator.log`.
+   - Tail los logs: `tail -f /home/ansible/workspaces/konvi-platform/.local/logs/orchestrator.log`.
    - Buscar línea `[coord] tenant=... conv=... state=... cart_items=N outside_hours=... window_expired=... cart_changed=...` (V2 corriendo).
    - Si aparece `[v2_adapter] coordinator falló — fallback a monolito`: V2 lanzó excepción → fallback OK al cliente, pero hay bug que investigar.
 
@@ -715,23 +696,23 @@ Total suite: **709 tests OK** (681 → 709, +28 nuevos rev. 74).
 
 ```bash
 # Estado de servicios
-make -C /home/ansible/commerce-ops-local status
+make -C /home/ansible/workspaces/konvi-platform/.local status
 
 # Logs en vivo
-tail -f /home/ansible/commerce-ops-local/logs/orchestrator.log
+tail -f /home/ansible/workspaces/konvi-platform/.local/logs/orchestrator.log
 
 # Logs de api / connector
-tail -f /home/ansible/commerce-ops-local/logs/api.log
-tail -f /home/ansible/commerce-ops-local/logs/connector.log
+tail -f /home/ansible/workspaces/konvi-platform/.local/logs/api.log
+tail -f /home/ansible/workspaces/konvi-platform/.local/logs/connector.log
 
 # URLs de webhooks (ngrok)
-make -C /home/ansible/commerce-ops-local print-urls
+make -C /home/ansible/workspaces/konvi-platform/.local print-urls
 
 # Reiniciar todo
-make -C /home/ansible/commerce-ops-local restart
+make -C /home/ansible/workspaces/konvi-platform/.local restart
 
 # Bajar todo
-make -C /home/ansible/commerce-ops-local down
+make -C /home/ansible/workspaces/konvi-platform/.local down
 ```
 
 ### Fase E — Decomisar V1 (PENDIENTE — solo tras Fase D estable)

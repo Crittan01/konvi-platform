@@ -1,7 +1,34 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-06-23 (rev. 111 · Inbox crónico cura raíz Fase 0+1+2+3 + ADR-0024)
-**Branch activo**: `develop` (post-A0 + Model B + finiquito Inbox crónico Fase 0-3).
+**Última actualización**: 2026-07-12 (rev. 112 · iniciativa production-grade bloques 0→H DESPLEGADA a producción)
+**Branch activo**: `develop` (= `origin/production` = `0dbf1180`). `main` está 249 commits atrás (no es deploy target).
+**Deploy**: `production` autodespliega en Render (los 4 servicios live). NO hay freeze.
+
+---
+
+## Rev. 112 (2026-07-10→12 — CIERRE + DEPLOY) — Iniciativa production-grade por bloques 0→H (Prompt Maestro)
+
+Metodología: un BLOQUE a la vez (branch desde develop → impl → tests → `validate.sh --ci` VERDE → revisión adversarial multi-agente → migración segura → ADR → PR → founder autoriza merge → deploy). Bloques **0→H TODOS CERRADOS y desplegados**. `origin/production` == `origin/develop` == `0dbf1180` (2026-07-12).
+
+| Bloque | PRs | ADR | Contenido | Migración |
+|---|---|---|---|---|
+| **0** Seguridad | #26 | 0032 | audit_log tamper-evident, PII fuga get_claim_status, purchases RLS, MFA gateway | sí (3) |
+| **A** Dinero | #27-29 | 0033 | Wompi cents redondeo, cupón invalida link, purge_contact selectivo (Cód. Comercio Art.60), reconciliación webhook | — |
+| **B** Aveonline envío | #30, guía | 0034 | peso real en guía, order_id en shipments, idempotencia guía (claim-before-bill), `real_guides_enabled` per-tenant | sí |
+| **C** Catálogo/stock | #32-34 | 0035 | import hoja datos, precio inválido rechazado, RPC atómico idempotente `rpc_stock_decrement/restore` | sí (RPC) |
+| **D** Mercado Libre | #36 | 0036 | oversell cross-canal (rpc_stock_decrement), status monotónico, reposición en cancelación, validación SSRF resource | — |
+| **E** Inbox + MeLi reliability | #37-41 | 0037 | token refresh lease+fencing, console truth-fixes, emoji tofu, crash ventana 24h, webhook host connector, media inbound proxy (XSS+DoS guards) | sí (lease) |
+| **F** Post-venta + finanzas | #42-46 | 0038 | finanzas owner-only (3 capas RLS), anulación gastos, notif cliente reclamos, F-6 orders→delivered, F-7 alerta operador, guard monotónico shipment | sí (2) |
+| **G** Dashboard + cierre | #47-51 | — | home coherente/realtime, KPI ventas NETAS + refund ledger, RAG drift guard + re-embed, RBAC sweep, email desnudo checkout, guard `status_occurred_at` | sí |
+| **H** Bugs P0 + quick wins | #52-53 | — | cron Wompi VOIDED reparado (import cross-servicio muerto), `send_product_image` fantasma → envío real, 11 quick wins (💵 emoji, código muerto, SLOW_TESTS bcrypt, verdad documental) | — |
+
+**Refuerzo por revisión adversarial**: cada bloque pasó un workflow multi-agente (find→verify) antes del PR. BLOQUE H: 27 hallazgos reales en el propio fix (email 2xx-only, orphan-rollback, idempotencia cross-path, tenant scope, age-out alert) — todos aplicados, test del monto verificado por mutación 100x.
+
+**Migraciones**: 218 archivos en `supabase/migrations/` (57 nuevas en jul-2026). Aplicadas a prod con protocolo seguro (smoke ROLLBACK → apply → `migration repair`).
+
+**Sigue vigente de rev.110/111** (NO borrar): Model B Direct Provider per-tenant WhatsApp (ADR-0023), cura crónica Inbox V3 per-state builder + business_ops kwargs (ADR-0024). Ver secciones abajo.
+
+**Auditoría ecosistema BOT 2026-07-12** (workflow 26 agentes): 17 crit/high confirmados → plan bloques I-L. **BLOQUE I (esta rev, en curso)**: verdad documental — reescritos `06-contracts.md` (Meta Model B, ADR-0025, Aveonline, FSM agentic 9 estados, KB threshold), este doc, `04-next-steps.md`, `HANDOFF.md`, versiones. Sigue: J (robustez runtime), K/L.
 
 ---
 
@@ -457,7 +484,7 @@ UX/legal significativos.
 **Memorias persistidas**:
 
 - `memory/feedback_local_logs.md` — Logs en
-  `/home/ansible/commerce-ops-local/logs/` son fuente de verdad runtime;
+  `/home/ansible/workspaces/konvi-platform/.local/logs/` son fuente de verdad runtime;
   leer antes de especular.
 - `memory/feedback_ui_colors.md` — Tailwind shades 300-500 son
   fluorescentes; usar 700 en componentes Tenant Console.
@@ -590,13 +617,13 @@ fallback graceful — no falla flujo).
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **Render**: 🧊 **EN FREEZE** — no se desplega allá hasta retomar producción. Toda prueba corre en VM local.
-- **VM local**: levantada con `make -C /home/ansible/commerce-ops-local up` (api + connector + orchestrator + web + tunnels ngrok). Reiniciar orchestrator tras cambios de código en `services/ai-orchestrator/`: `make -C /home/ansible/commerce-ops-local restart` (o `stop-orchestrator + start-orchestrator`).
+- **Render**: ✅ **LIVE** — `production` autodespliega los 4 servicios (web/api/orchestrator/connector). Deploys en jul-2026 (bloques 0→H). El desarrollo/UAT corre en VM local, que comparte la MISMA Supabase productiva.
+- **VM local**: levantada con `make -C /home/ansible/workspaces/konvi-platform/.local up` (api + connector + orchestrator + web + tunnels ngrok). Reiniciar orchestrator tras cambios de código en `services/ai-orchestrator/`: `make -C /home/ansible/workspaces/konvi-platform/.local restart` (o `stop-orchestrator + start-orchestrator`).
 - **Inbox**: ✅ Certificado (rev. 67/72) — compliance Meta + `content_type` tipado
 - **Coherencia bot**: ✅ Re-certificado (rev. 71)
 - **Coherencia arquitectural Front↔API↔DB**: ✅ Re-certificado (rev. 72) — 4 drifts críticos cerrados (Claims/Compras/KB/Audit)
 - **F7-lite cart recovery**: ✅ Implementado (rev. 70)
-- **DB**: ✅ 74 migraciones aplicadas. Sin drift schema↔migrations.
+- **DB**: ✅ 218 migraciones en `supabase/migrations/` (57 nuevas jul-2026, bloques 0→H). Aplicadas a prod con protocolo seguro + ledger repair.
 
 ---
 

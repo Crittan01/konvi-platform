@@ -15,7 +15,7 @@ No sustituye el código ni la jerarquía documental de `.context/`.
 |---|---|
 | Frontend | Next.js `15.5.20` + React `^19` + TypeScript `^5` |
 | Backend Python | FastAPI `0.128.8`, Pydantic `2.12.5`, `supabase==2.28.3` |
-| IA | `google-genai==1.47.0`, `gemini-2.5-flash` |
+| IA | `google-genai==1.47.0`; modelo prod `gemini-3.1-flash-lite` (render.yaml), default código `gemini-3.5-flash`, cascade a `claude-sonnet-4-5` rescue |
 | DB/Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
 | Mensajería | WhatsApp Cloud API oficial (`v22.0`) |
 

@@ -11,6 +11,7 @@ Estados únicos en runtime y DB:
 - `bot_active` — bot responde automáticamente
 - `human_takeover` — bot silenciado, agente humano atiende
 - `closed` — bot silenciado, no reabre automáticamente
+- `opted_out` — cliente revocó consent vía STOP keyword (rev.105 H.4.1); el orchestrator skipea todo inbound. El operador reactiva manual a `bot_active`. Constante `CONVERSATION_STATUS_OPTED_OUT` en `conversation_contract.py` (orchestrator + API).
 
 Aplicado en: `supabase` (constraint), API, Frontend Inbox, Connector/Worker/Orchestrator.  
 Sincronización de recencia: trigger DB `trg_sync_conversation_last_interaction` (`messages → conversations.last_interaction_at`).
@@ -64,79 +65,99 @@ Callback rechaza state faltante/inválido/expirado/reutilizado.
 Fuente única: `tenant_integrations` por `tenant_id` (`provider='whatsapp'`).  
 No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en env vars.
 
-### 7.1 Modelo arquitectónico (verificado 2026-05-08)
+### 7.1 Modelo arquitectónico — Model B Direct Provider per-tenant (ADR-0023, rev.110, 2026-06-22)
 
-Hay UNA SOLA Meta App propiedad del Business Portfolio de la plataforma.
-Cada tenant conecta su WABA + Phone Number a esa App vía System User token
-generado en su propio Business Manager. Ver detalle completo en
-`docs/research/meta-app-architecture-2026-05-08.md`.
+**CADA tenant tiene SU PROPIA Meta App** (App Secret + Verify Token + WABA +
+Phone Number + System User token propios), igual que Wompi/Aveonline/Telegram.
+Konvi **NUNCA** es Partner/BSP de Meta. El connector-whatsapp recibe webhooks de
+N Meta Apps distintas y las enruta por el path `POST/GET /api/v1/whatsapp/webhook/{tenant_id}`
+(el `tenant_id` UUID viene en la URL, es el eje del Model B).
 
-**Variables globales** (Render env-var del servicio `connector-whatsapp`):
+Fuente canónica: `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md`
+(supersede la research doc `meta-app-architecture-2026-05-08.md`, que describía el
+modelo A "1 Konvi App + N tenants" ya abandonado).
 
-| Var | Origen | Uso |
-|---|---|---|
-| `META_APP_SECRET` | App Secret de la Meta App de la plataforma | HMAC SHA-256 verify de TODOS los webhooks inbound |
-| `META_VERIFY_TOKEN` | Verify Token configurado en developers.facebook.com | GET handshake `hub.challenge` |
-
-**NO existen `app_secret` ni `verify_token` per-tenant** — sería arquitectura
-multi-app (raro, requiere que cada tenant tenga su propia Meta App). El modelo
-actual de Konvi es 1 Meta App + N tenants conectados.
+**NO hay env vars globales de credenciales Meta** en el connector. Verificable:
+`grep -rn 'META_APP_SECRET\|META_VERIFY_TOKEN' services/connector-whatsapp/` → 0 matches.
+Los únicos `os.getenv` del connector son SUPABASE/SENTRY/RENDER.
 
 ### 7.2 Schema canónico `tenant_integrations.credentials` (provider='whatsapp')
 
 ```jsonc
 {
-  // Identificadores públicos (NO sensitive — plaintext OK)
-  "phone_number_id": "990364...1295",        // requerido outbound /messages + multiplex inbound
-  "waba_id": "215905...8202272",             // requerido templates CRUD F2 (POST /{WABA_ID}/message_templates)
-  "display_phone_number": "+57 311 5678910", // opcional, solo display
+  // Identificadores de la Meta App DEL TENANT
+  "app_id": "<Meta App ID del tenant>",       // su propia App
+  "phone_number_id": "990364...1295",         // requerido outbound /messages + multiplex inbound
+  "waba_id": "215905...8202272",              // requerido templates CRUD (POST /{WABA_ID}/message_templates)
+  "display_phone_number": "+57 311 5678910",  // opcional, solo display
 
-  // Secretos del tenant (Vault preferido)
-  "access_token_secret_id": "<vault_uuid>",  // System User token Bearer Graph API
-  "access_token": "...",                      // (legacy fallback, migrar a Vault)
+  // Secretos del tenant (Vault, resueltos por el connector/orchestrator)
+  "app_secret_secret_id": "<vault_uuid>",     // App Secret → HMAC verify per-tenant (Vault)
+  "access_token_secret_id": "<vault_uuid>",   // System User token Bearer Graph API (Vault)
+  "verify_token": "...",                       // claro en JSONB (no crítico) — handshake GET
+
+  // Ruteo / rol
+  "webhook_url_path_segment": "...",           // decorativo; el routing usa el tenant_id UUID del path
+  "integration_type": "direct_provider",       // Model B
+  "integration_role": "...",
 
   // Metadata operativa (synced via webhook phone_number_quality_update)
-  "tier": "TIER_250",                         // TIER_50|250|1K|10K|100K|UNLIMITED
-  "quality_rating": "GREEN"                   // GREEN|YELLOW|RED
+  "tier": "TIER_250",                          // TIER_50|250|1K|10K|100K|UNLIMITED
+  "quality_rating": "GREEN"                    // GREEN|YELLOW|RED
 }
 ```
 
 **Notas**:
-- `access_token` lo genera el tenant en SU `business.facebook.com` (System User
-  con permisos sobre SU WABA). Es Bearer token de larga duración (no caduca).
-- `access_token` se usa por `services/ai-orchestrator/whatsapp_sender.py` para
-  outbound `/messages` y por `MetaBusinessManagementClient` (F2) para CRUD
-  templates `POST /{WABA_ID}/message_templates`.
-- `tier` + `quality_rating` se actualizan automáticamente cuando Meta envía
-  `phone_number_quality_update` (suscripción F2 pendiente Sem 7).
+- El `app_secret` (HMAC) y el `access_token` (outbound) viven en Vault per-tenant
+  (`app_secret_secret_id`, `access_token_secret_id`). El `verify_token` (handshake)
+  va claro en el JSONB (no es crítico).
+- El tenant genera estas credenciales en SU `developers.facebook.com` /
+  `business.facebook.com` (su propia Meta App + System User sobre SU WABA).
+- Campos reales consumidos por el connector: ver docstring de
+  `services/connector-whatsapp/dependencies/meta.py:20-30`.
 
-### 7.3 HMAC verification + tenant forensics (rev. 106 Sem 6 simplificado)
+### 7.3 HMAC verification per-tenant + invariante cross-tenant (rev.110, ADR-0023)
 
-`services/connector-whatsapp/dependencies/meta.py`:
+`services/connector-whatsapp/dependencies/meta.py` (`verify_meta_signature_for_tenant`):
 
-1. Lee raw_body + header `X-Hub-Signature-256: sha256=<hex>`.
-2. HMAC SHA-256 verify constant-time contra `META_APP_SECRET` global. Si falla → 403.
-3. (Forensics) extrae `phone_number_id` del payload, lookup `tenant_integrations`
-   → loguea `tenant_id` + `phone_number_id` en cada webhook OK. Auditoría Habeas
-   Data + debugging multi-tenant. NO bloquea ni cambia el HMAC.
-4. Cache TTL 5min para `phone_number_id → tenant_id` (incluye negativos).
+1. `tenant_id` viene del URL path (`/webhook/{tenant_id}`). Lee raw_body + header
+   `X-Hub-Signature-256: sha256=<hex>`.
+2. Resuelve el `app_secret` **per-tenant** desde Vault (cache 300s + single-flight
+   anti-stampede) y valida HMAC SHA-256 constant-time contra ESE secret. Falla → 403.
+   No existe secret global.
+3. **Invariante cross-tenant (defense-in-depth, SÍ bloquea):** tras HMAC OK, extrae
+   `phone_number_id` del payload y resuelve su `tenant_id`. Si difiere del `tenant_id`
+   del path → métrica `hmac_fail_cross_tenant_invariant` + **403** (no es solo forensics).
+4. Tres caches TTL 300s (phone_number_id→tenant_id, tenant_id→app_secret,
+   tenant_id→verify_token) con caching negativo + single-flight lock, más métricas
+   in-memory expuestas en `GET /health/metrics`.
+
+El handshake GET `/webhook/{tenant_id}` compara `hub.verify_token` contra el
+`verify_token` de ESE tenant (`credentials.verify_token`).
 
 Razón de NO usar F.1 webhook framework: `connector-whatsapp` es deploy unit
 independiente Render (`rootDir: services/connector-whatsapp`) — no puede importar
-de `services/api/lib/`. Ver `docs/research/f1-f2-meta-gap-audit-2026-05-08.md`
-§7.bis. F.1 sigue siendo canónico para webhooks dentro de `services/api/`.
+de `services/api/lib/` (`meta.py:41-42`). F.1 sigue siendo canónico para webhooks
+dentro de `services/api/`.
 
-## 8) Seguridad multi-tenant (service_role)
+## 8) Seguridad multi-tenant (service_role) — ADR-0025
 
 `service_role` bypasea RLS → el aislamiento depende de filtros explícitos `tenant_id` en cada query.  
-Helper: `scoped_table(supabase, table, tenant_id)` en `services/api/dependencies/tenant_scope.py`.
+Estrategia canónica (ADR-0025), tres capas:
+- **Lint AST estático** `scripts/audit_tenant_filter.py` — enforce el patrón `.table(X).eq("tenant_id", tid)` en queries multi-tenant (baseline 0 gaps, ratchet en CI). Excepciones se taggean `# tenant_filter:exempt:<razón>`.
+- **RLS + GUC**: `app_current_tenant()` = COALESCE(GUC `app.current_tenant_id`, JWT `app_metadata.tenant_id`).
+- **Vault ownership**: los secretos se leen scoped al tenant dueño.
 
-## 9) Shipping Envia (CO)
+El helper `scoped_table(...)` y `services/api/dependencies/tenant_scope.py` fueron **ELIMINADOS** (0 adopción, 2 meses post-rev.58). El patrón vigente es el `.eq("tenant_id", tid)` explícito verificado por el lint.
+
+## 9) Shipping Aveonline (CO) — ADR-0019
+
+Provider activo **único** = `aveonline` (Envia fue **ELIMINADO** del runtime en rev.109, 2026-05-30; sus endpoints label/tracking/pickup/cancel se borraron con él). Default resuelto en `services/api/routers/shipping.py` (`_get_active_shipping_provider`).
 
 - DANE: acepta 5 u 8 dígitos, normaliza a 8 para cotizar (`11001 → 11001000`).
-- Payload Envia: `city = dane_8digit`, `postalCode = dane_8digit`.
 - `shipping/quote` retorna `highlights.cheapest` y `highlights.fastest` (determinístico, sin LLM).
-- Envia Fase 2 (label/tracking/pickup/cancel) bajo feature flag `ENVIA_PHASE2_ENABLED=true` (default false).
+- Aveonline maneja eventos de estado post-venta vía webhook (`routers/aveonline_webhook.py`) — ver ADR-0038 (F-6/F-7) + guard monotónico `shipments.status_occurred_at`.
+- Generación de guía real gateada per-tenant por `real_guides_enabled` (default false).
 
 ## 10) Tiering runtime (Basic / Pro / Enterprise)
 
@@ -162,6 +183,25 @@ Existentes bootstrappeados a `enterprise` para no cortar operación.
 - TTL 30 min en Wompi; worker cancela `pending_payment` expirados a los 35 min (`PENDING_PAYMENT_TTL_MINUTES`).
 
 ## 13) FSM Conversacional — estados
+
+**Hay DOS FSM coexistiendo** (no confundir):
+
+**(A) FSM AGENTIC canónico — path PRIMARIO** (`services/ai-orchestrator/agentic/state_machine/states.py`, enum `AgenticState`, 9 estados, desde rev.109/111). Es el que corre para tenants con `agentic_enabled=true` (todos los nuevos, KAIU incluido). Persiste en `conversations.agentic_state` (migración `20260604000000`):
+
+```
+GREETING            ← saludo inicial / re-engage tras inactividad
+EXPLORING           ← cliente navega categorías, aún 0 items
+CART_BUILDING       ← cart con ≥1 item, sin checkout iniciado
+PII_COLLECTION      ← recolección de datos de contacto (checkout)
+SHIPPING_QUOTE      ← cotización de envío
+CARRIER_SELECTION   ← selección de transportadora
+PAYMENT             ← método pago / link Wompi / COD pendiente
+POST_PAYMENT        ← orden creada, esperando confirmación final / tracking
+HUMAN_HANDOFF       ← escalado a operador (accesible desde cualquier estado)
+```
+Resolver puro determinístico en `agentic/state_machine/resolver.py`; matriz de transiciones en `transitions.py`.
+
+**(B) FSM transaccional LEGACY** (`services/ai-orchestrator/fsm/states.py`) — aún vivo para el resolver de checkout (dirección/PII). Sus estados:
 
 ```
 CATALOG_MODE                   ← consulta, sin intención de compra
@@ -262,7 +302,7 @@ Validación: `dependencies/contact_validators.py.is_address_complete(addr)`.
 | **Envíos** | Tarifas/zonas/tiempos, restricciones | Política de devolución |
 | **Pagos** | Métodos aceptados, financiamiento | Datos del banco (sensible) |
 
-RAG: embeddings `gemini-embedding-001` (3072 dim), búsqueda semántica top-3, threshold 0.4. Sin filtro por categoría — el RAG busca en todo el KB del tenant por significado.
+RAG: embeddings `gemini-embedding-2` (3072 dim; `gemini-embedding-001` fue RETIRADO por Google, F-doc Fase 6, y su fallback histórico `text-embedding-004` también se apagó ene-2026), búsqueda semántica pgvector top-3, `match_threshold=0.5` (`tools/kb_tool.py:169`). Sin filtro por categoría — el RAG busca en todo el KB del tenant por significado.
 
 ### Identidad del negocio vs Comportamiento del agente (rev. 67)
 
@@ -295,7 +335,7 @@ Reglas:
 **Multimodal audio (D rev. 67):**
 - Feature flag `MULTIMODAL_AUDIO_ENABLED` (default `true`). Apagable en caliente.
 - Flujo: connector persiste `media_id` + `media_mime` → orchestrator descarga via `services/meta_media.py`
-  → envía inline al modelo Gemini (`gemini-2.5-flash`, multimodal nativo) → recibe transcripción.
+  → envía inline al modelo Gemini multimodal (`MULTIMODAL_MODEL`, default `gemini-3.5-flash`) → recibe transcripción.
 - La transcripción reemplaza `content` y `content_type='text'`; el flow normal del FSM continúa con ese texto.
 - Mimes soportados: `audio/ogg`, `audio/mp3`, `audio/mpeg`, `audio/wav`, `audio/aiff`, `audio/aac`, `audio/flac`.
 - Tamaño máx: `META_MEDIA_MAX_BYTES` (default 16 MB).

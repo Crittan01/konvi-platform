@@ -99,7 +99,7 @@ No tiene implementación. Bloqueante OQ-P01 sin resolver.
 
 ```text
 konvi-platform/
-├── apps/web/                    # Next.js 14.2.35 — Tenant Console
+├── apps/web/                    # Next.js 15.5.20 — Tenant Console
 │   └── app/dashboard/
 │       ├── (sales)/             # Route Group → /dashboard/{orders,contacts,shipping,claims}
 │       ├── (products)/          # Route Group → /dashboard/catalog  (inventory eliminado)
