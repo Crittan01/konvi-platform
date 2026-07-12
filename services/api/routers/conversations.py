@@ -1220,9 +1220,19 @@ async def rerun_last_inbound(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # BLOQUE G-4 (review MEDIUM): rate-limit per-user. Al abrir rerun al operator
+    # (rol más numeroso) sin throttle, un doble-click/script clonaba el inbound N
+    # veces → N invocaciones LLM + N mensajes duplicados al cliente (exposición WABA).
+    # RL_SEND_MESSAGE (per-user) porque rerun produce un outbound al cliente, igual
+    # que send_agent_image. El disable de 5s del botón NO es seguridad.
+    _rl: None = Depends(RL_SEND_MESSAGE),
 ):
     """Re-procesa el último inbound del cliente. El bot generará nuevo outbound.
+
+    BLOQUE G-4 (decisión founder): Rerun es owner/manager/operator — es una acción
+    de soporte no destructiva (el docstring ya lo dice: "operador quiere segunda
+    toma") y el botón se muestra a todos. Se quitó require_write_role para alinear
+    la API con la UI (antes el operator veía el botón y recibía 403).
 
     Casos de uso (P0-3 backlog):
       - Bot dio respuesta mala / con typo → operador quiere segunda toma.

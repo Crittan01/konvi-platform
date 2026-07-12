@@ -205,10 +205,15 @@ async def create_claim(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
 ):
     """Crea un reclamo. Valida que el order pertenezca al tenant.
-    Si customer_id no viene, se deriva del order.contact_id."""
+    Si customer_id no viene, se deriva del order.contact_id.
+
+    BLOQUE G-4 (decisión founder): CREAR reclamos es owner/manager/operator — el
+    operator es front-line de soporte y la UI ya expone «Nuevo Reclamo» (canWrite
+    incluye operator). Se quitó require_write_role para alinear la API con la UI
+    (antes el operator veía el botón y recibía 403). RESOLVER/reembolsar sigue
+    restringido (patch_claim/resolve_claim mantienen require_write_role)."""
     order = _ensure_order_belongs_to_tenant(supabase, tenant_id, body.order_id)
     _validate_reason(body.reason.strip())
 
