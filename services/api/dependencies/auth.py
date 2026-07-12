@@ -181,6 +181,12 @@ async def get_current_role(request: Request) -> str:
     return role
 
 
+async def get_current_user_id(request: Request) -> Optional[str]:
+    """user_id (claim `sub`) del JWT — para trails de auditoría (ej. reversed_by)."""
+    payload = _extract_jwt_payload(request)
+    return payload.get("sub")
+
+
 async def require_write_role(role: str = Depends(get_current_role)) -> str:
     """
     Dependencia que exige role owner o manager.
