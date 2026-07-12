@@ -144,6 +144,9 @@ async def list_suppliers(
     include_inactive: bool = Query(default=False),
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    # BLOQUE F-1: los datos financieros de compras (proveedores, costos, márgenes) son OWNER-ONLY
+    # (decisión founder). Antes los GET no tenían guard → manager/operator veían costos/márgenes.
+    _role: str = Depends(require_owner_role),
 ):
     res = (
         supabase.table("suppliers")
@@ -247,6 +250,7 @@ async def list_purchase_orders(
     limit: int = Query(default=50, ge=1, le=200),
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),  # F-1: compras owner-only
 ):
     q = supabase.table("purchase_orders").select("*").eq("tenant_id", tenant_id)
     if status:
@@ -310,6 +314,7 @@ async def get_purchase_order(
     po_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),  # F-1: compras owner-only
 ):
     po_res = (
         supabase.table("purchase_orders")
