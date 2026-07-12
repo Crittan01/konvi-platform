@@ -769,6 +769,12 @@ def build_system_prompt(
     support_schedule: Optional[dict] = None,
     social_links: Optional[dict] = None,
     after_hours_message: Optional[str] = None,
+    # BLOQUE J-2 (review): CARRITO ACTUAL también en el fallback V2. Antes solo
+    # V3 per-state lo inyectaba; si el fallback V2 se activaba (excepción en la
+    # composición V3), el prompt perdía el snapshot factual del carrito (ADR-0026
+    # Pieza C) y el bot podía re-inventar totales. Reusa el MISMO renderer
+    # compartido (cart_state_section) que V3 → sin duplicación de bloque.
+    cart_snapshot: Optional[str] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -813,6 +819,12 @@ def build_system_prompt(
     philosophy_block = _render_philosophy_block(tenant_philosophy)
     agent_persona_block = _render_agent_persona_block(agent_role_description)
     coupons_block = _render_coupons_block(active_coupons)
+    # BLOQUE J-2 — CARRITO ACTUAL (ADR-0026 Pieza C) vía el renderer compartido.
+    from agentic.prompt.blocks import cart_state_section
+    cart_state_block = cart_state_section(cart_snapshot)
+    # BLOQUE J-2 — línea de emojis desde el single source (emoji_policy).
+    from agentic.emoji_policy import allowed_emoji_prompt_line
+    _emoji_line = allowed_emoji_prompt_line()
     # A2 finiquito 2026-06-23 — bloque operaciones del negocio.
     business_ops_block = _render_business_ops_block(
         tenant_name=tenant_name,
@@ -973,7 +985,7 @@ ESTILO
   sin decimales, COP). Para tracking numbers: triple backtick.
 
 • **CERO emojis decorativos** (😊 ✨ 🌿 etc.). Únicas excepciones:
-  📋 (resumen), 🚚 (envío), ✅ (pago confirmado), 💵 (contraentrega).
+  {_emoji_line}.
 
 ═══════════════════════════════════════════════════════════════════
 FLUJO HABITUAL (no rígido — adapta según conversación)
@@ -1088,5 +1100,7 @@ CUPONES / PROMOCIONES
 {coupons_block}
 
 ═══════════════════════════════════════════════════════════════════
+
+{cart_state_block}
 """
     return prompt.strip()

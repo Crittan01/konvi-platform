@@ -30,6 +30,31 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
+def _report_agentic_v2_fallback(
+    conversation_id: str, reason: str, state: str, *, alert: bool,
+) -> None:
+    """BLOQUE J-2 (review): el fallback al prompt monolito V2 era INVISIBLE en
+    prod (solo un logger.warning). Se vuelve visible. NO PII: solo
+    conversation_id truncado + motivo + estado.
+
+    `alert=True` → logger.error (Sentry lo captura vía LoggingIntegration; NO se
+      añade capture_message explícito para no duplicar el evento). Reservado para
+      `v3_build_error` (regresión REAL del builder V3 per-state — vale una alerta).
+    `alert=False` → logger.warning (bajo el umbral de Sentry). Para `resolver_none`,
+      que es un fallo de INFRA (Supabase) ya logueado como WARNING en
+      _resolve_and_persist_agentic_state → evita una tormenta de eventos ERROR por
+      turno durante una degradación de DB.
+    """
+    msg = (
+        "[AGENTIC_FALLBACK_V2] conv=%s reason=%s state=%s — usando prompt V2 monolito"
+    )
+    args = ((conversation_id or "?")[:8], reason, state)
+    if alert:
+        logger.error(msg, *args)
+    else:
+        logger.warning(msg, *args)
+
+
 # Feature flags operativos.
 AGENTIC_SHADOW_ENABLED = os.getenv("AGENTIC_SHADOW_ENABLED", "false").lower() == "true"
 AGENTIC_SHADOW_TIMEOUT_S = float(os.getenv("AGENTIC_SHADOW_TIMEOUT_S", "30"))
@@ -2734,13 +2759,18 @@ async def _run_agentic_full(
     # de tools. Reduce ~50-70% size del prompt + carga cognitiva LLM.
     # Fallback al monolito si falla la composición (defensa profundidad).
     _allowed_tools: Optional[set[str]] = None
+    # BLOQUE J-2 (review MEDIUM): init ANTES del try. Si el import de agentic.prompt
+    # (línea siguiente) lanza — justo la regresión del builder V3 que el fallback
+    # cubre — el except reconstruye V2 con `cart_snapshot=_cart_snapshot`; si el init
+    # estuviera DENTRO del try, después del import, quedaría unbound → UnboundLocalError
+    # que anula silenciosamente la preservación del carrito.
+    _cart_snapshot = None
     if _resolved_state is not None:
         try:
             from agentic.prompt import build_prompt_for_state, tools_for_state
             # ADR-0026 Pieza C — snapshot factual del carrito para el LLM (estados de
             # checkout): subtotal real + estado de envío + ciudad conocida → no inventa ni
             # repregunta. Falla-seguro: si no se puede leer, el prompt va sin el bloque.
-            _cart_snapshot = None
             try:
                 from agentic.prompt.builder import _CART_STATE_STATES
                 if _resolved_state in _CART_STATE_STATES:
@@ -2804,7 +2834,54 @@ async def _run_agentic_full(
                 "fallback a monolito",
                 conversation_id[:8], _resolved_state.value, _ps_exc,
             )
+            _report_agentic_v2_fallback(
+                conversation_id, "v3_build_error", _resolved_state.value, alert=True,
+            )
+            # BLOQUE J-2 (review): reconstruir V2 CON el cart_snapshot ya computado.
+            # Antes el fallback usaba el build eager de 1281 SIN cart_snapshot →
+            # perdía el CARRITO ACTUAL (ADR-0026) y el bot podía re-inventar totales.
+            # _cart_snapshot está en scope (init a None ANTES del try, no dentro).
+            try:
+                system_prompt = build_system_prompt(
+                    tenant_name=tenant_name,
+                    catalog=catalog,
+                    agent_name=_agent.get("name") or "Sara Camila",
+                    tenant_pitch=tenant_pitch,
+                    tenant_tone=tenant_tone,
+                    contact_record=contact or {},
+                    carriers=carriers_caps,
+                    payment_methods=payment_methods_cfg,
+                    tenant_philosophy=tenant_philosophy,
+                    agent_role_description=_agent.get("role_description"),
+                    active_coupons=active_coupons,
+                    shipping_origin=tenant_shipping_origin,
+                    store_locations=tenant_store_locations,
+                    store_type=tenant_store_type,
+                    support_schedule=tenant_support_schedule,
+                    social_links=tenant_social_links,
+                    after_hours_message=tenant_after_hours_message,
+                    cart_snapshot=_cart_snapshot,
+                )
+            except Exception as _rebuild_exc:
+                # El rebuild también falló → queda el system_prompt del build eager
+                # de 1281 (sin cart_snapshot, pero funcional). No romper el turno.
+                # WARNING (no ERROR, review LOW-pii): consistente con los siblings
+                # (cart_snapshot/catalog_view) y evita enviar str(exc) sin scrub a
+                # Sentry (LoggingIntegration solo capta ERROR).
+                logger.warning(
+                    "[AGENTIC_FALLBACK_V2] rebuild V2 con cart_snapshot falló "
+                    "conv=%s: %s — se usa el build eager previo",
+                    conversation_id[:8], _rebuild_exc,
+                )
             _allowed_tools = None  # monolito = todas las tools
+    else:
+        # BLOQUE J-2 (review): _resolved_state is None significa que el resolver
+        # (función total) lanzó excepción — fallo de INFRA (Supabase), NO regresión
+        # de código. Ya se logueó WARNING en _resolve_and_persist_agentic_state.
+        # alert=False → WARNING (no ERROR): evita una tormenta de eventos Sentry por
+        # turno durante una degradación de DB. El cart tampoco es reconstruible aquí
+        # (si la DB está caída, la lectura del carrito también fallaría).
+        _report_agentic_v2_fallback(conversation_id, "resolver_none", "None", alert=False)
 
     # A8 #2 finiquito (audit §6) — fsm_states_allowed enforcement + tools
     # intersection del agente activo. Helper puro testeable (ver
