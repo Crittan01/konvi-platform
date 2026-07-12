@@ -433,28 +433,68 @@ export function ChatPanel({
                           </>
                         )
                       })()
-                    ) : msg.content_type === 'image' && msg.media_url ? (
-                      <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
-                        <img
-                          src={msg.media_url}
-                          alt={msg.content || 'imagen del producto'}
-                          className="rounded-lg max-w-full max-h-72 object-contain border border-border/40 bg-background/30"
-                          loading="lazy"
-                        />
-                      </a>
-                    ) : (
-                      // Media del cliente sin URL descargable (persistencia media inbound
-                      // pendiente — decisión Storage vs proxy Meta). Al menos indicamos el
-                      // tipo de adjunto para que el operador no lea "[Imagen recibida]" crudo.
-                      MEDIA_TYPE_LABELS[msg.content_type] && !msg.media_url ? (
-                        <div className={`mb-1.5 inline-flex items-center gap-1.5 text-[11px] italic rounded-md px-2 py-1 border ${
-                          isInbound ? 'border-border/60 bg-muted/40 text-muted-foreground' : 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80'
-                        }`}>
-                          <Paperclip className="h-3 w-3 shrink-0" />
-                          Adjunto de {MEDIA_TYPE_LABELS[msg.content_type]} recibido — previsualización no disponible
-                        </div>
-                      ) : null
-                    )}
+                    ) : MEDIA_TYPE_LABELS[msg.content_type] ? (
+                      (() => {
+                        // INBOUND (cliente): Meta da un media_id permanente → se sirve vía el proxy
+                        // /api/conversations/media/{id} (el media_url de Meta es temporal + con Bearer).
+                        // OUTBOUND (operador): media_url es la URL pública del bucket. `location` no
+                        // tiene binario descargable → cae al placeholder.
+                        const ct = msg.content_type
+                        const mediaSrc = msg.media_id
+                          ? `/api/conversations/media/${encodeURIComponent(msg.media_id)}`
+                          : (msg.media_url || null)
+                        if (mediaSrc && ct === 'image') {
+                          return (
+                            <a href={mediaSrc} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
+                              <img
+                                src={mediaSrc}
+                                alt={msg.content || 'imagen'}
+                                className="rounded-lg max-w-full max-h-72 object-contain border border-border/40 bg-background/30"
+                                loading="lazy"
+                              />
+                            </a>
+                          )
+                        }
+                        if (mediaSrc && ct === 'audio') {
+                          return <audio controls src={mediaSrc} className="mb-1.5 w-full max-w-xs" />
+                        }
+                        if (mediaSrc && ct === 'video') {
+                          return (
+                            <video
+                              controls
+                              src={mediaSrc}
+                              className="rounded-lg max-w-full max-h-72 mb-1.5 border border-border/40"
+                            />
+                          )
+                        }
+                        if (mediaSrc && (ct === 'document' || ct === 'sticker')) {
+                          return (
+                            <a
+                              href={mediaSrc}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`mb-1.5 inline-flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border ${
+                                isInbound
+                                  ? 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60'
+                                  : 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80'
+                              }`}
+                            >
+                              <Paperclip className="h-3 w-3 shrink-0" />
+                              Descargar {MEDIA_TYPE_LABELS[ct]}
+                            </a>
+                          )
+                        }
+                        // Sin fuente descargable (media_id/url ausente, p.ej. location o histórico).
+                        return (
+                          <div className={`mb-1.5 inline-flex items-center gap-1.5 text-[11px] italic rounded-md px-2 py-1 border ${
+                            isInbound ? 'border-border/60 bg-muted/40 text-muted-foreground' : 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80'
+                          }`}>
+                            <Paperclip className="h-3 w-3 shrink-0" />
+                            Adjunto de {MEDIA_TYPE_LABELS[ct]} recibido — previsualización no disponible
+                          </div>
+                        )
+                      })()
+                    ) : null}
                     {msg.content && msg.content_type !== 'template' && (
                       // div (no <p>): renderWhatsAppFormat emite bloques <ul>/<ol>,
                       // inválidos dentro de <p> → hydration error en React 19 / Next 15.

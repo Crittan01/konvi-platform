@@ -69,6 +69,10 @@ export interface Message {
   content: string
   content_type: MessageContentType
   media_url?: string | null
+  // Media INBOUND (cliente→operador): Meta solo da un media_id permanente; el binario se sirve
+  // vía el proxy /api/conversations/media/{media_id} (media_url de Meta es temporal + con Bearer).
+  media_id?: string | null
+  media_mime?: string | null
   created_at: string
   processed: boolean
   processing_status?: 'pending' | 'processed' | 'skipped' | 'failed'
