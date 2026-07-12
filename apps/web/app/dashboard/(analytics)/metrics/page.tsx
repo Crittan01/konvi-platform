@@ -91,7 +91,7 @@ export default async function MetricsPage(
     win(supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover')),
     supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
     supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
-    win(supabase.from('claims').select('id, status, reason, requested_amount', { count: 'exact' }).eq('tenant_id', tenantId)),
+    win(supabase.from('claims').select('id, status, reason, requested_amount, refunded_amount', { count: 'exact' }).eq('tenant_id', tenantId)),
   ])
 
   // ── Agregación EXACTA de pedidos vía RPC (sin cap 1000 de PostgREST) +

@@ -88,6 +88,9 @@ export type ClaimRow = {
   status: string
   reason: string
   requested_amount: number | string | null
+  // BLOQUE G-2: monto REAL reembolsado (capturado al marcar 'refunded'). Preferido
+  // sobre requested_amount (intención). El backfill lo llenó para reclamos históricos.
+  refunded_amount?: number | string | null
 }
 
 const num = (v: number | string | null | undefined): number => {
@@ -188,7 +191,9 @@ export function aggregateClaims(rows: ClaimRow[]): ClaimAggregate {
     if (!CLAIM_TERMINAL_STATUSES.includes(c.status as (typeof CLAIM_TERMINAL_STATUSES)[number])) open++
     if (c.status === 'refunded') {
       refundedCount++
-      totalRefunded += num(c.requested_amount)
+      // BLOQUE G-2: monto REAL reembolsado; fallback a requested_amount (histórico
+      // pre-ledger / edge sin captura). Coherente con el KPI net-revenue del home.
+      totalRefunded += num(c.refunded_amount ?? c.requested_amount)
     }
     byReason[c.reason] = (byReason[c.reason] ?? 0) + 1
   }

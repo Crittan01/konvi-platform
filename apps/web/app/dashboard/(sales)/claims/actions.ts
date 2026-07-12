@@ -71,13 +71,37 @@ export async function createClaim(data: {
   }
 }
 
-export async function updateClaimStatus(claimId: string, status: string, notes?: string) {
+// BLOQUE G-2: registra el monto reembolsado en un reclamo YA 'refunded' con monto NULL
+// (backfill histórico). PATCH solo refunded_amount → path de corrección de la API.
+export async function correctRefundAmount(claimId: string, refundedAmount: number) {
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ refunded_amount: refundedAmount }),
+    })
+    if (!res.ok) return { error: await readApiError(res, 'No se pudo registrar el monto') }
+    revalidatePath('/dashboard/claims')
+    return { success: true }
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : 'Error registrando el monto' }
+  }
+}
+
+export async function updateClaimStatus(
+  claimId: string, status: string, notes?: string, refundedAmount?: number,
+) {
   const token = await getToken()
   if (!token) return { error: 'Unauthorized' }
 
   try {
     const body: Record<string, unknown> = { status }
     if (notes !== undefined) body.resolution_notes = notes
+    // BLOQUE G-2: monto REAL reembolsado (obligatorio al pasar a 'refunded'; el KPI
+    // net-revenue lo resta). La API lo exige en esa transición.
+    if (refundedAmount !== undefined) body.refunded_amount = refundedAmount
 
     const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}`, {
       method: 'PATCH',

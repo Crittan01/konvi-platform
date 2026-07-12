@@ -62,13 +62,21 @@ describe('aggregateClaims', () => {
       { id: '1', status: 'open', reason: 'defective', requested_amount: null },
       { id: '2', status: 'investigating', reason: 'delayed', requested_amount: null },
       { id: '3', status: 'cancelled', reason: 'other', requested_amount: null },
-      { id: '4', status: 'refunded', reason: 'defective', requested_amount: 500 },
+      // BLOQUE G-2: refunded_amount REAL (300) prevalece sobre requested_amount (500).
+      { id: '4', status: 'refunded', reason: 'defective', requested_amount: 500, refunded_amount: 300 },
       { id: '5', status: 'rejected', reason: 'other', requested_amount: null },
     ])
     expect(agg.open).toBe(2)            // open + investigating (cancelled NO)
     expect(agg.refundedCount).toBe(1)
-    expect(agg.totalRefunded).toBe(500)
+    expect(agg.totalRefunded).toBe(300) // usa refunded_amount, no requested_amount
     expect(agg.byReason).toEqual({ defective: 2, delayed: 1, other: 2 })
+  })
+
+  it('BLOQUE G-2: refunded sin refunded_amount → fallback a requested_amount', () => {
+    const agg = aggregateClaims([
+      { id: '1', status: 'refunded', reason: 'defective', requested_amount: 500 },
+    ])
+    expect(agg.totalRefunded).toBe(500)
   })
 })
 
