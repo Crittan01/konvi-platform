@@ -6,6 +6,14 @@ from supabase import Client
 
 logger = logging.getLogger("orchestrator.whatsapp_sender")
 
+
+def _mask_phone(p: str) -> str:
+    """Enmascara el teléfono para logs (W1 Habeas Data): solo últimos 4 dígitos.
+    Defense-in-depth junto al scrubber de Sentry (que también protege logs locales)."""
+    if not p:
+        return "?"
+    return "***" + str(p)[-4:]
+
 META_API_VERSION = "v22.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
@@ -148,7 +156,7 @@ async def send_whatsapp_message(
             return None
 
     except httpx.TimeoutException:
-        logger.error("[META API] Timeout al enviar a %s", clean_phone)
+        logger.error("[META API] Timeout al enviar a %s", _mask_phone(clean_phone))
         return None
     except Exception as e:
         logger.error("[META API] Error inesperado: %s", e, exc_info=True)
@@ -481,7 +489,7 @@ async def send_whatsapp_template(
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=payload, headers=headers)
     except httpx.TimeoutException:
-        logger.error("[WA_TPL] timeout to=%s template=%s", clean_phone, template_name)
+        logger.error("[WA_TPL] timeout to=%s template=%s", _mask_phone(clean_phone), template_name)
         return None, TEMPLATE_ERR_TIMEOUT
     except Exception as e:
         logger.error("[WA_TPL] error inesperado: %s", e, exc_info=True)
