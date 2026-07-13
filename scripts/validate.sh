@@ -314,14 +314,21 @@ fi
 if $FULL; then
   _hdr "Dependencias Python — vulnerabilidades (pip-audit)"
 
+  # Ola 0 (auditoría 2026-07-13): el gate viejo usaba `--format=text` (INVÁLIDO →
+  # pip-audit erroraba, `|| true` lo tragaba, el grep de "vulnerability" no matcheaba
+  # → FALSE-GREEN en TODO el CI). Ahora: --format=columns + veredicto por EXIT CODE.
+  # Allowlist de starlette (transitivo de FastAPI==0.128.8; no pinneable sin bump
+  # coordinado de FastAPI, starlette 1.x rompe el FastAPI actual) → seguimiento W3
+  # supply-chain. Si aparece una vuln NUEVA en cualquier paquete, el gate falla.
+  _PA_IGNORE="--ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249"
   if command -v pip-audit &>/dev/null; then
     for dir in services/api services/ai-orchestrator services/connector-whatsapp; do
       req="$dir/requirements.txt"
       if [ -f "$req" ]; then
-        out=$(pip-audit -r "$req" --format=text 2>&1 || true)
-        if echo "$out" | grep -qi "vulnerability"; then
-          _err "$req — vulnerabilidades:"
-          echo "$out" | grep -i "vulnerability" | head -5
+        out=$(pip-audit -r "$req" --format=columns $_PA_IGNORE 2>&1); pa_rc=$?
+        if [ $pa_rc -ne 0 ]; then
+          _err "$req — vulnerabilidades (o error pip-audit, rc=$pa_rc):"
+          echo "$out" | grep -iE "PYSEC|CVE|Name|error|Traceback" | head -8
         else
           _ok "$req — sin vulnerabilidades conocidas"
         fi
