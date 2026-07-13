@@ -62,6 +62,56 @@ from fastapi import Request, HTTPException, Header
 
 logger = logging.getLogger(__name__)
 
+# ─── Rate-limit + Content-Length cap (perímetro internet-facing, Ola 0) ──────
+# El endpoint /webhook/{tenant_id} no tenía rate-limit → un flood corría el lookup
+# de secret (Vault + Supabase compartida) por CADA request antes de fallar el HMAC.
+# Limiter in-memory per-IP (sliding window) + tope de keys (evita crecimiento
+# unbounded ante flood de IPs/XFF distintos) + rechazo por Content-Length ANTES
+# de leer body y del lookup. Deploy unit aislado → no importa de services/api.
+from collections import deque  # noqa: E402
+
+_RL_LIMIT = 240            # requests por ventana y por IP
+_RL_WINDOW_S = 60
+_RL_MAX_KEYS = 4096        # tope de IPs rastreadas (cota de memoria)
+_MAX_BODY_BYTES = 512 * 1024   # 512 KB — los webhooks Meta son pequeños (~pocos KB)
+
+_rl_lock = threading.Lock()
+_rl_events: dict[str, deque] = {}
+
+
+def _rate_limit_hit(ip: str) -> tuple[bool, int]:
+    """Sliding window per-IP. Devuelve (allowed, retry_after_s). Acotado en memoria."""
+    now = time.time()
+    cutoff = now - _RL_WINDOW_S
+    with _rl_lock:
+        q = _rl_events.get(ip)
+        if q is None:
+            q = deque()
+            _rl_events[ip] = q
+        while q and q[0] <= cutoff:
+            q.popleft()
+        if len(q) >= _RL_LIMIT:
+            return False, max(1, int((q[0] + _RL_WINDOW_S) - now))
+        q.append(now)
+        # Housekeeping: si la key quedó vacía tras el sweep no debería llegar aquí;
+        # y si superamos el tope de keys, purgamos las vacías + las más viejas.
+        if len(_rl_events) > _RL_MAX_KEYS:
+            for k in [k for k, dq in _rl_events.items() if not dq or dq[-1] <= cutoff]:
+                del _rl_events[k]
+            while len(_rl_events) > _RL_MAX_KEYS:
+                # evict la key con el evento más reciente más antiguo (LRU aprox).
+                oldest = min(_rl_events, key=lambda k: _rl_events[k][-1] if _rl_events[k] else 0)
+                del _rl_events[oldest]
+        return True, 0
+
+
+def _client_ip(request: "Request") -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 # ─── Caches ─────────────────────────────────────────────────────────────────
 
 _CACHE_TTL_SECONDS = 300
@@ -98,6 +148,8 @@ _metrics: dict[str, int] = {
     "cache_hits_app_secret": 0,
     "cache_hits_verify_token": 0,
     "cache_hits_phone_to_tenant": 0,
+    "rate_limited": 0,               # Ola 0 — flood per-IP rechazado (429)
+    "rejected_body_too_large": 0,    # Ola 0 — Content-Length > cap (413)
 }
 _unique_tenants_seen: set[str] = set()
 
@@ -412,6 +464,27 @@ async def verify_meta_signature_for_tenant(
                       "no tenant" vs "wrong signature" a un atacante).
       raw_body bytes — éxito.
     """
+    # Ola 0 — rechazo barato ANTES del lookup de secret (Vault/Supabase compartida)
+    # y de leer el body: Content-Length cap (413) + rate-limit per-IP (429).
+    _cl = request.headers.get("content-length")
+    if _cl is not None:
+        try:
+            if int(_cl) > _MAX_BODY_BYTES:
+                _incr_metric("rejected_body_too_large")
+                logger.warning("[META_HMAC] body_too_large tenant=%s len=%s", tenant_id, _cl)
+                raise HTTPException(status_code=413, detail="Payload too large")
+        except ValueError:
+            pass
+    _ip = _client_ip(request)
+    _allowed, _retry = _rate_limit_hit(_ip)
+    if not _allowed:
+        _incr_metric("rate_limited")
+        logger.warning("[META_HMAC] rate_limited ip=%s retry_after=%s", _ip, _retry)
+        raise HTTPException(
+            status_code=429, detail="Rate limited",
+            headers={"Retry-After": str(_retry)},
+        )
+
     if not x_hub_signature_256:
         _incr_metric("hmac_fail_missing_signature")
         logger.warning("[META_HMAC] tenant=%s signature missing", tenant_id)
