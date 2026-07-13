@@ -9,7 +9,9 @@ logger = logging.getLogger("orchestrator.whatsapp_sender")
 
 def _mask_phone(p: str) -> str:
     """Enmascara el teléfono para logs (W1 Habeas Data): solo últimos 4 dígitos.
-    Defense-in-depth junto al scrubber de Sentry (que también protege logs locales)."""
+    NECESARIO en el call-site: el scrubber de Sentry (before_send) solo limpia lo que
+    se TRANSMITE a Sentry, NO los logs locales de Render (stdout) — que son fuente de
+    verdad de errores. Todo log que incluya el teléfono debe pasar por aquí."""
     if not p:
         return "?"
     return "***" + str(p)[-4:]
@@ -145,7 +147,7 @@ async def send_whatsapp_message(
             message_id = response.json().get("messages", [{}])[0].get("id", "unknown")
             logger.info(
                 "[META API] Mensaje enviado | type=%s | to=%s | meta_message_id=%s",
-                msg_kind, clean_phone, message_id,
+                msg_kind, _mask_phone(clean_phone), message_id,
             )
             return message_id
         else:
@@ -499,7 +501,7 @@ async def send_whatsapp_template(
         meta_message_id = response.json().get("messages", [{}])[0].get("id")
         logger.info(
             "[WA_TPL] template enviado tenant=%s name=%s to=%s meta_msg_id=%s",
-            tenant_id, template_name, clean_phone, meta_message_id,
+            tenant_id, template_name, _mask_phone(clean_phone), meta_message_id,
         )
         return meta_message_id, None
 

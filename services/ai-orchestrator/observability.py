@@ -31,7 +31,10 @@ logger = logging.getLogger("observability")
 
 # ── Scrub PII (Habeas Data Ley 1581): NUNCA teléfono/email a Sentry (W1) ──────
 import re as _re_pii  # noqa: E402
-_RE_PHONE = _re_pii.compile(r'(?<!\d)(?:\+?57)?3\d{9}(?!\d)')
+# Móvil COL: 3XX XXX XXXX, con separadores internos opcionales (espacio/punto/guion/
+# paréntesis), la forma humana más común. Cuantificadores acotados {0,3} → sin ReDoS.
+# Prefijo +57/57 opcional. Cubre contiguo (E.164) y con separadores.
+_RE_PHONE = _re_pii.compile(r'(?<!\d)(?:\+?57[\s.()\-]{0,3})?3\d{2}[\s.()\-]{0,3}\d{3}[\s.()\-]{0,3}\d{4}(?!\d)')
 _RE_EMAIL = _re_pii.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
 
 
@@ -50,10 +53,6 @@ def _scrub_event(obj):
     if isinstance(obj, tuple):
         return tuple(_scrub_event(v) for v in obj)
     return obj
-
-
-def _scrub_breadcrumb(crumb, hint):
-    return _scrub_event(crumb)
 
 
 def _before_send(event: dict, hint: dict) -> Optional[dict]:
@@ -119,7 +118,9 @@ def init_sentry(service_name: str) -> bool:
         send_default_pii=False,
         # Filtros pre-send (health, 4xx, etc.)
         before_send=_before_send,
-        before_breadcrumb=_scrub_breadcrumb,
+        # Los breadcrumbs se escruban en before_send (recorre event["breadcrumbs"]) al
+        # transmitir el evento — NO se registra before_breadcrumb para evitar escrubar
+        # cada breadcrumb del hot path (todo log INFO+ / request HTTP) sin emitir evento.
         # Tags por servicio para split en UI Sentry.
         # tags se setean via `set_tag` después.
     )

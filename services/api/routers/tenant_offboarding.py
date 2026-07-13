@@ -64,10 +64,10 @@ def _actor_from_request(request: Request) -> tuple[Optional[str], Optional[str],
         email = payload.get("email")
     except Exception:
         user_id, email = None, None
-    ip = (
-        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        or (request.client.host if request.client else None)
-    )
+    from dependencies.security import _client_ip  # helper XFF unificado (W1)
+    ip = _client_ip(request)
+    if ip == "unknown":
+        ip = None
     return user_id, email, ip
 
 
