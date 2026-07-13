@@ -808,7 +808,7 @@ Pasos cuando se priorice:
 |---|---|---|
 | Extender `_load_customer_context_block` | Query a `orders` con `status='cancelled'` + JOIN `order_items` con TTL configurable. Variable env `CART_RECOVERY_LOOKBACK_DAYS` (default 7). | 45 min |
 | Bloque system prompt | Sección "CARRITO PREVIO (cancelado hace N días)" con items, totales y INSTRUCCIÓN: ofrecer retomar SOLO si el cliente expresa intención de compra (no proactivo, no intrusivo). | 20 min |
-| Tokens léxicos lazy mode | Agregar `"carrito"`, `"retomar"`, `"ese pedido"`, `"lo de antes"`, `"el otro dia"`, `"el de ayer"` a `_CUSTOMER_CONTEXT_LAZY_TOKENS`. | 10 min |
+| Tokens léxicos lazy mode | **OBSOLETO** — el gate lazy `_customer_context_should_load` + `_CUSTOMER_CONTEXT_LAZY_TOKENS` fueron ELIMINADOS en BLOQUE K-1 (eran código muerto, 0 callsites; el contexto del cliente se carga por diseño). Este paso ya no aplica. | — |
 | Tool `recreate_order_from_cancelled(order_id)` | Determinístico, en orchestrator. Copia items, **re-valida stock actual** por variante, **re-calcula precio actual**. Output: `{ new_order_id, stock_diffs[], price_diffs[] }`. | 60 min |
 | UX bot — branching | Si stock=0 en alguna variante: ofrecer reemplazo desde catálogo activo. Si precio cambió: advertir antes de generar nuevo link Wompi. | 30 min |
 | Tests | (a) carrito cancelled <7d aparece en contexto; (b) cancelled >7d NO aparece; (c) cliente conocido sin token léxico → no se carga; (d) stock=0 dispara branch reemplazo; (e) diff precio se reporta al cliente. | 45 min |
@@ -816,8 +816,10 @@ Pasos cuando se priorice:
 **Total: ~3.5 horas.**
 
 **Reusos:**
-- `_load_customer_context_block` y `_customer_context_should_load` (rev. 69) — extender, no reescribir.
-- Lazy mode + feature flag `CUSTOMER_CONTEXT_ENABLED/MODE` (rev. 69) cubren el on/off global.
+- `_load_customer_context_block` (rev. 69) — extender, no reescribir. (El gate lazy
+  `_customer_context_should_load` + flags `CUSTOMER_CONTEXT_ENABLED/MODE` fueron
+  ELIMINADOS en BLOQUE K-1 — el contexto se carga incondicional por diseño; ya no hay
+  on/off global que reusar.)
 - Wompi `payment_link` y `_build_customer_data` (rev. 68) reusables tal cual al regenerar el link.
 
 ### F7-email — Recovery dual-channel (postpuesto hasta SMTP propio)

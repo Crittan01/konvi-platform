@@ -1141,7 +1141,12 @@ Cierre de los 8 riesgos abiertos del rev. 68 que el usuario priorizó (A1, A2, A
 - `services/api/dependencies/contact_validators.py`: `_calculate_nit_dv()` con tabla oficial de pesos DIAN. Si NIT trae `-X`, valida que el DV sea correcto. Si no trae DV, sigue aceptando (Wompi lenient).
 - Tests: 5 nuevos (NIT con DV correcto/incorrecto, sin DV, formato inválido, valores conocidos).
 
-### WS-A4 · Feature flag CUSTOMER_CONTEXT_MODE
+### WS-A4 · Feature flag CUSTOMER_CONTEXT_MODE — ⚠️ ELIMINADO en BLOQUE K-1 (2026-07-12)
+
+> El gate `_customer_context_should_load` + `_CUSTOMER_CONTEXT_LAZY_TOKENS` + los flags
+> `CUSTOMER_CONTEXT_ENABLED/MODE` fueron REMOVIDOS (eran código muerto: 0 callsites; el
+> contexto del cliente se carga incondicional por diseño vía `_load_customer_context_block`).
+> Lo de abajo es registro histórico de cuando existió.
 
 - `services/ai-orchestrator/orchestrator.py`: `_customer_context_should_load(query_text)` con 3 modos.
 - `CUSTOMER_CONTEXT_ENABLED` (kill switch) + `CUSTOMER_CONTEXT_MODE` (always/lazy/disabled).
