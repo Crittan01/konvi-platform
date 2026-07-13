@@ -334,6 +334,22 @@ class ConsentRequiredInvariantTests(unittest.TestCase):
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
         self.assertIn("autorización", result.replacement_text.lower())
 
+    def test_save_contact_field_consent_failed_rewrite(self):
+        """BLOQUE M1 — cobertura del tool REAL que usa el LLM. `save_contact_field`
+        (consolidado rev.108, expuesto por tools_subset en estados PII) es el que
+        devuelve CONSENT_REQUIRED. Antes NO estaba en _SAVE_TOOLS → el invariant
+        estaba muerto en prod pese al verde de save_email. Este test lo blinda."""
+        result = _run(self.inv.validate(
+            candidate_text="Listo, guardé tus datos.",
+            tool_call_log=[{
+                "tool": "save_contact_field",
+                "result": {"error": "consent required", "code": "CONSENT_REQUIRED"},
+            }],
+            **self.base_kwargs,
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("autorización", result.replacement_text.lower())
+
     def test_llm_afirma_guardado_con_save_email_exitoso_ok(self):
         result = _run(self.inv.validate(
             candidate_text="Listo, guardé tu email crittan01@gmail.com.",

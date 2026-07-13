@@ -29,7 +29,13 @@ def _llm_affirms_pii_saved(text: str) -> bool:
     return any(p.search(text) for p in _PII_AFFIRMATIVE_PATTERNS)
 
 
+# El LLM usa el tool CONSOLIDADO `save_contact_field` (rev. 108) para persistir
+# PII del cliente — es el que expone `tools_subset` en los estados PII. Sin él,
+# este invariant NUNCA disparaba (los save_* legacy ya no se registran al LLM),
+# dejando muerta la defensa-en-profundidad de consent Habeas Data (BLOQUE M1).
+# Se conservan los nombres legacy por si algún tenant/path aún los invoca.
 _SAVE_TOOLS = {
+    "save_contact_field",
     "save_email", "save_name", "save_document",
     "save_address", "save_shipping_phone",
 }

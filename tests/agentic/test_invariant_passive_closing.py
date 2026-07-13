@@ -52,8 +52,15 @@ def _mock_supabase_with_cart(
         chain = MagicMock()
         if name == "conversation_carts":
             chain.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = cart_res
+        elif name == "conversation_cart_items":
+            # .select().eq("cart_id").eq("tenant_id").execute()  (2 .eq)
+            chain.select.return_value.eq.return_value.eq.return_value.execute.return_value = items_res
         elif name == "cart_items":
-            chain.select.return_value.eq.return_value.execute.return_value = items_res
+            # Guard anti-regresión: la tabla canónica es `conversation_cart_items`.
+            # Si el código vuelve a consultar la inexistente `cart_items`, el mock
+            # NO la alimenta → items_count=0 → los tests con items>0 fallan (verde
+            # honesto, ya no enmascarado). Ver BLOQUE M1.
+            raise AssertionError("cart_items no existe; usar conversation_cart_items")
         elif name == "contacts":
             # A6.2.7: query contacts ahora filtra .eq("tenant_id").eq("id") (2 .eq)
             chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = contact_res

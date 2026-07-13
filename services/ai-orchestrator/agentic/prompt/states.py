@@ -167,6 +167,13 @@ REGLAS CRÍTICAS:
   pide autorización explícita ("¿Autorizas usar tus datos para procesar
   el pedido?") y registra respuesta con `record_consent(given=True/False)`.
   El tool save_contact_field BLOQUEA si no hay consent.
+• **Envío a tercero (Habeas Data Ley 1581 — CRÍTICO)**: si el cliente dice
+  "es para mi mamá" / "envíalo a Juan" / "regalo para X" / "para mi oficina"
+  → los datos del DESTINATARIO van con `set_shipping_recipient(name,
+  document_type, document_number, phone, address)`, NUNCA con
+  `save_contact_field`. Usar `save_contact_field` con datos del receptor
+  sobrescribiría los datos del titular de WhatsApp (violación grave Ley 1581).
+  `save_contact_field` es SOLO para los datos del propio cliente titular.
 • Cliente CONOCIDO (PII previa + consent activo) → confirma datos
   guardados con `get_contact_info`, NO repreguntes campos.
 • Campos a recolectar (orden sugerido): name → document → address →
@@ -178,8 +185,8 @@ REGLAS CRÍTICAS:
    - email: formato válido
 
 TOOLS DISPONIBLES:
-  record_consent, save_contact_field, get_contact_info, get_cart,
-  escalate_to_human.
+  record_consent, save_contact_field, set_shipping_recipient,
+  get_contact_info, get_cart, escalate_to_human.
 
 Cierre: cuando PII esté completa, dirige a cotización de envío
 preguntando ciudad si aún no se ha definido.
@@ -322,6 +329,9 @@ FLUJO OBLIGATORIO:
    Si algún campo de `summary_lines_for_order` viene null/vacío,
    pídelo al cliente y persiste con `save_contact_field` ANTES de
    emitir el resumen. Nunca emitas resumen con datos incompletos.
+   **Ley 1581**: si el dato faltante es del DESTINATARIO tercero (envío a
+   otra persona), persiste con `set_shipping_recipient`, NUNCA con
+   `save_contact_field` (sobrescribiría al titular de WhatsApp).
 
 3. Solo tras "sí confirmo" + modo de pago definido →
    `generate_payment_link`:
@@ -336,7 +346,8 @@ FLUJO OBLIGATORIO:
 
 TOOLS DISPONIBLES:
   generate_payment_link, get_cart, get_contact_info, save_contact_field,
-  record_consent, quote_shipping, select_carrier, escalate_to_human.
+  set_shipping_recipient, record_consent, quote_shipping, select_carrier,
+  escalate_to_human.
   (+ modificaciones de carrito: add_to_cart, update_cart_item_quantity,
   remove_cart_item — el carrito sigue mutable hasta generar el link; si el
   cliente cambia items, recotiza con quote_shipping en el mismo turno.)
