@@ -28,7 +28,7 @@ def _mfa_gated_paths():
     (r.dependant.dependencies[*].call)."""
     import main
     from dependencies.internal_auth import enforce_mfa_internal_or_user
-    gate_fns = {A.enforce_mfa, enforce_mfa_internal_or_user}
+    gate_fns = {A.enforce_mfa, A.enforce_mfa_strict, enforce_mfa_internal_or_user}
     gated = set()
     for r in main.app.routes:
         fns = [getattr(d, "dependency", None) for d in (getattr(r, "dependencies", []) or [])]
@@ -158,6 +158,49 @@ class MfaGateWiringTests(unittest.TestCase):
             any(p.startswith("/api/v1/mfa") for p in gated_paths),
             "el router mfa no debe estar gateado por enforce_mfa",
         )
+
+
+class MfaStrictFailClosedTests(unittest.TestCase):
+    """W1 — enforce_mfa_strict: FAIL-CLOSED en operaciones crown-jewel (export PII,
+    borrado de cuenta). Ante incertidumbre DENIEGA; sin forzar MFA a quien no lo activó."""
+
+    def _run(self, payload, lookup=None, lookup_exc=None):
+        with patch.object(A, "_extract_jwt_payload", return_value=payload):
+            if lookup_exc is not None:
+                cm = patch.object(A, "_lookup_verified_mfa_cached", side_effect=lookup_exc)
+            else:
+                cm = patch.object(A, "_lookup_verified_mfa_cached", return_value=lookup)
+            with cm:
+                return asyncio.run(A.enforce_mfa_strict(_req()))
+
+    def test_aal2_pasa(self):
+        self.assertIsNone(self._run({"aal": "aal2", "sub": "u1"}, lookup=True))
+
+    def test_aal1_con_mfa_rechaza_401(self):
+        with self.assertRaises(HTTPException) as cm:
+            self._run({"aal": "aal1", "sub": "u1"}, lookup=True)
+        self.assertEqual(cm.exception.status_code, 401)
+
+    def test_aal1_sin_mfa_pasa(self):
+        # no forzar MFA a quien no lo activó (aal1 + sin factor verificado)
+        self.assertIsNone(self._run({"aal": "aal1", "sub": "u1"}, lookup=False))
+
+    def test_lookup_caido_fail_closed_503(self):
+        # DIFERENCIA vs enforce_mfa (fail-open): aquí el outage DENIEGA
+        with self.assertRaises(HTTPException) as cm:
+            self._run({"aal": "aal1", "sub": "u1"}, lookup_exc=A._MfaLookupError("auth admin down"))
+        self.assertEqual(cm.exception.status_code, 503)
+
+    def test_sin_sub_rechaza_401(self):
+        with self.assertRaises(HTTPException) as cm:
+            self._run({"aal": "aal1", "sub": ""}, lookup=False)
+        self.assertEqual(cm.exception.status_code, 401)
+
+    def test_enforce_mfa_amplio_sigue_fail_open(self):
+        # contraste: el gate amplio NO debe romper por un outage
+        with patch.object(A, "_extract_jwt_payload", return_value={"aal": "aal1", "sub": "u1"}), \
+             patch.object(A, "_lookup_verified_mfa_cached", side_effect=A._MfaLookupError("down")):
+            self.assertIsNone(asyncio.run(A.enforce_mfa(_req())))
 
 
 if __name__ == "__main__":

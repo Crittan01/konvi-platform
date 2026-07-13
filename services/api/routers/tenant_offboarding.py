@@ -31,7 +31,7 @@ from supabase import Client
 
 from dependencies.auth import (
     _extract_jwt_payload,  # type: ignore
-    enforce_mfa,
+    enforce_mfa_strict,
     get_current_tenant,
     get_service_client,
     require_write_role,
@@ -145,7 +145,7 @@ async def offboarding_status(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/export", dependencies=[Depends(RL_OFFBOARDING_EXPORT), Depends(enforce_mfa)])
+@router.post("/export", dependencies=[Depends(RL_OFFBOARDING_EXPORT), Depends(enforce_mfa_strict)])
 async def export_data(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -195,7 +195,7 @@ async def export_data(
     return payload
 
 
-@router.post("/request-deletion", dependencies=[Depends(RL_OFFBOARDING_DELETION), Depends(enforce_mfa)])
+@router.post("/request-deletion", dependencies=[Depends(RL_OFFBOARDING_DELETION), Depends(enforce_mfa_strict)])
 async def request_deletion(
     body: RequestDeletionBody,
     request: Request,
