@@ -130,6 +130,7 @@ def _read_cart_state(supabase: Any, *, conversation_id: str, tenant_id: str) -> 
             supabase.table("conversation_cart_items")
             .select("id", count="exact", head=True)
             .eq("cart_id", cart["id"])
+            .eq("tenant_id", tenant_id)  # A6.2.7 — scope multi-tenant explícito
             .execute()
         )
         state["items_count"] = int(getattr(items_res, "count", 0) or 0)

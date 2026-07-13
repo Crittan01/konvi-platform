@@ -53,7 +53,8 @@ def _mock_supabase_with_cart(
         if name == "conversation_carts":
             chain.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = cart_res
         elif name == "conversation_cart_items":
-            chain.select.return_value.eq.return_value.execute.return_value = items_res
+            # .select().eq("cart_id").eq("tenant_id").execute()  (2 .eq)
+            chain.select.return_value.eq.return_value.eq.return_value.execute.return_value = items_res
         elif name == "cart_items":
             # Guard anti-regresión: la tabla canónica es `conversation_cart_items`.
             # Si el código vuelve a consultar la inexistente `cart_items`, el mock
