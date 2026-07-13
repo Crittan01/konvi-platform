@@ -105,10 +105,20 @@ def _rate_limit_hit(ip: str) -> tuple[bool, int]:
         return True, 0
 
 
+_TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+
+
 def _client_ip(request: "Request") -> str:
+    """IP del cliente robusta ante spoofing de XFF (W1): Render AÑADE la IP real al
+    FINAL; un atacante solo puede PREPEND → tomamos el hop de la DERECHA (unspoofable),
+    correcto si el edge append O reemplaza. TRUSTED_PROXY_HOPS (default 0) = proxies
+    confiables ADICIONALES delante de Render (p.ej. 1 si hay CDN) → xff[-(1+hops)]."""
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            need = 1 + _TRUSTED_PROXY_HOPS
+            return parts[-need] if len(parts) >= need else parts[0]
     return request.client.host if request.client else "unknown"
 
 

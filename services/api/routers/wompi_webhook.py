@@ -22,7 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from dependencies.auth import _get_service_client
-from dependencies.security import webhook_rate_limit_check
+from dependencies.security import _client_ip, webhook_rate_limit_check
 from integrations.wompi_client import (
     create_payment_link_sync,
     get_tenant_wompi_creds,
@@ -49,8 +49,7 @@ async def wompi_webhook(request: Request, background_tasks: BackgroundTasks):
     # de DB + saturación del threadpool. bucket sin tenant_id (protege por-atacante).
     # Fail-open: un error del limiter NUNCA debe dropear un webhook de pago legítimo.
     try:
-        xff = request.headers.get("x-forwarded-for", "")
-        ip = xff.split(",")[0].strip() if xff else (request.client.host if request.client else "unknown")
+        ip = _client_ip(request)
         allowed, retry_after = webhook_rate_limit_check(
             _get_service_client(), ip=ip, bucket="webhook.wompi", limit=200, window_seconds=60,
         )
