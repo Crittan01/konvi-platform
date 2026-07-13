@@ -468,7 +468,10 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
             return
 
         total_amount = float(order.get("total_amount") or 0)
-        amount_in_cents = int(total_amount * 100)
+        # int(round(...)) — NO int(x*100): la multiplicación float trunca (149.99*100
+        # = 14998.9999… → 14998) → link 1 cent menos → el guard de monto (línea ~263,
+        # que usa int(round)) RECHAZA → orden pagada varada. Canónico = round.
+        amount_in_cents = int(round(total_amount * 100))
         if amount_in_cents < 150_000:
             logger.warning("[WOMPI] retry_monto_bajo order=%s amount=%s", order_id, amount_in_cents)
             _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)
