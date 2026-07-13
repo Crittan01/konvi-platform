@@ -132,45 +132,5 @@ class LastOutboundPresentedVariantsAllTests(unittest.TestCase):
         self.assertIn(result["id"], {"p-coco", "p-serum"})
 
 
-class DetectVariantConfirmationMultiProductTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        import orchestrator
-        cls.orch = orchestrator
-
-    def test_resolves_coco_when_60_gramos(self):
-        # T-1 lista AMBOS productos. Cliente dice "60 gramos" → debe
-        # resolverse a Coco (Sérum solo tiene ml, no g).
-        result = self.orch._detect_variant_confirmation(
-            "60 gramos por favor",
-            _HISTORY_BOTH,
-            [_COCO, _SERUM],
-        )
-        self.assertEqual(len(result), 1, "Bug-C: detector debe resolver Coco")
-        self.assertEqual(result[0]["product_id"], "p-coco")
-        self.assertEqual(result[0]["variation_id"], "v-60g")
-
-    def test_resolves_serum_when_30_ml(self):
-        # T-1 lista AMBOS productos. Cliente dice "30 ml" → debe
-        # resolverse a Sérum.
-        result = self.orch._detect_variant_confirmation(
-            "30 ml",
-            _HISTORY_BOTH,
-            [_COCO, _SERUM],
-        )
-        self.assertIsNotNone(result)
-        self.assertEqual(result[0]["product_id"], "p-serum")
-        self.assertEqual(result[0]["variation_id"], "v-30ml")
-
-    def test_returns_none_when_no_match(self):
-        # Cliente dice algo que no matchea ninguna variante.
-        result = self.orch._detect_variant_confirmation(
-            "no estoy seguro",
-            _HISTORY_BOTH,
-            [_COCO, _SERUM],
-        )
-        self.assertEqual(result, [])
-
-
 if __name__ == "__main__":
     unittest.main()

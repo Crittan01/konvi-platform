@@ -1,28 +1,27 @@
-"""Dispatcher legacy ↔ agentic.
+"""Dispatcher del worker → agentic.
 
-ADR-0018 Fase B + C. Punto único donde el worker decide:
+ADR-0018 Fase C (cutover completo). Punto único donde el worker decide cómo
+responder a un mensaje entrante:
 
-  • Si tenant.agentic_enabled=True (Fase C cutover) → invoca agentic full
-    (envía outbound al cliente).
-  • Si AGENTIC_SHADOW_ENABLED=True (Fase B shadow) → invoca agentic
-    SILENCIOSAMENTE en paralelo + loggea para comparar con legacy.
-    Legacy responde al cliente.
-  • Else → solo legacy (default, comportamiento pre-refactor).
+  • Si tenant.agentic_enabled=True → invoca agentic full (envía outbound al
+    cliente). Es el ÚNICO path productivo — el V1 legacy fue RETIRADO
+    (BLOQUE K-2, decisión J-4 #4; el pipeline monolítico + sus heurísticas
+    no-determinísticas ya no existen).
+  • Si el agentic crashea → degraded honesto + escalation diferida a operador
+    (NO hay fallback a comportamiento impredecible).
+  • Si el tenant NO está migrado a agentic (defensa ante misconfiguración de
+    provisioning) → degraded + escalation a humano.
 
 Production-grade:
-  • Errores del agentic NUNCA afectan al cliente (legacy responde igual).
-  • Shadow mode timeout = 30s (no bloquea polling cycle).
-  • Audit log completo: TODO turn agentic (shadow + cutover) se persiste
-    en `agentic_shadow_log` con `mode='shadow'|'cutover'` (rev. 107 cierre
-    arquitectónico — antes cutover solo emitía a stdout y los logs rotaban).
-    Helper único: `_persist_turn_audit()`.
+  • Errores del agentic NUNCA dejan al cliente sin respuesta (degraded garantizado).
+  • Audit log completo: TODO turn agentic (mode='cutover') se persiste en
+    `agentic_shadow_log` (rev. 107 cierre arquitectónico — el nombre de la tabla
+    conserva 'shadow' por compat histórica). Helper único: `_persist_turn_audit()`.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -54,10 +53,6 @@ def _report_agentic_v2_fallback(
     else:
         logger.warning(msg, *args)
 
-
-# Feature flags operativos.
-AGENTIC_SHADOW_ENABLED = os.getenv("AGENTIC_SHADOW_ENABLED", "false").lower() == "true"
-AGENTIC_SHADOW_TIMEOUT_S = float(os.getenv("AGENTIC_SHADOW_TIMEOUT_S", "30"))
 
 # F5 bot_engine #3 — content_types entrantes no-texto/no-multimodal
 # (document/sticker/location). Manejados determinísticamente antes del loop
@@ -149,7 +144,7 @@ async def dispatch_message(
     content: str,
     content_type: str,
 ) -> None:
-    """Punto único de dispatch. Decide legacy/agentic/shadow basado en flags.
+    """Punto único de dispatch. Enruta al path agentic (único productivo).
 
     NO retorna nada — el outbound se envía dentro del path elegido.
 
@@ -158,9 +153,8 @@ async def dispatch_message(
          a cualquier path). El operador tomó la conversación o ya cerró
          — el bot debe permanecer en silencio total.
       1. Si tenant.agentic_enabled=True → agentic FULL (envía outbound).
-      2. Elif AGENTIC_SHADOW_ENABLED=True → legacy responde al cliente +
-         agentic shadow corre en paralelo y loggea silenciosamente.
-      3. Else → solo legacy.
+      2. Else (tenant no migrado) → degraded + escalation a humano (V1 legacy
+         retirado, BLOQUE K-2). Defensa ante misconfiguración; 0 tenants en prod.
     """
     # Re-opt-in gate (FINDING-A 2026-06-25) — DEBE correr ANTES del skip de
     # status: 'opted_out' ∈ _SKIP_STATUSES, así que un cliente que envía
@@ -308,31 +302,31 @@ async def dispatch_message(
             )
             return
 
-    # Path legacy SOLO para tenants explícitamente NO migrados a agentic.
-    # Producción: KAIU + futuros tenants con agentic_enabled=True NUNCA
-    # llegan aquí.
-    from orchestrator import build_and_run_orchestration
-    await build_and_run_orchestration(
-        supabase=supabase,
+    # V1 legacy RETIRADO (BLOQUE K-2, decisión J-4 #4). El path agentic es la
+    # ÚNICA fuente de verdad. Un tenant que llega aquí NO está migrado a agentic
+    # (agentic_enabled=false o sin row en tenant_integrations.meta) → el bot no
+    # opera y se escala a operador humano: interpretación segura, consistente con
+    # el path de crash de arriba y con fsm_states_denied (J-4 #3). En producción
+    # 0 tenants llegan aquí (KAIU es agentic); esto es defensa ante
+    # misconfiguración de provisioning del tenant.
+    # Nota: is_tenant_agentic_enabled devuelve False tanto si el row
+    # provider='agentic' NO existe (tenant no migrado) como si la lectura del
+    # flag falló transitoriamente (ver WARNING previo). No misdiagnosticar como
+    # solo-provisioning: ambas causas caen aquí y ambas escalan seguro.
+    logger.error(
+        "[AGENTIC_DISPATCH] tenant=%s conv=%s sin agentic_enabled y V1 retirado "
+        "— degraded + escalación a humano. Causa: row provider='agentic' ausente "
+        "(revisar provisioning) O fallo transitorio leyendo el flag (ver WARNING)",
+        tenant_id, conversation_id,
+    )
+    await _emit_degraded_response_and_escalate(
+        supabase,
         message_id=message_id,
         tenant_id=tenant_id,
         conversation_id=conversation_id,
-        content=content,
-        content_type=content_type,
+        error=RuntimeError("tenant no migrado a agentic (V1 retirado)"),
     )
-
-    # Shadow mode: si flag activo Y agentic NO se ejecutó como full,
-    # corre agentic en paralelo (silencioso) para comparar.
-    if AGENTIC_SHADOW_ENABLED and not agentic_enabled:
-        # No await — fire-and-forget con timeout interno.
-        asyncio.create_task(_run_agentic_shadow_safe(
-            supabase,
-            message_id=message_id,
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            content=content,
-            content_type=content_type,
-        ))
+    return
 
 
 # ─── Degraded response helper (rev. 109 BUG 38) ─────────────────────────────
@@ -3276,129 +3270,6 @@ async def _run_agentic_full(
     )
 
 
-# ─── Agentic shadow path (Fase B) ──────────────────────────────────────────
-
-
-async def _run_agentic_shadow_safe(
-    supabase: Any,
-    *,
-    message_id: str,
-    tenant_id: str,
-    conversation_id: str,
-    content: str,
-    content_type: str,
-) -> None:
-    """Wrapper de shadow con timeout + try/except — NUNCA propaga error."""
-    try:
-        await asyncio.wait_for(
-            _run_agentic_shadow(
-                supabase,
-                message_id=message_id,
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                content=content,
-                content_type=content_type,
-            ),
-            timeout=AGENTIC_SHADOW_TIMEOUT_S,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "[AGENTIC_SHADOW] timeout conv=%s — descartado",
-            conversation_id[:8],
-        )
-    except Exception as exc:
-        logger.warning(
-            "[AGENTIC_SHADOW] error conv=%s: %s — descartado (legacy OK)",
-            conversation_id[:8], exc,
-        )
-
-
-async def _run_agentic_shadow(
-    supabase: Any,
-    *,
-    message_id: str,
-    tenant_id: str,
-    conversation_id: str,
-    content: str,
-    content_type: str,
-) -> None:
-    """Shadow: agentic compone respuesta SILENCIOSA + loggea para comparar."""
-    import agentic.tools.catalog  # noqa: F401
-    import agentic.tools.cart  # noqa: F401
-    import agentic.tools.contact  # noqa: F401
-    import agentic.tools.shipping  # noqa: F401
-    import agentic.tools.payment  # noqa: F401
-    import agentic.tools.escalation  # noqa: F401
-    import agentic.tools.claims  # noqa: F401  # Rev. 109 founder 2026-05-28
-
-    from agentic.agent import run_agentic_turn
-    from agentic.system_prompt import build_system_prompt
-    from orchestrator import (
-        _get_conversation_history,
-        _fetch_contact_for_phone,
-        _get_conversation_customer_phone,
-    )
-    from tools.catalog_tool import get_tenant_catalog
-
-    catalog = await get_tenant_catalog(supabase, tenant_id)
-    history = await _get_conversation_history(supabase, tenant_id, conversation_id)
-    customer_phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
-    if customer_phone:
-        contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
-    else:
-        contact_id, contact = None, {}
-
-    # Rev. 109 backlog #2 — Multi-agente per-tenant en shadow path también.
-    try:
-        from lib.tenant_agents import get_active_agent
-        _agent_shadow = get_active_agent(supabase, tenant_id=tenant_id)
-    except Exception:
-        _agent_shadow = {"name": "Sara Camila"}
-
-    system_prompt = build_system_prompt(
-        tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
-        catalog=catalog,
-        agent_name=_agent_shadow.get("name") or "Sara Camila",
-        agent_role_description=_agent_shadow.get("role_description"),
-    )
-
-    started_at = time.monotonic()
-    result = await run_agentic_turn(
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
-        contact_id=contact_id,
-        inbound_text=content,
-        contact_record=contact or {},
-        catalog=catalog,
-        history=history,
-        supabase=supabase,
-        system_prompt=system_prompt,
-    )
-    elapsed_s = time.monotonic() - started_at
-
-    _persist_turn_audit(
-        supabase,
-        mode="shadow",
-        message_id=message_id,
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
-        inbound_text=content,
-        result=result,
-        elapsed_s=elapsed_s,
-        final_text=None,                # shadow no envía outbound → no hay final post-invariant
-        invariant_outcome=None,
-        invariant_name=None,
-        system_prompt_chars=len(system_prompt or ""),
-        history_turns=len(history or []),
-    )
-
-    logger.info(
-        "[AGENTIC_SHADOW] conv=%s tools=%d elapsed=%.2fs truncated=%s finish=%s",
-        conversation_id[:8], result.tool_calls_executed, elapsed_s,
-        result.truncated, result.finish_reason,
-    )
-
-
 # ─── State machine helper unificado (rev. 109) ─────────────────────────────
 
 
@@ -3591,9 +3462,9 @@ def _persist_turn_audit(
     Best-effort: si falla, loggea WARNING pero NO afecta al cliente. La
     pérdida de un audit es preferible a interrumpir el flow de respuesta.
 
-    `mode`:
-      • 'shadow' → legacy responde al cliente, agentic loggea silencioso.
-      • 'cutover' → agentic respondió al cliente (Fase C).
+    `mode`: en producción siempre 'cutover' (agentic respondió al cliente,
+    Fase C). El valor 'shadow' quedó obsoleto tras el retiro del shadow harness
+    (BLOQUE K-2); el parámetro se conserva por compat de la columna.
 
     Captura `finish_reason` desde `result.finish_reason` (rev. 107) lo que
     permite diagnosticar empty_output sin depender de logs stdout.

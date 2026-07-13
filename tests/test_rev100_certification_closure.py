@@ -279,38 +279,12 @@ class SarEndpointHardeningTests(unittest.TestCase):
         self.assertIn("DB temporarily unavailable", self.code)
 
 
-class OrchestratorCallerErrorLoggingTests(unittest.TestCase):
-    """Rev. 100 — orchestrator.py loguea ERROR cuando notifications retorna False."""
-
-    @classmethod
-    def setUpClass(cls):
-        with open(
-            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/"
-            "orchestrator.py",
-            encoding="utf-8",
-        ) as f:
-            cls.code = f.read()
-
-    def test_consent_revoked_caller_distinguishes_false_from_exception(self):
-        # Debe haber: ok = await notify_consent_revoked(...) + if not ok: error.
-        # Test robusto a refactors de indent (rev. 103 añadió nivel anidado
-        # para path "no había datos que eliminar").
-        self.assertRegex(
-            self.code, r"ok\s*=\s*await\s+notify_consent_revoked",
-        )
-        self.assertRegex(
-            self.code,
-            r'logger\.error\(\s*\n\s+"\[CONSENT\]\s+notify_consent_revoked\s+returned\s+False',
-        )
-
-    def test_sar_received_caller_distinguishes_false_from_exception(self):
-        self.assertRegex(
-            self.code, r"ok\s*=\s*await\s+notify_sar_received",
-        )
-        self.assertIn(
-            'logger.error(\n                        "[SAR] notify_sar_received returned False',
-            self.code,
-        )
+# BLOQUE K-2: OrchestratorCallerErrorLoggingTests ELIMINADO — probaba el patrón
+# de caller (ok = await notify_consent_revoked/notify_sar_received + log ERROR)
+# dentro de build_and_run_orchestration (pipeline V1 retirado). La conducta de
+# compliance se preserva en el path agentic (_handle_data_rights_if_intent,
+# soft_revoke_consent) y en la API (data_subject_request.py), con cobertura propia
+# (test_a11_habeas_data_request, test_rev93_sar_endpoints).
 
 
 class EnvVarCoherenceTests(unittest.TestCase):
