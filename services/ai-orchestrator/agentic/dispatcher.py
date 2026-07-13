@@ -2908,6 +2908,7 @@ async def _run_agentic_full(
     # fsm_states apagados). Solo RESTRINGE sobre lo que per-state/per-agent ya
     # permitió; ausencia de config = no-op (degrada seguro). Ver
     # agentic/tenant_guardrails.py.
+    _state_is_denied = False  # J-4: se setea si el estado resuelto está apagado
     try:
         from agentic.tenant_guardrails import (
             parse_tenant_guardrails,
@@ -2935,9 +2936,14 @@ async def _run_agentic_full(
             _tenant_guardrails,
             _resolved_state.value if _resolved_state else None,
         ):
+            # BLOQUE J-4 (decisión founder 2026-07-12): un estado APAGADO por el
+            # tenant NO se sirve — se escala al operador. Antes solo se logueaba y
+            # el bot seguía respondiendo (el guardrail no tenía efecto). Marcamos y
+            # escalamos tras el try (fuera del contexto de tenant_guardrails).
+            _state_is_denied = True
             logger.warning(
                 "[TENANT_GUARDRAILS] conv=%s estado=%s APAGADO para el tenant — "
-                "sirviendo con toolset restringido del tenant",
+                "escalando a human_takeover (el bot no opera en este estado)",
                 conversation_id[:8],
                 _resolved_state.value if _resolved_state else "?",
             )
@@ -2947,6 +2953,43 @@ async def _run_agentic_full(
             conversation_id[:8], _tg_exc,
         )
     # ─── /per-state ───
+
+    # BLOQUE J-4 — estado apagado por el tenant → escalar y NO correr el LLM.
+    if _state_is_denied:
+        _denied_state = _resolved_state.value if _resolved_state else "?"
+        try:
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Con gusto te ayudo — te conecto con un especialista del "
+                    "equipo para atender esto como corresponde. En un momento "
+                    "te contactan."
+                ),
+            )
+        except Exception as _msg_exc:
+            logger.warning(
+                "[TENANT_GUARDRAILS] conv=%s no pude avisar al cliente del "
+                "handoff: %s", conversation_id[:8], _msg_exc,
+            )
+        await _escalate_conversation_to_human(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            reason=(
+                f"🚫 Estado *{_denied_state}* apagado por el tenant "
+                "(fsm_states_denied) — el bot no opera aquí; atención humana."
+            ),
+        )
+        # CRÍTICO (review HIGH): marcar el inbound como PROCESSED antes del return,
+        # como TODOS los demás paths terminales de _run_agentic_full. Sin esto el
+        # mensaje quedaba en 'processing' → el sweep de stale lo re-despachaba cada
+        # ~3 min: en el peor caso (si el UPDATE de status del escalate falló, best-
+        # effort) re-disparaba este mismo path y re-enviaba "te conecto con un
+        # especialista" al cliente en loop hasta MAX_PROCESSING_ATTEMPTS.
+        _mark_message_processing(
+            supabase, tenant_id, message_id,
+            processing_status=PROCESSING_STATUS_PROCESSED,
+        )
+        return
 
     # Ejecutar agente.
     started_at = time.monotonic()
