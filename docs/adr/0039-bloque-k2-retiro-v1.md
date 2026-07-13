@@ -81,11 +81,13 @@ Las conductas V1 que importan **ya vivían en el agentic** y conservan cobertura
 - Menos superficie de test/mantenimiento; el score del core del BOT sube.
 
 **Neutrales / follow-up**
-- `fsm/state_renderers.py` quedó huérfano (solo lo usaba V1) — **se deja presente** en
-  este PR (importa y testea OK) y se marca para barrido en un follow-up, para no
-  cascadear la deleción.
-- Posibles helpers `_missing_address_fields` / `_extract_first_name` ahora sin caller
-  (dead-but-present, inofensivos) — mismo follow-up de barrido.
+- `fsm/state_renderers.py` (V1-only: `render_needs_shipping_city`,
+  `render_awaiting_carrier_selection`, `_format_price_cop`) quedó huérfano y **se
+  eliminó en este mismo PR (commit K-2b)** tras verificar 0 importadores vivos (el
+  agentic renderiza vía `agentic/system_prompt.py`). El test `test_cop_format_consolidation`
+  se editó para conservar la cobertura viva de los formatters agentic.
+- `_extract_first_name` sigue VIVO (lo usa `tools/payment_link_tool.py`) → se conserva.
+  `_missing_address_fields` queda como re-export test-only en orchestrator (F401-exempt).
 - La regla de UX "listado de catálogo amplio" era V1-only y NO está en el prompt agentic.
   No es regresión (0 tenants en V1), pero es una posible mejora del prompt agentic a
   evaluar por separado.

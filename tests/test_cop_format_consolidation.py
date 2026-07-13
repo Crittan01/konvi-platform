@@ -4,11 +4,10 @@
 centralizarlo. Ahora delegan en los helpers canónicos:
   • cart_render._cop            → text_utils.format_cents_cop (centavos)
   • cart_render_coherence._format_cop → text_utils.format_pesos (pesos)
-  • state_renderers._format_price_cop → wrapper que TRUNCA + format_pesos (pesos)
 
-El caso delicado es state_renderers: recibe float(DECIMAL(10,2)) y el helper viejo
-TRUNCABA (int(price)); format_pesos REDONDEA. El wrapper trunca antes de formatear
-para preservar el comportamiento y la coherencia con catalog.py (que también trunca).
+(BLOQUE K-2: el 3er helper, state_renderers._format_price_cop, se retiró junto con
+el pipeline V1 — fsm/state_renderers.py era V1-only. La cobertura de truncación
+DECIMAL(10,2) que le correspondía la conserva catalog.py, que también trunca.)
 """
 import os
 import sys
@@ -19,7 +18,6 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 
 from agentic.cart_render import _cop  # noqa: E402
 from agentic.invariants.cart_render_coherence import _format_cop  # noqa: E402
-from fsm.state_renderers import _format_price_cop  # noqa: E402
 
 
 class CentsFormatterTests(unittest.TestCase):
@@ -35,23 +33,6 @@ class CrossRenderCoherenceTests(unittest.TestCase):
         """_cop(1_350_000 cents) == _format_cop(13500 pesos) == '$13.500'."""
         self.assertEqual(_cop(1_350_000), _format_cop(13500))
         self.assertEqual(_format_cop(13500), "$13.500")
-
-
-class StateRendererTruncationTests(unittest.TestCase):
-    """Guard contra el regression round-vs-truncate en precios DECIMAL(10,2)."""
-
-    def test_trunca_fraccion(self):
-        self.assertEqual(_format_price_cop(12500.75), "$12.500")  # NO '$12.501'
-        self.assertEqual(_format_price_cop(129.99), "$129")        # NO '$130'
-
-    def test_string_decimal(self):
-        self.assertEqual(_format_price_cop("50000.00"), "$50.000")
-
-    def test_entero(self):
-        self.assertEqual(_format_price_cop(50000), "$50.000")
-
-    def test_none_safe(self):
-        self.assertEqual(_format_price_cop(None), "$0")
 
 
 if __name__ == "__main__":
