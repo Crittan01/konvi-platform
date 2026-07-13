@@ -95,25 +95,29 @@ def _distributed_hit(
     )
 
 
-_TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+# nº de hops CONFIABLES contados DESDE LA DERECHA del XFF para ubicar la IP real del
+# cliente (anti-spoofing: un atacante solo puede PREPEND, no APPEND). Default 0 =
+# comportamiento histórico (leftmost). Activar (>0) SOLO tras VALIDAR EN DOCUMENTACION
+# OFICIAL el manejo de X-Forwarded-For de Render (append vs replace; posición de la IP
+# real) — de lo contrario se rompería el rate-limit / allowlist de webhooks.
+# INTERVENCION HUMANA: fijar XFF_TRUSTED_HOPS_FROM_RIGHT una vez verificado.
+_XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
 
 
 def _client_ip(request: Request) -> str:
-    """IP del cliente robusta ante spoofing de X-Forwarded-For (W1).
+    """IP del cliente desde X-Forwarded-For (helper unificado — W1).
 
-    Render (y proxies estándar) AÑADEN la IP real del cliente al FINAL del XFF; un
-    atacante solo puede PREPEND valores → tomamos el hop de la DERECHA (unspoofable),
-    NO el de la izquierda. Esto es correcto tanto si el edge APPENDEA como si REEMPLAZA
-    el XFF entrante (en ambos casos la IP real queda a la derecha).
-    TRUSTED_PROXY_HOPS (default 0) = nº de proxies confiables ADICIONALES delante de
-    Render (p.ej. 1 si se agrega un CDN) → tomamos xff[-(1+hops)].
+    Default (XFF_TRUSTED_HOPS_FROM_RIGHT=0): hop IZQUIERDO (comportamiento histórico).
+    Con N>0: toma xff[-N] (el hop N-ésimo desde la derecha, unspoofable) — anti-spoofing
+    del leftmost, PERO requiere verificar el XFF de Render antes de activar (ver arriba).
     """
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
-            need = 1 + _TRUSTED_PROXY_HOPS
-            return parts[-need] if len(parts) >= need else parts[0]
+            if _XFF_HOPS_FROM_RIGHT > 0:
+                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            return parts[0]  # leftmost (histórico)
     if request.client and request.client.host:
         return request.client.host
     return "unknown"

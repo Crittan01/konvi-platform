@@ -106,20 +106,22 @@ def _rate_limit_hit(ip: str) -> tuple[bool, int]:
         return True, 0
 
 
-_TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+# Ver security._client_ip (api): default 0 = leftmost (histórico). Activar (>0) SOLO
+# tras VALIDAR EN DOCUMENTACION OFICIAL el manejo de X-Forwarded-For de Render.
+_XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
 
 
 def _client_ip(request: "Request") -> str:
-    """IP del cliente robusta ante spoofing de XFF (W1): Render AÑADE la IP real al
-    FINAL; un atacante solo puede PREPEND → tomamos el hop de la DERECHA (unspoofable),
-    correcto si el edge append O reemplaza. TRUSTED_PROXY_HOPS (default 0) = proxies
-    confiables ADICIONALES delante de Render (p.ej. 1 si hay CDN) → xff[-(1+hops)]."""
+    """IP del cliente desde XFF (helper unificado — W1). Default (0): hop IZQUIERDO
+    (histórico). Con N>0: xff[-N] (hop N desde la derecha, unspoofable) — anti-spoofing,
+    pero requiere verificar el XFF de Render antes de activar."""
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
-            need = 1 + _TRUSTED_PROXY_HOPS
-            return parts[-need] if len(parts) >= need else parts[0]
+            if _XFF_HOPS_FROM_RIGHT > 0:
+                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            return parts[0]  # leftmost (histórico)
     return request.client.host if request.client else "unknown"
 
 
