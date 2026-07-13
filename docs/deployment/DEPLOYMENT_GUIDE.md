@@ -23,8 +23,13 @@ Esta guía reemplaza instructivos legacy y refleja el runtime actual del reposit
 
 ## 3) Paso a paso de despliegue
 
-1. Push a rama de despliegue (`develop` en flujo actual).
-2. Render aplica blueprint desde `render.yaml`.
+El target de deploy es la rama **`production`** (`render.yaml`: `branch: production` +
+`autoDeploy: true`). `develop` es integración y NO despliega. Ver
+`docs/deployment/rollout-and-rollback.md` para el detalle + rollback.
+
+1. Merge de PRs a `develop` (gate `--ci` verde).
+2. Promover a producción: `git push origin origin/develop:production` → Render autodeploya
+   los servicios que cambiaron.
 3. Verificar health checks:
 
 ```bash
