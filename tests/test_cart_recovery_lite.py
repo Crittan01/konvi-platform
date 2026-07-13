@@ -29,7 +29,6 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 from orchestrator import (  # noqa: E402
     _cart_recovery_enabled,
     _cart_recovery_lookback_days,
-    _customer_context_should_load,
     _load_cart_recovery_block,
     _load_customer_context_block,
 )
@@ -141,34 +140,9 @@ class CartRecoveryEnvTests(unittest.TestCase):
         self.assertEqual(_cart_recovery_lookback_days(), 7)
 
 
-class CustomerContextLazyTokensCartRecoveryTests(unittest.TestCase):
-    def setUp(self):
-        self._backup = {
-            "CUSTOMER_CONTEXT_ENABLED": os.environ.get("CUSTOMER_CONTEXT_ENABLED"),
-            "CUSTOMER_CONTEXT_MODE": os.environ.get("CUSTOMER_CONTEXT_MODE"),
-        }
-        os.environ["CUSTOMER_CONTEXT_ENABLED"] = "true"
-        os.environ["CUSTOMER_CONTEXT_MODE"] = "lazy"
-
-    def tearDown(self):
-        for k, v in self._backup.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-    def test_carrito_token_activates_lazy(self):
-        for query in [
-            "oye, ¿qué tenía en mi carrito?",
-            "quiero retomar el de antes",
-            "el carrito anterior",
-            "lo que tenía pendiente",
-            "quiero pagar",
-        ]:
-            self.assertTrue(
-                _customer_context_should_load(query),
-                f"esperaba True para: {query!r}",
-            )
+# BLOQUE K: CustomerContextLazyTokensCartRecoveryTests ELIMINADO — probaba el gate
+# muerto `_customer_context_should_load` (0 callsites runtime), removido en la
+# limpieza de flags CUSTOMER_CONTEXT (decisión founder J-4 #1).
 
 
 class LoadCartRecoveryBlockTests(unittest.TestCase):
@@ -308,14 +282,12 @@ class LoadCustomerContextBlockIntegrationTests(unittest.TestCase):
     cuando hay tanto pedidos activos como carrito recuperable."""
 
     def setUp(self):
+        # BLOQUE K: los flags CUSTOMER_CONTEXT_* fueron eliminados (gate muerto);
+        # aquí solo quedan los de cart-recovery, que sí gobiernan de verdad.
         self._backup = {
-            "CUSTOMER_CONTEXT_ENABLED": os.environ.get("CUSTOMER_CONTEXT_ENABLED"),
-            "CUSTOMER_CONTEXT_MODE": os.environ.get("CUSTOMER_CONTEXT_MODE"),
             "CART_RECOVERY_ENABLED": os.environ.get("CART_RECOVERY_ENABLED"),
             "CART_RECOVERY_LOOKBACK_DAYS": os.environ.get("CART_RECOVERY_LOOKBACK_DAYS"),
         }
-        os.environ["CUSTOMER_CONTEXT_ENABLED"] = "true"
-        os.environ["CUSTOMER_CONTEXT_MODE"] = "lazy"
         os.environ["CART_RECOVERY_ENABLED"] = "true"
         os.environ["CART_RECOVERY_LOOKBACK_DAYS"] = "7"
 

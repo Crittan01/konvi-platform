@@ -465,13 +465,6 @@ services:
         value: "16777216"
       - key: META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS
         value: "10"
-      # ── Customer context — cliente conocido (rev. 69) ─────────────────────
-      # 'lazy' carga el bloque solo si la query menciona pedido/orden/envío/reclamo.
-      # 'always' siempre carga (rev. 68). 'disabled' nunca.
-      - key: CUSTOMER_CONTEXT_ENABLED
-        value: "true"
-      - key: CUSTOMER_CONTEXT_MODE
-        value: "lazy"
       # ── Cart recovery (F7-lite, rev. 70) ─────────────────────────────────
       # Inyecta carrito previo cancelado al system prompt para que el bot
       # ofrezca retomar cuando el cliente vuelve a expresar intención de compra.

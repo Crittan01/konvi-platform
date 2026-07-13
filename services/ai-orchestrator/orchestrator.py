@@ -747,41 +747,10 @@ def _log_consent_event(
         )
 
 
-def _log_pii_access(
-    supabase: Client,
-    *,
-    tenant_id: str,
-    contact_id: str,
-    accessed_by: str,              # 'user:<email>' | 'agent:orchestrator' | 'integration:wompi'
-    purpose: str,                  # 'inbox_view' | 'wompi_checkout' | 'data_export' | etc.
-    fields_accessed: list[str],
-    actor_user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-) -> None:
-    """Rev. 93 — INSERT en pii_access_log (append-only, Art. 9).
-
-    Llamar cuando un actor explícitamente lee PII del contacto (NO en
-    cada SELECT sistémico — solo en lecturas con propósito específico).
-    """
-    try:
-        row = {
-            "tenant_id": tenant_id,
-            "contact_id": contact_id,
-            "accessed_by": accessed_by,
-            "actor_user_id": actor_user_id,
-            "purpose": purpose,
-            "fields_accessed": fields_accessed,
-            "ip_address": ip_address,
-            "user_agent": user_agent,
-        }
-        # tenant_filter:exempt:payload_includes_tenant_id
-        supabase.table("pii_access_log").insert(row).execute()
-    except Exception as e:
-        logger.warning(
-            "[PII_ACCESS] No se pudo registrar acceso contact=%s: %s",
-            contact_id, e,
-        )
+# BLOQUE K (decisión founder J-4 #1): `_log_pii_access` del orchestrator ELIMINADO
+# — tenía 0 callsites en runtime (el bot audita PII vía los chokepoints de tools, no
+# per-turn; diseño documentado rev.93). El espejo VIVO vive en el API
+# (services/api/dependencies/pii_audit.py) para las lecturas con propósito (SAR, etc.).
 
 
 def _record_consent(
@@ -890,56 +859,17 @@ def _get_conversation_customer_phone(supabase: Client, tenant_id: str, conversat
     return str(conv_res.data[0].get("customer_phone") or "").strip() or None
 
 
-_CUSTOMER_CONTEXT_LAZY_TOKENS: frozenset[str] = frozenset({
-    # Tokens léxicos que indican que el cliente está consultando por sus operaciones.
-    # Si la query del cliente contiene cualquiera de estos, cargamos el contexto.
-    "pedido", "pedidos", "orden", "ordenes", "compra", "compras",
-    "tracking", "guia", "guía", "envio", "envío", "rastreo",
-    "reclamo", "reclamos", "queja", "quejas",
-    "garantia", "garantía", "devolucion", "devolución", "cambio",
-    "estado", "status",
-    # F7-lite cart recovery: el cliente vuelve a hablar de "el carrito" /
-    # "lo del otro día" / "retomar" — disparamos contexto para inyectar
-    # carrito previo cancelled y permitir que el bot ofrezca retomar.
-    "carrito", "retomar", "retomo", "antes", "ayer",
-    "anterior", "ultima", "última", "ultimo", "último",
-    "pendiente", "pendientes", "pagar", "pago",
-})
-
-
-def _customer_context_should_load(query_text: Optional[str]) -> bool:
-    """Decide si cargar el bloque de contexto cliente conocido.
-
-    Modos (CUSTOMER_CONTEXT_MODE env var, default 'lazy'):
-    - 'always': siempre carga (rev. 68 default — mayor costo en tokens).
-    - 'lazy': carga solo si la query del cliente contiene tokens de consulta
-      sobre sus operaciones (pedido/reclamo/envío/etc.).
-    - 'disabled': nunca carga (kill switch).
-
-    El kill switch global CUSTOMER_CONTEXT_ENABLED (default 'true') anula
-    el modo si está en 'false'.
-    """
-    if os.getenv("CUSTOMER_CONTEXT_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
-        return False
-    mode = (os.getenv("CUSTOMER_CONTEXT_MODE", "lazy") or "lazy").strip().lower()
-    if mode == "disabled":
-        return False
-    if mode == "always":
-        return True
-    # Default: lazy — solo si la query menciona operaciones del cliente.
-    if not query_text:
-        return False
-    # _tokenize_text extrae solo alfanuméricos sin acentos — robusto contra
-    # signos de puntuación ("¿pedido?" → ["pedido"]).
-    tokens = set(_tokenize_text(query_text))
-    return bool(tokens & _CUSTOMER_CONTEXT_LAZY_TOKENS)
+# BLOQUE K (decisión founder J-4 #1): `_customer_context_should_load` +
+# `_CUSTOMER_CONTEXT_LAZY_TOKENS` ELIMINADOS. El gate tenía 0 callsites en runtime
+# (los flags CUSTOMER_CONTEXT_ENABLED/MODE de render.yaml no gateaban nada — el bot
+# carga el contexto del cliente por diseño vía `_load_customer_context_block`). Se
+# quitaron los flags muertos + el gate + los tokens. La carga real es by-design (rev.93).
 
 
 def _cart_recovery_enabled() -> bool:
-    """F7-lite kill switch independiente del global CUSTOMER_CONTEXT_ENABLED.
-
-    Permite apagar solo el bloque de carrito previo sin tumbar el contexto
-    de pedidos activos / reclamos abiertos.
+    """F7-lite kill switch (`CART_RECOVERY_ENABLED`, default true) del bloque de
+    carrito previo. Apaga solo el cart-recovery sin tumbar el contexto de pedidos
+    activos / reclamos abiertos.
     """
     raw = os.getenv("CART_RECOVERY_ENABLED", "true")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}

@@ -3,7 +3,6 @@
 Cobertura:
   • _hash_phone: hash sha256 estable del phone para lookup post-anonymization.
   • _log_consent_event: insert en consent_audit_log con shape correcto.
-  • _log_pii_access: insert en pii_access_log con shape correcto.
   • _record_consent: ahora también escribe consent_audit_log.
 
 Las migraciones reales (consent_audit_log + pii_access_log) son SQL
@@ -19,7 +18,6 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 from orchestrator import (  # noqa: E402
     _hash_phone,
     _log_consent_event,
-    _log_pii_access,
     _record_consent,
 )
 
@@ -100,47 +98,9 @@ class LogConsentEventTests(unittest.TestCase):
         )
 
 
-class LogPiiAccessTests(unittest.TestCase):
-
-    def setUp(self):
-        self.supabase = MagicMock()
-        self.insert_chain = self.supabase.table.return_value.insert
-        self.insert_chain.return_value.execute.return_value = MagicMock()
-
-    def _captured_row(self):
-        args, _ = self.insert_chain.call_args
-        return args[0]
-
-    def test_insert_to_correct_table(self):
-        _log_pii_access(
-            self.supabase,
-            tenant_id="t-1", contact_id="c-1",
-            accessed_by="user:alice@kaiu.co",
-            purpose="inbox_view",
-            fields_accessed=["name", "email"],
-        )
-        self.supabase.table.assert_any_call("pii_access_log")
-
-    def test_row_shape_includes_fields_accessed(self):
-        _log_pii_access(
-            self.supabase,
-            tenant_id="t-1", contact_id="c-1",
-            accessed_by="agent:orchestrator",
-            purpose="wompi_checkout",
-            fields_accessed=["document_number", "name", "email", "phone"],
-        )
-        row = self._captured_row()
-        self.assertEqual(row["accessed_by"], "agent:orchestrator")
-        self.assertEqual(row["purpose"], "wompi_checkout")
-        self.assertIn("document_number", row["fields_accessed"])
-
-    def test_log_failure_silent(self):
-        self.insert_chain.return_value.execute.side_effect = Exception("X")
-        # No debe levantar.
-        _log_pii_access(
-            self.supabase, tenant_id="t", contact_id="c",
-            accessed_by="x", purpose="x", fields_accessed=[],
-        )
+# BLOQUE K: LogPiiAccessTests ELIMINADO — probaba el `_log_pii_access` del
+# orchestrator, removido (0 callsites runtime; decisión founder J-4 #1). El espejo
+# VIVO del API (services/api/dependencies/pii_audit.py) conserva su propia cobertura.
 
 
 class RecordConsentWritesAuditTests(unittest.TestCase):
