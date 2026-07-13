@@ -65,6 +65,13 @@ logger = logging.getLogger(__name__)
 # ─── Caches ─────────────────────────────────────────────────────────────────
 
 _CACHE_TTL_SECONDS = 300
+# Tope por cache — cota dura de memoria. El endpoint del connector es
+# internet-facing: una request con `sha256=xx` a /webhook/{uuid-aleatorio}
+# dispara la resolución del secret del tenant → cachea None (negative cache)
+# ANTES de que falle el HMAC. Sin tope, un flood de UUIDs aleatorios crece el
+# cache sin límite (el TTL es lazy: solo evict en re-acceso, que nunca llega
+# para keys de ataque). maxsize + barrido activo + evicción del más viejo lo cierra.
+_CACHE_MAXSIZE = 2048
 
 _cache_lock = threading.RLock()
 _phone_to_tenant_cache: dict[str, tuple[Optional[str], float]] = {}
@@ -129,9 +136,25 @@ def _cache_get(cache: dict, key: str) -> tuple[bool, Optional[str]]:
         return True, value
 
 
+def _sweep_expired(cache: dict) -> None:
+    """Barrido ACTIVO de entradas expiradas. El TTL de `_cache_get` es lazy —
+    solo evict al re-acceder una key. Las keys de ataque (UUIDs random) nunca se
+    re-acceden → sin barrido, se acumulan hasta expirar sin liberar memoria."""
+    now = time.time()
+    for k in [k for k, (_v, exp) in cache.items() if now >= exp]:
+        del cache[k]
+
+
 def _cache_put(cache: dict, key: str, value: Optional[str]) -> None:
     with _cache_lock:
         cache[key] = (value, time.time() + _CACHE_TTL_SECONDS)
+        if len(cache) > _CACHE_MAXSIZE:
+            _sweep_expired(cache)
+            # Si tras barrer expirados sigue sobre el tope (flood dentro del TTL),
+            # evict el más viejo (menor expiry = insertado antes, TTL constante).
+            while len(cache) > _CACHE_MAXSIZE:
+                oldest = min(cache, key=lambda k: cache[k][1])
+                del cache[oldest]
 
 
 def _cache_invalidate_all() -> int:
