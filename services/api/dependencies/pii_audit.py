@@ -9,9 +9,10 @@ Diseño:
     depender del éxito de la inserción para seguir operando.
   • Se invoca DESPUÉS de la lectura exitosa del recurso PII (el mismo
     request ya cargó los datos para el operador / titular).
-  • Espejo del helper homónimo en services/ai-orchestrator/orchestrator.py
-    — duplicación intencional (cada servicio mantiene su lib mínima sin
-    crossimports cross-service).
+  • Implementación ÚNICA del audit de acceso PII. El orchestrator NO audita
+    PII per-turn (el bot lee el contexto del cliente por diseño; la auditoría
+    ocurre en los chokepoints de tools). El helper homónimo del orchestrator
+    fue eliminado en BLOQUE K-1 (era código muerto, 0 callsites).
 """
 from __future__ import annotations
 
