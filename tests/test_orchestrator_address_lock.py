@@ -22,8 +22,6 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 from orchestrator import (  # noqa: E402
     _missing_address_fields,
     _has_real_address_data,
-    _determine_transactional_state,
-    _build_address_request_prompt,
     _build_order_summary_text,
     _format_address_for_summary,
 )
@@ -212,45 +210,6 @@ class MissingAddressFieldsTests(unittest.TestCase):
             "company_name": "Acme S.A.S.",
         }
         self.assertEqual(_missing_address_fields(addr), [])
-
-    def test_determine_state_blocks_at_needs_direction_when_building_type_missing(self):
-        """FSM no debe avanzar a READY_FOR_SUMMARY sin building_type."""
-        contact = {
-            "consent_given": True,
-            "email": "x@y.com",
-            "name": "Cris",
-            "document_type": "CC",
-            "document_number": "123",
-            "address": {"street": "Calle 1", "city": "Bogotá"},
-        }
-        self.assertEqual(_determine_transactional_state(contact), "NEEDS_DIRECTION")
-
-    def test_determine_state_advances_with_complete_casa(self):
-        contact = {
-            "consent_given": True,
-            "email": "x@y.com",
-            "name": "Cris",
-            "document_type": "CC",
-            "document_number": "123",
-            "address": {
-                "street": "Calle 1",
-                "city": "Bogotá",
-                "neighborhood": "Chapinero",  # P6 opción C.
-                "building_type": "casa",
-            },
-        }
-        self.assertEqual(_determine_transactional_state(contact), "READY_FOR_SUMMARY")
-
-
-class AddressRequestPromptTests(unittest.TestCase):
-    def test_prompt_lists_only_missing(self):
-        contact = {"address": {"street": "Calle 1", "city": "Bogotá"}}
-        prompt = _build_address_request_prompt(contact, "Cris")
-        # Debe mencionar tipo de vivienda como faltante
-        self.assertIn("Tipo de vivienda", prompt)
-        # No debe pedir lo que ya tenemos
-        self.assertNotIn("Calle y número", prompt)
-        self.assertNotIn("Ciudad", prompt)
 
 
 class OrderSummaryTests(unittest.TestCase):

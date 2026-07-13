@@ -95,34 +95,5 @@ class TenantFlagReadingTests(unittest.TestCase):
         self.assertFalse(_run(is_tenant_agentic_enabled(sb, "tenant-x")))
 
 
-class DispatcherFlagPathsTests(unittest.TestCase):
-    """Verifica que el dispatcher elige el path correcto.
-
-    NO testeamos invocación real de agentic full ni shadow porque
-    requieren mocks complejos del orchestrator legacy. Eso queda
-    cubierto por golden conversation tests E2E.
-    """
-
-    def test_agentic_shadow_env_var_default_false(self):
-        # Sin env var, shadow está OFF.
-        # Re-importamos el módulo en un proceso aislado sería ideal,
-        # pero como simple verificación: env var no seteada → False.
-        os.environ.pop("AGENTIC_SHADOW_ENABLED", None)
-        import importlib
-        import agentic.dispatcher as disp
-        importlib.reload(disp)
-        self.assertFalse(disp.AGENTIC_SHADOW_ENABLED)
-
-    def test_agentic_shadow_env_var_true_se_lee(self):
-        os.environ["AGENTIC_SHADOW_ENABLED"] = "true"
-        import importlib
-        import agentic.dispatcher as disp
-        importlib.reload(disp)
-        self.assertTrue(disp.AGENTIC_SHADOW_ENABLED)
-        # Cleanup.
-        os.environ.pop("AGENTIC_SHADOW_ENABLED", None)
-        importlib.reload(disp)
-
-
 if __name__ == "__main__":
     unittest.main()

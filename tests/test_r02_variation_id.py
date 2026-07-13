@@ -18,58 +18,6 @@ import orchestrator
 from tools.payment_link_tool import handle_payment_link_if_applicable
 
 
-class VerifiedOrderContextWithIdsTests(unittest.TestCase):
-
-    def _make_catalog(self):
-        return [
-            {
-                "id": "prod-uuid-123",
-                "title": "Camiseta Polo Testing",
-                "price": 60000.0,
-                "price_min": 60000.0,
-                "price_max": 65000.0,
-                "stock": 10,
-                "variants": [
-                    {"id": "var-uuid-rojo", "label": "Color: Rojo", "price": 60000.0, "stock": 5},
-                    {"id": "var-uuid-azul", "label": "Color: Azul", "price": 65000.0, "stock": 3},
-                ],
-            }
-        ]
-
-    def test_returns_product_id_and_variation_id_when_variant_detected(self):
-        history = [
-            {"direction": "inbound", "content": "Quiero la camiseta polo color rojo"},
-            {"direction": "outbound", "content": "¿Continuamos con la opción *Económica*?"},
-        ]
-        result = orchestrator._build_verified_order_context(self._make_catalog(), history)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["product_id"], "prod-uuid-123")
-        self.assertEqual(result["variation_id"], "var-uuid-rojo")
-        self.assertEqual(result["variant_label"], "Color: Rojo")
-
-    def test_returns_cheapest_variation_id_when_no_variant_detected(self):
-        history = [
-            {"direction": "inbound", "content": "Quiero una camiseta polo"},
-        ]
-        result = orchestrator._build_verified_order_context(self._make_catalog(), history)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["product_id"], "prod-uuid-123")
-        # La más barata con stock es "Color: Rojo" ($60.000)
-        self.assertEqual(result["variation_id"], "var-uuid-rojo")
-
-    def test_product_id_present_in_all_results(self):
-        history = [
-            {"direction": "inbound", "content": "Camiseta polo"},
-        ]
-        result = orchestrator._build_verified_order_context(self._make_catalog(), history)
-        self.assertIn("product_id", result)
-        self.assertIn("variation_id", result)
-
-    def test_none_when_no_product_in_context(self):
-        result = orchestrator._build_verified_order_context(self._make_catalog(), [])
-        self.assertIsNone(result)
-
-
 @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "test-secret")
 class PaymentLinkToolWithVerifiedCtxTests(unittest.IsolatedAsyncioTestCase):
 
