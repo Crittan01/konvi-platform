@@ -22,6 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from dependencies.auth import _get_service_client
+from dependencies.security import webhook_rate_limit_check
 from integrations.wompi_client import (
     create_payment_link_sync,
     get_tenant_wompi_creds,
@@ -43,6 +44,22 @@ async def wompi_webhook(request: Request, background_tasks: BackgroundTasks):
     Recibe eventos de Wompi. Responde 200 inmediatamente.
     El procesamiento real ocurre en BackgroundTask.
     """
+    # Rate-limit per-IP ANTES de procesar (paridad con aveonline/meli — Ola 0):
+    # el path de dinero era el ÚNICO webhook sin rate-limit → flood = amplificación
+    # de DB + saturación del threadpool. bucket sin tenant_id (protege por-atacante).
+    # Fail-open: un error del limiter NUNCA debe dropear un webhook de pago legítimo.
+    try:
+        xff = request.headers.get("x-forwarded-for", "")
+        ip = xff.split(",")[0].strip() if xff else (request.client.host if request.client else "unknown")
+        allowed, retry_after = webhook_rate_limit_check(
+            _get_service_client(), ip=ip, bucket="webhook.wompi", limit=200, window_seconds=60,
+        )
+        if not allowed:
+            logger.warning("[WOMPI][WH] rate_limited ip=%s retry_after=%s", ip, retry_after)
+            return JSONResponse(status_code=429, content={"received": False, "message": "rate limited"})
+    except Exception as _rl_exc:  # noqa: BLE001 — fail-open: no dropear webhook de pago
+        logger.warning("[WOMPI][WH] rate-limit check falló (fail-open): %s", _rl_exc)
+
     try:
         payload = await request.json()
     except Exception:
@@ -468,7 +485,11 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
             return
 
         total_amount = float(order.get("total_amount") or 0)
-        amount_in_cents = int(total_amount * 100)
+        # int(round(...)) — NO int(x*100): la multiplicación float puede quedar apenas
+        # por debajo del entero (150000.02*100 = 15000001.9999… → int=15000001, 1 cent
+        # menos) → link con monto menor → el guard de monto (línea ~263, que usa
+        # int(round)) RECHAZA → orden pagada varada. Canónico = round.
+        amount_in_cents = int(round(total_amount * 100))
         if amount_in_cents < 150_000:
             logger.warning("[WOMPI] retry_monto_bajo order=%s amount=%s", order_id, amount_in_cents)
             _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)

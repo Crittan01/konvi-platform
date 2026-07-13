@@ -23,7 +23,8 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 from helpers.wompi_payload_builder import WompiPayloadBuilder
 
 
-def _make_supabase_mock(*, order_status="pending_payment", has_conversation=True):
+def _make_supabase_mock(*, order_status="pending_payment", has_conversation=True,
+                        total_amount=135_000.0):
     """Construye un mock de Supabase con las respuestas esperadas."""
     supabase = MagicMock()
 
@@ -32,7 +33,7 @@ def _make_supabase_mock(*, order_status="pending_payment", has_conversation=True
         "id": "order-uuid-123",
         "tenant_id": "tenant-uuid-456",
         "status": order_status,
-        "total_amount": 135_000.0,
+        "total_amount": total_amount,
         "notes": "Pedido de prueba",
         "conversation_id": "conv-uuid-789" if has_conversation else None,
     }
@@ -151,6 +152,32 @@ class WompiRetryTests(unittest.TestCase):
 
         mock_create_link.assert_called_once()
         supabase.rpc.assert_called_once()
+
+    @patch("routers.wompi_webhook._get_service_client")
+    @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
+    @patch("routers.wompi_webhook.get_tenant_wompi_creds", return_value=("prv_test_key", "events_key", "sandbox"))
+    @patch("routers.wompi_webhook.create_payment_link_sync")
+    def test_retry_total_fraccionario_usa_cents_redondeados(self, mock_create_link, _mock_creds, mock_sig, mock_supabase_client):
+        """OLA 0 (audit CRITICAL money): el link del retry debe usar int(round(total*100)),
+        NO int(total*100). Con total 150000.02 la multiplicación float trunca a 15000001
+        (1 cent menos) → el guard de monto rechaza → orden pagada varada. Debe ser 15000002."""
+        total = 150_000.02
+        truncado = int(total * 100)          # 15000001 (bug)
+        redondeado = int(round(total * 100))  # 15000002 (correcto)
+        self.assertNotEqual(truncado, redondeado, "el total elegido debe truncar mal")
+        mock_create_link.return_value = {
+            "link_id": "frac-link", "checkout_url": "https://checkout.wompi.co/l/frac",
+            "active": True, "amount_in_cents": redondeado, "expires_at": "2026-04-25T12:00:00.000Z",
+        }
+        supabase = _make_supabase_mock(order_status="pending_payment", total_amount=total)
+        mock_supabase_client.return_value = supabase
+        from routers.wompi_webhook import _maybe_offer_payment_retry
+        _maybe_offer_payment_retry(supabase, order_id="order-uuid-123", txn_status="DECLINED")
+        mock_create_link.assert_called_once()
+        self.assertEqual(
+            mock_create_link.call_args.kwargs.get("amount_in_cents"), redondeado,
+            "el retry usó cents truncados (1 cent menos) → guard de monto rechazaría",
+        )
 
     @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
     def test_declined_confirmed_order_no_retry(self, _mock_sig):
