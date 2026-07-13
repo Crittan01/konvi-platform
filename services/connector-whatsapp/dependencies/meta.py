@@ -150,11 +150,16 @@ def _cache_put(cache: dict, key: str, value: Optional[str]) -> None:
         cache[key] = (value, time.time() + _CACHE_TTL_SECONDS)
         if len(cache) > _CACHE_MAXSIZE:
             _sweep_expired(cache)
-            # Si tras barrer expirados sigue sobre el tope (flood dentro del TTL),
-            # evict el más viejo (menor expiry = insertado antes, TTL constante).
             while len(cache) > _CACHE_MAXSIZE:
-                oldest = min(cache, key=lambda k: cache[k][1])
-                del cache[oldest]
+                # Preferir evictar entradas NEGATIVAS (value=None = flood/UUID
+                # inexistente) sobre secrets legítimos: evita amplificar lookups
+                # de Vault bajo ataque (re-fetch de un secret válido evictado) y
+                # encuentra víctima rápido porque el flood domina el cache. Solo
+                # si no queda ninguna negativa, evict el más viejo (FIFO).
+                victim = next((k for k, (v, _e) in cache.items() if v is None), None)
+                if victim is None:
+                    victim = min(cache, key=lambda k: cache[k][1])
+                del cache[victim]
 
 
 def _cache_invalidate_all() -> int:
