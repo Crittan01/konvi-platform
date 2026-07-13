@@ -156,6 +156,44 @@ class CreateClaimTool:
         order = order_res.data[0]
         customer_id = order.get("contact_id") or ctx.contact_id
 
+        # 1b. Idempotencia (Ola 0): si YA hay un reclamo ABIERTO para este
+        #     pedido/cliente, NO crear un duplicado. El LLM puede invocar
+        #     create_claim otra vez si el cliente repite "mi pedido llegó dañado"
+        #     en el mismo flujo → antes duplicaba reclamos + doble notif al operador.
+        try:
+            existing_res = (
+                ctx.supabase.table("claims")
+                .select("id, ticket_number")
+                .eq("tenant_id", ctx.tenant_id)
+                .eq("order_id", args.order_id)
+                .eq("customer_id", customer_id)
+                .eq("status", "open")
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            existing_res = None
+        if existing_res is not None and existing_res.data:
+            ex = existing_res.data[0]
+            return tool_success(
+                {
+                    "claim_id": ex["id"],
+                    "ticket_number": ex.get("ticket_number"),
+                    "status": "open",
+                    "note": (
+                        f"Ya hay un reclamo abierto (#{ex.get('ticket_number')}) para "
+                        f"este pedido. Recuérdale al cliente ese número; el equipo lo "
+                        f"revisará. NO registres otro."
+                    ),
+                },
+                audit={
+                    "operation": "create_claim",
+                    "idempotent": True,
+                    "ticket_number": ex.get("ticket_number"),
+                    "order_id": args.order_id,
+                },
+            )
+
         # 2. Insertar claim. Trigger DB compute ticket_number automáticamente.
         payload: dict = {
             "tenant_id": ctx.tenant_id,
