@@ -28,7 +28,12 @@ Metodología: un BLOQUE a la vez (branch desde develop → impl → tests → `v
 
 **Sigue vigente de rev.110/111** (NO borrar): Model B Direct Provider per-tenant WhatsApp (ADR-0023), cura crónica Inbox V3 per-state builder + business_ops kwargs (ADR-0024). Ver secciones abajo.
 
-**Auditoría ecosistema BOT 2026-07-12** (workflow 26 agentes): 17 crit/high confirmados → plan bloques I-L. **BLOQUE I (esta rev, en curso)**: verdad documental — reescritos `06-contracts.md` (Meta Model B, ADR-0025, Aveonline, FSM agentic 9 estados, KB threshold), este doc, `04-next-steps.md`, `HANDOFF.md`, versiones. Sigue: J (robustez runtime), K/L.
+**Auditoría ecosistema BOT 2026-07-12** (workflow 26 agentes): 17 crit/high confirmados → plan bloques I-L.
+- **BLOQUE I** ✅: verdad documental — reescritos `06-contracts.md` (Meta Model B, ADR-0025, Aveonline, FSM agentic 9 estados, KB threshold), este doc, `04-next-steps.md`, `HANDOFF.md`, versiones.
+- **BLOQUE J** ✅ (J-1 robustez worker, J-2 fallback V2, J-3 enforcement/wiring, J-4 4 decisiones founder) — desplegado.
+- **BLOQUE K-1** (elimina flags CUSTOMER_CONTEXT muertos) ✅ + **K-3a** (test paridad `_hash_phone`) ✅.
+- **BLOQUE K-2** ✅ **RETIRO V1** (PR #61, merged develop 3f82a33d, ADR-0039): eliminado el pipeline monolítico V1 dead-in-prod (~9.140 LOC: `build_and_run_orchestration` + `_build_system_prompt` + 88 helpers heurísticos + `prompt/builder.py` + `checkout_form.py` + `fsm/state_renderers.py` + shadow harness). `orchestrator.py` 10.419→2.625 LOC. **Ahora hay 2 builders, no 3** (V1 retirado): V2 monolito agentic + V3 per-state agentic (primario). Único cambio runtime: route dispatcher no-agentic→degraded+escalate. Verificado call-graph AST + dangling-ref + review adversarial 12-agentes + gate VERDE (coverage 58.9%→63.8%).
+- **Sigue (K/L, foco dedicado)**: dead endpoints (interfaces externas — requieren confirmación ops), Settings write-paths, dedup helpers, higiene L (paths tests, cutover D3). Sin desplegar a producción aún (develop adelante de production).
 
 ---
 
