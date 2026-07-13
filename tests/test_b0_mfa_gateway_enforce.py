@@ -139,10 +139,12 @@ class MfaGateWiringTests(unittest.TestCase):
         self.assertTrue(must <= self.gated, f"faltan gateados: {must - self.gated}")
 
     def test_orders_money_movement_gateado(self):
-        """payment-link (dual-auth, internal-aware) + PATCH (user-only) money-movement."""
+        """payment-link (dual-auth, internal-aware) + PATCH (user-only) money-movement
+        + generate-shipping-guide (Ola 0 — guía REAL Aveonline = dinero, internal-aware)."""
         must = {
             ("/api/v1/orders/{order_id}/payment-link", "POST"),
             ("/api/v1/orders/{order_id}", "PATCH"),
+            ("/api/v1/orders/{order_id}/generate-shipping-guide", "POST"),
         }
         self.assertTrue(must <= self.gated, f"faltan gateados: {must - self.gated}")
 
