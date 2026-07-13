@@ -138,6 +138,24 @@ class MfaGateWiringTests(unittest.TestCase):
         }
         self.assertTrue(must <= self.gated, f"faltan gateados: {must - self.gated}")
 
+    def test_offboarding_crownjewels_son_fail_closed(self):
+        """Ancla la propiedad de seguridad: export (PII) + request-deletion (borrado) usan
+        enforce_mfa_strict (FAIL-CLOSED), NO el gate amplio fail-open. Un revert
+        strict→enforce_mfa debe ROMPER este test (el de arriba usa la unión y no lo pillaría)."""
+        import main
+        strict_paths = set()
+        for r in main.app.routes:
+            deps = [getattr(d, "dependency", None) for d in (getattr(r, "dependencies", []) or [])]
+            deps += [getattr(d, "call", None) for d in getattr(getattr(r, "dependant", None), "dependencies", []) or []]
+            if A.enforce_mfa_strict in deps:
+                for m in getattr(r, "methods", None) or []:
+                    strict_paths.add((getattr(r, "path", ""), m))
+        must = {
+            ("/api/v1/tenant/offboarding/export", "POST"),
+            ("/api/v1/tenant/offboarding/request-deletion", "POST"),
+        }
+        self.assertTrue(must <= strict_paths, f"crown-jewels no fail-closed (strict): {must - strict_paths}")
+
     def test_orders_money_movement_gateado(self):
         """payment-link (dual-auth, internal-aware) + PATCH (user-only) money-movement
         + generate-shipping-guide (Ola 0 — guía REAL Aveonline = dinero, internal-aware)."""
