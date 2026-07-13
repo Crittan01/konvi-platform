@@ -360,9 +360,12 @@ class OrchestratorWorker:
             await coro
         except Exception as exc:  # noqa: BLE001 — fault isolation deliberada
             self._metrics["poll_job_errors"] = self._metrics.get("poll_job_errors", 0) + 1
+            # Sin exc_info=True: el traceback completo puede arrastrar PII de cliente a
+            # Sentry (scrubber sistémico va en W1). Tipo + mensaje truncado bastan para
+            # diagnosticar QUÉ job y QUÉ clase de error, con menor superficie de PII.
             logger.error(
-                "[WORKER] job '%s' falló (aislado, ciclo continúa): %s",
-                name, exc, exc_info=True,
+                "[WORKER] job '%s' falló (aislado, ciclo continúa): %s: %.200s",
+                name, type(exc).__name__, str(exc),
             )
 
     async def _poll_cycle(self):

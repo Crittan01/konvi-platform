@@ -83,6 +83,25 @@ class ConnectorWebhookGuardTests(unittest.TestCase):
             self._call(_req(content_length=_meta._MAX_BODY_BYTES + 1))
         self.assertEqual(ctx.exception.status_code, 413)
 
+    def test_bypass_chunked_sin_content_length_413(self):
+        """Sin header Content-Length (chunked) el cap del header no aplica → el backstop
+        post-read de len(raw_body) debe cazarlo igual (413). Requiere pasar el lookup de
+        app_secret (el body se lee después) → lo mockeamos."""
+        from unittest.mock import patch
+        from fastapi import HTTPException
+        req = _req(content_length=None)  # sin Content-Length
+        big = b"x" * (_meta._MAX_BODY_BYTES + 10)
+
+        async def _body():
+            return big
+        req.body = _body
+        with patch.object(_meta, "_resolve_tenant_app_secret", return_value="fakesecret"):
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(_meta.verify_meta_signature_for_tenant(
+                    tenant_id="0fb0777e-f3e4-48c7-89bf-a25aa201c0c9",
+                    request=req, x_hub_signature_256="sha256=deadbeef"))
+        self.assertEqual(ctx.exception.status_code, 413)
+
     def test_flood_429_antes_del_lookup(self):
         from fastapi import HTTPException
         # agotar el límite para esta IP

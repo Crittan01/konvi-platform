@@ -32,6 +32,9 @@ class _Query:
     def eq(self, *_):
         return self
 
+    def in_(self, *_):
+        return self
+
     def limit(self, *_):
         return self
 

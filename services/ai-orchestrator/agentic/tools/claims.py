@@ -167,7 +167,10 @@ class CreateClaimTool:
                 .eq("tenant_id", ctx.tenant_id)
                 .eq("order_id", args.order_id)
                 .eq("customer_id", customer_id)
-                .eq("status", "open")
+                # estados NO-terminales: un reclamo abierto O EN INVESTIGACIÓN sigue
+                # activo → no crear duplicado. Los terminales (resolved/refunded/
+                # rejected/cancelled) SÍ permiten radicar uno nuevo.
+                .in_("status", ["open", "investigating"])
                 .limit(1)
                 .execute()
             )

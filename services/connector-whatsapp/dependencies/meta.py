@@ -512,6 +512,12 @@ async def verify_meta_signature_for_tenant(
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     raw_body = await request.body()
+    # Backstop del Content-Length cap: si no vino header (Transfer-Encoding chunked)
+    # o mintió, el tamaño REAL leído también se acota → 413.
+    if len(raw_body) > _MAX_BODY_BYTES:
+        _incr_metric("rejected_body_too_large")
+        logger.warning("[META_HMAC] body_too_large_actual tenant=%s len=%d", tenant_id, len(raw_body))
+        raise HTTPException(status_code=413, detail="Payload too large")
 
     if not _hmac_verify(raw_body, signature_hex, app_secret):
         _incr_metric("hmac_fail_invalid_signature")
