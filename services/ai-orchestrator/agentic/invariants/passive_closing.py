@@ -14,7 +14,7 @@ Caso runtime motivador (conv 3b0452e8, 2026-05-22):
 Reglas:
   • Detecta frases de cierre pasivo en candidate_text (último párrafo
     o última oración interrogativa).
-  • Lee estado real del cart desde `conversation_carts` + cart_items.
+  • Lee estado real del cart desde `conversation_carts` + `conversation_cart_items`.
   • Si cart vacío → OK (cierre pasivo aceptable si solo conversaba).
   • Si cart con items + shipping=0 → REWRITE: promover cotización.
   • Si cart con shipping > 0 + PII incompleta → REWRITE: pedir PII.
@@ -127,7 +127,7 @@ def _read_cart_state(supabase: Any, *, conversation_id: str, tenant_id: str) -> 
         state["shipping_cents"] = int(cart.get("shipping_cents") or 0)
 
         items_res = (
-            supabase.table("cart_items")
+            supabase.table("conversation_cart_items")
             .select("id", count="exact", head=True)
             .eq("cart_id", cart["id"])
             .execute()
