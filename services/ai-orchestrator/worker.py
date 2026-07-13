@@ -328,6 +328,7 @@ class OrchestratorWorker:
             "payment_reminders_skipped_human_takeover": 0,  # gap F7-7
             "cart_abandoned_skipped_quiet_hours": 0,        # gap F7-25
             "wompi_void_notify_failed": 0,                  # gap F7-14
+            "poll_job_errors": 0,                           # Ola 0 — jobs aislados que fallaron
             "sla_notify_failed": 0,                         # gap F7-15
             # F5 bot_engine — rate-limit inbound→LLM (protección costo Gemini).
             "inbound_llm_rate_limited": 0,
@@ -351,25 +352,45 @@ class OrchestratorWorker:
                 logger.error(f"Error en ciclo de polling: {e}", exc_info=True)
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
+    async def _run_job(self, name: str, coro):
+        """Aísla un job del ciclo (Ola 0): si falla, loguea + métrica pero NO aborta
+        los jobs siguientes. Antes un fallo en un job (p.ej. void poll) tumbaba el
+        resto del ciclo — SLA, hard-delete y health dejaban de correr."""
+        try:
+            await coro
+        except Exception as exc:  # noqa: BLE001 — fault isolation deliberada
+            self._metrics["poll_job_errors"] = self._metrics.get("poll_job_errors", 0) + 1
+            # Sin exc_info=True: el traceback completo puede arrastrar PII de cliente a
+            # Sentry (scrubber sistémico va en W1). Tipo + mensaje truncado bastan para
+            # diagnosticar QUÉ job y QUÉ clase de error, con menor superficie de PII.
+            logger.error(
+                "[WORKER] job '%s' falló (aislado, ciclo continúa): %s: %.200s",
+                name, type(exc).__name__, str(exc),
+            )
+
     async def _poll_cycle(self):
-        """Ejecuta ciclo de inbound + notificaciones operacionales + mantenimiento."""
+        """Ejecuta ciclo de inbound + notificaciones operacionales + mantenimiento.
+
+        Cada job va aislado (`_run_job`): un fallo transitorio en uno NO impide que
+        corran los demás (dinero/SLA/retención no deben quedar bloqueados por, p.ej.,
+        un blip del poll inbound)."""
         self._metrics["poll_cycles"] += 1
         # Capa A — recuperación periódica de mensajes huérfanos en 'processing'
         # (carrera de coalescing/claim). ANTES del poll inbound para que un mensaje
         # re-encolado entre de inmediato al ciclo.
-        await self._sweep_stale_processing_if_due()
-        await self._poll_inbound_messages()
-        await self._poll_human_takeover_notifications()
-        await self._poll_whatsapp_outbound_messages()
-        await self._run_idempotency_cleanup_if_due()
-        await self._send_payment_reminders_if_due()
-        await self._send_cart_abandoned_reminders_if_due()
-        await self._release_expired_pending_payment_orders()
-        await self._poll_wompi_pending_voids_if_due()
-        await self._anti_hibernation_ping_if_due()
-        await self._check_human_takeover_sla_if_due()
-        await self._run_tenant_hard_delete_if_due()
-        await self._collect_health_metrics_if_due()
+        await self._run_job("sweep_stale_processing", self._sweep_stale_processing_if_due())
+        await self._run_job("poll_inbound", self._poll_inbound_messages())
+        await self._run_job("human_takeover_notif", self._poll_human_takeover_notifications())
+        await self._run_job("whatsapp_outbound", self._poll_whatsapp_outbound_messages())
+        await self._run_job("idempotency_cleanup", self._run_idempotency_cleanup_if_due())
+        await self._run_job("payment_reminders", self._send_payment_reminders_if_due())
+        await self._run_job("cart_abandoned", self._send_cart_abandoned_reminders_if_due())
+        await self._run_job("release_pending_payment", self._release_expired_pending_payment_orders())
+        await self._run_job("wompi_void_poll", self._poll_wompi_pending_voids_if_due())
+        await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
+        await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
+        await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
+        await self._run_job("health_metrics", self._collect_health_metrics_if_due())
 
     def _combine_by_conversation(self, msgs: list[dict]) -> list[dict]:
         """Rev. 85 — combina mensajes consecutivos de la MISMA conversación en uno solo

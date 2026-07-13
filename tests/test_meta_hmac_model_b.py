@@ -88,11 +88,25 @@ def _payload_for(phone_number_id: str) -> bytes:
     }).encode("utf-8")
 
 
-class FakeRequest:
-    """Mimics FastAPI Request just enough for verify_meta_signature_for_tenant."""
+class _FakeClient:
+    def __init__(self, host: str):
+        self.host = host
 
-    def __init__(self, body: bytes):
+
+class FakeRequest:
+    """Mimics FastAPI Request just enough for verify_meta_signature_for_tenant.
+
+    Incluye headers + client (Ola 0 añadió Content-Length cap + rate-limit per-IP
+    al inicio del dependency; un Request real de FastAPI siempre los tiene)."""
+
+    _ip_counter = 0
+
+    def __init__(self, body: bytes, headers: dict | None = None):
         self._body = body
+        self.headers = headers or {}
+        # IP única por instancia → los tests no comparten el bucket del rate-limit.
+        FakeRequest._ip_counter += 1
+        self.client = _FakeClient(f"10.0.0.{FakeRequest._ip_counter % 250}")
 
     async def body(self) -> bytes:
         return self._body

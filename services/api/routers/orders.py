@@ -960,6 +960,9 @@ async def generate_shipping_guide_endpoint(
     tenant_id: str = Depends(get_tenant_id_internal_or_user),
     supabase: Client = Depends(get_service_client_internal_or_user),
     role: str = Depends(get_role_internal_or_user),
+    # Ola 0 — genera guía REAL (Aveonline cobra = movimiento de dinero) → exige MFA
+    # AAL2 al operador. internal_or_user hace NO-OP a la llamada del bot/orchestrator.
+    _mfa: None = Depends(enforce_mfa_internal_or_user),
 ):
     """Genera guía Aveonline para una orden — manual desde Inbox.
 
