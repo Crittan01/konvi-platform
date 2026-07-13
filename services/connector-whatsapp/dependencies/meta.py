@@ -52,6 +52,7 @@ import hmac
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from typing import Optional
@@ -105,10 +106,22 @@ def _rate_limit_hit(ip: str) -> tuple[bool, int]:
         return True, 0
 
 
+# Ver security._client_ip (api): default 0 = leftmost (histórico). Activar (>0) SOLO
+# tras VALIDAR EN DOCUMENTACION OFICIAL el manejo de X-Forwarded-For de Render.
+_XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
+
+
 def _client_ip(request: "Request") -> str:
+    """IP del cliente desde XFF (helper unificado — W1). Default (0): hop IZQUIERDO
+    (histórico). Con N>0: xff[-N] (hop N desde la derecha, unspoofable) — anti-spoofing,
+    pero requiere verificar el XFF de Render antes de activar."""
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            if _XFF_HOPS_FROM_RIGHT > 0:
+                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            return parts[0]  # leftmost (histórico)
     return request.client.host if request.client else "unknown"
 
 

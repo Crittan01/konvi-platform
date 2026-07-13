@@ -202,15 +202,11 @@ def _check_meli_origin_alert(ip: str) -> None:
 
 
 def _extract_request_ip(request: Request) -> str:
-    """Extrae IP real del cliente. Prefiere x-forwarded-for[0] (LB Render)."""
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    if request.client and request.client.host:
-        return request.client.host
-    return ""
+    """Extrae IP real del cliente. W1: delega al helper unificado, que toma el hop
+    de la DERECHA del XFF (unspoofable) en vez del izquierdo (client-controlled)."""
+    from dependencies.security import _client_ip
+    ip = _client_ip(request)
+    return "" if ip == "unknown" else ip
 
 
 def _verify_meli_origin(request: Request, supabase=Depends(get_service_client)) -> None:

@@ -6,6 +6,16 @@ from supabase import Client
 
 logger = logging.getLogger("orchestrator.whatsapp_sender")
 
+
+def _mask_phone(p: str) -> str:
+    """Enmascara el teléfono para logs (W1 Habeas Data): solo últimos 4 dígitos.
+    NECESARIO en el call-site: el scrubber de Sentry (before_send) solo limpia lo que
+    se TRANSMITE a Sentry, NO los logs locales de Render (stdout) — que son fuente de
+    verdad de errores. Todo log que incluya el teléfono debe pasar por aquí."""
+    if not p:
+        return "?"
+    return "***" + str(p)[-4:]
+
 META_API_VERSION = "v22.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
@@ -137,7 +147,7 @@ async def send_whatsapp_message(
             message_id = response.json().get("messages", [{}])[0].get("id", "unknown")
             logger.info(
                 "[META API] Mensaje enviado | type=%s | to=%s | meta_message_id=%s",
-                msg_kind, clean_phone, message_id,
+                msg_kind, _mask_phone(clean_phone), message_id,
             )
             return message_id
         else:
@@ -148,7 +158,7 @@ async def send_whatsapp_message(
             return None
 
     except httpx.TimeoutException:
-        logger.error("[META API] Timeout al enviar a %s", clean_phone)
+        logger.error("[META API] Timeout al enviar a %s", _mask_phone(clean_phone))
         return None
     except Exception as e:
         logger.error("[META API] Error inesperado: %s", e, exc_info=True)
@@ -481,7 +491,7 @@ async def send_whatsapp_template(
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=payload, headers=headers)
     except httpx.TimeoutException:
-        logger.error("[WA_TPL] timeout to=%s template=%s", clean_phone, template_name)
+        logger.error("[WA_TPL] timeout to=%s template=%s", _mask_phone(clean_phone), template_name)
         return None, TEMPLATE_ERR_TIMEOUT
     except Exception as e:
         logger.error("[WA_TPL] error inesperado: %s", e, exc_info=True)
@@ -491,7 +501,7 @@ async def send_whatsapp_template(
         meta_message_id = response.json().get("messages", [{}])[0].get("id")
         logger.info(
             "[WA_TPL] template enviado tenant=%s name=%s to=%s meta_msg_id=%s",
-            tenant_id, template_name, clean_phone, meta_message_id,
+            tenant_id, template_name, _mask_phone(clean_phone), meta_message_id,
         )
         return meta_message_id, None
 

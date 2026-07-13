@@ -95,12 +95,29 @@ def _distributed_hit(
     )
 
 
+# nº de hops CONFIABLES contados DESDE LA DERECHA del XFF para ubicar la IP real del
+# cliente (anti-spoofing: un atacante solo puede PREPEND, no APPEND). Default 0 =
+# comportamiento histórico (leftmost). Activar (>0) SOLO tras VALIDAR EN DOCUMENTACION
+# OFICIAL el manejo de X-Forwarded-For de Render (append vs replace; posición de la IP
+# real) — de lo contrario se rompería el rate-limit / allowlist de webhooks.
+# INTERVENCION HUMANA: fijar XFF_TRUSTED_HOPS_FROM_RIGHT una vez verificado.
+_XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
+
+
 def _client_ip(request: Request) -> str:
+    """IP del cliente desde X-Forwarded-For (helper unificado — W1).
+
+    Default (XFF_TRUSTED_HOPS_FROM_RIGHT=0): hop IZQUIERDO (comportamiento histórico).
+    Con N>0: toma xff[-N] (el hop N-ésimo desde la derecha, unspoofable) — anti-spoofing
+    del leftmost, PERO requiere verificar el XFF de Render antes de activar (ver arriba).
+    """
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            if _XFF_HOPS_FROM_RIGHT > 0:
+                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            return parts[0]  # leftmost (histórico)
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
