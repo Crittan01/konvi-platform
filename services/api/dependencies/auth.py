@@ -217,9 +217,14 @@ _MFA_CACHE: dict = {}
 _MFA_CACHE_TTL = 60.0  # segundos (evita consultar el Auth admin en cada request)
 
 
-def _user_has_verified_mfa(sub: str) -> bool:
-    """¿El usuario tiene un factor MFA verificado? Cacheado (TTL 60s). Fail-open ante
-    error de lookup (defensa en profundidad; el gate primario es aal2 + web middleware)."""
+class _MfaLookupError(Exception):
+    """El estado de MFA no se pudo determinar (outage del Auth admin). El caller decide
+    fail-open (gate amplio) o fail-closed (operaciones crown-jewel)."""
+
+
+def _lookup_verified_mfa_cached(sub: str) -> bool:
+    """¿El usuario tiene un factor MFA verificado? Cacheado (TTL 60s).
+    RAISES _MfaLookupError si el lookup falla — NO decide política aquí."""
     import time
     now = time.time()
     hit = _MFA_CACHE.get(sub)
@@ -233,16 +238,26 @@ def _user_has_verified_mfa(sub: str) -> bool:
             return getattr(f, "status", None) or (f.get("status") if isinstance(f, dict) else None)
         has = any(_status(f) == "verified" for f in factors)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[MFA] lookup de factores falló para sub=%s (%s) — fail-open", sub, exc)
-        return False
+        raise _MfaLookupError(str(exc)) from exc
     _MFA_CACHE[sub] = (has, now + _MFA_CACHE_TTL)
     return has
+
+
+def _user_has_verified_mfa(sub: str) -> bool:
+    """Wrapper FAIL-OPEN (contrato del gate amplio): ante error de lookup retorna False
+    (no bloquear a quien no activó MFA por un outage; el gate primario es aal2 + web
+    middleware). Para operaciones crown-jewel usar enforce_mfa_strict (fail-closed)."""
+    try:
+        return _lookup_verified_mfa_cached(sub)
+    except _MfaLookupError as exc:
+        logger.warning("[MFA] lookup de factores falló para sub=%s (%s) — fail-open", sub, exc)
+        return False
 
 
 async def enforce_mfa(request: Request) -> None:
     """Dependencia: exige AAL2 si el usuario tiene MFA verificado. Aplicar en routers
     sensibles (settings, team, integraciones, mutaciones owner). Si el user no tiene
-    MFA, aal1 es aceptable (no rompe a quien no lo activó)."""
+    MFA, aal1 es aceptable (no rompe a quien no lo activó). FAIL-OPEN ante lookup caído."""
     payload = _extract_jwt_payload(request)
     aal = payload.get("aal") or "aal1"
     if aal == "aal2":
@@ -252,6 +267,39 @@ async def enforce_mfa(request: Request) -> None:
         raise HTTPException(
             status_code=401,
             detail=("Esta operación requiere verificación en dos pasos (MFA). "
+                    "Inicia sesión completando el segundo factor."),
+        )
+
+
+async def enforce_mfa_strict(request: Request) -> None:
+    """Variante FAIL-CLOSED para operaciones crown-jewel irreversibles (export de datos
+    personales, borrado de cuenta). Igual que enforce_mfa PERO ante INCERTIDUMBRE —
+    lookup del Auth admin caído, o JWT sin sub — DENIEGA (503/401) en vez de permitir:
+    no se mueve dato sensible sin poder verificar el nivel de aseguramiento.
+
+    Trade-off ACEPTADO: durante un outage del Auth admin estas rutas quedan bloqueadas
+    para TODOS (son destructivas/irreversibles; mejor 503 que un export/borrado no
+    verificado). Como enforce_mfa, NO fuerza MFA a quien no lo activó (aal1 sin factor
+    verificado sigue permitido)."""
+    payload = _extract_jwt_payload(request)
+    aal = payload.get("aal") or "aal1"
+    if aal == "aal2":
+        return
+    sub = payload.get("sub") or ""
+    if not sub:
+        raise HTTPException(status_code=401, detail="Sesión inválida: no se pudo verificar identidad.")
+    try:
+        has = _lookup_verified_mfa_cached(sub)
+    except _MfaLookupError as exc:
+        logger.error("[MFA strict] lookup falló para sub=%s (%s) — FAIL-CLOSED (503)", sub, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo verificar el estado de MFA en este momento. Reintenta en unos segundos.",
+        )
+    if has:
+        raise HTTPException(
+            status_code=401,
+            detail=("Esta operación sensible requiere verificación en dos pasos (MFA). "
                     "Inicia sesión completando el segundo factor."),
         )
 
