@@ -25,17 +25,28 @@ Dos ambientes, **aislados a nivel de organización Supabase** (no solo de proyec
 - **Renombrar `konvi-ops` → `konvi-prod` es SEGURO y cosmético:** el *project ref* (`xmelwnhhphksbpdjmbbp`) y la URL de conexión son **inmutables**; solo cambia el nombre visible. Verificar en Settings → General que el ref no cambia.
 - **Región del dev = la misma que prod** (paridad de latencia/comportamiento).
 
-### Render (ya consistente — sin cambios de nombre)
+### Render — estructura (workspace → project → environment → servicios)
+```
+Workspace:  My Workspace (crittan01@gmail.com)
+└── Project:  Konvi                       (prj-d6hlqr9aae7s73c0kp20)
+    └── Environment:  Production          (evm-d6hlqr9aae7s73c0kp2g)
+        ├── konvi-connector   (srv-d8e9mk4m0tmc73elvme0)  webhooks Meta (mensajes)
+        ├── konvi-api         (srv-d8e9mk4m0tmc73elvmeg)  webhooks Wompi/MeLi/Aveonline
+        ├── konvi-orchestrator(srv-d8e9mk4m0tmc73elvmdg)  worker/bot
+        └── konvi-web         (srv-d8e9mk4m0tmc73elvmf0)  backoffice Next.js (interno)
+```
+
 | Servicio | Rol | Instancia recomendada |
 |---|---|---|
 | `konvi-connector` | webhooks Meta (mensajes) | **Starter** (always-on) |
 | `konvi-api` | webhooks Wompi/MeLi/Aveonline | **Starter** |
 | `konvi-orchestrator` | worker/bot | **Starter** |
 | `konvi-web` | backoffice Next.js (interno) | Starter recomendado / Free aceptable |
-| ~~`kaiu-api`~~ | **legacy** (revisar/eliminar) | — |
 
-- Regla de nombres: prefijo `konvi-<rol>`. Si a futuro hay Render de staging: `konvi-<rol>-staging`.
+- **Multi-tenant real:** estos **4 servicios sirven a TODOS los tenants** (routing por `tenant_id` + RLS + credenciales por-tenant en Vault, ADR-0023 Model B). **N tenants = 4 servicios, siempre.** Agregar un tenant = datos (`provision_tenant.py`), NO un deploy nuevo.
+- Regla de nombres: prefijo `konvi-<rol>`. Si a futuro hay staging: nuevo **environment `Staging`** dentro del mismo project `Konvi` (no servicios sueltos).
 - **No** se necesita un Render dev por ahora: el desarrollo local apunta al Supabase **dev**.
+- *(Limpieza 2026-07-16: se eliminó `kaiu-api` — deploy legacy de un repo distinto (`kaiu-natural-living`), NO parte de Konvi. KAIU es un tenant, no un servicio.)*
 
 ### Local / credenciales (repo)
 | Archivo | Apunta a | Uso |
