@@ -342,6 +342,24 @@ if $FULL; then
     _warn "pip-audit no instalado: pip3.11 install pip-audit"
   fi
 
+  # ── Seguridad JS — vulnerabilidades del lockfile (osv-scanner, W5/T7-01) ─────
+  # Allowlist en osv-scanner.toml (vulns CONOCIDAS con razón; las fijables las propone
+  # dependabot). Falla por EXIT CODE si aparece una vuln NUEVA no allowlisteada.
+  _hdr "Dependencias JS — vulnerabilidades (osv-scanner)"
+  if command -v osv-scanner &>/dev/null; then
+    if [ -f "pnpm-lock.yaml" ]; then
+      osv_out=$(osv-scanner scan --lockfile pnpm-lock.yaml --config osv-scanner.toml 2>&1); osv_rc=$?
+      if [ $osv_rc -eq 0 ]; then
+        _ok "pnpm-lock.yaml — sin vulnerabilidades NUEVAS (allowlist osv-scanner.toml)"
+      else
+        _err "pnpm-lock.yaml — vulnerabilidad JS NUEVA (no en osv-scanner.toml):"
+        echo "$osv_out" | grep -iE "GHSA|CVE|PACKAGE|FIXED" | head -8
+      fi
+    fi
+  else
+    _warn "osv-scanner no instalado (CI lo instala; local: github.com/google/osv-scanner/releases)"
+  fi
+
   _hdr "Variables críticas en .env local"
   # META_APP_SECRET y META_VERIFY_TOKEN: DEPRECATED per ADR-0023 Model B (Rev. 110).
   # Solo usadas one-shot por scripts/admin/seed_konvi_dev_app_secret_vault.py.

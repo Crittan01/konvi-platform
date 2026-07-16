@@ -1,0 +1,44 @@
+# osv-scanner — allowlist de vulnerabilidades JS conocidas (W5/T7-01).
+# Patrón espejo de la allowlist de pip-audit en validate.sh: se documentan las vulns
+# CONOCIDAS con razón; el gate FALLA si aparece una vuln NUEVA (por exit code).
+#
+# Las FIJABLES las propone dependabot (.github/dependabot.yml) como PRs individuales
+# testeables → al mergear cada bump se ELIMINA su entrada de aquí (ratchet decreciente).
+# Las SIN FIX upstream (xlsx) se conservan hasta el follow-up de código.
+
+# ── xlsx 0.18.5 — SIN FIX upstream (paquete fork abandonado) ──────────────────
+# Follow-up W5/T7-02 (decisión founder: split read-path): quitar `xlsx`, migrar la
+# LECTURA de archivos subidos a un parser parcheado, dejar xlsx-js-style solo para
+# ESCRITURA de plantillas (sin input no confiable). Hasta entonces, ignorado con nota.
+[[IgnoredVulns]]
+id = "GHSA-4r6h-8v6p-xvw6"
+reason = "xlsx 0.18.5 prototype pollution — sin fix upstream. Follow-up T7-02 split read-path."
+[[IgnoredVulns]]
+id = "GHSA-5pgg-2g8v-p4x9"
+reason = "xlsx 0.18.5 ReDoS — sin fix upstream. Follow-up T7-02 split read-path."
+
+# ── FIJABLES — rastreadas por dependabot (se quitan al mergear el bump) ────────
+[[IgnoredVulns]]
+id = "GHSA-mw96-cpmx-2vgc"
+reason = "rollup 3.29.5→3.30.0 (transitivo, build). dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+reason = "uuid 9.0.1→11.1.1 (major — validar breaking). dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-96hv-2xvq-fx4p"
+reason = "ws 8.20.0→8.21.0. dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-58qx-3vcg-4xpx"
+reason = "ws 8.20.0→8.20.1. dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-qx2v-qp2m-jg93"
+reason = "postcss 8.4.31/8.5.8→8.5.10. dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-h67p-54hq-rp68"
+reason = "js-yaml 4.1.1→4.2.0. dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-jxxr-4gwj-5jf2"
+reason = "brace-expansion 5.0.5→5.0.6. dependabot-tracked."
+[[IgnoredVulns]]
+id = "GHSA-8988-4f7v-96qf"
+reason = "@opentelemetry/core 1.30.1→2.8.0 (major). dependabot-tracked."
