@@ -1,0 +1,81 @@
+# Dependabot — actualizaciones automáticas de dependencias (W5/T7-03).
+# Agrupadas + semanales para reducir ruido de PRs. `cooldown` mitiga el vector de un
+# release recién-publicado malicioso (espera N días antes de proponer un bump).
+version: 2
+
+updates:
+  # ── Python: 3 servicios backend (cada uno con su requirements.txt) ──────────
+  - package-ecosystem: pip
+    directory: /services/api
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      python-api:
+        patterns: ["*"]
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: pip
+    directory: /services/ai-orchestrator
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      python-orchestrator:
+        patterns: ["*"]
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: pip
+    directory: /services/connector-whatsapp
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      python-connector:
+        patterns: ["*"]
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── JavaScript / pnpm workspace (lockfile en la raíz) ───────────────────────
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7          # extra prudencia en el ecosistema npm (typosquat/hijack)
+    groups:
+      js-minor-patch:
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "javascript"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── GitHub Actions (pins de acciones del CI) ────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      ci-actions:
+        patterns: ["*"]
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "chore(ci)"

@@ -70,6 +70,15 @@ jobs:
           sudo mkdir -p /home/ansible/workspaces
           sudo ln -sfn "$GITHUB_WORKSPACE" /home/ansible/workspaces/konvi-platform
 
+      # W5/T7-01 — osv-scanner para el gate de vulnerabilidades JS (validate.sh --full).
+      - name: Install osv-scanner
+        run: |
+          curl -sL --retry 2 -m 90 \
+            "https://github.com/google/osv-scanner/releases/download/v2.2.4/osv-scanner_linux_amd64" \
+            -o /usr/local/bin/osv-scanner
+          sudo chmod +x /usr/local/bin/osv-scanner
+          osv-scanner --version
+
       - name: Run validate.sh (CI strict)
         env:
           CI_STRICT: "true"
