@@ -202,8 +202,12 @@ def _check_meli_origin_alert(ip: str) -> None:
 
 
 def _extract_request_ip(request: Request) -> str:
-    """Extrae IP real del cliente. W1: delega al helper unificado, que toma el hop
-    de la DERECHA del XFF (unspoofable) en vez del izquierdo (client-controlled)."""
+    """Extrae IP real del cliente. Delega al helper unificado (security.resolve_client_ip):
+    prefiere TRUSTED_CLIENT_IP_HEADER (inmune al hop-count) y si no cae al XFF por hops.
+    IMPORTANTE (W5/T4-01): el allowlist MeLi depende del valor EXACTO del cliente; hasta
+    verificar empíricamente la topología XFF de Render, el default usa el leftmost — un XFF
+    spoofeado podría afectar la allowlist. La activación del header/hops correcto cierra el
+    bypass sin romper el allowlist (ver audit T4-01). En local usa el leftmost."""
     from dependencies.security import _client_ip
     ip = _client_ip(request)
     return "" if ip == "unknown" else ip

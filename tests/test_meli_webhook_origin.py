@@ -171,5 +171,34 @@ class LatencyTests(unittest.TestCase):
         self.assertLess(avg_ms, 5.0, f"validación demasiado lenta: {avg_ms:.3f}ms/llamada")
 
 
+class MeliAllowlistRightmostAntiSpoofTests(unittest.TestCase):
+    """W5/T4-01 — con XFF_TRUSTED_HOPS_FROM_RIGHT=1 (Render prod), el allowlist MeLi usa
+    la IP real que Render appendea (RIGHTMOST). Un atacante que prepend-ea una IP MeLi
+    falsa NO evade el allowlist; y una IP MeLi real appendeada por Render SÍ pasa aunque
+    el leftmost sea basura."""
+
+    def setUp(self):
+        self.mw = _reload_module()
+        import dependencies.security as sec
+        self.sec = sec
+        self._p = patch.object(sec, "_XFF_HOPS_FROM_RIGHT", 1)  # simula Render (env=1)
+        self._p.start()
+        self.addCleanup(self._p.stop)
+
+    def test_spoof_meli_izquierdo_NO_evade(self):
+        # atacante: pone una IP MeLi válida a la izquierda; Render appendea su IP real (no-MeLi).
+        req = _make_request(client_host="10.0.0.5", xff="54.88.218.97, 10.0.0.5")
+        with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+            with self.assertRaises(self.mw.HTTPException) as ctx:
+                self.mw._verify_meli_origin(req, supabase=MagicMock())
+            self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_meli_real_appendeada_pasa(self):
+        # tráfico legítimo: cliente manda basura a la izquierda; Render appendea la IP MeLi real.
+        req = _make_request(client_host="54.88.218.97", xff="9.9.9.9, 54.88.218.97")
+        with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+            self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+
 if __name__ == "__main__":
     unittest.main()
