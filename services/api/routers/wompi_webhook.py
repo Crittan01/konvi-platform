@@ -65,8 +65,93 @@ async def wompi_webhook(request: Request, background_tasks: BackgroundTasks):
         # Wompi envía JSON; body inválido no debe provocar retry en su lado
         return JSONResponse(status_code=200, content={"received": True})
 
-    background_tasks.add_task(_process_wompi_event, payload)
+    # ── W2 DURABILIDAD: persistir el payload CRUDO en el inbox ANTES del 200 ACK.
+    # Wompi no reintenta un 200 ni ofrece pull por reference → si el proceso muere
+    # entre este ACK y el fin del procesamiento en background, el evento de dinero
+    # se perdería. El inbox lo captura durable; el worker reconcilia lo no procesado.
+    # Best-effort: si el insert falla NO bloqueamos el ACK (degradamos al flujo
+    # previo para ESTE evento). Idempotente por checksum.
+    # Solo capturamos `transaction.updated` (los únicos que _process_wompi_event
+    # procesa / mueven dinero); el resto se ignora igual → no ensuciamos el inbox y
+    # se reduce la superficie de payloads forjados (persist corre antes de verificar
+    # la firma; el atacante solo lograría filas inertes, acotadas por rate-limit +
+    # cleanup, rechazadas en la verificación de firma del re-drive).
+    if payload.get("event") == "transaction.updated":
+        checksum = ((payload.get("signature") or {}).get("checksum") or "").strip()
+        try:
+            _persist_inbox(_get_service_client(), checksum, payload)
+        except Exception as _inbox_exc:  # noqa: BLE001
+            logger.warning("[WOMPI][INBOX] persist falló (best-effort): %s", _inbox_exc)
+
+    background_tasks.add_task(_process_wompi_event_durable, payload)
     return JSONResponse(status_code=200, content={"received": True})
+
+
+# ─── W2 · Durabilidad (inbox transaccional) ────────────────────────────────────
+
+def _persist_inbox(supabase, checksum: str, payload: dict) -> None:
+    """Persiste el payload crudo en wompi_webhook_inbox (idempotente por checksum).
+    Sin checksum no hay clave de dedup → se omite (cae al flujo no-durable)."""
+    if not checksum:
+        return
+    try:
+        supabase.table("wompi_webhook_inbox").insert({
+            "checksum": checksum,
+            "raw_payload": payload,
+        }).execute()
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "duplicate key" in msg or "23505" in msg:
+            return  # ya capturado (reintento de Wompi o re-drive del worker)
+        raise
+
+
+def _mark_inbox_processed(supabase, checksum: str) -> None:
+    """Marca el evento como procesado (desenlace terminal). Idempotente."""
+    if not checksum:
+        return
+    try:
+        supabase.table("wompi_webhook_inbox").update(
+            {"processed_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("checksum", checksum).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[WOMPI][INBOX] mark_processed falló checksum=%s err=%s", checksum[:12], exc)
+
+
+def _record_inbox_error(supabase, checksum: str, err: str) -> None:
+    """Guarda el último error + incrementa attempts (best-effort, para dead-letter)."""
+    if not checksum:
+        return
+    try:
+        # attempts se incrementa vía RPC atómica del worker en el re-drive; aquí solo
+        # dejamos rastro del error del intento en-proceso.
+        supabase.table("wompi_webhook_inbox").update(
+            {"last_error": (err or "")[:500]}
+        ).eq("checksum", checksum).execute()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _process_wompi_event_durable(payload: dict) -> None:
+    """Envuelve _process_wompi_event para la durabilidad W2.
+
+    Si _process_wompi_event RETORNA (incluidos sus early-returns de eventos
+    ignorados/huérfanos/duplicados/no-aprobados) es un desenlace TERMINAL → marca
+    el inbox procesado. Si LANZA o el proceso crashea mid-procesamiento, la fila
+    queda processed_at NULL → el worker la reconcilia (re-POST). La idempotencia
+    de dinero la garantiza el dedup wompi_events_seen + el guard de estado terminal.
+    """
+    checksum = ((payload.get("signature") or {}).get("checksum") or "").strip()
+    try:
+        _process_wompi_event(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[WOMPI] proceso_falló checksum=%s err=%s — inbox queda para reconciliación",
+            (checksum[:12] if checksum else "?"), exc,
+        )
+        _record_inbox_error(_get_service_client(), checksum, str(exc))
+        return
+    _mark_inbox_processed(_get_service_client(), checksum)
 
 
 def _process_wompi_event(payload: dict) -> None:
@@ -148,8 +233,14 @@ def _process_wompi_event(payload: dict) -> None:
     # ── 3.5. Dedup de eventos duplicados por checksum (Wompi reintenta en
     # 30m/3h/24h cuando merchant responde no-2xx; la firma SHA256 del payload
     # es el identificador más confiable porque no se documenta `event.id`
-    # estable). INSERT con ON CONFLICT DO NOTHING — si la fila ya existía,
-    # `data` viene vacía y descartamos el evento.
+    # estable). El row se marca processed_at al FINAL del flujo (paso 8).
+    #
+    # W2 DURABILIDAD (crítico): el dedup debe distinguir "YA PROCESADO por completo"
+    # de "recibido pero INCOMPLETO" (crash entre este INSERT y _confirm_order). Si
+    # tratáramos la mera EXISTENCIA como duplicado (return), un evento cuyo 1er
+    # intento crasheó antes de confirmar NUNCA se confirmaría: ni el reintento nativo
+    # de Wompi ni el re-drive del inbox W2 podrían completarlo (ambos chocan aquí).
+    # Regla: descartar SOLO si processed_at IS NOT NULL; si es NULL, reprocesar.
     if event_uid and tenant_id_for_sig:
         try:
             supabase.table("wompi_events_seen").insert({
@@ -166,18 +257,42 @@ def _process_wompi_event(payload: dict) -> None:
             # "duplicate key" en el mensaje.
             msg = str(exc)
             if "duplicate key" in msg or "23505" in msg:
-                logger.info(
-                    "[WOMPI] evento_duplicado checksum=%s txn=%s — descartado por dedup",
+                # El row ya existe — ¿fue procesado por completo o quedó incompleto?
+                already_processed = None
+                try:
+                    _chk = (
+                        supabase.table("wompi_events_seen")  # tenant_filter:exempt:webhook_dedup_idempotent_event_id_unique
+                        .select("processed_at")
+                        .eq("event_id", event_uid)
+                        .limit(1)
+                        .execute()
+                    )
+                    already_processed = (_chk.data or [{}])[0].get("processed_at")
+                except Exception as _chk_exc:  # noqa: BLE001
+                    logger.warning(
+                        "[WOMPI] dedup_processed_check_failed checksum=%s err=%s — descarta (comportamiento previo)",
+                        event_uid[:12], _chk_exc,
+                    )
+                    return  # ante duda, no arriesgar doble-proceso
+                if already_processed:
+                    logger.info(
+                        "[WOMPI] evento_duplicado checksum=%s txn=%s — YA procesado, descartado",
+                        event_uid[:12], txn_id,
+                    )
+                    return
+                # Recibido antes pero NO completado (crash previo) → reprocesar.
+                logger.warning(
+                    "[WOMPI] evento_incompleto checksum=%s txn=%s — recibido sin procesar (crash previo), REPROCESANDO",
                     event_uid[:12], txn_id,
                 )
-                return
-            # Cualquier otro error (red, schema, mock test sin tabla): NO
-            # bloquear procesamiento — la idempotencia upstream (orden ya
-            # confirmed → skip) protege de doble decremento.
-            logger.warning(
-                "[WOMPI] dedup_check_failed checksum=%s err=%s — continúa procesamiento",
-                event_uid[:12], exc,
-            )
+            else:
+                # Cualquier otro error (red, schema, mock test sin tabla): NO
+                # bloquear procesamiento — el guard de estado terminal de la orden
+                # protege de doble decremento.
+                logger.warning(
+                    "[WOMPI] dedup_check_failed checksum=%s err=%s — continúa procesamiento",
+                    event_uid[:12], exc,
+                )
 
     # ── 4. Registrar/actualizar pago en tabla payments (idempotente por txn_id) ─
     try:
@@ -294,12 +409,14 @@ def _process_wompi_event(payload: dict) -> None:
         return
 
     # ── 6. Confirmar orden y descontar stock ──────────────────────────────────
-    try:
-        _confirm_order(supabase, order_id, tenant_id)
-        logger.info("[WOMPI] orden_confirmada order_id=%s txn_id=%s tenant=%s", order_id, txn_id, tenant_id)
-    except Exception as e:
-        logger.error("[WOMPI] error_confirmando_orden order_id=%s txn_id=%s error=%s", order_id, txn_id, e)
-        return
+    # W2 DURABILIDAD: un fallo TRANSITORIO aquí (DB flake) es money-crítico. Antes se
+    # tragaba (except→return) → el wrapper durable lo veía como retorno normal → marcaba
+    # el inbox procesado → NUNCA se reconciliaba → orden PAGADA sin confirmar. Ahora se
+    # PROPAGA: el wrapper deja el inbox sin procesar → el worker re-drivea. El re-drive es
+    # idempotente (dedup processed-aware + guard de estado terminal: si un intento previo
+    # sí confirmó, el guard 'confirmed' lo salta y marca procesado).
+    _confirm_order(supabase, order_id, tenant_id)
+    logger.info("[WOMPI] orden_confirmada order_id=%s txn_id=%s tenant=%s", order_id, txn_id, tenant_id)
 
     # ── 7. Notificar al cliente vía WhatsApp (outbound queue) ─────────────────
     if conversation_id:
