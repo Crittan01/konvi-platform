@@ -37,10 +37,29 @@ if [[ "${HARNESS_REFRESH:-0}" == "1" ]]; then
   echo "[harness] baseline actualizado: $BASELINE"
 fi
 
-# Levantar el contenedor de Postgres (idempotente). El reset de migraciones puede fallar
-# en las seeds de datos — lo ignoramos: solo necesitamos el contenedor con roles+auth+ext.
-echo "[harness] iniciando Postgres local (supabase db start)…"
+# Levantar el contenedor de Postgres. `supabase db start` APLICA las migraciones del
+# repo; el replay de las 222 FALLA en seeds que asumen datos de prod (20260523000000) y
+# en un arranque LIMPIO (CI) eso TIRA el contenedor → el baseline no conecta. Solución:
+# arrancar con las migraciones del repo MOVIDAS APARTE, de modo que db start aplique solo
+# las migraciones INTERNAS de supabase (roles authenticated/service_role, esquema auth
+# con auth.jwt()/auth.users, extensiones pgmq/vault/vector). El esquema de la app lo
+# aporta el baseline. Restauramos siempre (trap).
+MIGR="$ROOT/supabase/migrations"
+MIGR_BAK=""
+_restore_migr() {
+  if [[ -n "$MIGR_BAK" && -d "$MIGR_BAK" ]]; then
+    rm -rf "$MIGR"; mv "$MIGR_BAK" "$MIGR"; MIGR_BAK=""
+  fi
+}
+trap _restore_migr EXIT
+if [[ -d "$MIGR" ]]; then
+  MIGR_BAK="${MIGR}.harness_bak"
+  rm -rf "$MIGR_BAK"; mv "$MIGR" "$MIGR_BAK"; mkdir -p "$MIGR"
+fi
+echo "[harness] iniciando Postgres local (supabase db start, sin migraciones de app)…"
 supabase db start >/dev/null 2>&1 || true
+_restore_migr
+trap - EXIT
 
 # Esperar readiness.
 for _ in $(seq 1 30); do
