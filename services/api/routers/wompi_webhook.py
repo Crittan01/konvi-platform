@@ -222,9 +222,11 @@ def _process_wompi_event(payload: dict) -> None:
         return
 
     # ── 3. Verificar firma con events_key del tenant ──────────────────────────
+    # W3-F1: raise_on_error=True → un flake de Vault PROPAGA (inbox sin procesar →
+    # reconcilia) en vez de degradar a events_key='' → 'firma_invalida' → pago perdido.
     events_key: str = ""
     if tenant_id_for_sig:
-        _, events_key_val, _ = get_tenant_wompi_creds(supabase, tenant_id_for_sig)
+        _, events_key_val, _ = get_tenant_wompi_creds(supabase, tenant_id_for_sig, raise_on_error=True)
         events_key = events_key_val or ""
     if not verify_event_signature(payload, events_key):
         logger.warning("[WOMPI] firma_invalida event=%s link=%s tenant=%s", event_name, payment_link_id, tenant_id_for_sig)
@@ -269,11 +271,17 @@ def _process_wompi_event(payload: dict) -> None:
                     )
                     already_processed = (_chk.data or [{}])[0].get("processed_at")
                 except Exception as _chk_exc:  # noqa: BLE001
-                    logger.warning(
-                        "[WOMPI] dedup_processed_check_failed checksum=%s err=%s — descarta (comportamiento previo)",
+                    # W3-F2: un fallo TRANSITORIO del processed-check NO debe descartar
+                    # el evento (return terminal → pago perdido si estaba incompleto).
+                    # PROPAGA → el wrapper deja el inbox sin procesar → el worker re-drivea.
+                    # El re-drive es idempotente: si YA estaba procesado, el dedup del
+                    # re-intento lo detectará (processed_at NOT NULL → skip); si no, lo
+                    # completa. Reconciliar es más seguro que perder el evento.
+                    logger.error(
+                        "[WOMPI] dedup_processed_check_failed checksum=%s err=%s — PROPAGA para reconciliación",
                         event_uid[:12], _chk_exc,
                     )
-                    return  # ante duda, no arriesgar doble-proceso
+                    raise
                 if already_processed:
                     logger.info(
                         "[WOMPI] evento_duplicado checksum=%s txn=%s — YA procesado, descartado",
@@ -834,45 +842,57 @@ def _upsert_payment_record(
 
 
 def _get_order_id_by_link(supabase, wompi_link_id: str):
-    """Resuelve order_id desde wompi_link_id via tabla payments."""
-    try:
-        res = (
-            supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
-            .select("order_id")
-            .eq("wompi_link_id", wompi_link_id)
-            .limit(1)
-            .execute()
-        )
-        data = res.data or []
-        return data[0]["order_id"] if data else None
-    except Exception as e:
-        logger.error("[WOMPI] Error resolviendo order por link %s: %s", wompi_link_id, e)
-        return None
+    """Resuelve order_id desde wompi_link_id via tabla payments.
+
+    W3-F1 DURABILIDAD: distingue 'no encontrado' (query OK, 0 filas → None) de
+    'error de LECTURA' (excepción transitoria → PROPAGA). Antes tragaba el error y
+    devolvía None → el flujo lo trataba como huérfano/sin-orden → el wrapper durable
+    marcaba el inbox procesado → el pago se perdía para siempre. Ahora un flake deja
+    el inbox sin procesar → el worker re-drivea (idempotente)."""
+    res = (
+        supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
+        .select("order_id")
+        .eq("wompi_link_id", wompi_link_id)
+        .limit(1)
+        .execute()
+    )
+    data = res.data or []
+    return data[0]["order_id"] if data else None
 
 
 def _get_order_by_id(supabase, order_id: str):
-    try:
-        res = (
-            supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
-            # F16: total_amount es OBLIGATORIO — sin él el guard de monto (5b) quedaba muerto
-            # (order_total siempre None → salta la comparación → confirmaba con CUALQUIER monto) y el
-            # retry post-DECLINED leía 0 → siempre "monto bajo" → nunca regeneraba link (venta perdida).
-            # BLOQUE A (item 4): cancelled_by_actor para reconciliar un APPROVED tardío
-            # contra una orden auto-cancelada por el sweeper de TTL (webhook perdido).
-            .select("id, tenant_id, status, conversation_id, contact_id, total_amount, cancelled_by_actor")
-            .eq("id", order_id)
-            .limit(1)
-            .execute()
-        )
-        return (res.data or [None])[0]
-    except Exception as e:
-        logger.error("[WOMPI] Error buscando order %s: %s", order_id, e)
-        return None
+    """W3-F1 DURABILIDAD: 'no encontrado' (0 filas → None) vs 'error de LECTURA'
+    (excepción → PROPAGA). Un flake transitorio no debe verse como orden inexistente
+    (que marcaría el inbox procesado con el pago sin confirmar); ahora reconcilia."""
+    res = (
+        supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
+        # F16: total_amount es OBLIGATORIO — sin él el guard de monto (5b) quedaba muerto
+        # (order_total siempre None → salta la comparación → confirmaba con CUALQUIER monto) y el
+        # retry post-DECLINED leía 0 → siempre "monto bajo" → nunca regeneraba link (venta perdida).
+        # BLOQUE A (item 4): cancelled_by_actor para reconciliar un APPROVED tardío
+        # contra una orden auto-cancelada por el sweeper de TTL (webhook perdido).
+        .select("id, tenant_id, status, conversation_id, contact_id, total_amount, cancelled_by_actor")
+        .eq("id", order_id)
+        .limit(1)
+        .execute()
+    )
+    return (res.data or [None])[0]
 
 
 def _confirm_order(supabase, order_id: str, tenant_id: str) -> None:
     from routers.orders import _decrement_stock_on_confirm
 
+    # NOTA W3-F3 (DIFERIDO — no reordenar sin migración): se evaluó decrementar el stock
+    # ANTES del flip para cerrar el oversell del crash-recovery (crash entre flip y
+    # decremento → 'confirmed' sin descuento → el guard terminal del re-drive lo salta).
+    # PERO el reorder introduce un DOBLE decremento en el sub-caso soft-reserve: run 1
+    # consume reservas (movement reason='reservation_consumed', marca cart 'converted');
+    # tras un crash, el re-drive no re-encuentra el cart → cae al decremento DIRECTO
+    # (reason='sale') cuyo ON CONFLICT (order,variation,'sale') NO ve el movement previo
+    # 'reservation_consumed' → descuenta 2x → falso agotado + sobre-reposición al cancelar.
+    # _decrement_stock_on_confirm NO es idempotente CROSS-PATH (dos reasons, dos índices).
+    # Fix correcto = unificar la clave de idempotencia de stock_movements entre ambos paths
+    # (migración) — W3-remainder. Se mantiene el orden histórico (flip → decremento).
     supabase.table("orders").update({
         "status": "confirmed",
         "updated_at": datetime.now(timezone.utc).isoformat(),

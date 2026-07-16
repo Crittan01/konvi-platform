@@ -149,6 +149,7 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         w._wompi_inbox_reconcile_enabled = True
         w._last_wompi_inbox_reconcile_at = 0.0
         w._last_wompi_inbox_cleanup_at = time.time()  # cleanup reciente → se salta este ciclo
+        w._metrics = {}
         claimed = [
             {"checksum": "c1", "raw_payload": {"signature": {"checksum": "c1"}}, "attempts": 1},
             {"checksum": "c2", "raw_payload": {"signature": {"checksum": "c2"}}, "attempts": 2},
@@ -181,6 +182,7 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         w._wompi_inbox_reconcile_enabled = True
         w._last_wompi_inbox_reconcile_at = 0.0
         w._last_wompi_inbox_cleanup_at = 0.0  # vencido → cleanup corre
+        w._metrics = {}
         calls = []
         sb = MagicMock()
 
@@ -196,15 +198,33 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cleanup_wompi_inbox", calls)
         self.assertIn("claim_wompi_inbox_batch", calls)
 
-    async def test_deshabilitado_no_hace_nada(self):
+    async def test_deshabilitado_no_hace_redrive(self):
+        import time
         sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
         import worker as wk
         w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
         w._wompi_inbox_reconcile_enabled = False
         w._last_wompi_inbox_reconcile_at = 0.0
+        w._last_wompi_inbox_cleanup_at = time.time()  # cleanup reciente → aislar el re-drive
         w.supabase = MagicMock()
         await w._reconcile_wompi_inbox_if_due()
+        # deshabilitado → NO reclama (el claim es el re-drive); el cleanup ya se saltó por throttle
         w.supabase.rpc.assert_not_called()
+
+    async def test_cleanup_corre_aun_deshabilitado(self):
+        # W3 GAP-PII: el cleanup NO depende del flag de re-drive
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        import worker as wk
+        w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
+        w._wompi_inbox_reconcile_enabled = False
+        w._last_wompi_inbox_reconcile_at = 0.0
+        w._last_wompi_inbox_cleanup_at = 0.0  # vencido
+        calls = []
+        sb = MagicMock()
+        sb.rpc.side_effect = lambda name, *a, **k: (calls.append(name), MagicMock(execute=lambda: MagicMock(data=0)))[1]
+        w.supabase = sb
+        await w._reconcile_wompi_inbox_if_due()
+        self.assertEqual(calls, ["cleanup_wompi_inbox"])  # cleanup sí, claim no
 
 
 class DedupProcessedAwareTests(unittest.TestCase):
@@ -244,6 +264,98 @@ class DedupProcessedAwareTests(unittest.TestCase):
     def test_ya_procesado_descarta(self):
         mock_confirm = self._run(processed_at="2026-07-13T00:00:00+00:00")
         mock_confirm.assert_not_called()  # processed_at NOT NULL → descarta
+
+
+class W3TransientErrorPropagationTests(unittest.TestCase):
+    """W3-F1/F2: los helpers de correlación/credenciales distinguen 'no encontrado'
+    (None) de 'error de LECTURA' (PROPAGA) — sin esto un flake marcaría el inbox
+    procesado y perdería el pago."""
+
+    def _sb_raises(self, table_name):
+        sb = MagicMock()
+        t = MagicMock()
+        chain = MagicMock()
+        for m in ("select", "eq", "limit", "maybe_single"):
+            getattr(chain, m).return_value = chain
+        chain.execute.side_effect = Exception("connection reset by peer")
+        t.select.return_value = chain
+        sb.table.return_value = t
+        return sb
+
+    def test_get_order_by_id_propaga_error_lectura(self):
+        with self.assertRaises(Exception):
+            wh._get_order_by_id(self._sb_raises("orders"), "order-1")
+
+    def test_get_order_id_by_link_propaga_error_lectura(self):
+        with self.assertRaises(Exception):
+            wh._get_order_id_by_link(self._sb_raises("payments"), "link-1")
+
+    def test_get_order_by_id_no_encontrado_devuelve_none(self):
+        sb = MagicMock()
+        chain = MagicMock()
+        for m in ("select", "eq", "limit"):
+            getattr(chain, m).return_value = chain
+        chain.execute.return_value = MagicMock(data=[])
+        sb.table.return_value.select.return_value = chain
+        self.assertIsNone(wh._get_order_by_id(sb, "order-x"))
+
+
+class W3CredsStrictTests(unittest.TestCase):
+    """W3-F1: get_tenant_wompi_creds(raise_on_error=True) propaga el error de Vault;
+    default sigue degradando (fallback seguro para los otros callers)."""
+
+    def _sb(self):
+        sb = MagicMock()
+        chain = MagicMock()
+        for m in ("select", "eq", "maybe_single"):
+            getattr(chain, m).return_value = chain
+        chain.execute.side_effect = Exception("vault RPC 500")
+        sb.table.return_value.select.return_value = chain
+        return sb
+
+    def test_default_degrada(self):
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        from integrations.wompi_client import get_tenant_wompi_creds
+        self.assertEqual(get_tenant_wompi_creds(self._sb(), "t1"), (None, None, "sandbox"))
+
+    def test_strict_propaga(self):
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        from integrations.wompi_client import get_tenant_wompi_creds
+        with self.assertRaises(Exception):
+            get_tenant_wompi_creds(self._sb(), "t1", raise_on_error=True)
+
+
+class W3ConfirmOrderOrderingTests(unittest.TestCase):
+    """W3-F3 DIFERIDO (revertido): el reorder decrement-antes-del-flip introducía DOBLE
+    decremento en el sub-caso soft-reserve (reason 'reservation_consumed' vs 'sale' no
+    comparten clave ON CONFLICT). Se mantiene el orden histórico (flip → decremento)
+    hasta unificar la idempotencia cross-path vía migración (W3-remainder). Este test
+    ancla ese orden para que un re-reorder accidental lo rompa."""
+
+    def test_flip_antes_del_decremento_orden_historico(self):
+        order_calls = []
+        sb = MagicMock()
+
+        def _table(name):
+            t = MagicMock()
+            if name == "orders":
+                upd = MagicMock()
+                upd.eq.return_value = upd
+
+                def _exec():
+                    order_calls.append("flip_confirmed")
+                    return MagicMock(data=[])
+
+                upd.execute.side_effect = _exec
+                t.update.return_value = upd
+            return t
+
+        sb.table.side_effect = _table
+        with patch("routers.orders._decrement_stock_on_confirm",
+                   side_effect=lambda *a, **k: order_calls.append("decrement")):
+            wh._confirm_order(sb, "order-1", "t1")
+        self.assertEqual(order_calls, ["flip_confirmed", "decrement"],
+                         f"orden histórica esperada (evita doble-decremento soft-reserve): {order_calls}")
 
 
 if __name__ == "__main__":

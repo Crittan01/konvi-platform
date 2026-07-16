@@ -347,6 +347,8 @@ class OrchestratorWorker:
             "payment_reminders_skipped_human_takeover": 0,  # gap F7-7
             "cart_abandoned_skipped_quiet_hours": 0,        # gap F7-25
             "wompi_void_notify_failed": 0,                  # gap F7-14
+            "wompi_inbox_depth": 0,                         # W3 T3-01 — backlog sin procesar (gauge)
+            "wompi_inbox_dead_lettered": 0,                 # W3 T3-01 — eventos de dinero en dead-letter (alertable)
             "poll_job_errors": 0,                           # Ola 0 — jobs aislados que fallaron
             "sla_notify_failed": 0,                         # gap F7-15
             # F5 bot_engine — rate-limit inbound→LLM (protección costo Gemini).
@@ -2212,9 +2214,25 @@ class OrchestratorWorker:
         inocuo. Tras MAX_ATTEMPTS la fila queda como dead-letter (last_error) para
         revisión manual.
         """
+        now = time.time()
+
+        # W3 GAP-PII: el cleanup corre SIEMPRE, DESACOPLADO del flag de re-drive. La
+        # tabla guarda el payload CRUDO con PII del pagador (Ley 1581); si se desactivara
+        # el reconcile, sin esto la PII se acumularía sin purga. Throttle 6h; retención
+        # 7d procesadas / 30d dead-letter (RPC cleanup_wompi_inbox).
+        if now - self._last_wompi_inbox_cleanup_at > 21600:
+            self._last_wompi_inbox_cleanup_at = now
+            try:
+                cl = self.supabase.rpc("cleanup_wompi_inbox", {}).execute()
+                _purged = cl.data if isinstance(cl.data, int) else (cl.data or 0)
+                if _purged:
+                    logger.info("[WOMPI_INBOX] cleanup purgó %s filas", _purged)
+            except Exception as exc:
+                logger.warning("[WOMPI_INBOX] cleanup falló: %s", exc)
+
+        # Re-drive (gated por el flag): reclamar + re-POSTear filas sin procesar.
         if not self._wompi_inbox_reconcile_enabled:
             return
-        now = time.time()
         interval = max(30, WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS)
         if now - self._last_wompi_inbox_reconcile_at < interval:
             return
@@ -2233,19 +2251,9 @@ class OrchestratorWorker:
             logger.warning("[WOMPI_INBOX] claim falló: %s", exc)
             return
 
-        # Cleanup acotado (throttle 6h): purga filas procesadas viejas / dead-letter
-        # muy viejas. Barato y poco frecuente; mantiene la tabla pequeña.
-        if now - self._last_wompi_inbox_cleanup_at > 21600:
-            self._last_wompi_inbox_cleanup_at = now
-            try:
-                cl = self.supabase.rpc("cleanup_wompi_inbox", {}).execute()
-                _purged = cl.data if isinstance(cl.data, int) else (cl.data or 0)
-                if _purged:
-                    logger.info("[WOMPI_INBOX] cleanup purgó %s filas", _purged)
-            except Exception as exc:
-                logger.warning("[WOMPI_INBOX] cleanup falló: %s", exc)
-
         rows = res.data or []
+        # W3 T3-01: gauge de backlog observable (filas reclamadas este ciclo).
+        self._metrics["wompi_inbox_depth"] = len(rows)
         if not rows:
             return
 
@@ -2276,6 +2284,11 @@ class OrchestratorWorker:
                     checksum, attempts, exc,
                 )
             if attempts >= WOMPI_INBOX_MAX_ATTEMPTS:
+                self._metrics["wompi_inbox_dead_lettered"] = (
+                    self._metrics.get("wompi_inbox_dead_lettered", 0) + 1
+                )
+                # logger.error → LoggingIntegration lo envía a Sentry (alertable);
+                # el conteo alimenta health_metrics para el evaluador de SLOs (W7 T3-EVAL).
                 logger.error(
                     "[WOMPI_INBOX][DEAD_LETTER] checksum=%s alcanzó %d intentos — "
                     "requiere reconciliación MANUAL con dashboard Wompi",

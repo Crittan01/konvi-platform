@@ -46,11 +46,20 @@ def wompi_base_url(environment: str) -> str:
     return WOMPI_PROD_URL if environment == "production" else WOMPI_SANDBOX_URL
 
 
-def get_tenant_wompi_creds(supabase, tenant_id: str) -> Tuple[Optional[str], Optional[str], str]:
+def get_tenant_wompi_creds(
+    supabase, tenant_id: str, *, raise_on_error: bool = False,
+) -> Tuple[Optional[str], Optional[str], str]:
     """
     Lee private_key, events_key y environment desde tenant_integrations (Vault).
     Retorna (private_key, events_key, environment).
     Retorna (None, None, "sandbox") si el tenant no tiene Wompi configurado.
+
+    W3-F1 DURABILIDAD: `raise_on_error=True` distingue 'no configurado' (0 filas →
+    None) de un ERROR DE LECTURA transitorio (DB/Vault caído → PROPAGA). Lo usa el
+    path de verificación de firma del webhook: sin esto, un flake de Vault devolvía
+    events_key vacío → 'firma_invalida' → el wrapper durable marcaba el inbox
+    procesado → el pago se perdía. Default False = comportamiento previo (los otros
+    callers degradan a manual/503, un fallback seguro que NO debemos romper).
     """
     try:
         from vault_helper import VaultHelper, resolve_secret
@@ -77,6 +86,8 @@ def get_tenant_wompi_creds(supabase, tenant_id: str) -> Tuple[Optional[str], Opt
         return private_key, events_key, environment
     except Exception as e:
         logger.error("[WOMPI] error_leyendo_creds tenant=%s error=%s", tenant_id, e)
+        if raise_on_error:
+            raise
         return None, None, "sandbox"
 
 
