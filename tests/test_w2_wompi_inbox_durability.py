@@ -15,7 +15,40 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test")
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
+
 import routers.wompi_webhook as wh  # noqa: E402
+from helpers.wompi_payload_builder import WompiPayloadBuilder  # noqa: E402
+
+
+def _dedup_supabase(processed_at_value):
+    """supabase-mock: el INSERT en wompi_events_seen lanza 'duplicate key'; el SELECT
+    de processed_at devuelve `processed_at_value` (None = incompleto, ts = ya procesado)."""
+    sb = MagicMock()
+
+    def _table(name):
+        t = MagicMock()
+        if name == "wompi_events_seen":
+            t.insert.return_value.execute.side_effect = Exception("duplicate key value violates unique 23505")
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = MagicMock(data=[{"processed_at": processed_at_value}])
+            t.select.return_value = sel
+            upd = MagicMock()
+            upd.eq.return_value = upd
+            upd.execute.return_value = MagicMock(data=[])
+            t.update.return_value = upd
+            return t
+        g = MagicMock()
+        for m in ("select", "insert", "update", "eq", "limit", "single", "in_", "order"):
+            getattr(g, m).return_value = g
+        g.execute.return_value = MagicMock(data=[])
+        return g
+
+    sb.table.side_effect = _table
+    sb.rpc.return_value.execute.return_value = MagicMock(data=[])
+    return sb
 
 
 def _captured_table(store):
@@ -111,9 +144,11 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         import worker as wk
         from unittest.mock import AsyncMock
 
+        import time
         w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)  # sin __init__ pesado
         w._wompi_inbox_reconcile_enabled = True
         w._last_wompi_inbox_reconcile_at = 0.0
+        w._last_wompi_inbox_cleanup_at = time.time()  # cleanup reciente → se salta este ciclo
         claimed = [
             {"checksum": "c1", "raw_payload": {"signature": {"checksum": "c1"}}, "attempts": 1},
             {"checksum": "c2", "raw_payload": {"signature": {"checksum": "c2"}}, "attempts": 2},
@@ -135,9 +170,31 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(posted), 2)
         self.assertTrue(posted[0][0].endswith("/api/v1/webhooks/wompi"))
         self.assertEqual(posted[0][1], claimed[0]["raw_payload"])
-        # llamó al claim RPC con los límites
+        # llamó al claim RPC (cleanup saltado por timestamp reciente)
         sb.rpc.assert_called_once()
         self.assertEqual(sb.rpc.call_args[0][0], "claim_wompi_inbox_batch")
+
+    async def test_cleanup_corre_si_vencido(self):
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        import worker as wk
+        w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
+        w._wompi_inbox_reconcile_enabled = True
+        w._last_wompi_inbox_reconcile_at = 0.0
+        w._last_wompi_inbox_cleanup_at = 0.0  # vencido → cleanup corre
+        calls = []
+        sb = MagicMock()
+
+        def _rpc(name, params):
+            calls.append(name)
+            ex = MagicMock()
+            ex.execute.return_value = MagicMock(data=(0 if name == "cleanup_wompi_inbox" else []))
+            return ex
+
+        sb.rpc.side_effect = _rpc
+        w.supabase = sb
+        await w._reconcile_wompi_inbox_if_due()
+        self.assertIn("cleanup_wompi_inbox", calls)
+        self.assertIn("claim_wompi_inbox_batch", calls)
 
     async def test_deshabilitado_no_hace_nada(self):
         sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
@@ -148,6 +205,45 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         w.supabase = MagicMock()
         await w._reconcile_wompi_inbox_if_due()
         w.supabase.rpc.assert_not_called()
+
+
+class DedupProcessedAwareTests(unittest.TestCase):
+    """W2 CRÍTICO: el dedup debe reprocesar un evento recibido-pero-incompleto
+    (processed_at NULL, crash previo) y descartar solo los YA procesados. Sin esto el
+    re-drive del inbox (y el reintento nativo de Wompi) morirían en el dedup → orden
+    pagada sin confirmar."""
+
+    def _run(self, processed_at):
+        payload = (
+            WompiPayloadBuilder()
+            .with_approved_txn(payment_link_id="pl", txn_id="tx", amount_in_cents=135_000)
+            .build()
+        )
+        sb = _dedup_supabase(processed_at)
+        order = {
+            "id": "order-1", "tenant_id": "t1", "status": "pending_payment",
+            "conversation_id": "c1", "total_amount": 1350.0,
+        }
+        with patch.object(wh, "_get_service_client", return_value=sb), \
+             patch.object(wh, "_get_order_id_by_link", return_value="order-1"), \
+             patch.object(wh, "_get_order_by_id", return_value=order), \
+             patch.object(wh, "verify_event_signature", return_value=True), \
+             patch.object(wh, "get_tenant_wompi_creds", return_value=(None, "key", "sandbox")), \
+             patch.object(wh, "_upsert_payment_record", return_value=False), \
+             patch.object(wh, "_confirm_order") as mock_confirm, \
+             patch.object(wh, "_notify_client_payment_approved"), \
+             patch.object(wh, "_send_payment_confirmation_email"), \
+             patch.object(wh, "_generate_shipping_guide", return_value=False):
+            wh._process_wompi_event(payload)
+        return mock_confirm
+
+    def test_incompleto_reprocesa_y_confirma(self):
+        mock_confirm = self._run(processed_at=None)
+        mock_confirm.assert_called_once()  # processed_at NULL → reprocesa
+
+    def test_ya_procesado_descarta(self):
+        mock_confirm = self._run(processed_at="2026-07-13T00:00:00+00:00")
+        mock_confirm.assert_not_called()  # processed_at NOT NULL → descarta
 
 
 if __name__ == "__main__":

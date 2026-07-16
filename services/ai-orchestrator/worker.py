@@ -303,6 +303,7 @@ class OrchestratorWorker:
         # W2 — reconciliación del inbox durable Wompi.
         self._wompi_inbox_reconcile_enabled = WOMPI_INBOX_RECONCILE_ENABLED
         self._last_wompi_inbox_reconcile_at = 0.0
+        self._last_wompi_inbox_cleanup_at = 0.0
         self._last_sla_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
         self._last_stale_sweep_at = 0.0
@@ -2231,6 +2232,18 @@ class OrchestratorWorker:
         except Exception as exc:
             logger.warning("[WOMPI_INBOX] claim falló: %s", exc)
             return
+
+        # Cleanup acotado (throttle 6h): purga filas procesadas viejas / dead-letter
+        # muy viejas. Barato y poco frecuente; mantiene la tabla pequeña.
+        if now - self._last_wompi_inbox_cleanup_at > 21600:
+            self._last_wompi_inbox_cleanup_at = now
+            try:
+                cl = self.supabase.rpc("cleanup_wompi_inbox", {}).execute()
+                _purged = cl.data if isinstance(cl.data, int) else (cl.data or 0)
+                if _purged:
+                    logger.info("[WOMPI_INBOX] cleanup purgó %s filas", _purged)
+            except Exception as exc:
+                logger.warning("[WOMPI_INBOX] cleanup falló: %s", exc)
 
         rows = res.data or []
         if not rows:

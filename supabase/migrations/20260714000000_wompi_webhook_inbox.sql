@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS public.wompi_webhook_inbox (
     -- nº de re-drives del worker (backstop dead-letter: tras N intentos se deja
     -- de reintentar y queda para revisión manual con last_error).
     attempts     INT NOT NULL DEFAULT 0,
+    -- Lease de visibilidad: el claim NO re-reclama una fila dentro de la ventana
+    -- de lease (da tiempo a que la API procese + marque processed_at). Evita
+    -- inflar attempts / dead-letterar un evento LENTO pero válido (guía ~10-15s).
+    claimed_at   TIMESTAMPTZ,
     last_error   TEXT
 );
 
@@ -36,6 +40,11 @@ CREATE TABLE IF NOT EXISTS public.wompi_webhook_inbox (
 CREATE INDEX IF NOT EXISTS idx_wompi_inbox_unprocessed
     ON public.wompi_webhook_inbox (received_at)
     WHERE processed_at IS NULL;
+
+-- Cleanup: purga de filas procesadas viejas (crecimiento acotado).
+CREATE INDEX IF NOT EXISTS idx_wompi_inbox_processed
+    ON public.wompi_webhook_inbox (processed_at)
+    WHERE processed_at IS NOT NULL;
 
 -- Infra de webhook (sin tenant_id — el tenant se resuelve DURANTE el proceso):
 -- solo service_role (backend) escribe/lee. RLS ON sin policies = deny-all para
@@ -53,20 +62,25 @@ COMMENT ON TABLE public.wompi_webhook_inbox IS
 CREATE OR REPLACE FUNCTION public.claim_wompi_inbox_batch(
     p_limit INT DEFAULT 20,
     p_min_age_seconds INT DEFAULT 120,
-    p_max_attempts INT DEFAULT 5
+    p_max_attempts INT DEFAULT 5,
+    p_lease_seconds INT DEFAULT 300
 )
 RETURNS TABLE (checksum TEXT, raw_payload JSONB, attempts INT)
 LANGUAGE sql
 SET search_path = public, pg_temp
 AS $$
     UPDATE public.wompi_webhook_inbox AS w
-    SET attempts = w.attempts + 1
+    SET attempts = w.attempts + 1,
+        claimed_at = now()
     WHERE w.checksum IN (
         SELECT c.checksum
         FROM public.wompi_webhook_inbox AS c
         WHERE c.processed_at IS NULL
           AND c.received_at < now() - make_interval(secs => p_min_age_seconds)
           AND c.attempts < p_max_attempts
+          -- Lease: no re-reclamar dentro de p_lease_seconds del último claim.
+          AND (c.claimed_at IS NULL
+               OR c.claimed_at < now() - make_interval(secs => p_lease_seconds))
         ORDER BY c.received_at
         LIMIT p_limit
         FOR UPDATE SKIP LOCKED
@@ -74,6 +88,32 @@ AS $$
     RETURNING w.checksum, w.raw_payload, w.attempts;
 $$;
 
-REVOKE ALL ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT) FROM anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT, INT) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_wompi_inbox_batch(INT, INT, INT, INT) TO service_role;
+
+-- Cleanup de crecimiento no acotado: filas procesadas OK viejas se purgan
+-- (auditoría/reproceso ya no aplican). Las dead-letter (processed_at NULL +
+-- attempts>=max) se conservan más tiempo para reconciliación manual.
+CREATE OR REPLACE FUNCTION public.cleanup_wompi_inbox(
+    p_processed_retention_days INT DEFAULT 7,
+    p_deadletter_retention_days INT DEFAULT 30
+)
+RETURNS INT
+LANGUAGE sql
+SET search_path = public, pg_temp
+AS $$
+    WITH del AS (
+        DELETE FROM public.wompi_webhook_inbox
+        WHERE (processed_at IS NOT NULL
+               AND processed_at < now() - make_interval(days => p_processed_retention_days))
+           OR (processed_at IS NULL
+               AND received_at < now() - make_interval(days => p_deadletter_retention_days))
+        RETURNING 1
+    )
+    SELECT count(*)::INT FROM del;
+$$;
+
+REVOKE ALL ON FUNCTION public.cleanup_wompi_inbox(INT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.cleanup_wompi_inbox(INT, INT) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.cleanup_wompi_inbox(INT, INT) TO service_role;

@@ -373,7 +373,12 @@ class WompiWebhookTests(unittest.TestCase):
 
     @patch("routers.wompi_webhook._confirm_order")
     @patch("routers.wompi_webhook._get_service_client")
-    def test_error_on_confirm_logs_and_skips_notify(self, mock_get_client, mock_confirm):
+    def test_error_on_confirm_propaga_para_reconciliacion(self, mock_get_client, mock_confirm):
+        """W2 durabilidad: un fallo TRANSITORIO de _confirm_order (DB flake) debe
+        PROPAGAR, no tragarse. Antes (except→return) el wrapper durable lo veía como
+        retorno normal → marcaba el inbox procesado → orden PAGADA sin confirmar y sin
+        reintento. Ahora propaga → el wrapper deja el inbox sin procesar → el worker
+        reconcilia (idempotente por dedup processed-aware + guard de estado terminal)."""
         payload = WompiPayloadBuilder().with_approved_txn(
             payment_link_id="plink-5", txn_id="txn-5"
         ).build()
@@ -386,8 +391,9 @@ class WompiWebhookTests(unittest.TestCase):
         mock_get_client.return_value = supabase
         mock_confirm.side_effect = RuntimeError("DB fail")
 
-        # No debe lanzar excepción hacia arriba
-        wompi_webhook._process_wompi_event(payload)
+        # DEBE propagar (el wrapper durable lo captura y deja el inbox para reconciliación)
+        with self.assertRaises(RuntimeError):
+            wompi_webhook._process_wompi_event(payload)
 
         mock_confirm.assert_called_once()
 
