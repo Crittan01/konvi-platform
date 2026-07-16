@@ -150,6 +150,14 @@ services:
         value: "0.1"
       - key: SENTRY_ENV
         value: production
+      # W5/T4-01 — IP real del cliente detrás del edge de Render. Render usa Cloudflare y
+      # forwardea CF-Connecting-IP con la IP REAL del cliente (evidencia: arcjet-js#3899
+      # muestra XFF de 3 hops "cliente, cf-proxy, hop-interno" + cf-connecting-ip=cliente;
+      # Cloudflare docs: "provides the client IP connecting to Cloudflare to the origin").
+      # Es INMUNE al nº de hops (a diferencia de XFF_TRUSTED_HOPS_FROM_RIGHT) y al futuro
+      # api.konvi.co proxied. resolve_client_ip cae grácil al XFF si el header falta.
+      - key: TRUSTED_CLIENT_IP_HEADER
+        value: cf-connecting-ip
     healthCheckPath: /health
     branch: production
     autoDeploy: true
@@ -272,6 +280,12 @@ services:
         value: "0.1"
       - key: SENTRY_ENV
         value: production
+      # W5/T4-01 — IP real del cliente vía CF-Connecting-IP (Render forwardea el header de
+      # Cloudflare con la IP real, unspoofable, inmune al nº de hops). Cubre rate-limit
+      # (wompi/aveonline/meli), allowlist MeLi y audit IP de offboarding. Fallback grácil
+      # al XFF si el header falta. Ref: arcjet-js#3899 + Cloudflare HTTP headers docs.
+      - key: TRUSTED_CLIENT_IP_HEADER
+        value: cf-connecting-ip
     healthCheckPath: /health
     branch: production
     autoDeploy: true
