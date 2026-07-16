@@ -111,10 +111,21 @@ jobs:
       - name: Install harness deps
         run: pip install pytest "psycopg[binary]"
 
+      # Instalación DIRECTA del binario (con retry) en vez de supabase/setup-cli@v1:
+      # la acción falló transitoriamente ("Setup Supabase CLI in 10s") en el push a
+      # develop de #73 → gate flaky. El binario pinneado es determinista + reintentable.
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: latest
+        run: |
+          VER="2.90.0"
+          for attempt in 1 2 3; do
+            if curl -sL --fail -m 120 \
+              "https://github.com/supabase/cli/releases/download/v${VER}/supabase_linux_amd64.tar.gz" \
+              -o /tmp/supabase.tar.gz; then break; fi
+            echo "retry $attempt…"; sleep 5
+          done
+          tar -xzf /tmp/supabase.tar.gz -C /tmp
+          sudo mv /tmp/supabase /usr/local/bin/supabase
+          supabase --version
 
       # Levanta un Postgres local (supabase/postgres: roles + auth + extensiones) y
       # aplica el BASELINE schema-only de prod (tests/dbharness/schema_baseline.sql).
