@@ -55,6 +55,12 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore::pydantic.PydanticDeprecatedSince212",
 ]
+# W4 T1 — el harness DB ejecutable (tests/dbharness/) requiere un Postgres local con
+# el esquema aplicado. Se EXCLUYE del run por defecto (`-m 'not dbharness'`) para no
+# romper la suite en máquinas sin DB; se corre explícito con `-m dbharness`.
+markers = [
+    "dbharness: prueba que requiere un Postgres real con el esquema de prod (W4/T1)",
+]
 
 [tool.coverage.run]
 source = ["services"]

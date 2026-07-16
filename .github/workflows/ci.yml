@@ -87,6 +87,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  db-harness:
+    name: Harness DB ejecutable (RLS/authz/inbox)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install harness deps
+        run: pip install pytest "psycopg[binary]"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Levanta un Postgres local (supabase/postgres: roles + auth + extensiones) y
+      # aplica el BASELINE schema-only de prod (tests/dbharness/schema_baseline.sql).
+      # El replay de las 222 migraciones NO aplica limpio (seeds que asumen datos de
+      # prod) → se usa el baseline (dump schema-only, sin PII). Ver scripts/dbharness_up.sh.
+      - name: Levantar Postgres + aplicar baseline
+        run: bash scripts/dbharness_up.sh
+
+      - name: Correr harness (RLS deny cross-tenant + escalada + inbox SKIP LOCKED)
+        env:
+          HARNESS_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          # HARNESS_REQUIRED=1: en CI el harness DEBE correr. Sin esto, un DB no
+          # disponible dejaría todo SKIPPED y el job VERDE — verificando NADA.
+          HARNESS_REQUIRED: "1"
+        run: |
+          set -o pipefail
+          python -m pytest tests/dbharness -q -m dbharness -p no:cacheprovider | tee /tmp/harness_out.txt
+          # Belt-and-suspenders: fallar si NINGÚN test pasó (all-skipped ≠ éxito).
+          if ! grep -qE "[0-9]+ passed" /tmp/harness_out.txt; then
+            echo "::error::El harness no ejecutó ninguna prueba (0 passed) — gate sin valor"; exit 1
+          fi
+
   build-web:
     name: Next.js build (apps/web)
     runs-on: ubuntu-latest
