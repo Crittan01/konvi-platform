@@ -200,5 +200,39 @@ class MeliAllowlistRightmostAntiSpoofTests(unittest.TestCase):
             self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
 
 
+class MeliAllowlistTrustedHeaderTests(unittest.TestCase):
+    """W5/T4-01 — con TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip (prod Render), el allowlist
+    MeLi usa el header de Cloudflare (IP real unspoofable, inmune al hop-count). Un XFF
+    spoofeado NO evade: el header manda."""
+
+    def setUp(self):
+        self.mw = _reload_module()
+        import dependencies.security as sec
+        self._p = patch.object(sec, "_TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip")
+        self._p.start()
+        self.addCleanup(self._p.stop)
+
+    def _req(self, cf_ip, xff=None):
+        req = MagicMock()
+        req.headers = {"cf-connecting-ip": cf_ip}
+        if xff is not None:
+            req.headers["x-forwarded-for"] = xff
+        req.client = MagicMock(host="10.0.0.1")
+        return req
+
+    def test_cf_header_meli_pasa_ignora_xff_spoof(self):
+        req = self._req(cf_ip="54.88.218.97", xff="1.2.3.4, 5.6.7.8")  # XFF basura
+        with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+            self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+    def test_cf_header_no_meli_rechaza_aunque_xff_finja_meli(self):
+        # atacante: cf-connecting-ip real (Cloudflare) no-MeLi, pero pone MeLi en el XFF.
+        req = self._req(cf_ip="9.9.9.9", xff="54.88.218.97")
+        with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+            with self.assertRaises(self.mw.HTTPException) as ctx:
+                self.mw._verify_meli_origin(req, supabase=MagicMock())
+            self.assertEqual(ctx.exception.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
