@@ -24,12 +24,14 @@ CI_MODE=false
 # por nuevos archivos sin tests; subir a 70% al cerrar Sem 11.
 COVERAGE_MIN="${COVERAGE_MIN:-55}"
 
+DB_HARNESS=false
 for arg in "$@"; do
   case "$arg" in
-    --full)     FULL=true ;;
-    --build)    BUILD=true ;;
-    --coverage) COVERAGE=true ;;
-    --ci)       CI_MODE=true; FULL=true; COVERAGE=true; BUILD=true ;;
+    --full)       FULL=true ;;
+    --build)      BUILD=true ;;
+    --coverage)   COVERAGE=true ;;
+    --db-harness) DB_HARNESS=true ;;
+    --ci)         CI_MODE=true; FULL=true; COVERAGE=true; BUILD=true ;;
   esac
 done
 
@@ -79,11 +81,13 @@ _hdr "Python unit tests"
 export SLOW_TESTS=1
 
 if python3.11 -c "import pytest" 2>/dev/null; then
+  # -m 'not dbharness': el harness DB (tests/dbharness/) requiere un Postgres local y se
+  # corre aparte (--db-harness / job CI dedicado), no en la suite de unidad por defecto.
   if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
     python3.11 -m coverage erase 2>/dev/null || true
-    result=$(python3.11 -m coverage run --source=services -m pytest tests/ -q -p no:cacheprovider 2>&1 | tail -4)
+    result=$(python3.11 -m coverage run --source=services -m pytest tests/ -q -m 'not dbharness' -p no:cacheprovider 2>&1 | tail -4)
   else
-    result=$(python3.11 -m pytest tests/ -q -p no:cacheprovider 2>&1 | tail -4)
+    result=$(python3.11 -m pytest tests/ -q -m 'not dbharness' -p no:cacheprovider 2>&1 | tail -4)
   fi
   # pytest summary line: "N passed, M skipped in Xs" (sin "failed"/"error").
   if echo "$result" | grep -qE "[0-9]+ passed" && \
@@ -399,6 +403,28 @@ if $LINT || $CI_MODE; then
     fi
   else
     _warn "ruff no instalado: pip install ruff"
+  fi
+fi
+
+# ─── 9. Harness DB ejecutable (solo --db-harness) ─────────────────────────────
+# RLS/authz/RPC verificados contra un Postgres REAL con el esquema de prod (W4/T1).
+# Skip ELEGANTE si el DB local no está disponible (no rompe --ci en máquinas sin
+# Postgres): las pruebas llevan skip incondicional vía conftest.harness_available().
+if $DB_HARNESS; then
+  _hdr "Harness DB ejecutable (RLS/authz/inbox contra Postgres real)"
+  if ! python3.11 -c "import psycopg" 2>/dev/null; then
+    _warn "psycopg no instalado (pip install 'psycopg[binary]') — harness omitido"
+  else
+    hres=$(HARNESS_DB_URL="${HARNESS_DB_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}" \
+      python3.11 -m pytest tests/dbharness -q -m dbharness -p no:cacheprovider 2>&1 | tail -4)
+    if echo "$hres" | grep -qE "[0-9]+ passed" && ! echo "$hres" | grep -qE "[0-9]+ (failed|error)"; then
+      _ok "Harness DB OK ($(echo "$hres" | grep -oP '\d+ passed' | head -1))"
+    elif echo "$hres" | grep -qE "[0-9]+ skipped" && ! echo "$hres" | grep -qE "[0-9]+ passed"; then
+      _warn "Harness DB omitido (DB no disponible) — corré scripts/dbharness_up.sh"
+    else
+      _err "Harness DB FALLÓ — regresión de RLS/authz/inbox"
+      echo "$hres" | grep -E "FAILED|ERROR|failed|error" | head -5
+    fi
   fi
 fi
 
