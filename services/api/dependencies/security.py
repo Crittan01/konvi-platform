@@ -95,32 +95,56 @@ def _distributed_hit(
     )
 
 
-# nº de hops CONFIABLES contados DESDE LA DERECHA del XFF para ubicar la IP real del
-# cliente (anti-spoofing: un atacante solo puede PREPEND, no APPEND). Default 0 =
-# comportamiento histórico (leftmost). Activar (>0) SOLO tras VALIDAR EN DOCUMENTACION
-# OFICIAL el manejo de X-Forwarded-For de Render (append vs replace; posición de la IP
-# real) — de lo contrario se rompería el rate-limit / allowlist de webhooks.
-# INTERVENCION HUMANA: fijar XFF_TRUSTED_HOPS_FROM_RIGHT una vez verificado.
+# Resolución de la IP del cliente detrás del proxy de Render (W1/W5/T4-01). La topología
+# XFF de Render NO está documentada oficialmente: su feedback board indica que APPENDEA la
+# IP real y NO limpia el XFF que envía el cliente (→ leftmost SPOOFEABLE), pero Render está
+# fronteado por SU Cloudflare + proxy(s) interno(s) → el nº de hops NO es conocible sin
+# medición. Por eso, en orden de robustez:
+#   1) TRUSTED_CLIENT_IP_HEADER (p.ej. 'cf-connecting-ip'): header que el edge inyecta con
+#      la IP real — INMUNE al nº de hops y a cambios de topología (api.konvi.co proxied).
+#   2) XFF_TRUSTED_HOPS_FROM_RIGHT=N>0 → xff[-N]. Requiere el N EXACTO, verificado
+#      EMPÍRICAMENTE (endpoint /internal/ip-echo o XFF_CANARY=1). NO fijar a ciegas: con
+#      N equivocado, xff[-N] es una IP interna → 403 en el allowlist MeLi + colapso de
+#      rate-limit. Default 0 = leftmost (histórico, sin cambio de conducta).
+# INTERVENCION HUMANA (T4-01): medir en prod y fijar el header o el N. Hasta entonces
+# NO se activa nada (default 0). Ref audit: docs/research/audit-2026-07-16-plan-90plus.md T4-01.
+_TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "").strip().lower()
 _XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
+_XFF_CANARY = os.getenv("XFF_CANARY", "") == "1"
 
 
-def _client_ip(request: Request) -> str:
-    """IP del cliente desde X-Forwarded-For (helper unificado — W1).
-
-    Default (XFF_TRUSTED_HOPS_FROM_RIGHT=0): hop IZQUIERDO (comportamiento histórico).
-    Con N>0: toma xff[-N] (el hop N-ésimo desde la derecha, unspoofable) — anti-spoofing
-    del leftmost, PERO requiere verificar el XFF de Render antes de activar (ver arriba).
-    """
+def resolve_client_ip(request: Request) -> str:
+    """IP del cliente detrás del proxy (W1/W5). Orden: (1) TRUSTED_CLIENT_IP_HEADER si
+    presente (inmune al hop-count); (2) XFF_TRUSTED_HOPS_FROM_RIGHT>0 → xff[-N], default 0
+    → leftmost; (3) request.client.host → 'unknown'. Ver comentario arriba: el default NO
+    cambia la conducta hasta verificar empíricamente la topología XFF de Render."""
     xff = request.headers.get("x-forwarded-for", "")
-    if xff:
+    resolved = None
+    if _TRUSTED_CLIENT_IP_HEADER:
+        hv = (request.headers.get(_TRUSTED_CLIENT_IP_HEADER, "") or "").strip()
+        if hv:
+            resolved = hv
+    if resolved is None and xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
             if _XFF_HOPS_FROM_RIGHT > 0:
-                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
-            return parts[0]  # leftmost (histórico)
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+                resolved = parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            else:
+                resolved = parts[0]
+    if resolved is None:
+        resolved = request.client.host if (request.client and request.client.host) else "unknown"
+    if _XFF_CANARY:
+        logger.info(
+            "[XFF_CANARY] trusted_header=%s xff=%r client_host=%s resolved=%s",
+            _TRUSTED_CLIENT_IP_HEADER or "-", xff[:200],
+            (request.client.host if request.client else "-"), resolved,
+        )
+    return resolved
+
+
+def _client_ip(request: Request) -> str:
+    """Alias histórico de resolve_client_ip (compat con los call-sites existentes)."""
+    return resolve_client_ip(request)
 
 
 def _get_optional_user_id(request: Request) -> str:

@@ -56,5 +56,29 @@ class XffTrustedHopFromRightTests(unittest.TestCase):
             self.assertEqual(_client_ip(_req("only")), "only")
 
 
+class TrustedClientIpHeaderTests(unittest.TestCase):
+    """W5/T4-01 — TRUSTED_CLIENT_IP_HEADER (p.ej. cf-connecting-ip): solución robusta
+    INMUNE al nº de hops del XFF (no requiere conocer la topología de Render)."""
+
+    def _req(self, headers):
+        r = MagicMock()
+        r.headers = headers
+        r.client = MagicMock(host="9.9.9.9")
+        return r
+
+    def test_usa_header_de_confianza_ignora_xff(self):
+        with patch.object(security, "_TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip"):
+            ip = _client_ip(self._req({
+                "x-forwarded-for": "spoof1, spoof2, internal-render",
+                "cf-connecting-ip": "200.1.2.3",
+            }))
+        self.assertEqual(ip, "200.1.2.3")  # el header gana, inmune al hop-count
+
+    def test_header_ausente_cae_a_xff(self):
+        with patch.object(security, "_TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip"):
+            ip = _client_ip(self._req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"}))
+        self.assertEqual(ip, "1.1.1.1")  # sin el header → XFF (default leftmost)
+
+
 if __name__ == "__main__":
     unittest.main()

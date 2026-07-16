@@ -106,23 +106,38 @@ def _rate_limit_hit(ip: str) -> tuple[bool, int]:
         return True, 0
 
 
-# Ver security._client_ip (api): default 0 = leftmost (histórico). Activar (>0) SOLO
-# tras VALIDAR EN DOCUMENTACION OFICIAL el manejo de X-Forwarded-For de Render.
+# Ver security.resolve_client_ip (api) para el rationale completo (W5/T4-01). La topología
+# XFF de Render NO está documentada; NO fijar el hop a ciegas (rompería el rate-limit).
+# Orden: TRUSTED_CLIENT_IP_HEADER (inmune al hop-count) → XFF_TRUSTED_HOPS_FROM_RIGHT (N
+# verificado empíricamente) → leftmost (default 0). Ref: docs/research/audit-2026-07-16-plan-90plus.md T4-01.
+_TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "").strip().lower()
 _XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
+_XFF_CANARY = os.getenv("XFF_CANARY", "") == "1"
 
 
 def _client_ip(request: "Request") -> str:
-    """IP del cliente desde XFF (helper unificado — W1). Default (0): hop IZQUIERDO
-    (histórico). Con N>0: xff[-N] (hop N desde la derecha, unspoofable) — anti-spoofing,
-    pero requiere verificar el XFF de Render antes de activar."""
+    """IP del cliente detrás del proxy (W1/W5). (1) TRUSTED_CLIENT_IP_HEADER si presente;
+    (2) XFF_TRUSTED_HOPS_FROM_RIGHT>0 → xff[-N], default 0 → leftmost; (3) client.host."""
     xff = request.headers.get("x-forwarded-for", "")
-    if xff:
+    resolved = None
+    if _TRUSTED_CLIENT_IP_HEADER:
+        hv = (request.headers.get(_TRUSTED_CLIENT_IP_HEADER, "") or "").strip()
+        if hv:
+            resolved = hv
+    if resolved is None and xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
             if _XFF_HOPS_FROM_RIGHT > 0:
-                return parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
-            return parts[0]  # leftmost (histórico)
-    return request.client.host if request.client else "unknown"
+                resolved = parts[-_XFF_HOPS_FROM_RIGHT] if len(parts) >= _XFF_HOPS_FROM_RIGHT else parts[0]
+            else:
+                resolved = parts[0]
+    if resolved is None:
+        resolved = request.client.host if request.client else "unknown"
+    if _XFF_CANARY:
+        logger.info("[XFF_CANARY] trusted_header=%s xff=%r client_host=%s resolved=%s",
+                    _TRUSTED_CLIENT_IP_HEADER or "-", xff[:200],
+                    (request.client.host if request.client else "-"), resolved)
+    return resolved
 
 
 # ─── Caches ─────────────────────────────────────────────────────────────────
