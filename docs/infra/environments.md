@@ -20,7 +20,7 @@ Dos ambientes, **aislados a nivel de organización Supabase** (no solo de proyec
 | Ambiente | Organización | Proyecto | Plan | Ref (inmutable) |
 |---|---|---|---|---|
 | **prod** | `Konvi` *(org existente)* | **`konvi-prod`** *(renombrar de `konvi-ops`)* | **Pro** | `xmelwnhhphksbpdjmbbp` |
-| **dev** | **`Konvi Dev`** *(nueva, Free)* | **`konvi-dev`** | **Free** | *(se genera al crear)* |
+| **dev** | **`Konvi Dev`** *(nueva, Free)* | **`konvi-dev`** | **Free** | `qkltqxbhssgnyjqltwcr` |
 
 - **Renombrar `konvi-ops` → `konvi-prod` es SEGURO y cosmético:** el *project ref* (`xmelwnhhphksbpdjmbbp`) y la URL de conexión son **inmutables**; solo cambia el nombre visible. Verificar en Settings → General que el ref no cambia.
 - **Región del dev = la misma que prod** (paridad de latencia/comportamiento).
@@ -77,12 +77,20 @@ Para `konvi-connector`, `konvi-api`, `konvi-orchestrator` *(y opcionalmente `kon
 2. Tras pasar a Starter, retirar el hack anti-hibernación (ya no hace falta).
 - **CRITERIO DE ÉXITO:** `/health` responde sin cold-start tras 20+ min inactivo.
 
-### D. Cutover local a dev *(lo hago yo — no-cost, tras B)*
-1. Aplicar el schema baseline (`tests/dbharness/schema_baseline.sql`) a `konvi-dev`.
-2. Seed sintético (tenant de prueba + Vault sandbox Meta/Wompi/Aveonline).
-3. Cambiar `.env` local + ngrok a `konvi-dev`; mover credenciales prod a `.env.prod`.
-4. `env_guard` anti-prod en scripts destructivos (cubre `.env` y `.env.prod`).
-- **CRITERIO DE ÉXITO:** un test local destructivo afecta SOLO `konvi-dev`; prod intacto. **Cierra el CRITICAL.**
+### D. Cutover local a dev — ✅ HECHO 2026-07-16 *(no-cost)*
+1. ✅ Schema baseline aplicado a `konvi-dev` (77 tablas, 45 policies, 106 funcs).
+2. ✅ Seed sintético mínimo: tenant `KAIU Dev (sandbox)` (`d0000000-…0001`) + owner
+   login-able (`dev-owner@konvi.test`) + subscription auto (`billing_plans('basic')`).
+   *(DIFERIDO: Vault sandbox Meta/Wompi/Aveonline — el bot end-to-end en dev lo
+   requiere; no bloquea el aislamiento de datos, que es el CRITICAL.)*
+3. ✅ `.env` → `konvi-dev` (default seguro); prod snapshot → `.env.prod`. Ambos gitignored.
+4. ✅ `env_guard` anti-prod (`scripts/_env_guard.py`): `assert_not_prod()` fail-closed
+   cableado en `wipe_conversation.py` y `admin/purge_tenant_storage.py`. Override
+   auditable `KONVI_ALLOW_PROD=1`. Cubierto por `tests/test_env_guard.py` (9 tests).
+- **CRITERIO DE ÉXITO:** ✅ verificado empíricamente — con `.env`, un query solo ve
+  `KAIU Dev (sandbox)`; prod (`.env.prod`) intacto. Un wipe con creds de prod aborta
+  (exit 2) antes de borrar. **CRITICAL `dev = prod` CERRADO a nivel local.**
+  *(Pendiente Render: prod ya usa `konvi-prod`; no hay Render dev — local basta.)*
 
 ## 4. Costo mensual resultante (verificado)
 | Ítem | Costo |

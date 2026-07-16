@@ -368,6 +368,11 @@ def main():
     args = ap.parse_args()
 
     creds = _load_env()
+    # D.4 cutover dev/prod: rechaza correr este wipe testing-only contra prod
+    # salvo override explícito KONVI_ALLOW_PROD=1 (ver scripts/_env_guard.py).
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _env_guard import assert_not_prod
+    assert_not_prod(creds, action="wipe_conversation")
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
     # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
     key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
