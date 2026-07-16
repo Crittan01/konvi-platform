@@ -117,6 +117,21 @@ WOMPI_VOID_POLL_LOOKBACK_HOURS = int(
     os.getenv("WOMPI_VOID_POLL_LOOKBACK_HOURS", "48"),
 )
 
+# W2 — Reconciliación del inbox durable Wompi. Re-drive de webhooks de pago
+# perdidos por crash del proceso API entre el 200 ACK y el fin del procesamiento
+# (Wompi no reintenta un 200 ni ofrece pull por reference). El worker re-POSTea el
+# payload crudo a la API → reusa el flujo verificado completo (firma + dedup +
+# confirm). Ver migración 20260714000000_wompi_webhook_inbox.
+WOMPI_INBOX_RECONCILE_ENABLED = os.getenv("WOMPI_INBOX_RECONCILE_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS = int(
+    os.getenv("WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS", "180"),  # 3 min
+)
+WOMPI_INBOX_MIN_AGE_SECONDS = int(os.getenv("WOMPI_INBOX_MIN_AGE_SECONDS", "120"))  # 2 min grace
+WOMPI_INBOX_MAX_ATTEMPTS = int(os.getenv("WOMPI_INBOX_MAX_ATTEMPTS", "5"))
+WORKER_API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
+
 CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -285,6 +300,9 @@ class OrchestratorWorker:
         # Rev. 109 P1 #1 — Polling backup Wompi VOIDED.
         self._wompi_void_poll_enabled = WOMPI_VOID_POLL_ENABLED
         self._last_wompi_void_poll_at = 0.0
+        # W2 — reconciliación del inbox durable Wompi.
+        self._wompi_inbox_reconcile_enabled = WOMPI_INBOX_RECONCILE_ENABLED
+        self._last_wompi_inbox_reconcile_at = 0.0
         self._last_sla_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
         self._last_stale_sweep_at = 0.0
@@ -387,6 +405,7 @@ class OrchestratorWorker:
         await self._run_job("cart_abandoned", self._send_cart_abandoned_reminders_if_due())
         await self._run_job("release_pending_payment", self._release_expired_pending_payment_orders())
         await self._run_job("wompi_void_poll", self._poll_wompi_pending_voids_if_due())
+        await self._run_job("wompi_inbox_reconcile", self._reconcile_wompi_inbox_if_due())
         await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
@@ -2177,6 +2196,77 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.warning(
                     "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
+                )
+
+    async def _reconcile_wompi_inbox_if_due(self) -> None:
+        """W2 — Reconciliación del inbox durable Wompi (re-drive de webhooks perdidos).
+
+        La API persiste cada webhook Wompi en `wompi_webhook_inbox` ANTES del 200 ACK.
+        Si el proceso API crashea entre el ACK y el fin del procesamiento en background,
+        la fila queda `processed_at IS NULL`. Aquí reclamamos atómicamente esas filas
+        (más viejas que el grace, con attempts < max) y re-POSTeamos el payload crudo a
+        /api/v1/webhooks/wompi → reusa el flujo verificado completo (firma + dedup +
+        confirm). La idempotencia de dinero la garantiza wompi_events_seen + el guard de
+        estado terminal de la orden, así que un re-drive de un evento ya procesado es
+        inocuo. Tras MAX_ATTEMPTS la fila queda como dead-letter (last_error) para
+        revisión manual.
+        """
+        if not self._wompi_inbox_reconcile_enabled:
+            return
+        now = time.time()
+        interval = max(30, WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS)
+        if now - self._last_wompi_inbox_reconcile_at < interval:
+            return
+        self._last_wompi_inbox_reconcile_at = now
+
+        try:
+            res = self.supabase.rpc(
+                "claim_wompi_inbox_batch",
+                {
+                    "p_limit": 20,
+                    "p_min_age_seconds": WOMPI_INBOX_MIN_AGE_SECONDS,
+                    "p_max_attempts": WOMPI_INBOX_MAX_ATTEMPTS,
+                },
+            ).execute()
+        except Exception as exc:
+            logger.warning("[WOMPI_INBOX] claim falló: %s", exc)
+            return
+
+        rows = res.data or []
+        if not rows:
+            return
+
+        logger.warning(
+            "[WOMPI_INBOX] %d webhook(s) sin procesar → re-drive (posible crash post-ACK)",
+            len(rows),
+        )
+
+        import httpx
+        url = f"{WORKER_API_URL}/api/v1/webhooks/wompi"
+        for row in rows:
+            checksum = (row.get("checksum") or "")[:12]
+            payload = row.get("raw_payload")
+            attempts = row.get("attempts") or 0
+            if not isinstance(payload, dict):
+                logger.warning("[WOMPI_INBOX] payload no-dict checksum=%s — skip", checksum)
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.post(url, json=payload)
+                logger.info(
+                    "[WOMPI_INBOX] re-drive checksum=%s attempt=%d → %s",
+                    checksum, attempts, resp.status_code,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[WOMPI_INBOX] re-drive checksum=%s attempt=%d falló: %s",
+                    checksum, attempts, exc,
+                )
+            if attempts >= WOMPI_INBOX_MAX_ATTEMPTS:
+                logger.error(
+                    "[WOMPI_INBOX][DEAD_LETTER] checksum=%s alcanzó %d intentos — "
+                    "requiere reconciliación MANUAL con dashboard Wompi",
+                    checksum, attempts,
                 )
 
     async def _release_expired_pending_payment_orders(self) -> None:

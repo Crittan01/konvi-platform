@@ -65,8 +65,87 @@ async def wompi_webhook(request: Request, background_tasks: BackgroundTasks):
         # Wompi envía JSON; body inválido no debe provocar retry en su lado
         return JSONResponse(status_code=200, content={"received": True})
 
-    background_tasks.add_task(_process_wompi_event, payload)
+    # ── W2 DURABILIDAD: persistir el payload CRUDO en el inbox ANTES del 200 ACK.
+    # Wompi no reintenta un 200 ni ofrece pull por reference → si el proceso muere
+    # entre este ACK y el fin del procesamiento en background, el evento de dinero
+    # se perdería. El inbox lo captura durable; el worker reconcilia lo no procesado.
+    # Best-effort: si el insert falla NO bloqueamos el ACK (degradamos al flujo
+    # previo para ESTE evento). Idempotente por checksum.
+    checksum = ((payload.get("signature") or {}).get("checksum") or "").strip()
+    try:
+        _persist_inbox(_get_service_client(), checksum, payload)
+    except Exception as _inbox_exc:  # noqa: BLE001
+        logger.warning("[WOMPI][INBOX] persist falló (best-effort): %s", _inbox_exc)
+
+    background_tasks.add_task(_process_wompi_event_durable, payload)
     return JSONResponse(status_code=200, content={"received": True})
+
+
+# ─── W2 · Durabilidad (inbox transaccional) ────────────────────────────────────
+
+def _persist_inbox(supabase, checksum: str, payload: dict) -> None:
+    """Persiste el payload crudo en wompi_webhook_inbox (idempotente por checksum).
+    Sin checksum no hay clave de dedup → se omite (cae al flujo no-durable)."""
+    if not checksum:
+        return
+    try:
+        supabase.table("wompi_webhook_inbox").insert({
+            "checksum": checksum,
+            "raw_payload": payload,
+        }).execute()
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "duplicate key" in msg or "23505" in msg:
+            return  # ya capturado (reintento de Wompi o re-drive del worker)
+        raise
+
+
+def _mark_inbox_processed(supabase, checksum: str) -> None:
+    """Marca el evento como procesado (desenlace terminal). Idempotente."""
+    if not checksum:
+        return
+    try:
+        supabase.table("wompi_webhook_inbox").update(
+            {"processed_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("checksum", checksum).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[WOMPI][INBOX] mark_processed falló checksum=%s err=%s", checksum[:12], exc)
+
+
+def _record_inbox_error(supabase, checksum: str, err: str) -> None:
+    """Guarda el último error + incrementa attempts (best-effort, para dead-letter)."""
+    if not checksum:
+        return
+    try:
+        # attempts se incrementa vía RPC atómica del worker en el re-drive; aquí solo
+        # dejamos rastro del error del intento en-proceso.
+        supabase.table("wompi_webhook_inbox").update(
+            {"last_error": (err or "")[:500]}
+        ).eq("checksum", checksum).execute()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _process_wompi_event_durable(payload: dict) -> None:
+    """Envuelve _process_wompi_event para la durabilidad W2.
+
+    Si _process_wompi_event RETORNA (incluidos sus early-returns de eventos
+    ignorados/huérfanos/duplicados/no-aprobados) es un desenlace TERMINAL → marca
+    el inbox procesado. Si LANZA o el proceso crashea mid-procesamiento, la fila
+    queda processed_at NULL → el worker la reconcilia (re-POST). La idempotencia
+    de dinero la garantiza el dedup wompi_events_seen + el guard de estado terminal.
+    """
+    checksum = ((payload.get("signature") or {}).get("checksum") or "").strip()
+    try:
+        _process_wompi_event(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[WOMPI] proceso_falló checksum=%s err=%s — inbox queda para reconciliación",
+            (checksum[:12] if checksum else "?"), exc,
+        )
+        _record_inbox_error(_get_service_client(), checksum, str(exc))
+        return
+    _mark_inbox_processed(_get_service_client(), checksum)
 
 
 def _process_wompi_event(payload: dict) -> None:
