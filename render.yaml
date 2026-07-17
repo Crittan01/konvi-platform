@@ -70,10 +70,10 @@ services:
       # URL pública del frontend — leida en runtime por Server Actions (invite flow)
       # SIN prefijo NEXT_PUBLIC_ para evitar bake-in en tiempo de build
       - key: APP_URL
-        value: https://konvi-web.onrender.com
+        value: https://app.konvi.co
       # NEXT_PUBLIC_APP_URL — bundle browser bake-in (cliente JS). Mismo valor que APP_URL.
       - key: NEXT_PUBLIC_APP_URL
-        value: https://konvi-web.onrender.com
+        value: https://app.konvi.co
       - key: API_URL
         value: https://konvi-api.onrender.com
       - key: APP_ENV
@@ -196,7 +196,7 @@ services:
         sync: false
       # URLs runtime para construir links absolutos (emails, OAuth callbacks).
       - key: APP_URL
-        value: https://konvi-web.onrender.com
+        value: https://app.konvi.co
       - key: APP_ENV
         value: production
       # URL pública del API para registrar webhooks de providers externos
