@@ -49,11 +49,22 @@ for envfile in (Path("apps/web/.env.local"),):
         if k and v:
             os.environ.setdefault(k, v)
 
+# Cutover dev/prod (D.4): este helper testing-only borra conversations. Rechaza
+# correr contra prod (o un destino no reconocido como dev) salvo KONVI_ALLOW_PROD=1.
+# Corre ANTES de create_client — si apunta a prod, aborta sin abrir cliente.
+import sys as _sys
+
+_sys.path.insert(0, str(_REPO / "scripts"))
+from _env_guard import assert_safe_target
+
+assert_safe_target(dict(os.environ), action="uat.live.helpers")
+
 from supabase import create_client
 
 SB = create_client(
     os.environ["NEXT_PUBLIC_SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+    # SUPABASE_SECRET_KEY canónico (nuevo formato) con fallback legacy SERVICE_ROLE_KEY.
+    os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_ROLE_KEY"],
 )
 
 # Defaults founder KAIU — sobrescribibles por env.

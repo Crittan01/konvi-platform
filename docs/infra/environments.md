@@ -10,7 +10,7 @@
 Dos ambientes, **aislados a nivel de organización Supabase** (no solo de proyecto):
 
 - **prod** — datos reales (pedidos, pagos, audit Habeas Data, Vault). Plan **Pro** (backups diarios). Es el único que NO puede perder datos.
-- **dev** — datos **sintéticos** (seed). Plan **Free** (sin backups, se pausa si >1 semana inactivo — se reanuda en ~1min). Aísla el desarrollo local para que un test destructivo JAMÁS toque prod.
+- **dev** — datos **sintéticos** (seed). Plan **Free** (sin backups; se pausa tras >1 semana inactivo — **reanudación MANUAL en el Dashboard**, no auto-wake ante request [verificado: [free-project-pausing](https://supabase.com/docs/guides/platform/free-project-pausing)]). Aísla el desarrollo local para que un test destructivo JAMÁS toque prod. *(Si el pausing molesta: subir la org Dev a Pro — sigue aislada — en vez de un ping semanal.)*
 
 **Por qué orgs SEPARADAS y no 2 proyectos en la misma org:** la facturación de Supabase es por-org; un 2º proyecto en la org Pro cuesta **+~$10/mes** (compute), mientras que un proyecto en una **org Free separada = $0** + aislamiento total de billing/acceso.
 
@@ -20,7 +20,7 @@ Dos ambientes, **aislados a nivel de organización Supabase** (no solo de proyec
 | Ambiente | Organización | Proyecto | Plan | Ref (inmutable) |
 |---|---|---|---|---|
 | **prod** | `Konvi` *(org existente)* | **`konvi-prod`** *(renombrar de `konvi-ops`)* | **Pro** | `xmelwnhhphksbpdjmbbp` |
-| **dev** | **`Konvi Dev`** *(nueva, Free)* | **`konvi-dev`** | **Free** | *(se genera al crear)* |
+| **dev** | **`Konvi Dev`** *(nueva, Free)* | **`konvi-dev`** | **Free** | `qkltqxbhssgnyjqltwcr` |
 
 - **Renombrar `konvi-ops` → `konvi-prod` es SEGURO y cosmético:** el *project ref* (`xmelwnhhphksbpdjmbbp`) y la URL de conexión son **inmutables**; solo cambia el nombre visible. Verificar en Settings → General que el ref no cambia.
 - **Región del dev = la misma que prod** (paridad de latencia/comportamiento).
@@ -60,7 +60,7 @@ Ambos gitignored. El `env_guard` anti-prod de scripts destructivos valida contra
 
 ### A. Supabase Pro en prod *(no-negociable, primero — ~5 min)*
 1. Dashboard → org que contiene **`konvi-ops`** → **Settings → Billing → Upgrade to Pro**.
-2. Aceptar el estimado (**~$34.81/mes** = $25 Pro + $9.81 compute Micro del proyecto — es el piso de prod-con-backups).
+2. Aceptar el estimado (**~$34.81/mes bruto** = $25 Pro + $9.81 compute Micro; el **crédito de $10 de compute** que incluye Pro cubre un Micro → **~$25/mes neto** [verificado: [manage-your-usage/compute](https://supabase.com/docs/guides/platform/manage-your-usage/compute)]).
 3. *(Opcional, clarificación)* Settings → General → renombrar `konvi-ops` → **`konvi-prod`** (el ref no cambia).
 - **CRITERIO DE ÉXITO:** proyecto en plan **Pro** + Database → Backups con schedule diario en <24h.
 - **PITR:** NO activar (backup diario basta para 1 tenant; reevaluar con >1 tenant pagando).
@@ -77,18 +77,34 @@ Para `konvi-connector`, `konvi-api`, `konvi-orchestrator` *(y opcionalmente `kon
 2. Tras pasar a Starter, retirar el hack anti-hibernación (ya no hace falta).
 - **CRITERIO DE ÉXITO:** `/health` responde sin cold-start tras 20+ min inactivo.
 
-### D. Cutover local a dev *(lo hago yo — no-cost, tras B)*
-1. Aplicar el schema baseline (`tests/dbharness/schema_baseline.sql`) a `konvi-dev`.
-2. Seed sintético (tenant de prueba + Vault sandbox Meta/Wompi/Aveonline).
-3. Cambiar `.env` local + ngrok a `konvi-dev`; mover credenciales prod a `.env.prod`.
-4. `env_guard` anti-prod en scripts destructivos (cubre `.env` y `.env.prod`).
-- **CRITERIO DE ÉXITO:** un test local destructivo afecta SOLO `konvi-dev`; prod intacto. **Cierra el CRITICAL.**
+### D. Cutover local a dev — ✅ HECHO 2026-07-16 *(no-cost)*
+1. ✅ Schema baseline aplicado a `konvi-dev` (77 tablas, 45 policies, 106 funcs).
+2. ✅ Seed sintético mínimo: tenant `KAIU Dev (sandbox)` (`d0000000-…0001`) + owner
+   login-able (`dev-owner@konvi.test`) + subscription auto (`billing_plans('basic')`).
+   *(DIFERIDO: Vault sandbox Meta/Wompi/Aveonline — el bot end-to-end en dev lo
+   requiere; no bloquea el aislamiento de datos, que es el CRITICAL.)*
+3. ✅ Cutover de credenciales locales → `konvi-dev` (default seguro); snapshots prod aparte:
+   - raíz `.env` → dev; prod → `.env.prod`.
+   - frontend `apps/web/.env.local` → dev (6 vars Supabase, incl. `DATABASE_URL` pooler
+     + `SUPABASE_PROJECT_REF`); prod → `apps/web/.env.local.prod`.
+   Todos gitignored.
+4. ✅ `env_guard` fail-closed (`scripts/_env_guard.py`, modelo **deny-by-default /
+   allow-only-known-dev**): `assert_safe_target()` aborta (exit 2) contra prod, ref
+   desconocido o host no-parseable, salvo override auditable `KONVI_ALLOW_PROD=1`.
+   Cableado en los **4 scripts destructivos**: `wipe_conversation.py`,
+   `admin/purge_tenant_storage.py`, `uat/e2e_chat.py`, `uat/live/helpers.py`.
+   Cubierto por `tests/test_env_guard.py` (19 tests, incl. bypass pooler/custom-domain).
+- **CRITERIO DE ÉXITO:** ✅ verificado empíricamente — con `.env` / `apps/web/.env.local`
+  un query solo ve `KAIU Dev (sandbox)`; prod (`*.prod`) intacto. Los 4 scripts
+  destructivos abortan (exit 2) contra prod antes de tocar datos. **CRITICAL
+  `dev = prod` CERRADO a nivel local (backend + frontend).**
+  *(Pendiente Render: prod ya usa `konvi-prod`; no hay Render dev — local basta.)*
 
 ## 4. Costo mensual resultante (verificado)
 | Ítem | Costo |
 |---|---|
-| Supabase `konvi-prod` (Pro + Micro compute) | ~$34.81 |
+| Supabase `konvi-prod` (Pro + Micro, − $10 crédito compute) | ~$25 (bruto ~$34.81) |
 | Supabase `konvi-dev` (org Free separada) | $0 |
 | Render 3× Starter (backend) | ~$21 |
 | *(opcional) Render `konvi-web` Starter* | +$7 |
-| **Total** | **~$56/mes** (~$63 con web) |
+| **Total** | **~$46/mes** (~$53 con web) — piso en Micro, no techo a escala |

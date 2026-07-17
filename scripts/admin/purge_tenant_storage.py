@@ -61,6 +61,10 @@ def _client():
             "Falta NEXT_PUBLIC_SUPABASE_URL y/o "
             "SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY"
         )
+    # Cutover dev/prod (D.4): rechaza purgar storage de prod salvo override.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from _env_guard import assert_safe_target
+    assert_safe_target(dict(os.environ), action="purge_tenant_storage")
     return create_client(url, key)
 
 

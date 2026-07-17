@@ -126,6 +126,11 @@ def _build_meta_payload(*, customer_phone: str, text: str, meta_waba_id: str,
 
 def _supabase():
     creds = _load_env()
+    # Cutover dev/prod (D.4): script testing-only (cmd_reset borra conv/orders/
+    # contacts). Aborta si apunta a prod salvo override KONVI_ALLOW_PROD=1.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from _env_guard import assert_safe_target
+    assert_safe_target(creds, action="e2e_chat")
     from supabase import create_client
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
     # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.

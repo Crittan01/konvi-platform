@@ -79,3 +79,6 @@ pip-selfcheck.json
 
 # Stack local runtime (Makefile, logs, pids, ngrok-configs) — NO versionar
 .local/
+.env.dev
+.env.prod
+.env.local.prod
