@@ -1822,38 +1822,6 @@ $$;
 ALTER FUNCTION "public"."get_tenant_team"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."handle_new_user_claims"() RETURNS "trigger"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$
-DECLARE
-  v_tenant_id uuid;
-  v_role text;
-BEGIN
-  -- Busca la asignación del usuario en los recursos de tenant
-  SELECT tenant_id, role INTO v_tenant_id, v_role
-  FROM public.tenant_users
-  WHERE user_id = NEW.id
-  LIMIT 1;
-
-  IF v_tenant_id IS NOT NULL THEN
-    -- Modifica los crudos jsonb del usuario de auth nativo para reflejarlos en auth.jwt()
-    UPDATE auth.users
-    SET raw_app_meta_data = 
-      jsonb_set(
-        jsonb_set(COALESCE(raw_app_meta_data, '{}'::jsonb), '{tenant_id}', to_jsonb(v_tenant_id::text)),
-        '{role}', to_jsonb(v_role)
-      )
-    WHERE id = NEW.id;
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."handle_new_user_claims"() OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb" DEFAULT '{}'::"jsonb", "p_ip" "text" DEFAULT NULL::"text", "p_user_agent" "text" DEFAULT NULL::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -9336,12 +9304,6 @@ GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uui
 GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "anon";
 GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."handle_new_user_claims"() TO "anon";
-GRANT ALL ON FUNCTION "public"."handle_new_user_claims"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."handle_new_user_claims"() TO "service_role";
 
 
 
