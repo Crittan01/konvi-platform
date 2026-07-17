@@ -323,6 +323,10 @@ services:
         sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: API_URL
         value: https://konvi-api.onrender.com
+      # URL pública del frontend — usada por notifications.py para los links de
+      # email del bot (/dashboard/inbox). Sin esto, el default es onrender.
+      - key: APP_URL
+        value: https://app.konvi.co
       - key: APP_ENV
         value: production
       # AVEONLINE generación REAL de guías (true=factura) vs simulado (false=dry-run).
