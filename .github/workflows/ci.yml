@@ -127,12 +127,13 @@ jobs:
           sudo mv /tmp/supabase /usr/local/bin/supabase
           supabase --version
 
-      # Levanta un Postgres local (supabase/postgres: roles + auth + extensiones) y
-      # aplica el BASELINE schema-only de prod (tests/dbharness/schema_baseline.sql).
-      # El replay de las 222 migraciones NO aplica limpio (seeds que asumen datos de
-      # prod) → se usa el baseline (dump schema-only, sin PII). Ver scripts/dbharness_up.sh.
-      - name: Levantar Postgres + aplicar baseline
-        run: bash scripts/dbharness_up.sh
+      # W8 (cierre #5+#4): tras los seeds replay-safe, el harness corre el schema
+      # REAL (replay-desde-cero de las 222 migraciones), NO un dump de prod. Este
+      # paso levanta el stack, replica desde cero y FALLA si el schema producido
+      # difiere del baseline canónico comiteado (gate anti-drift). Deja el Postgres
+      # local (54322) con el schema replicado para el paso siguiente (pytest).
+      - name: Levantar Postgres + replay + gate anti-drift
+        run: bash scripts/schema_drift_check.sh
 
       - name: Correr harness (RLS deny cross-tenant + escalada + inbox SKIP LOCKED)
         env:
