@@ -106,3 +106,94 @@ def test_guc_tenant_gana_al_jwt(db, seed):
     finally:
         conn.rollback()
         conn.close()
+
+
+# ── notification_settings: role-aware (W1, espejo de tenant_integrations) ──────
+
+def test_operator_lee_pero_no_escribe_notification_settings(db, seed):
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.notification_settings WHERE tenant_id=%s", (TENANT_A,))
+        assert cur.fetchone()[0] >= 1, "operator no pudo LEER notification_settings de su tenant"
+        cur.execute("UPDATE public.notification_settings SET enabled=false WHERE tenant_id=%s", (TENANT_A,))
+        assert cur.rowcount == 0, "operator logró ESCRIBIR notification_settings (RLS role-aware roto)"
+
+
+def test_owner_escribe_notification_settings(db, seed):
+    with as_user(OWNER_A, TENANT_A, "owner") as cur:
+        cur.execute("UPDATE public.notification_settings SET enabled=false WHERE tenant_id=%s", (TENANT_A,))
+        assert cur.rowcount >= 1, "owner no pudo escribir notification_settings de su tenant"
+
+
+def test_operator_no_lee_notification_settings_de_otro_tenant(db, seed):
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.notification_settings WHERE tenant_id=%s", (TENANT_B,))
+        assert cur.fetchone()[0] == 0, "operator leyó notification_settings de OTRO tenant"
+
+
+# ── tenants: role-aware (UPDATE owner/manager; SELECT miembro) ─────────────────
+
+def test_operator_no_actualiza_tenant(db, seed):
+    """RLS role-aware (F6): un operator NO puede UPDATE la fila de su tenant."""
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("UPDATE public.tenants SET name='hack' WHERE id=%s", (TENANT_A,))
+        assert cur.rowcount == 0, "operator logró UPDATE de tenants (RLS role-aware roto)"
+
+
+def test_owner_actualiza_su_tenant(db, seed):
+    with as_user(OWNER_A, TENANT_A, "owner") as cur:
+        cur.execute("UPDATE public.tenants SET name='Harness A2' WHERE id=%s", (TENANT_A,))
+        assert cur.rowcount == 1, "owner no pudo actualizar su tenant"
+
+
+def test_miembro_no_lee_otro_tenant(db, seed):
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.tenants WHERE id=%s", (TENANT_B,))
+        assert cur.fetchone()[0] == 0, "miembro de A vio el tenant B"
+
+
+# ── suppliers: finanzas owner-only (operator NO lee ni su propio tenant) ───────
+
+def test_operator_no_lee_suppliers(db, seed):
+    """Finanzas owner-only (f_finance_rls_owner_only): un operator NO ve proveedores
+    ni siquiera de su propio tenant (dato sensible de márgenes)."""
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.suppliers WHERE tenant_id=%s", (TENANT_A,))
+        assert cur.fetchone()[0] == 0, "operator leyó suppliers (finanzas owner-only roto)"
+
+
+def test_owner_lee_sus_suppliers(db, seed):
+    with as_user(OWNER_A, TENANT_A, "owner") as cur:
+        cur.execute("SELECT count(*) FROM public.suppliers WHERE tenant_id=%s", (TENANT_A,))
+        assert cur.fetchone()[0] >= 1, "owner no pudo leer sus suppliers"
+
+
+def test_owner_no_lee_suppliers_de_otro_tenant(db, seed):
+    with as_user(OWNER_A, TENANT_A, "owner") as cur:
+        cur.execute("SELECT count(*) FROM public.suppliers WHERE tenant_id=%s", (TENANT_B,))
+        assert cur.fetchone()[0] == 0, "owner de A leyó suppliers de B"
+
+
+# ── contacts: aislamiento PII + WITH CHECK cross-tenant ───────────────────────
+
+def test_operator_no_lee_contacts_de_otro_tenant(db, seed):
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.contacts WHERE tenant_id=%s", (TENANT_B,))
+        assert cur.fetchone()[0] == 0, "operator leyó contacts (PII) de OTRO tenant"
+
+
+def test_owner_no_inserta_contact_en_otro_tenant(db, seed):
+    """WITH CHECK: owner de A NO puede INSERT un contacto para el tenant B."""
+    with as_user(OWNER_A, TENANT_A, "owner") as cur:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "INSERT INTO public.contacts (tenant_id, phone, name) VALUES (%s,'+570000000000','x')",
+                (TENANT_B,),
+            )
+
+
+# ── tenant_subscriptions: aislamiento cross-tenant ────────────────────────────
+
+def test_operator_no_lee_subscription_de_otro_tenant(db, seed):
+    with as_user(OP_A, TENANT_A, "operator") as cur:
+        cur.execute("SELECT count(*) FROM public.tenant_subscriptions WHERE tenant_id=%s", (TENANT_B,))
+        assert cur.fetchone()[0] == 0, "operator vio la subscription de OTRO tenant"

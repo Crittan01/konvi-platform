@@ -110,6 +110,24 @@ def seed_tenants(conn) -> dict:
             "(%s,'wompi','connected'),(%s,'wompi','connected')",
             (TENANT_A, TENANT_B),
         )
+        # W8 cierre #8 — filas de negocio para tests de aislamiento cross-tenant:
+        # config role-aware (notification_settings), PII (contacts), finanzas
+        # owner-only (suppliers). 1 fila por tenant.
+        cur.execute(
+            "INSERT INTO public.notification_settings (tenant_id, channel, enabled) VALUES "
+            "(%s,'email',true),(%s,'email',true)",
+            (TENANT_A, TENANT_B),
+        )
+        cur.execute(
+            "INSERT INTO public.contacts (tenant_id, phone, name) VALUES "
+            "(%s,'+573000000001','Contacto A'),(%s,'+573000000002','Contacto B')",
+            (TENANT_A, TENANT_B),
+        )
+        cur.execute(
+            "INSERT INTO public.suppliers (tenant_id, name) VALUES "
+            "(%s,'Proveedor A'),(%s,'Proveedor B')",
+            (TENANT_A, TENANT_B),
+        )
     return {
         "tenant_a": TENANT_A, "tenant_b": TENANT_B,
         "owner_a": OWNER_A, "op_a": OP_A, "owner_b": OWNER_B,
@@ -120,6 +138,8 @@ def _cleanup(cur) -> None:
     tids = [TENANT_A, TENANT_B]
     uids = [OWNER_A, OP_A, OWNER_B]
     cur.execute("DELETE FROM public.notification_settings WHERE tenant_id = ANY(%s)", (tids,))
+    cur.execute("DELETE FROM public.suppliers WHERE tenant_id = ANY(%s)", (tids,))
+    cur.execute("DELETE FROM public.contacts WHERE tenant_id = ANY(%s)", (tids,))
     cur.execute("DELETE FROM public.tenant_integrations WHERE tenant_id = ANY(%s)", (tids,))
     cur.execute("DELETE FROM public.tenant_users WHERE tenant_id = ANY(%s)", (tids,))
     cur.execute("DELETE FROM public.tenants WHERE id = ANY(%s)", (tids,))

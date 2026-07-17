@@ -82,3 +82,6 @@ pip-selfcheck.json
 .env.dev
 .env.prod
 .env.local.prod
+
+# Temp del gate anti-drift / harness DB (W8)
+.schema_drift.diff

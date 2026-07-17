@@ -1,3 +1,9 @@
+-- ============================================================================
+-- schema_baseline.sql — SCHEMA CANÓNICO (replay-desde-cero de las migraciones).
+-- Generado por: bash scripts/schema_drift_check.sh --update
+-- NO editar a mano. Regenerar tras cualquier migración que cambie el schema.
+-- El gate anti-drift (W8 cierre #4) compara el replay contra este archivo.
+-- ============================================================================
 
 
 
@@ -13,14 +19,7 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 
-CREATE EXTENSION IF NOT EXISTS "pg_cron" WITH SCHEMA "pg_catalog";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pgsodium";
+CREATE EXTENSION IF NOT EXISTS "pg_net" WITH SCHEMA "extensions";
 
 
 
@@ -28,6 +27,13 @@ CREATE EXTENSION IF NOT EXISTS "pgsodium";
 
 
 COMMENT ON SCHEMA "public" IS 'standard public schema';
+
+
+
+CREATE EXTENSION IF NOT EXISTS "pg_graphql" WITH SCHEMA "graphql";
+
+
+
 
 
 
@@ -704,6 +710,10 @@ $$;
 
 
 ALTER FUNCTION "public"."custom_access_token_hook"("event" "jsonb") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."custom_access_token_hook"("event" "jsonb") IS 'Hook activo desde 2026-04-26. Reemplaza trigger on_tenant_assignment.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer DEFAULT 90, "p_qty" integer DEFAULT 20) RETURNS TABLE("msg_id" bigint, "read_ct" integer, "enqueued_at" timestamp with time zone, "vt" timestamp with time zone, "message" "jsonb")
@@ -1815,18 +1825,27 @@ ALTER FUNCTION "public"."get_tenant_team"() OWNER TO "postgres";
 CREATE OR REPLACE FUNCTION "public"."handle_new_user_claims"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
+DECLARE
+  v_tenant_id uuid;
+  v_role text;
 BEGIN
-  IF NEW.tenant_id IS NOT NULL AND NEW.user_id IS NOT NULL THEN
+  -- Busca la asignación del usuario en los recursos de tenant
+  SELECT tenant_id, role INTO v_tenant_id, v_role
+  FROM public.tenant_users
+  WHERE user_id = NEW.id
+  LIMIT 1;
+
+  IF v_tenant_id IS NOT NULL THEN
+    -- Modifica los crudos jsonb del usuario de auth nativo para reflejarlos en auth.jwt()
     UPDATE auth.users
-    SET raw_app_meta_data = jsonb_set(
+    SET raw_app_meta_data = 
       jsonb_set(
-        COALESCE(raw_app_meta_data, '{}'::jsonb),
-        '{tenant_id}', to_jsonb(NEW.tenant_id::text)
-      ),
-      '{role}', to_jsonb(NEW.role)
-    )
-    WHERE id = NEW.user_id;
+        jsonb_set(COALESCE(raw_app_meta_data, '{}'::jsonb), '{tenant_id}', to_jsonb(v_tenant_id::text)),
+        '{role}', to_jsonb(v_role)
+      )
+    WHERE id = NEW.id;
   END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -1898,10 +1917,17 @@ COMMENT ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filter
 CREATE OR REPLACE FUNCTION "public"."match_kb_documents"("query_embedding" "extensions"."vector", "match_threshold" double precision, "match_count" integer, "t_id" "uuid") RETURNS TABLE("id" "uuid", "title" "text", "content" "text", "category" "text", "similarity" double precision)
     LANGUAGE "sql" STABLE
     AS $$
-  SELECT kb.id, kb.title, kb.content, kb.category,
+  SELECT
+    kb.id,
+    kb.title,
+    kb.content,
+    kb.category,
     1 - (kb.embedding <=> query_embedding) AS similarity
   FROM kb_documents kb
-  WHERE kb.tenant_id = t_id AND kb.embedding IS NOT NULL AND kb.is_active = true
+  WHERE
+    kb.tenant_id  = t_id
+    AND kb.embedding IS NOT NULL
+    AND kb.is_active  = true
     AND 1 - (kb.embedding <=> query_embedding) > match_threshold
   ORDER BY kb.embedding <=> query_embedding
   LIMIT match_count;
@@ -2453,38 +2479,6 @@ ALTER FUNCTION "public"."reject_audit_log_mutation"() OWNER TO "postgres";
 
 COMMENT ON FUNCTION "public"."reject_audit_log_mutation"() IS 'BLOQUE 0 — audit_log append-only: rechaza UPDATE/DELETE de miembros (auth.role authenticated/anon). service_role/retención permitidos.';
 
-
-
-CREATE OR REPLACE FUNCTION "public"."rls_auto_enable"() RETURNS "event_trigger"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'pg_catalog'
-    AS $$
-DECLARE
-  cmd record;
-BEGIN
-  FOR cmd IN
-    SELECT *
-    FROM pg_event_trigger_ddl_commands()
-    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
-      AND object_type IN ('table','partitioned table')
-  LOOP
-     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN
-      BEGIN
-        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);
-        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;
-      EXCEPTION
-        WHEN OTHERS THEN
-          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;
-      END;
-     ELSE
-        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;
-     END IF;
-  END LOOP;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."rls_auto_enable"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."rpc_dashboard_revenue"() RETURNS TABLE("revenue_today" numeric, "revenue_month" numeric)
@@ -5052,6 +5046,13 @@ COMMENT ON COLUMN "public"."tenant_carriers"."carrier_code" IS 'Identificador de
 
 
 
+COMMENT ON COLUMN "public"."tenant_carriers"."supports_cod" IS 'Capability per-carrier per-tenant: el tenant acepta recaudo
+     contraentrega (COD) en este carrier. Aplica solo a provider=
+     ''aveonline'' (rev. 108). Envia COD sigue pausado per Plan A.0.1.
+     Restaurado por migración 20260530000000_restore_supports_cod_for_aveonline.';
+
+
+
 COMMENT ON COLUMN "public"."tenant_carriers"."cod_override" IS 'Override 3-estado sobre canonical aveonline_carrier_capabilities.
      supports_cod. NULL = usar canon. force_enable = acuerdo especial
      tenant. force_disable = tenant deshabilita COD pese al canon.';
@@ -5530,7 +5531,7 @@ COMMENT ON COLUMN "public"."tenants"."tono_comunicacion" IS 'Tono de comunicaci�
 
 
 
-COMMENT ON COLUMN "public"."tenants"."support_schedule" IS 'Horario estructurado: {days:[1-7], open:"HH:MM", close:"HH:MM"}. Fuente única para horario textual del bot (rev. 71).';
+COMMENT ON COLUMN "public"."tenants"."support_schedule" IS 'Horario estructurado: {days:[0-6], open:"HH:MM", close:"HH:MM"}. Fuente única para horario textual del bot (rev. 71).';
 
 
 
@@ -7076,10 +7077,6 @@ CREATE OR REPLACE TRIGGER "kb_documents_updated_at" BEFORE UPDATE ON "public"."k
 
 
 
-CREATE OR REPLACE TRIGGER "on_tenant_assignment" AFTER INSERT OR UPDATE ON "public"."tenant_users" FOR EACH ROW EXECUTE FUNCTION "public"."handle_new_user_claims"();
-
-
-
 CREATE OR REPLACE TRIGGER "pii_access_log_no_delete" BEFORE DELETE ON "public"."pii_access_log" FOR EACH ROW EXECUTE FUNCTION "public"."pii_access_log_block_modify"();
 
 
@@ -8533,10 +8530,6 @@ ALTER TABLE "public"."wompi_webhook_inbox" ENABLE ROW LEVEL SECURITY;
 ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
 
 
-
-
-
-
 ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."conversation_cart_items";
 
 
@@ -8576,27 +8569,6 @@ GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -9478,12 +9450,6 @@ GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "anon";
-GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
-
-
-
 REVOKE ALL ON FUNCTION "public"."rpc_dashboard_revenue"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "authenticated";
@@ -9702,21 +9668,6 @@ GRANT ALL ON FUNCTION "public"."webhook_event_check_or_register"("p_integration"
 
 REVOKE ALL ON FUNCTION "public"."webhook_event_mark_processed"("p_integration" "text", "p_event_uid" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."webhook_event_mark_processed"("p_integration" "text", "p_event_uid" "text") TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -10306,10 +10257,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
-
-
-
-
 
 
 
