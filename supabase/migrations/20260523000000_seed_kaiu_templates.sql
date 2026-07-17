@@ -31,6 +31,16 @@ DECLARE
     v_waba_id   TEXT := '2159052118202272';
 BEGIN
 
+  -- Replay-safe (cierre #5, 2026-07-16): esto es un seed de DATOS de PROD
+  -- (templates del tenant KAIU). En un entorno sin ese tenant (dev/harness/
+  -- branch fresco) la FK whatsapp_templates.tenant_id -> tenants(id) fallaría y
+  -- tiraría el replay-desde-cero. Guard de existencia → no-op fuera de prod;
+  -- en prod (KAIU existe) se comporta idéntico (los INSERT ya son idempotentes).
+  IF NOT EXISTS (SELECT 1 FROM public.tenants WHERE id = v_tenant_id) THEN
+    RAISE NOTICE 'seed_kaiu_templates: tenant KAIU % ausente → skip (entorno no-prod)', v_tenant_id;
+    RETURN;
+  END IF;
+
   -- 1. payment_reminder_v1 (UTILITY)
   INSERT INTO public.whatsapp_templates (
     tenant_id, waba_id, name, language, category, components,

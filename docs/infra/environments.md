@@ -108,3 +108,23 @@ Para `konvi-connector`, `konvi-api`, `konvi-orchestrator` *(y opcionalmente `kon
 | Render 3× Starter (backend) | ~$21 |
 | *(opcional) Render `konvi-web` Starter* | +$7 |
 | **Total** | **~$46/mes** (~$53 con web) — piso en Micro, no techo a escala |
+
+## 5. Autoría de migraciones (anti-drift / replay-safe)
+
+Regla canónica para que las migraciones repliquen limpio desde cero (dev/harness/
+Supabase Branching), no solo sobre prod:
+
+1. **Schema puro replay-clean.** Toda migración de schema debe aplicar sobre una DB
+   vacía sin depender de datos de un tenant específico.
+2. **Seeds de datos tenant-específicos → guardados con existencia.** Un seed que
+   escribe filas de un tenant real (p.ej. templates KAIU) FK-falla en un entorno sin
+   ese tenant. Envolver en `IF NOT EXISTS (SELECT 1 FROM public.tenants WHERE id = ...)
+   THEN RAISE NOTICE '... skip'; RETURN; END IF;` → no-op fuera de prod, idéntico e
+   idempotente en prod. *(Ejemplos: `20260523000000_seed_kaiu_templates.sql`,
+   `20260704155100_reseed_kaiu_templates_tuteo_brand.sql` — cierre #5, 2026-07-16.)*
+3. **Datos sintéticos de dev NO van en migraciones** — van en el seed de dev
+   (`scripts/` / `provision_tenant.py`), para no acoplar el schema a datos.
+
+Verificación: `supabase db reset` (replay-desde-cero) debe terminar con exit 0. El
+gate anti-drift de CI (W8) lo hace bloqueante + diffea el schema resultante contra el
+baseline canónico de prod.
