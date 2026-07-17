@@ -122,7 +122,7 @@ services:
     name: konvi-connector
     runtime: python
     region: oregon
-    plan: free
+    plan: starter
     rootDir: services/connector-whatsapp
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
@@ -171,7 +171,7 @@ services:
     name: konvi-api
     runtime: python
     region: oregon
-    plan: free
+    plan: starter
     rootDir: services/api
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
@@ -301,7 +301,7 @@ services:
     name: konvi-orchestrator
     runtime: python
     region: oregon
-    plan: free
+    plan: starter
     rootDir: services/ai-orchestrator
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
