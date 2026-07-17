@@ -458,12 +458,13 @@ services:
         value: "21600"                           # 6 h
       - key: TENANT_HARD_DELETE_BATCH_SIZE
         value: "10"
-      # ── Anti-hibernación Render Free (R-10) ───────────────────────────────
-      # ANTI_HIBERNATION_PING_URL: configurar en Render Dashboard (sync: false)
-      # Formato: URLs separadas por coma, ej:
-      #   https://konvi-api.onrender.com/health,https://konvi-connector.onrender.com/health
+      # ── Anti-hibernación Render (R-10) — DESHABILITADO 2026-07-17 ─────────────
+      # Ya no hace falta: los 4 servicios pasaron a Starter (always-on), no hay
+      # spin-down de 15min que evitar. El ping era un hack para el tier Free.
+      # Se deja el código (worker.py no-opea con ENABLED=false, ver :310) + las vars
+      # por si se necesitara reactivar. PING_URL sigue en el Dashboard (sync: false).
       - key: ANTI_HIBERNATION_ENABLED
-        value: "true"
+        value: "false"
       - key: ANTI_HIBERNATION_PING_URL
         sync: false
       - key: ANTI_HIBERNATION_INTERVAL_SECONDS
