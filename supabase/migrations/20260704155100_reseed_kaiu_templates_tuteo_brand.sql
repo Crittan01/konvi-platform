@@ -39,6 +39,15 @@ DECLARE
     v_brand     TEXT;
     v_footer    JSONB;
 BEGIN
+  -- Replay-safe (cierre #5, 2026-07-16): re-seed de DATOS de PROD (templates
+  -- KAIU). Sin el tenant KAIU (dev/harness/branch fresco) la FK
+  -- whatsapp_templates.tenant_id -> tenants(id) fallaría el replay. Guard de
+  -- existencia → no-op fuera de prod; idéntico en prod (KAIU existe).
+  IF NOT EXISTS (SELECT 1 FROM public.tenants WHERE id = v_tenant_id) THEN
+    RAISE NOTICE 'reseed_kaiu_templates: tenant KAIU % ausente → skip (entorno no-prod)', v_tenant_id;
+    RETURN;
+  END IF;
+
   SELECT COALESCE(NULLIF(TRIM(t.name), ''), 'KAIU')
     INTO v_brand
     FROM public.tenants t
