@@ -28,7 +28,7 @@ services:
     name: konvi-web
     runtime: node
     region: oregon
-    plan: free
+    plan: starter
     rootDir: apps/web
     # Memory profile build: next build + Sentry instrumentation peak ~1.3 GB RSS.
     # Render build container = más RAM que runtime (runtime free=512 MB; build
