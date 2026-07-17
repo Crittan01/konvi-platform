@@ -63,8 +63,8 @@ def _client():
         )
     # Cutover dev/prod (D.4): rechaza purgar storage de prod salvo override.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from _env_guard import assert_not_prod
-    assert_not_prod(dict(os.environ), action="purge_tenant_storage")
+    from _env_guard import assert_safe_target
+    assert_safe_target(dict(os.environ), action="purge_tenant_storage")
     return create_client(url, key)
 
 
