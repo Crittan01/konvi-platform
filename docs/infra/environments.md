@@ -128,3 +128,19 @@ Supabase Branching), no solo sobre prod:
 Verificación: `supabase db reset` (replay-desde-cero) debe terminar con exit 0. El
 gate anti-drift de CI (W8) lo hace bloqueante + diffea el schema resultante contra el
 baseline canónico de prod.
+
+## 6. Modelo de ramas + hardening de release (W9)
+
+**Ramas:**
+- `develop` — trunk de integración (default en GitHub). feature/* y dependabot mergean acá vía PR con CI verde.
+- `production` — rama de deploy: Render `autoDeploy:true` la observa. Deploy = `git push origin origin/develop:production` (fast-forward).
+- `main` — **RETIRADA** (W9): vestigial (congelada 2026-07-01, contenida en develop, no default, sin PRs). Restaurable desde git si hiciera falta.
+
+**Interlock migrate-before-deploy (proceso — NO automatizado aún):**
+Cuando un release toca la DB: aplicar las migraciones a prod (protocolo seguro) **ANTES** de pushear el código a `production`. Un `autoDeploy` con la migración sin aplicar abre una ventana (~500s) donde el código nuevo corre contra el schema viejo (webhooks Meta/Wompi en riesgo). Regla: **migración a prod → verificar → push a production.** NO automatizar el db-push en el deploy hasta converger el ledger drift (el protocolo seguro sigue siendo manual por diseño).
+
+**Branch protection — DECISIÓN PENDIENTE (founder):**
+La síntesis recomienda proteger `production` (FF-only + required-CI). PERO el deploy actual es un **push directo** a `production`; protegerla contra pushes directos **rompería ese mecanismo**. Opciones:
+- (a) Mantener push-to-deploy (simple, actual) + protección solo en `develop` (required-CI, admin puede bypass). *Bajo riesgo, no toca el deploy.*
+- (b) Migrar el deploy a un flujo PR-a-`production` (permite proteger production) — más ceremonia.
+- **Recomendación:** (a) por ahora (founder solo); (b) cuando entre un 2º dev o Platform Console vaya live.

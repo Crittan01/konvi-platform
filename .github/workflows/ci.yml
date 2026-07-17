@@ -2,9 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop, "phase-*"]
+    branches: [develop, "phase-*"]
   push:
-    branches: [main, develop]
+    # W9: `main` retirada (vestigial). `develop` = trunk de integración;
+    # `production` = rama de deploy (Render autoDeploy) — corre CI también ahí
+    # como red de seguridad ante cualquier divergencia en el push de deploy.
+    branches: [develop, production]
 
 concurrency:
   group: ci-${{ github.ref }}
