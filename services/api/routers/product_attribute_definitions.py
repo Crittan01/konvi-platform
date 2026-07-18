@@ -100,7 +100,7 @@ def list_attribute_definitions(
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="attribute_definition", action="created")
-async def create_attribute_definition(
+def create_attribute_definition(
     definition: AttributeDefCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -143,7 +143,7 @@ async def create_attribute_definition(
 
 @router.patch("/{definition_id}", response_model=dict)
 @audit_log(entity_type="attribute_definition", action="updated")
-async def patch_attribute_definition(
+def patch_attribute_definition(
     definition_id: str,
     definition: AttributeDefPatch,
     request: Request,
@@ -179,7 +179,7 @@ async def patch_attribute_definition(
 
 @router.delete("/{definition_id}", status_code=204)
 @audit_log(entity_type="attribute_definition", action="deleted")
-async def delete_attribute_definition(
+def delete_attribute_definition(
     definition_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

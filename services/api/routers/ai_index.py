@@ -56,7 +56,7 @@ def _actor_from_jwt(request: Request) -> tuple[Optional[str], Optional[str]]:
 
 
 @router.post("/index-pending", response_model=dict, dependencies=[Depends(RL_AI_INDEX)])
-async def index_pending_kb_docs(
+def index_pending_kb_docs(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

@@ -78,7 +78,7 @@ def _payload(title="Jabón", category_id="cat-1", skus=("S1",)):
 
 
 async def _run(ctrl, payload):
-    return await bulk_import_products(payload=payload, request=_REQ, tenant_id=TID,
+    return bulk_import_products(payload=payload, request=_REQ, tenant_id=TID,
                                      supabase=ctrl, _role="owner")
 
 

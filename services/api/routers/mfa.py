@@ -109,7 +109,7 @@ def count_recovery_codes(
     action="mfa.recovery_codes_regenerated",
     capture_result=False,  # SEGURIDAD: el result trae plaintexts — NUNCA persistir.
 )
-async def regenerate_recovery_codes(
+def regenerate_recovery_codes(
     request: Request,
     sb: Client = Depends(get_service_client),
 ):
@@ -144,7 +144,7 @@ async def regenerate_recovery_codes(
 
 @router.post("/recovery-codes/verify", dependencies=[Depends(RL_MFA_VERIFY)])
 @audit_log(entity_type="mfa", action="mfa.recovery_code_verified")
-async def verify_recovery_code(
+def verify_recovery_code(
     body: VerifyCodeBody,
     request: Request,
     sb: Client = Depends(get_service_client),
@@ -177,7 +177,7 @@ async def verify_recovery_code(
 
 @router.delete("/recovery-codes/clear", dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="mfa", action="mfa.recovery_codes_cleared")
-async def clear_recovery_codes(
+def clear_recovery_codes(
     request: Request,
     sb: Client = Depends(get_service_client),
 ):
@@ -223,7 +223,7 @@ def _list_user_mfa_factors(sb: Client, user_id: str) -> list[dict]:
 
 @router.post("/recovery/reset-totp", dependencies=[Depends(RL_MFA_VERIFY)])
 @audit_log(entity_type="mfa", action="mfa.totp_reset_via_recovery")
-async def recovery_reset_totp(
+def recovery_reset_totp(
     body: RecoveryResetTotpBody,
     request: Request,
     sb: Client = Depends(get_service_client),
@@ -287,7 +287,7 @@ async def recovery_reset_totp(
     action="mfa.password_changed_via_recovery",
     capture_result=True,  # result = {"ok": true}; sin material sensible.
 )
-async def recovery_change_password(
+def recovery_change_password(
     body: RecoveryChangePasswordBody,
     request: Request,
     sb: Client = Depends(get_service_client),

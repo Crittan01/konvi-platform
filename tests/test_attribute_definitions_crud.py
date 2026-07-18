@@ -75,18 +75,18 @@ class _Ctrl:
 
 
 async def _create(ctrl, **kw):
-    return await create_attribute_definition(
+    return create_attribute_definition(
         definition=AttributeDefCreate(**kw), request=_REQ, tenant_id=TID, supabase=ctrl, _role="owner")
 
 
 async def _patch(ctrl, did, **kw):
-    return await patch_attribute_definition(
+    return patch_attribute_definition(
         definition_id=did, definition=AttributeDefPatch(**kw), request=_REQ,
         tenant_id=TID, supabase=ctrl, _role="owner")
 
 
 async def _delete(ctrl, did):
-    return await delete_attribute_definition(
+    return delete_attribute_definition(
         definition_id=did, request=_REQ, tenant_id=TID, supabase=ctrl, _role="owner")
 
 

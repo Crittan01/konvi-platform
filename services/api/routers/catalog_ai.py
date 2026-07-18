@@ -100,7 +100,7 @@ Devuelve EXCLUSIVAMENTE un objeto JSON: {{"description": "...", "safety_note": "
 
 
 @router.post("/suggest-content", response_model=SuggestContentResponse)
-async def suggest_product_content(
+def suggest_product_content(
     payload: SuggestContentRequest,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

@@ -126,10 +126,10 @@ class PiiAuditEndpointTests(unittest.TestCase):
             phone="+573001112233", name="Ana", email="ana@x.com",
             shipping_phone="+573009998877",
         )
-        body = asyncio.run(create_contact(
+        body = create_contact(
             contact=contact, request=_fake_request(),
             tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
-        ))
+        )
         self.assertEqual(body["id"], "contact-new")
         pii = _pii_inserts(sb)
         self.assertEqual(len(pii), 1)
@@ -145,10 +145,10 @@ class PiiAuditEndpointTests(unittest.TestCase):
     def test_patch_contact_logs_pii_access(self):
         sb = _FakeSupabase()
         patch_body = ContactPatch(name="Ana Maria", shipping_phone="+573001234567")
-        body = asyncio.run(patch_contact(
+        body = patch_contact(
             contact_id="contact-1", patch=patch_body, request=_fake_request(),
             tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
-        ))
+        )
         self.assertEqual(body["id"], "contact-1")
         pii = _pii_inserts(sb)
         self.assertEqual(len(pii), 1)
@@ -165,10 +165,10 @@ class PiiAuditEndpointTests(unittest.TestCase):
             consent_given=True, consent_source="manual_console",
             consent_channel="dashboard_console",
         )
-        asyncio.run(create_contact(
+        create_contact(
             contact=contact, request=_fake_request(),
             tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
-        ))
+        )
         inserts = [d for (n, op, d) in sb.ops if n == "contacts" and op == "insert"]
         self.assertEqual(len(inserts), 1)
         self.assertEqual(inserts[0]["consent_channel"], "dashboard_console")
@@ -178,10 +178,10 @@ class PiiAuditEndpointTests(unittest.TestCase):
         # Sin consent → consent_channel/actor null (no se estampan).
         sb = _FakeSupabase()
         contact = ContactCreate(phone="+573001112233", consent_channel="dashboard_console")
-        asyncio.run(create_contact(
+        create_contact(
             contact=contact, request=_fake_request(),
             tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
-        ))
+        )
         inserts = [d for (n, op, d) in sb.ops if n == "contacts" and op == "insert"]
         self.assertIsNone(inserts[0]["consent_channel"])
         self.assertIsNone(inserts[0]["consent_actor_email"])
@@ -189,11 +189,11 @@ class PiiAuditEndpointTests(unittest.TestCase):
     def test_patch_non_pii_only_no_audit(self):
         # Patch de solo 'notes' (no PII de contenido) → no pii_access_log.
         sb = _FakeSupabase()
-        body = asyncio.run(patch_contact(
+        body = patch_contact(
             contact_id="contact-1", patch=ContactPatch(notes="recordar llamar"),
             request=_fake_request(), tenant_id="tenant-A", supabase=sb,
             _role="manager", _rl=None,
-        ))
+        )
         self.assertEqual(body["id"], "contact-1")
         self.assertEqual(len(_pii_inserts(sb)), 0)
 

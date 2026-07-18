@@ -58,7 +58,7 @@ class DeadConsentEndpointsTests(unittest.TestCase):
         # escribe en audit_log y duplicaría el evento en la vista unificada). El
         # registro canónico es el insert directo en consent_audit_log.
         m = re.search(
-            r"((?:@[^\n]+\n)*)\s*async def reactivate_consent\(",
+            r"((?:@[^\n]+\n)*)\s*(?:async )?def reactivate_consent\(",
             CONTACTS_SRC,
         )
         self.assertIsNotNone(m, "no se encontró la definición de reactivate_consent")

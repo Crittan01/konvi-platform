@@ -460,7 +460,7 @@ async def link_listing(
 
 @router.delete("/link/{listing_id}", dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="marketplace_listing", action="deleted")
-async def unlink_listing(
+def unlink_listing(
     listing_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

@@ -75,7 +75,7 @@ def list_product_categories(
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="created")
-async def create_product_category(
+def create_product_category(
     category: ProductCategoryCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -119,7 +119,7 @@ async def create_product_category(
 
 @router.patch("/{category_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="updated")
-async def patch_product_category(
+def patch_product_category(
     category_id: str,
     category: ProductCategoryPatch,
     request: Request,
@@ -182,7 +182,7 @@ async def patch_product_category(
 
 @router.delete("/{category_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="deleted")
-async def delete_product_category(
+def delete_product_category(
     category_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

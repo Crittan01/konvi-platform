@@ -102,7 +102,7 @@ def validate_coupon(d: dict, *, require_code: bool) -> Optional[str]:
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="created")
-async def create_coupon(
+def create_coupon(
     coupon: CouponCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -146,7 +146,7 @@ async def create_coupon(
 
 @router.patch("/{coupon_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="updated")
-async def patch_coupon(
+def patch_coupon(
     coupon_id: str,
     coupon: CouponPatch,
     request: Request,
@@ -182,7 +182,7 @@ async def patch_coupon(
 
 @router.delete("/{coupon_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="deleted")
-async def delete_coupon(
+def delete_coupon(
     coupon_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

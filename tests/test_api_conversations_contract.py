@@ -144,7 +144,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         request = MagicMock()
         request.headers = {}
         with self.assertRaises(HTTPException) as ctx:
-            await conversations.update_conversation_status(
+            conversations.update_conversation_status(
                 conversation_id="c-1",
                 body=conversations.ConversationStatusUpdate(status="resolved"),
                 request=request,
@@ -165,7 +165,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         with patch("routers.conversations.begin_idempotency", return_value=(MagicMock(), None)), \
              patch("routers.conversations.finalize_idempotency"), \
              patch("routers.conversations.payload_fingerprint", return_value="fp"):
-            result = await conversations.update_conversation_status(
+            result = conversations.update_conversation_status(
                 conversation_id="c-1",
                 body=conversations.ConversationStatusUpdate(status="closed"),
                 request=request,

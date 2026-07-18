@@ -28,10 +28,9 @@ def _mock_sb(name="KAIU"):
 
 def _call(payload, result):
     with patch("lib.llm_suggest.run_suggestion", return_value=result):
-        return asyncio.new_event_loop().run_until_complete(
-            suggest_product_content(
-                payload=payload, tenant_id="t-1", supabase=_mock_sb(), _role="owner",
-            )
+        # suggest_product_content ahora es `def` (Wave 3 threadpool) → llamada directa.
+        return suggest_product_content(
+            payload=payload, tenant_id="t-1", supabase=_mock_sb(), _role="owner",
         )
 
 

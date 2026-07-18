@@ -9,6 +9,7 @@ Cubre:
 - entity_id se extrae de path params *_id o de result.id / result['id'].
 """
 import asyncio
+import inspect
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -153,6 +154,56 @@ class AuditLogDecoratorTests(unittest.IsolatedAsyncioTestCase):
             await fake_handler(request=MagicMock(), tenant_id="t", supabase=sb)
         # No insert (handler falló antes)
         sb.table.assert_not_called()
+
+
+class AuditLogDecoratorSyncTests(unittest.TestCase):
+    """async-agnostic (Wave 3): @audit_log ahora soporta handlers `def` (threadpool)."""
+
+    def test_wrapper_preserves_sync_nature(self):
+        # CLAVE: el wrapper de un handler def debe seguir siendo def (NO coroutine),
+        # si no Starlette no lo corre en el threadpool y no sirve para el HOL fix.
+        @audit_log(entity_type="x", action="y")
+        def sync_handler(**_):
+            return {}
+        self.assertFalse(inspect.iscoroutinefunction(sync_handler))
+
+    def test_wrapper_preserves_async_nature(self):
+        @audit_log(entity_type="x", action="y")
+        async def async_handler(**_):
+            return {}
+        self.assertTrue(inspect.iscoroutinefunction(async_handler))
+
+    def test_sync_handler_audits_after_success(self):
+        sb = MagicMock()
+
+        @audit_log(entity_type="product", action="updated")
+        def sync_handler(*, request, tenant_id, supabase, body):
+            return {"id": "prod-7"}
+
+        with patch("dependencies.audit._extract_jwt_payload", return_value={"sub": "u-1", "email": "u@x.com"}):
+            result = sync_handler(request=MagicMock(), tenant_id="t-1", supabase=sb, body={})
+        self.assertEqual(result["id"], "prod-7")
+        sb.table.assert_called_with("audit_log")
+        body = sb.table.return_value.insert.call_args.args[0]
+        self.assertEqual(body["entity_type"], "product")
+        self.assertEqual(body["action"], "updated")
+        self.assertEqual(body["entity_id"], "prod-7")
+
+    def test_sync_handler_skips_if_no_supabase(self):
+        @audit_log(entity_type="x", action="created")
+        def sync_handler(**_):
+            return {"id": "z"}
+        self.assertEqual(sync_handler()["id"], "z")
+
+    def test_sync_handler_propagates_exception(self):
+        sb = MagicMock()
+
+        @audit_log(entity_type="order", action="created")
+        def sync_handler(**_):
+            raise ValueError("boom")
+        with self.assertRaises(ValueError):
+            sync_handler(request=MagicMock(), tenant_id="t", supabase=sb)
+        sb.table.assert_not_called()  # no audita si el handler falló
 
 
 if __name__ == "__main__":

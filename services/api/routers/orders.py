@@ -127,7 +127,7 @@ class OrderPatch(BaseModel):
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="order", action="created")
-async def create_order(
+def create_order(
     order: OrderCreate,
     request: Request,
     # A0.2c dual-auth: acepta JWT user (Tenant Console) o INTERNAL_SERVICE_SECRET
@@ -364,7 +364,7 @@ def get_order(
 
 @router.patch("/{order_id}", response_model=dict)
 @audit_log(entity_type="order", action="updated")
-async def patch_order(
+def patch_order(
     order_id: str,
     patch: OrderPatch,
     request: Request,

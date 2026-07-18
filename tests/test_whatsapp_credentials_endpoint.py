@@ -64,7 +64,7 @@ def _payload():
 
 
 async def _run(ctrl, role="owner"):
-    return await upsert_whatsapp_credentials(
+    return upsert_whatsapp_credentials(
         payload=_payload(), request=_REQ, tenant_id=TID, supabase=ctrl, role=role)
 
 

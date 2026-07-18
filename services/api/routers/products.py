@@ -303,7 +303,7 @@ def list_products(
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="created")
-async def create_product(
+def create_product(
     product: ProductCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -384,7 +384,7 @@ async def create_product(
 
 @router.post("/bulk", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="created")
-async def bulk_import_products(
+def bulk_import_products(
     payload: BulkImport,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -495,7 +495,7 @@ def get_product(
 
 @router.patch("/{product_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="updated")
-async def patch_product(
+def patch_product(
     product_id: str,
     product: ProductPatch,
     request: Request,
@@ -556,7 +556,7 @@ async def patch_product(
 
 @router.patch("/{product_id}/variations/{variation_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="updated")
-async def patch_variation(
+def patch_variation(
     product_id: str,
     variation_id: str,
     variation: VariationPatch,
@@ -613,7 +613,7 @@ async def patch_variation(
 
 @router.post("/{product_id}/variations", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="created")
-async def add_variation(
+def add_variation(
     product_id: str,
     variation: VariationCreate,
     request: Request,
@@ -666,7 +666,7 @@ async def add_variation(
 
 @router.delete("/{product_id}/variations/{variation_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="deleted")
-async def delete_variation(
+def delete_variation(
     product_id: str,
     variation_id: str,
     request: Request,
@@ -713,7 +713,7 @@ async def delete_variation(
 
 @router.delete("/{product_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="deleted")
-async def delete_product(
+def delete_product(
     product_id: str,
     request: Request,
     hard: bool = Query(default=False),

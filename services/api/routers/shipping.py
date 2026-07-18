@@ -543,7 +543,7 @@ class RateSelection(BaseModel):
 
 
 @router.patch("/{shipment_id}/rate", response_model=dict)
-async def confirm_rate(
+def confirm_rate(
     shipment_id: str,
     rate: RateSelection,
     request: Request,
@@ -625,7 +625,7 @@ async def confirm_rate(
 
 
 @router.delete("/orphans", response_model=dict)
-async def purge_orphan_quotes(
+def purge_orphan_quotes(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
