@@ -34,9 +34,23 @@ else
 fi
 
 echo "[drift] levantando stack + replay-desde-cero de las migraciones…"
-supabase db start >/dev/null 2>&1 || true
-if ! supabase db reset >/dev/null 2>"$ROOT/.schema_drift_reset_err.log"; then
-  echo "::error::[drift] el replay de migraciones FALLÓ (db reset). Una migración no aplica limpio:" >&2
+# Arranque robusto: el contenedor de supabase a veces no queda listo en CI y el
+# 'db reset' falla aguas abajo con "supabase start is not running" — flake de infra,
+# NO de migración (visto en el push a production 2026-07-18, árbol idéntico a un PR
+# verde). Reintentar start+reset con limpieza entre intentos; solo un fallo real
+# persistente (migración que no aplica) tumba el gate.
+_replay_ok=false
+for attempt in 1 2 3; do
+  supabase db start >/dev/null 2>&1 || true
+  if supabase db reset >/dev/null 2>"$ROOT/.schema_drift_reset_err.log"; then
+    _replay_ok=true; break
+  fi
+  echo "[drift] intento $attempt: db reset falló — limpio el stack y reintento…" >&2
+  supabase stop --no-backup >/dev/null 2>&1 || true
+  sleep 5
+done
+if ! $_replay_ok; then
+  echo "::error::[drift] el replay de migraciones FALLÓ tras 3 intentos (db reset). Una migración no aplica limpio (o flake de infra persistente):" >&2
   tail -20 "$ROOT/.schema_drift_reset_err.log" >&2
   exit 1
 fi
