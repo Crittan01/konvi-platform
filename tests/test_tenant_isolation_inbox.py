@@ -90,7 +90,7 @@ class InboxTenantIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_conversations_filters_by_tenant(self):
         sb = _supabase_returning({"conversations": []})
-        await conversations.list_conversations(
+        conversations.list_conversations(
             tenant_id=self.TENANT_A, supabase=sb, status=None, limit=20, offset=0,
         )
         self.assertIn(self.TENANT_A, _all_tenant_id_filters(sb))

@@ -129,7 +129,7 @@ class CancelDeletionBody(BaseModel):
 
 
 @router.get("/status")
-async def offboarding_status(
+def offboarding_status(
     tenant_id: str = Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
 ):

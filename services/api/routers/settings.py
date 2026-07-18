@@ -138,7 +138,7 @@ class IdempotencyCleanupRequest(BaseModel):
 # ─── Tenant ───────────────────────────────────────────────────────────────────
 
 @router.get("/tenant", response_model=dict)
-async def get_tenant(
+def get_tenant(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
@@ -300,7 +300,7 @@ async def remove_team_member(
 # ─── Notifications ────────────────────────────────────────────────────────────
 
 @router.get("/notifications", response_model=list)
-async def get_notifications(
+def get_notifications(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
@@ -384,7 +384,7 @@ async def upsert_notification(
 
 
 @router.get("/plan-capabilities", response_model=dict)
-async def get_plan_capabilities(
+def get_plan_capabilities(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):

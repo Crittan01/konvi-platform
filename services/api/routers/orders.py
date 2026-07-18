@@ -334,7 +334,7 @@ async def create_order(
 
 
 @router.get("/{order_id}", response_model=dict)
-async def get_order(
+def get_order(
     order_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

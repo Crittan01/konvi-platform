@@ -176,7 +176,7 @@ def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
-async def list_claims(
+def list_claims(
     status: Optional[str] = Query(default=None),
     customer_id: Optional[str] = Query(default=None),
     order_id: Optional[str] = Query(default=None),
@@ -238,7 +238,7 @@ async def create_claim(
 
 
 @router.get("/{claim_id}", response_model=dict)
-async def get_claim(
+def get_claim(
     claim_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

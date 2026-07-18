@@ -53,7 +53,7 @@ class MaybeSingleNoneReturns404Tests(unittest.IsolatedAsyncioTestCase):
         supabase.table.return_value = chain
 
         with self.assertRaises(HTTPException) as ctx:
-            await claims.get_claim(
+            claims.get_claim(
                 claim_id="claim-missing", tenant_id="t-1", supabase=supabase,
             )
         self.assertEqual(ctx.exception.status_code, 404)
@@ -68,7 +68,7 @@ class MaybeSingleNoneReturns404Tests(unittest.IsolatedAsyncioTestCase):
             data={"id": "claim-1", "status": "open"},
         )
         supabase.table.return_value = chain
-        result = await claims.get_claim(
+        result = claims.get_claim(
             claim_id="claim-1", tenant_id="t-1", supabase=supabase,
         )
         self.assertEqual(result["id"], "claim-1")

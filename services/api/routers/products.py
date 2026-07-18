@@ -274,7 +274,7 @@ def _validate_attributes_against_contract(
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
-async def list_products(
+def list_products(
     status: Optional[str] = Query(default="active"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -468,7 +468,7 @@ async def bulk_import_products(
 
 
 @router.get("/{product_id}", response_model=dict)
-async def get_product(
+def get_product(
     product_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

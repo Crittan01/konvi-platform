@@ -139,7 +139,7 @@ def _compute_wac(old_stock: int, old_cost: float, po_qty: int, po_cost: float) -
 # ─── Endpoints: Suppliers ────────────────────────────────────────────────────
 
 @router.get("/suppliers", response_model=List[dict])
-async def list_suppliers(
+def list_suppliers(
     limit: int = Query(default=100, ge=1, le=500),
     include_inactive: bool = Query(default=False),
     tenant_id: str = Depends(get_current_tenant),
@@ -244,7 +244,7 @@ async def update_supplier(
 # ─── Endpoints: Purchase Orders ──────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
-async def list_purchase_orders(
+def list_purchase_orders(
     status: Optional[str] = Query(default=None),
     supplier_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -310,7 +310,7 @@ async def create_purchase_order(
 
 
 @router.get("/{po_id}", response_model=dict)
-async def get_purchase_order(
+def get_purchase_order(
     po_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

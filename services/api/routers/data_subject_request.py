@@ -567,7 +567,7 @@ def _render_export_html(payload: dict) -> str:
 
 
 @router.get("/{contact_id}/data-subject-request/printable", response_class=HTMLResponse)
-async def data_subject_request_printable(
+def data_subject_request_printable(
     contact_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

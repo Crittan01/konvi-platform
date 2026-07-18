@@ -44,7 +44,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         )
         supabase.table.return_value = query
 
-        result = await conversations.list_conversations(
+        result = conversations.list_conversations(
             tenant_id="t-1",
             supabase=supabase,
             status=None,
@@ -72,7 +72,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
             }
         ])
         supabase.table.return_value = query
-        await conversations.list_conversations(
+        conversations.list_conversations(
             tenant_id="t-1",
             supabase=supabase,
             status=None,
@@ -92,7 +92,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         catch-all convertía este 422 en 500.
         """
         with self.assertRaises(HTTPException) as ctx:
-            await conversations.list_conversations(
+            conversations.list_conversations(
                 tenant_id="t-1",
                 supabase=MagicMock(),
                 status="bogus",
@@ -112,7 +112,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
             {"status": "bot_active", "agentic_state": None},
         ])
         supabase.table.return_value = query
-        stats = await conversations.get_inbox_stats(tenant_id="t-1", supabase=supabase)
+        stats = conversations.get_inbox_stats(tenant_id="t-1", supabase=supabase)
         self.assertIn("agentic_state_counts", stats)
         counts = stats["agentic_state_counts"]
         self.assertEqual(counts["GREETING"], 1)
@@ -131,7 +131,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         ])
         supabase.table.return_value = query
 
-        stats = await conversations.get_inbox_stats(tenant_id="t-1", supabase=supabase)
+        stats = conversations.get_inbox_stats(tenant_id="t-1", supabase=supabase)
 
         self.assertEqual(stats["total"], 4)
         self.assertEqual(stats["bot_active"], 2)
