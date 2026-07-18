@@ -15,7 +15,8 @@ import * as Sentry from '@sentry/nextjs'
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
 
-  tracesSampleRate: Number(process.env.SENTRY_TRACES_RATE || 0.1),
+  // F97 fix — nombre canónico (el blueprint declara SENTRY_TRACES_SAMPLE_RATE, no *_RATE).
+  tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0.1),
 
   sendDefaultPii: false,
 
