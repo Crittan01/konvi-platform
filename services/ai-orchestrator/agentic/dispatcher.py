@@ -63,9 +63,54 @@ except Exception:  # pragma: no cover - import defensivo
     _NONTEXT_CONTENT_TYPES = frozenset({"document", "sticker", "location"})
 
 
+# Cache TTL del meta agentic per-tenant (perf rev. 114). Sus dos consumidores —el
+# gate is_tenant_agentic_enabled (@268) y los guardrails _load_tenant_agentic_meta
+# (@2914)— leían el MISMO row/columna → 2 queries idénticas por turno. Es config del
+# tenant (agentic_enabled + guardrails), NO verdad transaccional, no cambia
+# intra-conversación → cacheable. Dedup dentro del turno + reuso cross-turn (30s,
+# consistente con carrier_capabilities/tenant_payment_methods).
+_AGENTIC_META_CACHE: dict[str, tuple[float, dict]] = {}
+_AGENTIC_META_TTL_SECONDS = 30
+
+
+def _get_agentic_meta(supabase: Any, tenant_id: str) -> dict:
+    """Meta JSONB (cacheado 30s) del row tenant_integrations provider='agentic'.
+    Degrada a {} ante ausencia/error (comportamiento previo)."""
+    now = time.time()
+    cached = _AGENTIC_META_CACHE.get(tenant_id)
+    if cached and (now - cached[0]) < _AGENTIC_META_TTL_SECONDS:
+        return cached[1]
+    try:
+        res = (
+            supabase.table("tenant_integrations")
+            .select("meta")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "agentic")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        meta = (rows[0].get("meta") or {}) if rows else {}
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_META] error leyendo meta tenant=%s: %s — {}", tenant_id, exc,
+        )
+        meta = {}
+    _AGENTIC_META_CACHE[tenant_id] = (now, meta)
+    return meta
+
+
+def invalidate_agentic_meta_cache(tenant_id: Optional[str] = None) -> None:
+    """Invalida el cache de meta agentic (llamar tras cambiar agentic_enabled/guardrails)."""
+    if tenant_id is None:
+        _AGENTIC_META_CACHE.clear()
+    else:
+        _AGENTIC_META_CACHE.pop(tenant_id, None)
+
+
 async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
     """Lee `tenant_integrations.meta.agentic_enabled` del row dedicado
-    `provider='agentic'` del tenant.
+    `provider='agentic'` del tenant (cacheado 30s vía `_get_agentic_meta`).
 
     Default False si el row no existe (preserva backward compat — sin
     activación explícita, comportamiento legacy).
@@ -75,54 +120,17 @@ async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
     mezclar el flag en meta de otro provider. Esto evita race
     conditions en updates concurrentes a meta de otros providers.
     """
-    try:
-        res = (
-            supabase.table("tenant_integrations")
-            .select("meta")
-            .eq("tenant_id", tenant_id)
-            .eq("provider", "agentic")
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return False
-        meta = rows[0].get("meta") or {}
-        return bool(meta.get("agentic_enabled"))
-    except Exception as exc:
-        logger.warning(
-            "[AGENTIC_DISPATCH] error leyendo flag tenant=%s: %s — default False",
-            tenant_id, exc,
-        )
-        return False
+    return bool(_get_agentic_meta(supabase, tenant_id).get("agentic_enabled"))
 
 
 def _load_tenant_agentic_meta(supabase: Any, tenant_id: str) -> dict:
-    """Lee el `meta` JSONB del row `provider='agentic'` del tenant.
+    """Lee el `meta` JSONB del row `provider='agentic'` del tenant (cacheado 30s vía
+    `_get_agentic_meta`, compartido con el gate → dedup de la 2ª lectura por turno).
 
-    F5 bot_engine — fuente de los guardrails per-tenant (meta.guardrails). Sync
-    (se llama dentro del path cutover, no en hot loop). Degrada seguro a {} si
-    el row no existe o hay error → sin restricción (comportamiento previo).
+    F5 bot_engine — fuente de los guardrails per-tenant (meta.guardrails). Degrada
+    seguro a {} si el row no existe o hay error → sin restricción (comportamiento previo).
     """
-    try:
-        res = (
-            supabase.table("tenant_integrations")
-            .select("meta")
-            .eq("tenant_id", tenant_id)
-            .eq("provider", "agentic")
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return {}
-        return rows[0].get("meta") or {}
-    except Exception as exc:
-        logger.warning(
-            "[TENANT_GUARDRAILS] error leyendo meta tenant=%s: %s — {}",
-            tenant_id, exc,
-        )
-        return {}
+    return _get_agentic_meta(supabase, tenant_id)
 
 
 try:
