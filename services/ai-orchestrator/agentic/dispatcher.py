@@ -782,6 +782,47 @@ class TenantPromptContext:
     after_hours_message: Optional[str] = None
 
 
+# Cache TTL del row de config del tenant (perf rev. 114). `tenants` (identity +
+# philosophy + business_ops) es config que NO cambia intra-conversación → cacheable
+# (mismo patrón que carrier_capabilities/tenant_payment_methods). Solo se cachean
+# lecturas EXITOSAS: ante fallo se propaga la excepción SIN cachear, para que el
+# próximo turno reintente y el bot no quede 30s sin datos (lección A6.2.1).
+_TENANT_ROW_CACHE: dict[str, tuple[float, dict]] = {}
+_TENANT_ROW_TTL_SECONDS = 30
+_TENANT_ROW_SELECT = (
+    "name, business_pitch, tono_comunicacion, "
+    "mision, vision, valores, "
+    # A2 finiquito 2026-06-23 — business_ops block.
+    "shipping_origin, store_locations, store_type, "
+    "support_schedule, social_links, after_hours_message"
+)
+
+
+def _fetch_tenant_row(supabase: Any, tenant_id: str) -> dict:
+    """Row de config del tenant `tenants` (cacheado 30s). Raise (sin cachear) si la
+    query falla → el caller lo maneja/loguea y el próximo turno reintenta."""
+    now = time.time()
+    cached = _TENANT_ROW_CACHE.get(tenant_id)
+    if cached and (now - cached[0]) < _TENANT_ROW_TTL_SECONDS:
+        return cached[1]
+    ten_row = (
+        supabase.table("tenants")
+        .select(_TENANT_ROW_SELECT)
+        .eq("id", tenant_id).single().execute()
+    )
+    td = ten_row.data or {}
+    _TENANT_ROW_CACHE[tenant_id] = (now, td)
+    return td
+
+
+def invalidate_tenant_row_cache(tenant_id: Optional[str] = None) -> None:
+    """Invalida el cache de config de tenant (tras editar identity/business_ops)."""
+    if tenant_id is None:
+        _TENANT_ROW_CACHE.clear()
+    else:
+        _TENANT_ROW_CACHE.pop(tenant_id, None)
+
+
 def _load_tenant_prompt_context(
     supabase: Any,
     tenant_id: str,
@@ -799,35 +840,7 @@ def _load_tenant_prompt_context(
     """
     ctx = TenantPromptContext(name=default_name)
     try:
-        ten_row = (
-            supabase.table("tenants")
-            .select(
-                "name, business_pitch, tono_comunicacion, "
-                "mision, vision, valores, "
-                # A2 finiquito 2026-06-23 — business_ops block.
-                "shipping_origin, store_locations, store_type, "
-                "support_schedule, social_links, after_hours_message",
-            )
-            .eq("id", tenant_id).single().execute()
-        )
-        td = ten_row.data or {}
-        ctx.name = td.get("name") or ctx.name
-        ctx.pitch = td.get("business_pitch") or None
-        ctx.tone = td.get("tono_comunicacion") or None
-        # Rev. 109 auditoría — inyectar filosofía completa al system_prompt.
-        if any(td.get(k) for k in ("mision", "vision", "valores")):
-            ctx.philosophy = {
-                "mision": td.get("mision"),
-                "vision": td.get("vision"),
-                "valores": td.get("valores"),
-            }
-        # A2 finiquito — business_ops fields.
-        ctx.shipping_origin = td.get("shipping_origin") or None
-        ctx.store_locations = td.get("store_locations") or None
-        ctx.store_type = td.get("store_type") or None
-        ctx.support_schedule = td.get("support_schedule") or None
-        ctx.social_links = td.get("social_links") or None
-        ctx.after_hours_message = td.get("after_hours_message") or None
+        td = _fetch_tenant_row(supabase, tenant_id)
     except Exception as exc:
         # A6.2.1 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap):
         # ANTES `except: pass` silenciaba fallos DB → TODOS los kwargs
@@ -840,6 +853,25 @@ def _load_tenant_prompt_context(
             "%s: %s",
             tenant_id, type(exc).__name__, exc,
         )
+        return ctx
+    # Composición pura desde el row (cacheado) — no puede fallar, va fuera del try.
+    ctx.name = td.get("name") or ctx.name
+    ctx.pitch = td.get("business_pitch") or None
+    ctx.tone = td.get("tono_comunicacion") or None
+    # Rev. 109 auditoría — inyectar filosofía completa al system_prompt.
+    if any(td.get(k) for k in ("mision", "vision", "valores")):
+        ctx.philosophy = {
+            "mision": td.get("mision"),
+            "vision": td.get("vision"),
+            "valores": td.get("valores"),
+        }
+    # A2 finiquito — business_ops fields.
+    ctx.shipping_origin = td.get("shipping_origin") or None
+    ctx.store_locations = td.get("store_locations") or None
+    ctx.store_type = td.get("store_type") or None
+    ctx.support_schedule = td.get("support_schedule") or None
+    ctx.social_links = td.get("social_links") or None
+    ctx.after_hours_message = td.get("after_hours_message") or None
     return ctx
 
 

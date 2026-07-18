@@ -26,6 +26,7 @@ sys.path.insert(
 
 from agentic.dispatcher import (  # noqa: E402
     _load_tenant_prompt_context,
+    invalidate_tenant_row_cache,
     TenantPromptContext,
 )
 
@@ -77,6 +78,11 @@ KAIU_ROW = {
 
 
 class LoadOkTests(unittest.TestCase):
+    def setUp(self):
+        # _load_tenant_prompt_context cachea el row (perf rev. 114). Estos tests
+        # reusan tenant_ids con mocks distintos → resetear el cache entre cada uno.
+        invalidate_tenant_row_cache()
+
     def test_loads_all_fields_when_db_ok(self):
         sb = _FakeSupabase(data=KAIU_ROW)
         ctx = _load_tenant_prompt_context(sb, "tenant-kaiu")
@@ -111,6 +117,9 @@ class LoadOkTests(unittest.TestCase):
 
 class DegradationTests(unittest.TestCase):
     """A6.2.1 core — DB raises NO debe tumbar el turno + DEBE emitir warning."""
+
+    def setUp(self):
+        invalidate_tenant_row_cache()
 
     def test_db_exception_returns_defaults_not_raise(self):
         sb = _FakeSupabase(raise_exc=RuntimeError("supabase timeout"))
@@ -155,6 +164,59 @@ class DegradationTests(unittest.TestCase):
         # Solo el sentinel, ningún AGENTIC_TENANT_LOAD
         tenant_load_logs = [m for m in cm.output if "AGENTIC_TENANT_LOAD" in m]
         self.assertEqual(tenant_load_logs, [])
+
+
+class TenantRowCacheTests(unittest.TestCase):
+    """Cache TTL del row de tenant (perf rev. 114): hit sin re-query, invalidación,
+    y NO cachea errores (self-heal — lección A6.2.1)."""
+
+    def setUp(self):
+        invalidate_tenant_row_cache()
+
+    def test_second_call_hits_cache_no_requery(self):
+        from agentic.dispatcher import _fetch_tenant_row
+        counter = {"n": 0}
+
+        class _Q:
+            def select(self, *a, **k):
+                return self
+
+            def eq(self, *a, **k):
+                return self
+
+            def single(self):
+                return self
+
+            def execute(self):
+                counter["n"] += 1
+                return SimpleNamespace(data=KAIU_ROW)
+
+        class _SB:
+            def table(self, name):
+                return _Q()
+
+        sb = _SB()
+        _fetch_tenant_row(sb, "t-cache")
+        _fetch_tenant_row(sb, "t-cache")
+        self.assertEqual(counter["n"], 1, "la 2ª lectura debía dar cache-hit")
+
+    def test_error_not_cached_self_heals(self):
+        from agentic.dispatcher import _fetch_tenant_row
+        with self.assertRaises(RuntimeError):
+            _fetch_tenant_row(_FakeSupabase(raise_exc=RuntimeError("boom")), "t-heal")
+        # El error NO quedó cacheado → un supabase sano re-consulta y trae el row.
+        td = _fetch_tenant_row(_FakeSupabase(data=KAIU_ROW), "t-heal")
+        self.assertEqual(td["name"], "KAIU Living Natural")
+
+    def test_invalidate_forces_refetch(self):
+        from agentic.dispatcher import _fetch_tenant_row
+        self.assertEqual(
+            _fetch_tenant_row(_FakeSupabase(data={"name": "A"}), "t-inv")["name"], "A",
+        )
+        invalidate_tenant_row_cache("t-inv")
+        self.assertEqual(
+            _fetch_tenant_row(_FakeSupabase(data={"name": "B"}), "t-inv")["name"], "B",
+        )
 
 
 if __name__ == "__main__":
