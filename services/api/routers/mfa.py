@@ -84,7 +84,7 @@ class RecoveryChangePasswordBody(BaseModel):
 
 
 @router.get("/recovery-codes/count")
-async def count_recovery_codes(
+def count_recovery_codes(
     request: Request,
     sb: Client = Depends(get_service_client),
 ):

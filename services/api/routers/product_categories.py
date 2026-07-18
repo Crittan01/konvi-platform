@@ -37,7 +37,7 @@ class ProductCategoryPatch(BaseModel):
 
 
 @router.get("/", response_model=List[dict])
-async def list_product_categories(
+def list_product_categories(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):

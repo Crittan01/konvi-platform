@@ -89,7 +89,7 @@ def _strip_embedding(row: dict) -> dict:
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
-async def list_kb_docs(
+def list_kb_docs(
     category: Optional[str] = Query(default=None),
     is_active: Optional[bool] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
@@ -165,7 +165,7 @@ async def create_kb_doc(
 
 
 @router.get("/{doc_id}", response_model=dict)
-async def get_kb_doc(
+def get_kb_doc(
     doc_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

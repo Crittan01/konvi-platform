@@ -103,7 +103,7 @@ class TemplateInfo(BaseModel):
 
 
 @router.get("/templates", response_model=list[TemplateInfo])
-async def list_agent_templates() -> list[TemplateInfo]:
+def list_agent_templates() -> list[TemplateInfo]:
     """Lista los templates disponibles. Endpoint público (no requiere
     tenant — los templates son globales)."""
     from lib.agent_templates import AGENT_TEMPLATES

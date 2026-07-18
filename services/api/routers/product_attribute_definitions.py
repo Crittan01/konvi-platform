@@ -77,7 +77,7 @@ def _validate_type(t: str) -> None:
 
 
 @router.get("/", response_model=List[dict])
-async def list_attribute_definitions(
+def list_attribute_definitions(
     product_category_id: Optional[str] = None,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

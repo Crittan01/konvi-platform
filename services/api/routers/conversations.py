@@ -162,7 +162,7 @@ async def get_inbound_media(
 
 
 @router.get("/stats")
-async def get_inbox_stats(
+def get_inbox_stats(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
@@ -210,7 +210,7 @@ async def get_inbox_stats(
 
 
 @router.get("/", response_model=List[dict])
-async def list_conversations(
+def list_conversations(
     status: Optional[str] = Query(default=None),
     agentic_state: Optional[str] = Query(
         default=None,
@@ -281,7 +281,7 @@ async def list_conversations(
 
 
 @router.get("/{conversation_id}", response_model=dict)
-async def get_conversation(
+def get_conversation(
     conversation_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
@@ -316,7 +316,7 @@ async def get_conversation(
 
 
 @router.get("/{conversation_id}/messages", response_model=List[dict])
-async def get_conversation_messages(
+def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -362,7 +362,7 @@ async def get_conversation_messages(
 
 
 @router.get("/{conversation_id}/context", response_model=dict)
-async def get_conversation_context(
+def get_conversation_context(
     conversation_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
@@ -1025,7 +1025,7 @@ def _extract_user_id(request: Request) -> str:
 
 
 @router.get("/{conversation_id}/notes", response_model=List[dict])
-async def list_conversation_notes(
+def list_conversation_notes(
     conversation_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
@@ -1548,7 +1548,7 @@ def shape_cart(cart: dict, items: list[dict], title_map: dict) -> dict:
 
 
 @router.get("/{conversation_id}/cart", response_model=dict)
-async def get_conversation_cart(
+def get_conversation_cart(
     conversation_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

@@ -153,7 +153,7 @@ async def upsert_whatsapp_credentials(
 
 
 @router.get("/", response_model=list)
-async def list_integrations(
+def list_integrations(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
@@ -196,7 +196,7 @@ async def list_integrations(
 # ── MeLi ───────────────────────────────────────────────────────────────────
 
 @router.get("/meli/auth-url")
-async def get_meli_auth_url(
+def get_meli_auth_url(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
@@ -848,7 +848,7 @@ def _build_aveonline_webhook_url(tenant_id: str) -> str:
 
 
 @router.get("/aveonline/webhook")
-async def aveonline_webhook_status(
+def aveonline_webhook_status(
     tenant_id: str = Depends(get_current_tenant),
     role: str = Depends(get_current_role),
     supabase: Client = Depends(get_service_client),
@@ -1070,7 +1070,7 @@ async def aveonline_webhook_delete(
 
 
 @router.get("/aveonline/carriers", response_model=list)
-async def list_aveonline_carriers(
+def list_aveonline_carriers(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):

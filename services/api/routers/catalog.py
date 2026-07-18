@@ -55,7 +55,7 @@ def shape_catalog_product(p: dict, category_label: Optional[str]) -> dict:
 
 
 @router.get("/", response_model=List[dict])
-async def get_catalog(
+def get_catalog(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     tenant_id: str = Depends(get_current_tenant),
@@ -94,7 +94,7 @@ async def get_catalog(
 
 
 @router.get("/categories", response_model=List[dict])
-async def get_catalog_categories(
+def get_catalog_categories(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
