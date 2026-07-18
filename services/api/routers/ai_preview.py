@@ -150,7 +150,7 @@ def _run_cascade(system_prompt: str, message: str) -> Optional[str]:
 
 
 @router.post("/preview", response_model=dict, dependencies=[Depends(RL_AI_PREVIEW)])
-async def preview_bot_response(
+def preview_bot_response(
     body: PreviewRequest,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

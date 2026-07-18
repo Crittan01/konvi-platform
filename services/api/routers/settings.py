@@ -167,7 +167,7 @@ def get_tenant(
 
 @router.patch("/tenant", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="settings", action="updated")
-async def patch_tenant(
+def patch_tenant(
     patch: TenantPatch,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -231,7 +231,7 @@ async def patch_tenant(
 
 @router.patch("/team/{member_user_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="team_member", action="role_changed")
-async def patch_team_member(
+def patch_team_member(
     member_user_id: str,
     patch: TeamRolePatch,
     request: Request,
@@ -269,7 +269,7 @@ async def patch_team_member(
 
 @router.delete("/team/{member_user_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="team_member", action="deleted")
-async def remove_team_member(
+def remove_team_member(
     member_user_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -320,7 +320,7 @@ def get_notifications(
 
 @router.put("/notifications/{channel}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="settings", action="updated")
-async def upsert_notification(
+def upsert_notification(
     channel: str,
     cfg: NotificationConfig,
     request: Request,
@@ -404,7 +404,7 @@ def get_plan_capabilities(
 
 
 @router.post("/maintenance/idempotency-cleanup", response_model=dict)
-async def cleanup_idempotency(
+def cleanup_idempotency(
     body: IdempotencyCleanupRequest,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

@@ -200,7 +200,7 @@ def list_claims(
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="created")
-async def create_claim(
+def create_claim(
     body: ClaimCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -314,7 +314,7 @@ def _notify_client_claim_outcome(supabase, *, claim: dict, tenant_id: str, enabl
 
 @router.patch("/{claim_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="updated")
-async def patch_claim(
+def patch_claim(
     claim_id: str,
     patch: ClaimPatch,
     request: Request,
@@ -403,7 +403,7 @@ async def patch_claim(
 
 @router.post("/{claim_id}/resolve", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="status_changed")
-async def resolve_claim(
+def resolve_claim(
     claim_id: str,
     body: ClaimResolve,
     request: Request,

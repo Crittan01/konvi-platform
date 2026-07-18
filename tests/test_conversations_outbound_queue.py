@@ -104,7 +104,7 @@ class ConversationsOutboundQueueTests(unittest.IsolatedAsyncioTestCase):
         with patch("routers.conversations.begin_idempotency", return_value=(MagicMock(), None)), \
              patch("routers.conversations.finalize_idempotency"), \
              patch("routers.conversations.payload_fingerprint", return_value="fp"):
-            result = await conversations.send_agent_message(
+            result = conversations.send_agent_message(
                 conversation_id="c-1",
                 body=conversations.AgentMessageRequest(text="hola"),
                 request=request,

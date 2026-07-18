@@ -137,7 +137,7 @@ class OwnerDowngradeProtectionTests(unittest.IsolatedAsyncioTestCase):
         request = MagicMock()
         request.headers = {}
         with self.assertRaises(HTTPException) as ctx:
-            await settings_router.patch_team_member(
+            settings_router.patch_team_member(
                 member_user_id="owner-uid",
                 patch=TeamRolePatch(role="operator"),
                 request=request,
@@ -157,7 +157,7 @@ class OwnerDowngradeProtectionTests(unittest.IsolatedAsyncioTestCase):
         supabase.table.return_value = query
         request = MagicMock()
         request.headers = {}
-        result = await settings_router.patch_team_member(
+        result = settings_router.patch_team_member(
             member_user_id="u-2",
             patch=TeamRolePatch(role="manager"),
             request=request,

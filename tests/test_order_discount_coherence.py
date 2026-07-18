@@ -78,7 +78,7 @@ class _Ctrl:
 
 
 async def _create(ctrl, payload):
-    return await orders_mod.create_order(
+    return orders_mod.create_order(
         order=payload, request=_REQ, tenant_id="t1", supabase=ctrl, _role="manager",
     )
 

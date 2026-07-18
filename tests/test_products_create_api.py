@@ -90,7 +90,7 @@ class _Ctrl:
 
 
 async def _create(supabase, product):
-    return await create_product(
+    return create_product(
         product=product, request=_REQ, tenant_id=TID, supabase=supabase, _role="owner",
     )
 

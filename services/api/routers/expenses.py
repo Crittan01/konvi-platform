@@ -37,7 +37,7 @@ class ExpenseReverse(BaseModel):
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="expense", action="created")
-async def create_expense(
+def create_expense(
     expense: ExpenseCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -67,7 +67,7 @@ async def create_expense(
 
 @router.post("/{expense_id}/reverse", response_model=dict)
 @audit_log(entity_type="expense", action="reversed")
-async def reverse_expense(
+def reverse_expense(
     expense_id: str,
     body: ExpenseReverse,
     request: Request,

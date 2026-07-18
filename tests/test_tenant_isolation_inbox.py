@@ -103,7 +103,7 @@ class InboxTenantIsolationTests(unittest.IsolatedAsyncioTestCase):
             "last_interaction_at": "2026-04-28T00:00:00Z",
         }]})
         try:
-            await conversations.get_conversation("c-A", tenant_id=self.TENANT_A, supabase=sb)
+            conversations.get_conversation("c-A", tenant_id=self.TENANT_A, supabase=sb)
         except HTTPException:
             pass
         self.assertIn(self.TENANT_A, _all_tenant_id_filters(sb))
@@ -126,7 +126,7 @@ class InboxTenantIsolationTests(unittest.IsolatedAsyncioTestCase):
             request = MagicMock()
             request.headers = {}
             try:
-                await conversations.send_agent_message(
+                conversations.send_agent_message(
                     conversation_id="c-A",
                     body=conversations.AgentMessageRequest(text="hola"),
                     request=request,
@@ -151,7 +151,7 @@ class InboxTenantIsolationTests(unittest.IsolatedAsyncioTestCase):
             request = MagicMock()
             request.headers = {}
             try:
-                await conversations.update_conversation_status(
+                conversations.update_conversation_status(
                     conversation_id="c-A",
                     body=conversations.ConversationStatusUpdate(status="human_takeover"),
                     request=request,

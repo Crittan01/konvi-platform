@@ -75,7 +75,7 @@ class TenantScopingTests(unittest.IsolatedAsyncioTestCase):
             url=types.SimpleNamespace(path="/api/v1/orders/"),
         )
 
-        await orders.create_order(
+        orders.create_order(
             order=payload,
             request=fake_request,
             tenant_id="tenant-abc",

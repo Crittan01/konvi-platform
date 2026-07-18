@@ -146,7 +146,7 @@ def offboarding_status(
 
 
 @router.post("/export", dependencies=[Depends(RL_OFFBOARDING_EXPORT), Depends(enforce_mfa_strict)])
-async def export_data(
+def export_data(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
@@ -196,7 +196,7 @@ async def export_data(
 
 
 @router.post("/request-deletion", dependencies=[Depends(RL_OFFBOARDING_DELETION), Depends(enforce_mfa_strict)])
-async def request_deletion(
+def request_deletion(
     body: RequestDeletionBody,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -267,7 +267,7 @@ async def request_deletion(
 
 
 @router.post("/cancel-deletion", dependencies=[Depends(RL_WRITE_DEFAULT)])
-async def cancel_deletion(
+def cancel_deletion(
     body: CancelDeletionBody,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

@@ -112,7 +112,7 @@ def list_kb_docs(
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="created")
-async def create_kb_doc(
+def create_kb_doc(
     body: KbDocCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -185,7 +185,7 @@ def get_kb_doc(
 
 @router.patch("/{doc_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="updated")
-async def patch_kb_doc(
+def patch_kb_doc(
     doc_id: str,
     patch: KbDocPatch,
     request: Request,
@@ -240,7 +240,7 @@ async def patch_kb_doc(
 
 @router.delete("/{doc_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="deleted")
-async def delete_kb_doc(
+def delete_kb_doc(
     doc_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -262,7 +262,7 @@ async def delete_kb_doc(
 
 @router.post("/{doc_id}/reindex", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="updated")
-async def reindex_kb_doc(
+def reindex_kb_doc(
     doc_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

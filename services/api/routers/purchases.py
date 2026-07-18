@@ -167,7 +167,7 @@ def list_suppliers(
 
 @router.post("/suppliers", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="supplier", action="created")
-async def create_supplier(
+def create_supplier(
     body: SupplierCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -192,7 +192,7 @@ _MISSING_COLUMN_HINTS = ("is_active", "column", "schema cache", "pgrst204", "427
 
 @router.patch("/suppliers/{supplier_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="supplier", action="updated")
-async def update_supplier(
+def update_supplier(
     supplier_id: str,
     body: SupplierUpdate,
     request: Request,
@@ -268,7 +268,7 @@ def list_purchase_orders(
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="created")
-async def create_purchase_order(
+def create_purchase_order(
     body: PurchaseOrderCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -338,7 +338,7 @@ def get_purchase_order(
 
 @router.patch("/{po_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="updated")
-async def update_purchase_order(
+def update_purchase_order(
     po_id: str,
     body: PurchaseOrderUpdate,
     request: Request,
@@ -419,7 +419,7 @@ async def update_purchase_order(
 
 @router.post("/{po_id}/cancel", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="status_changed")
-async def cancel_purchase_order(
+def cancel_purchase_order(
     po_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -445,7 +445,7 @@ async def cancel_purchase_order(
 
 @router.post("/{po_id}/receive", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="status_changed")
-async def receive_purchase_order(
+def receive_purchase_order(
     po_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),

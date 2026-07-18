@@ -710,7 +710,7 @@ def get_conversation_context(
 
 @router.patch("/{conversation_id}/status", response_model=dict)
 @audit_log(entity_type="conversation", action="status_changed")
-async def update_conversation_status(
+def update_conversation_status(
     conversation_id: str,
     body: ConversationStatusUpdate,
     request: Request,
@@ -839,7 +839,7 @@ def _check_24h_window_or_raise(supabase: Client, tenant_id: str, conversation_id
 
 @router.post("/{conversation_id}/send", response_model=dict)
 @audit_log(entity_type="conversation", action="message_sent")
-async def send_agent_message(
+def send_agent_message(
     conversation_id: str,
     body: AgentMessageRequest,
     request: Request,
@@ -1061,7 +1061,7 @@ def list_conversation_notes(
 
 @router.post("/{conversation_id}/notes", response_model=dict, status_code=201)
 @audit_log(entity_type="conversation", action="note_created")
-async def create_conversation_note(
+def create_conversation_note(
     conversation_id: str,
     body: NoteCreate,
     request: Request,
@@ -1215,7 +1215,7 @@ async def delete_conversation_note(
 
 @router.post("/{conversation_id}/rerun", response_model=dict, status_code=202)
 @audit_log(entity_type="conversation", action="reprocessed")
-async def rerun_last_inbound(
+def rerun_last_inbound(
     conversation_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -1337,7 +1337,7 @@ async def rerun_last_inbound(
 
 @router.post("/{conversation_id}/send-image", response_model=dict)
 @audit_log(entity_type="conversation", action="image_sent")
-async def send_agent_image(
+def send_agent_image(
     conversation_id: str,
     body: AgentImageRequest,
     request: Request,

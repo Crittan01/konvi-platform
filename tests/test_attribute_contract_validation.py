@@ -155,7 +155,7 @@ class _CtrlFull:
 
 class CreateProductContractE2ETests(unittest.IsolatedAsyncioTestCase):
     async def _create(self, ctrl, product):
-        return await create_product(product=product, request=_REQ, tenant_id=TID,
+        return create_product(product=product, request=_REQ, tenant_id=TID,
                                     supabase=ctrl, _role="owner")
 
     async def test_create_rejects_out_of_contract_attribute(self):

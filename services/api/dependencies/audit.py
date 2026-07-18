@@ -44,6 +44,7 @@ Entity types canónicos (alineado con plan rev. 72):
 - order, contact, product, variation, claim, purchase_order, supplier,
   kb_doc, settings, integration, team_member.
 """
+import inspect
 import logging
 from functools import wraps
 from typing import Any, Callable, Optional
@@ -165,10 +166,9 @@ def audit_log(
     `payload` se guarda como None — el audit registra la ACCIÓN, no el secreto.
     """
     def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            result = await func(*args, **kwargs)
-
+        def _persist_audit(result: Any, kwargs: dict) -> None:
+            """Lógica de audit compartida (síncrona — write_audit_event ya es sync).
+            Corre DESPUÉS de que el handler retorna OK; si falla no rompe el handler."""
             request: Optional[Request] = kwargs.get("request")
             supabase = kwargs.get("supabase") or kwargs.get("sb")
             tenant_id = kwargs.get("tenant_id") or _extract_tenant_from_request(request)
@@ -178,7 +178,7 @@ def audit_log(
                     "[AUDIT] skip — handler sin supabase/tenant_id (entity=%s action=%s).",
                     entity_type, action,
                 )
-                return result
+                return
 
             user_id, user_email = _extract_user_info(request)
             entity_id = _extract_entity_id(kwargs, result)
@@ -194,6 +194,22 @@ def audit_log(
                 user_email=user_email,
                 payload=payload,
             )
+
+        # async-agnostic (perf rev. 114): soporta handlers `def` (threadpool) además de
+        # `async def`. Antes asumía async (`await func`) → bloqueaba convertir sus handlers
+        # a `def` para sacarlos del event loop (Wave 3). Comportamiento async idéntico.
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                result = await func(*args, **kwargs)
+                _persist_audit(result, kwargs)
+                return result
+            return async_wrapper
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
+            _persist_audit(result, kwargs)
             return result
-        return wrapper
+        return sync_wrapper
     return decorator

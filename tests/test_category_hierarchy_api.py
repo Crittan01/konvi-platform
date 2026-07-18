@@ -91,12 +91,12 @@ class _Ctrl:
 
 
 async def _create(ctrl, **kw):
-    return await create_product_category(
+    return create_product_category(
         category=ProductCategoryCreate(**kw), request=_REQ, tenant_id=TID, supabase=ctrl, _role="owner")
 
 
 async def _patch(ctrl, cid, **kw):
-    return await patch_product_category(
+    return patch_product_category(
         category_id=cid, category=ProductCategoryPatch(**kw), request=_REQ,
         tenant_id=TID, supabase=ctrl, _role="owner")
 

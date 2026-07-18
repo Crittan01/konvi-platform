@@ -123,7 +123,7 @@ def list_agent_templates() -> list[TemplateInfo]:
     response_model=SuggestResponse,
     dependencies=[Depends(RL_AI_SUGGEST)],  # LLM costoso — tope por tenant+user+IP
 )
-async def suggest_agent_prompt(
+def suggest_agent_prompt(
     body: SuggestRequest,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

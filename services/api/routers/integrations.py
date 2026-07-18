@@ -90,7 +90,7 @@ def _mask_token(token: str) -> str:
 
 @router.post("/whatsapp/credentials", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])  # F25: escribe secretos a Vault
 @audit_log(entity_type="integration", action="connected")
-async def upsert_whatsapp_credentials(
+def upsert_whatsapp_credentials(
     payload: WhatsAppCredentialsInput,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -405,7 +405,7 @@ async def disconnect_meli(
 
 @router.delete("/telegram/identity", status_code=204)
 @audit_log(entity_type="integration", action="disconnected")
-async def revoke_telegram_identity(
+def revoke_telegram_identity(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
@@ -1091,7 +1091,7 @@ def list_aveonline_carriers(
 
 
 @router.put("/aveonline/carriers", response_model=dict)
-async def bulk_upsert_aveonline_carriers(
+def bulk_upsert_aveonline_carriers(
     body: AveonlineCarriersBulk,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
@@ -1148,7 +1148,7 @@ async def bulk_upsert_aveonline_carriers(
 
 
 @router.delete("/aveonline/carriers/{carrier_code}", status_code=204)
-async def delete_aveonline_carrier(
+def delete_aveonline_carrier(
     carrier_code: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

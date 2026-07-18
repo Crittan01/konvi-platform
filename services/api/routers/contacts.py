@@ -275,7 +275,7 @@ def _compute_consent_update(
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="contact", action="created")
-async def create_contact(
+def create_contact(
     contact: ContactCreate,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -392,7 +392,7 @@ async def create_contact(
 
 @router.patch("/{contact_id}", response_model=dict)
 @audit_log(entity_type="contact", action="updated")
-async def patch_contact(
+def patch_contact(
     contact_id: str,
     patch: ContactPatch,
     request: Request,
@@ -559,7 +559,7 @@ class ReactivateConsent(BaseModel):
 
 
 @router.post("/{contact_id}/reactivate-consent", response_model=dict)
-async def reactivate_consent(
+def reactivate_consent(
     contact_id: str,
     body: ReactivateConsent,
     request: Request,
@@ -715,7 +715,7 @@ async def reactivate_consent(
 
 @router.post("/{contact_id}/purge", response_model=dict)
 @audit_log(entity_type="contact", action="purged")
-async def purge_contact(
+def purge_contact(
     contact_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
@@ -835,7 +835,7 @@ async def purge_contact(
 
 @router.delete("/{contact_id}", response_model=dict)
 @audit_log(entity_type="contact", action="deleted")
-async def delete_contact(
+def delete_contact(
     contact_id: str,
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
