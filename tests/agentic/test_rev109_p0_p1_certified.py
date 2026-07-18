@@ -442,8 +442,10 @@ class TestBacklog2MultiAgente:
 
     def setup_method(self):
         sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
-        from lib.tenant_agents import get_active_agent
+        from lib.tenant_agents import get_active_agent, invalidate_agents_cache
         self._get = get_active_agent
+        # list_tenant_agents cachea (perf rev. 114) → aislar entre tests.
+        invalidate_agents_cache()
 
     def _mock_sb(self, rows):
         class MockResult:
@@ -453,6 +455,7 @@ class TestBacklog2MultiAgente:
             def select(self, *a, **k): return self
             def eq(self, *a, **k): return self
             def limit(self, *a, **k): return self
+            def order(self, *a, **k): return self  # perf rev.114: default vía list_tenant_agents (ordena)
             def execute(self): return MockResult(self.rows)
         class MockSupabase:
             def __init__(self, rows): self.rows = rows

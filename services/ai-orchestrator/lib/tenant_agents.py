@@ -28,9 +28,25 @@ Uso:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 logger = logging.getLogger("orchestrator.tenant_agents")
+
+# Cache TTL de la lista de agentes del tenant (perf rev. 114). `ai_agents` es config
+# del comportamiento del bot (name/role/tools/guardrails), NO cambia intra-conversación
+# → cacheable. Solo se cachean lecturas EXITOSAS (error → [] sin cachear, self-heal).
+# get_active_agent deriva el default de esta lista → elimina una 2ª query por turno.
+_AGENTS_CACHE: dict[str, tuple[float, list]] = {}
+_AGENTS_TTL_SECONDS = 30
+
+
+def invalidate_agents_cache(tenant_id: Optional[str] = None) -> None:
+    """Invalida el cache de agentes del tenant (tras editar ai_agents)."""
+    if tenant_id is None:
+        _AGENTS_CACHE.clear()
+    else:
+        _AGENTS_CACHE.pop(tenant_id, None)
 
 
 _FALLBACK_AGENT = {
@@ -70,75 +86,54 @@ def get_active_agent(
     if not tenant_id:
         return dict(_FALLBACK_AGENT)
 
-    # Multi-agente: si hay >1 agente activo, usar router.
-    if inbound_text:
+    # Perf rev. 114: 1 sola lectura (cacheada) de la lista de agentes, reusada tanto
+    # por el router multi-agente como por la resolución del default → antes eran 2
+    # queries por turno (list + default) en el caso común de 1 agente.
+    agents = list_tenant_agents(supabase, tenant_id=tenant_id)
+
+    # Multi-agente: si hay >1 agente activo Y hay inbound, usar router.
+    if inbound_text and len(agents) > 1:
         try:
-            from agentic.agent_router import (
-                select_agent_for_inbound,
-            )
-            all_agents = list_tenant_agents(supabase, tenant_id=tenant_id)
-            if len(all_agents) > 1:
-                if intent:
-                    # Hint manual: buscar agente con ese rol.
-                    for ag in all_agents:
-                        if (ag.get("role") or "").lower() == intent.lower():
-                            return ag
-                return select_agent_for_inbound(
-                    inbound_text=inbound_text, agents=all_agents,
-                )
+            from agentic.agent_router import select_agent_for_inbound
+            if intent:
+                # Hint manual: buscar agente con ese rol.
+                for ag in agents:
+                    if (ag.get("role") or "").lower() == intent.lower():
+                        return ag
+            return select_agent_for_inbound(inbound_text=inbound_text, agents=agents)
         except Exception as exc:
             logger.info(
                 "[AGENT] router multi-agente falló tenant=%s: %s — "
                 "fallback default", tenant_id[:8], exc,
             )
 
-    # Rev. 109 auditoría — pitch/tone YA NO viven aquí. Vienen de tenants
-    # como única fuente de verdad. ai_agents solo guarda el comportamiento
-    # del bot (name + role + role_description + guardrails + tools_allowed).
-    try:
-        res = (
-            supabase.table("ai_agents")
-            # persona_block NO se selecciona: se leía al vacío (nunca se inyecta al
-            # prompt; éste usa role_description). La columna se dropea post-deploy
-            # (migración 20260702220000, expand-contract).
-            .select(
-                "id, name, role, role_description, "
-                "tools_allowed, fsm_states_allowed, "
-                "is_default",
-            )
-            .eq("tenant_id", tenant_id)
-            .eq("is_default", True)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if rows:
-            return rows[0]
-        # Tenant existe pero sin agente configurado → fallback.
-        logger.info(
-            "[AGENT] tenant=%s sin ai_agents row — fallback Sara Camila",
-            tenant_id[:8],
-        )
-    except Exception as exc:
-        # Tabla no existe aún (migration no aplicada) o cualquier otro
-        # error → fallback silencioso para no romper flow.
-        logger.info(
-            "[AGENT] ai_agents lookup falló tenant=%s: %s — "
-            "fallback Sara Camila",
-            tenant_id[:8], exc,
-        )
-
+    # Default agent: el `is_default` de la lista (misma semántica que la query previa
+    # `.eq(is_default, True).limit(1)`). Si NO hay is_default → fallback (preserva
+    # comportamiento; NO devolver un no-default). Rev. 109: pitch/tone vienen de
+    # `tenants`; ai_agents solo guarda comportamiento (name/role/role_description/tools).
+    default = next((a for a in agents if a.get("is_default")), None)
+    if default:
+        return default
+    logger.info(
+        "[AGENT] tenant=%s sin ai_agents default row — fallback Sara Camila",
+        tenant_id[:8],
+    )
     return dict(_FALLBACK_AGENT)
 
 
 def list_tenant_agents(supabase, *, tenant_id: str) -> list[dict]:
-    """Lista todos los agentes del tenant (multi-agente futuro).
+    """Lista todos los agentes del tenant (multi-agente futuro), cacheada 30s.
 
     Hoy retorna 1 row (1 agente per tenant). Cuando UI Tenant Console
-    soporte CRUD multi-agente, podrá retornar N rows.
+    soporte CRUD multi-agente, podrá retornar N rows. Solo se cachean lecturas
+    EXITOSAS: ante error retorna [] SIN cachear (self-heal el próximo turno).
     """
     if not tenant_id:
         return []
+    now = time.time()
+    cached = _AGENTS_CACHE.get(tenant_id)
+    if cached and (now - cached[0]) < _AGENTS_TTL_SECONDS:
+        return cached[1]
     try:
         res = (
             supabase.table("ai_agents")
@@ -148,6 +143,9 @@ def list_tenant_agents(supabase, *, tenant_id: str) -> list[dict]:
             .order("name", desc=False)
             .execute()
         )
-        return res.data or []
-    except Exception:
+        agents = res.data or []
+    except Exception as exc:
+        logger.info("[AGENT] ai_agents list falló tenant=%s: %s — []", tenant_id[:8], exc)
         return []
+    _AGENTS_CACHE[tenant_id] = (now, agents)
+    return agents
