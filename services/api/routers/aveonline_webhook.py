@@ -5,33 +5,38 @@ Recibe eventos `webhookEstadosGuias` (dossier §6.2) y los procesa para:
   2. Actualizar `shipments.status` con mapping cross-provider.
   3. Notificar al cliente vía WhatsApp + email según estado.
 
-Schema payload entrante (dossier §6.2, validado online 2026-05-25):
-  {
-    "status": "ok",
-    "message": "estado encontrado con exito",
-    "guia": 892349021,
-    "pedido_id": 903,
-    "estado": [
-      {"estado_id": 12, "nombre_estado": "ENTREGADA", "fecha": "2020-12-11 11:04:43"}
-    ]
-  }
+Schema payload entrante — soportamos DOS formatos (verificado contra la doc
+oficial `integraciones.aveonline.co/docs/webhookEstadosGuias` +
+`/docs/webhookPersonalizadoApi`, 2026-07-17):
 
-Defensa en profundidad (Aveonline NO tiene HMAC nativo — dossier §6.2):
-  1. URL secret-token verificado vía F.10 (`webhook_secret_manager`) usando
-     `integration='aveonline'`. Secret puede llegar en URL path o body
-     (Aveonline lo envía como `param1_value` cuando se registra el webhook
-     con `param1_name="secret"`).
-  2. Idempotency vía F.4 `webhook_events_seen`. event_uid composite:
-     `"{guia}|{estado_id}|{fecha}"` (dossier sec. 6.2 §3 replay protection).
-  3. Audit log forensics: cada webhook recibido (válido o inválido) se
-     intenta capturar con outcome status.
+  A) OFICIAL (custom-webhook `api-integrations`) — el secret llega como `token`
+     TOP-LEVEL (Aveonline lo genera al registrar y lo reenvía en cada evento) y
+     las fechas del array son `fechanovedad`/`fechacreacion` (NO `fecha`):
+       {"token": "000000^cZtUEYw", "guia": "111...", "pedido_id": "222...",
+        "estado": [{"estado_id": "12", "nombre_estado": "Entregada",
+                    "fechacreacion": "2023/06/02 12:37:58 pm",
+                    "fechanovedad": "2023-12-02 16:04:06"}]}
+  B) LEGACY (AveCRM avestock `createWebhook.php`) — secret como `secret`/
+     `param1_value`, fecha como `fecha`:
+       {"guia": 892349021, "pedido_id": 903,
+        "estado": [{"estado_id": 12, "nombre_estado": "ENTREGADA",
+                    "fecha": "2020-12-11 11:04:43"}]}
+
+Defensa en profundidad (Aveonline NO tiene HMAC nativo):
+  1. Secret verificado vía F.10 (`webhook_secret_manager`, `integration='aveonline'`).
+     Se extrae de: URL path, `token` top-level (oficial), `secret`/`param1_value`
+     (legacy) o query `?secret=`. El tenant persiste como secret el `token` que
+     Aveonline devuelve en `data.token` al registrar el custom-webhook.
+  2. Idempotency: event_uid `"{guia}|{estado_id}|{fecha}"` donde fecha = primera
+     presente entre fecha/fechanovedad/fechacreacion → replay protection.
+  3. Audit log forensics de cada webhook recibido (válido o inválido).
 
 Endpoint: POST /api/v1/webhooks/aveonline/{tenant_id}
-  - secret en body como `secret` o `param1_value`
+  - secret en body (`token` oficial | `secret`/`param1_value` legacy) o query
   - O en URL: POST /api/v1/webhooks/aveonline/{tenant_id}/{secret_token}
 
-Siempre responde 200 (Aveonline espera 2xx <30s — sin retry-after policy
-documentada explícitamente, pero plugin oficial trata cualquier 2xx como OK).
+ACK: 200 con {"success": true, "messages": "Proceso realizado"} (lo que espera
+el plugin oficial; cualquier 2xx igual se trata como OK, <30s).
 """
 from __future__ import annotations
 
@@ -49,6 +54,21 @@ from dependencies.security import _client_ip, webhook_rate_limit_check
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Aveonline Webhooks"])
+
+
+def _ack(outcome: str, **extra: Any) -> JSONResponse:
+    """200 con el ACK que el plugin oficial de Aveonline espera
+    (`success`/`messages`) + campos de diagnóstico internos (outcome/guia/...)."""
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "messages": "Proceso realizado",
+            "status": "ok",
+            "outcome": outcome,
+            **extra,
+        },
+    )
 
 
 # ── Mapping de estados Aveonline → canónico interno ──────────────────────────
@@ -147,14 +167,16 @@ def _extract_secret(
 ) -> str:
     """Resuelve el secret de múltiples lugares:
       1. URL path (más simple para registrar webhooks con URL completa).
-      2. Body field `secret`.
-      3. Body field `param1_value` (cuando Aveonline pasa `param1_name="secret"`).
-      4. Query string `?secret=...`.
+      2. Body field `token` (OFICIAL — custom-webhook lo reenvía top-level).
+      3. Body field `secret`.
+      4. Body field `param1_value` (legacy: Aveonline pasa `param1_name="secret"`).
+      5. Query string `?secret=...`.
     """
     if path_token and path_token != "_":
         return path_token
     if parsed_body:
-        for key in ("secret", "param1_value", "Secret"):
+        # `token` primero: es el mecanismo del custom-webhook oficial vigente.
+        for key in ("token", "secret", "param1_value", "Secret"):
             v = parsed_body.get(key)
             if isinstance(v, str) and v.strip():
                 return v.strip()
@@ -162,6 +184,38 @@ def _extract_secret(
     if isinstance(qv, str) and qv.strip():
         return qv.strip()
     return ""
+
+
+def _event_fecha(e: dict) -> str:
+    """Fecha del evento tolerando ambos formatos: legacy `fecha` y oficial
+    `fechanovedad` (fecha del cambio de estado) / `fechacreacion` (fallback)."""
+    return str(
+        e.get("fecha") or e.get("fechanovedad") or e.get("fechacreacion") or ""
+    )
+
+
+def _parse_occurred_at(fecha: str) -> Optional[str]:
+    """Parsea la fecha Aveonline → ISO8601 UTC. Tolera los 3 formatos vistos:
+      • "YYYY-MM-DD HH:MM:SS"        (legacy `fecha` + oficial `fechanovedad`)
+      • "YYYY/MM/DD HH:MM:SS am/pm"  (oficial `fechacreacion`, 12h con am/pm)
+      • ISO8601.
+    Retorna None si no matchea (occurred_at es best-effort, no rompe el evento).
+    """
+    if not fecha:
+        return None
+    s = fecha.strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %I:%M:%S %p"):
+        try:
+            # .upper() normaliza "pm"/"am" → "PM"/"AM" para %p; inocuo para el otro fmt.
+            return datetime.strptime(s.upper(), fmt).replace(
+                tzinfo=timezone.utc,
+            ).isoformat()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        return None
 
 
 def _select_latest_estado(estado_list: Any) -> Optional[dict]:
@@ -174,10 +228,8 @@ def _select_latest_estado(estado_list: Any) -> Optional[dict]:
     """
     if not isinstance(estado_list, list) or not estado_list:
         return None
-    # Sort by fecha desc; tolerar formatos string.
-    def _key(e: dict) -> str:
-        return str(e.get("fecha") or "")
-    return sorted(estado_list, key=_key, reverse=True)[0]
+    # Sort by fecha desc; tolerar formatos string (fecha/fechanovedad/fechacreacion).
+    return sorted(estado_list, key=_event_fecha, reverse=True)[0]
 
 
 def _process_estado_event(
@@ -199,21 +251,17 @@ def _process_estado_event(
     internal_status = _map_raw_status(nombre_estado)
     external_event_id = f"{guia}|{estado_id or ''}|{fecha}"
 
-    # Parse occurred_at best-effort (Aveonline usa "YYYY-MM-DD HH:MM:SS").
-    occurred_at: Optional[str] = None
-    if fecha:
-        try:
-            dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=timezone.utc,
-            )
-            occurred_at = dt.isoformat()
-        except ValueError:
-            try:
-                # Fallback: ISO format.
-                dt = datetime.fromisoformat(fecha.replace("Z", "+00:00"))
-                occurred_at = dt.isoformat()
-            except ValueError:
-                occurred_at = None
+    # Parse occurred_at best-effort (legacy + formatos oficiales fechanovedad/creacion).
+    occurred_at: Optional[str] = _parse_occurred_at(fecha)
+
+    # El custom-webhook oficial manda estado_id como STRING ("12"); el RPC espera
+    # int. Coacciona sin romper (None si no es numérico).
+    try:
+        raw_estado_id: Optional[int] = (
+            int(estado_id) if estado_id not in (None, "") else None
+        )
+    except (ValueError, TypeError):
+        raw_estado_id = None
 
     try:
         res = supabase_client.rpc(
@@ -225,7 +273,7 @@ def _process_estado_event(
                 "p_provider": "aveonline",
                 "p_external_event_id": external_event_id,
                 "p_raw_status": nombre_estado,
-                "p_raw_estado_id": estado_id,
+                "p_raw_estado_id": raw_estado_id,
                 "p_internal_status": internal_status,
                 "p_description": None,
                 "p_occurred_at": occurred_at,
@@ -578,16 +626,13 @@ async def _handle_aveonline_webhook(
         # documentan política de retry, pero el operador debe corregir.
         return JSONResponse(
             status_code=401,
-            content={"status": "error", "message": "secret invalid"},
+            content={"success": False, "messages": "secret invalid"},
         )
 
     # Schema canónico Aveonline.
     if not isinstance(parsed, dict):
         logger.warning("[AVEONLINE_WH] body no es JSON dict tenant=%s", tenant_id)
-        return JSONResponse(
-            status_code=200,
-            content={"status": "ok", "outcome": "skipped_invalid_json"},
-        )
+        return _ack("skipped_invalid_json")
 
     guia = str(parsed.get("guia") or "").strip()
     pedido_id_raw = parsed.get("pedido_id")
@@ -595,10 +640,7 @@ async def _handle_aveonline_webhook(
 
     if not guia:
         logger.warning("[AVEONLINE_WH] payload sin guia tenant=%s body=%s", tenant_id, parsed)
-        return JSONResponse(
-            status_code=200,
-            content={"status": "ok", "outcome": "skipped_no_guia"},
-        )
+        return _ack("skipped_no_guia")
 
     # Lookup shipment para resolver order_id (más confiable que pedido_id
     # que es el `numeroBolsa`/referencia interna del tenant en Aveonline).
@@ -627,32 +669,17 @@ async def _handle_aveonline_webhook(
                     guia=guia,
                     estado_id=e.get("estado_id"),
                     nombre_estado=str(e.get("nombre_estado") or ""),
-                    fecha=str(e.get("fecha") or ""),
+                    fecha=_event_fecha(e),
                     raw_payload=parsed,
                 )
                 events.append(ev)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "ok",
-                "outcome": "captured_no_shipment",
-                "guia": guia,
-                "events": events,
-            },
-        )
+        return _ack("captured_no_shipment", guia=guia, events=events)
 
     # Process every estado event (Aveonline puede mandar historial).
     events_processed = []
     latest_estado = _select_latest_estado(estado_list)
     if not isinstance(estado_list, list) or not estado_list:
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "ok",
-                "outcome": "skipped_no_estado",
-                "guia": guia,
-            },
-        )
+        return _ack("skipped_no_estado", guia=guia)
 
     # Rev. 113 (review F-7 hardening) — procesar en orden CRONOLÓGICO ascendente.
     # Aveonline manda historial sin orden garantizado (dossier §6.2); el RPC
@@ -660,7 +687,7 @@ async def _handle_aveonline_webhook(
     # así que iterar en orden de array podía dejar `shipments.status` REGRESADO (un
     # evento viejo pisando al nuevo). Ordenar asc → el más reciente se procesa
     # último y gana. Misma key que `_select_latest_estado` (fecha string ISO-like).
-    estado_sorted = sorted(estado_list, key=lambda e: str(e.get("fecha") or ""))
+    estado_sorted = sorted(estado_list, key=_event_fecha)
     for e in estado_sorted:
         ev = _process_estado_event(
             supabase,
@@ -670,7 +697,7 @@ async def _handle_aveonline_webhook(
             guia=guia,
             estado_id=e.get("estado_id"),
             nombre_estado=str(e.get("nombre_estado") or ""),
-            fecha=str(e.get("fecha") or ""),
+            fecha=_event_fecha(e),
             raw_payload=parsed,
         )
         events_processed.append(ev)
@@ -698,7 +725,7 @@ async def _handle_aveonline_webhook(
 
         latest_external_id = (
             f"{guia}|{latest_estado.get('estado_id') or ''}|"
-            f"{latest_estado.get('fecha') or ''}"
+            f"{_event_fecha(latest_estado)}"
         )
         latest_was_inserted = any(
             x["external_event_id"] == latest_external_id and x["inserted"]
@@ -723,15 +750,8 @@ async def _handle_aveonline_webhook(
                     "[AVEONLINE_WH] notify err shipment=%s: %s", shipment_id, e,
                 )
 
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "ok",
-            "outcome": "processed",
-            "guia": guia,
-            "shipment_id": shipment_id,
-            "events": events_processed,
-        },
+    return _ack(
+        "processed", guia=guia, shipment_id=shipment_id, events=events_processed,
     )
 
 

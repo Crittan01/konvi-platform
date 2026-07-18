@@ -83,6 +83,10 @@ services:
       # Mantener temporalmente hasta refactorizar esos 2 endpoints SSR al servicio api.
       - key: GEMINI_API_KEY
         sync: false
+      # Alinea el modelo del web (insights/ai-preview SSR) con prod. Sin esto el
+      # código cae a su default gemini-3.5-flash → diverge del orchestrator/api.
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
       # Rev. 109 J.2.7.4 — Sentry tracing E2E. 4 vars: 2 server + 2 browser bundle.
       - key: SENTRY_DSN
         sync: false                              # konvi-web project DSN
@@ -99,11 +103,11 @@ services:
       # Build-time: source map upload + release tagging. Sin esto Sentry
       # muestra stack traces minified — debugging produccion limitado.
       - key: SENTRY_ORG
-        value: konvi
+        value: konvi-e5                          # SLUG real de la org (display "konvi"; Sentry sufijó -e5)
       - key: SENTRY_PROJECT
-        value: konvi-web
+        value: konvi-web                          # confirmar slug en Sentry si el upload de sourcemaps falla por project
       - key: SENTRY_AUTH_TOKEN
-        sync: false                              # sntrys_... con scope project:releases
+        sync: false                              # Organization Token (sntrys_...), scope org:ci (Source Map Upload + Release Creation)
       # F83 seguridad — secreto HMAC para firmar la cookie de sesión de recovery MFA.
       # Sin esto la cookie era el literal '1' (bypass total de AAL2). Generar con:
       # openssl rand -hex 32. El middleware (Edge) verifica la firma con Web Crypto.
@@ -134,13 +138,11 @@ services:
       - key: SUPABASE_SECRET_KEY
         sync: false                              # sb_secret_*
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
-      - key: META_APP_SECRET
-        sync: false
-      - key: META_VERIFY_TOKEN
-        sync: false
-      - key: ALLOWED_ORIGINS
-        sync: false
+        sync: false                              # [DEPRECATED] fallback de SECRET_KEY (db_persistence.py:15)
+      # META_APP_SECRET / META_VERIFY_TOKEN eliminados (verificado 0 lectores): Model B
+      # (ADR-0023) resuelve app_secret + verify_token per-tenant desde Vault/credentials
+      # JSONB (dependencies/meta.py), no desde env. ALLOWED_ORIGINS eliminada: el
+      # connector no monta CORS (webhook server-to-server, main.py sin CORSMiddleware).
       - key: APP_ENV
         value: production
       # Rev. 109 J.2.7.4 — Sentry tracing (konvi-connector project DSN).
@@ -148,8 +150,8 @@ services:
         sync: false
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
-      - key: SENTRY_ENV
-        value: production
+      # SENTRY_ENV eliminada: el connector deriva environment de RENDER_SERVICE_NAME
+      # (observability.py:102), nunca lee SENTRY_ENV.
       # W5/T4-01 — IP real del cliente detrás del edge de Render. Render usa Cloudflare y
       # forwardea CF-Connecting-IP con la IP REAL del cliente (evidencia: arcjet-js#3899
       # muestra XFF de 3 hops "cliente, cf-proxy, hop-interno" + cf-connecting-ip=cliente;
@@ -484,13 +486,9 @@ services:
         value: "16777216"
       - key: META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS
         value: "10"
-      # ── Cart recovery (F7-lite, rev. 70) ─────────────────────────────────
-      # Inyecta carrito previo cancelado al system prompt para que el bot
-      # ofrezca retomar cuando el cliente vuelve a expresar intención de compra.
-      - key: CART_RECOVERY_ENABLED
-        value: "true"
-      - key: CART_RECOVERY_LOOKBACK_DAYS
-        value: "7"
+      # CART_RECOVERY_ENABLED / CART_RECOVERY_LOOKBACK_DAYS eliminadas (verificado 0
+      # lectores en el repo): config huérfana; el código F7-lite (rev.70) que las leía
+      # ya no existe. No cambia comportamiento.
       # ── Habeas Data — notificaciones email vía Resend (rev. 94) ──────────
       # Sin RESEND_API_KEY: notifications.py loguea en lugar de enviar email
       # (fallback graceful, no rompe flujo). Para activar en producción:
