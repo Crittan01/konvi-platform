@@ -134,6 +134,95 @@ class ExtractSecretTests(unittest.TestCase):
         self.assertEqual(webhook_mod._extract_secret("_", None, {}), "")
         # path_token="_" es marker explícito de "no secret en path"
 
+    def test_official_token_top_level(self):
+        # Custom-webhook oficial vigente: el secret llega como `token` top-level.
+        self.assertEqual(
+            webhook_mod._extract_secret(None, {"token": "official-tok"}, {}),
+            "official-tok",
+        )
+
+    def test_token_precedence_over_legacy_secret(self):
+        # Si vinieran ambos, `token` (oficial vigente) tiene precedencia.
+        self.assertEqual(
+            webhook_mod._extract_secret(
+                None, {"token": "tok", "secret": "legacy"}, {},
+            ),
+            "tok",
+        )
+
+    def test_path_token_still_wins_over_body_token(self):
+        self.assertEqual(
+            webhook_mod._extract_secret("path", {"token": "body"}, {}),
+            "path",
+        )
+
+
+class EventFechaTests(unittest.TestCase):
+    """Fecha del evento: legacy `fecha` + oficial `fechanovedad`/`fechacreacion`."""
+
+    def test_legacy_fecha(self):
+        self.assertEqual(
+            webhook_mod._event_fecha({"fecha": "2020-12-11 11:04:43"}),
+            "2020-12-11 11:04:43",
+        )
+
+    def test_official_fechanovedad(self):
+        self.assertEqual(
+            webhook_mod._event_fecha({"fechanovedad": "2023-12-02 16:04:06"}),
+            "2023-12-02 16:04:06",
+        )
+
+    def test_official_fechacreacion_fallback(self):
+        self.assertEqual(
+            webhook_mod._event_fecha({"fechacreacion": "2023/06/02 12:37:58 pm"}),
+            "2023/06/02 12:37:58 pm",
+        )
+
+    def test_precedence_fecha_then_novedad_then_creacion(self):
+        self.assertEqual(
+            webhook_mod._event_fecha(
+                {"fecha": "L", "fechanovedad": "N", "fechacreacion": "C"},
+            ),
+            "L",
+        )
+        self.assertEqual(
+            webhook_mod._event_fecha({"fechanovedad": "N", "fechacreacion": "C"}),
+            "N",
+        )
+
+    def test_empty_returns_empty_string(self):
+        self.assertEqual(webhook_mod._event_fecha({}), "")
+
+
+class ParseOccurredAtTests(unittest.TestCase):
+    """occurred_at best-effort: 24h (legacy/novedad), 12h am/pm (creacion), ISO."""
+
+    def test_24h_format_legacy_and_novedad(self):
+        self.assertEqual(
+            webhook_mod._parse_occurred_at("2020-12-11 11:04:43"),
+            "2020-12-11T11:04:43+00:00",
+        )
+
+    def test_12h_ampm_format_fechacreacion(self):
+        self.assertEqual(
+            webhook_mod._parse_occurred_at("2023/06/02 12:37:58 pm"),
+            "2023-06-02T12:37:58+00:00",
+        )
+        self.assertEqual(
+            webhook_mod._parse_occurred_at("2023/06/02 10:01:00 am"),
+            "2023-06-02T10:01:00+00:00",
+        )
+
+    def test_iso_fallback(self):
+        self.assertEqual(
+            webhook_mod._parse_occurred_at("2023-12-02T16:04:06+00:00"),
+            "2023-12-02T16:04:06+00:00",
+        )
+
+    def test_garbage_and_empty_return_none(self):
+        self.assertIsNone(webhook_mod._parse_occurred_at("no es una fecha"))
+        self.assertIsNone(webhook_mod._parse_occurred_at(""))
+
 
 class SelectLatestEstadoTests(unittest.TestCase):
     """Sortable estado history; el más reciente actualiza shipment status."""
@@ -146,6 +235,15 @@ class SelectLatestEstadoTests(unittest.TestCase):
         ]
         latest = webhook_mod._select_latest_estado(estado_list)
         self.assertEqual(latest["estado_id"], 12)
+
+    def test_returns_latest_by_official_fechanovedad(self):
+        # Formato oficial: sin `fecha`, ordena por `fechanovedad`.
+        estado_list = [
+            {"estado_id": "1", "nombre_estado": "En oficina", "fechanovedad": "2023-05-20 10:00:00"},
+            {"estado_id": "12", "nombre_estado": "Entregada", "fechanovedad": "2023-05-22 09:00:00"},
+        ]
+        latest = webhook_mod._select_latest_estado(estado_list)
+        self.assertEqual(latest["estado_id"], "12")
 
     def test_empty_returns_none(self):
         self.assertIsNone(webhook_mod._select_latest_estado([]))
