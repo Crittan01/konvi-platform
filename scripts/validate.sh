@@ -217,6 +217,21 @@ else
   _warn "Tenant filter lint script ausente (scripts/audit_tenant_filter.py)"
 fi
 
+# ─── 4.6 Webhook anti-drift (ngrok guard) — env audit 2026-07-17 ─────────────
+# Impide que una URL ngrok (túnel dev) quede hardcodeada en código/config de
+# prod (render.yaml/services/apps). El drift real vivía en dashboards externos
+# —no lintables— pero este gate cierra la clase de bug in-repo.
+_hdr "Webhook anti-drift (sin ngrok en prod)"
+if [ -f "scripts/check_no_ngrok.sh" ]; then
+  if bash scripts/check_no_ngrok.sh; then
+    _ok "Anti-drift: 0 URLs ngrok en render.yaml/services/apps"
+  else
+    _err "Anti-drift: URL ngrok detectada en código/config de prod"
+  fi
+else
+  _warn "Anti-drift: scripts/check_no_ngrok.sh ausente"
+fi
+
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 
