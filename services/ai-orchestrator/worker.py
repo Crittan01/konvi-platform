@@ -2351,6 +2351,15 @@ class OrchestratorWorker:
                 return
 
             cancelled = 0
+            # C' residual money-path (2026-07-18): contamos cuántas de las canceladas
+            # TENÍAN un link de pago creado. No podemos saber per-orden SI el cliente
+            # pagó (Wompi no permite consultar por reference; sin el txn_id del webhook
+            # no hay pull). El webhook tardío (retry Wompi ≤24h) reconcilia el caso común
+            # revirtiendo el auto-cancel. El RESIDUAL (24h de fallo total del webhook) se
+            # detecta por AGREGADO: un PICO de cancelled_with_link (ej. durante un outage
+            # de webhook.konvi.co) señala que pudimos cancelar órdenes PAGADAS → revisar
+            # el panel de Wompi. En operación normal son abandonos (señal baja).
+            cancelled_with_link = 0
             for order in stale:
                 # F5 reconciliación (dinero) — NUNCA cancelar una orden con un pago
                 # APPROVED. Si el pago quedó registrado approved pero el confirm de la
@@ -2442,6 +2451,21 @@ class OrchestratorWorker:
                 )
                 if res.data:
                     cancelled += 1
+                    # C' — ¿la orden cancelada tenía un link de pago? (residual money-path,
+                    # ver comentario arriba). +1 query por cancelada (cron, no hot-path).
+                    try:
+                        link_res = (
+                            self.supabase.table("payments")
+                            .select("wompi_link_id")
+                            .eq("order_id", order["id"])
+                            .eq("tenant_id", order["tenant_id"])
+                            .limit(5)
+                            .execute()
+                        )
+                        if any((p or {}).get("wompi_link_id") for p in (link_res.data or [])):
+                            cancelled_with_link += 1
+                    except Exception:
+                        pass  # el conteo es best-effort; no romper la cancelación
 
             if cancelled:
                 self._metrics["expired_orders_cancelled"] += cancelled
@@ -2449,6 +2473,17 @@ class OrchestratorWorker:
                     "⏱️ Pedidos pending_payment expirados cancelados: %s (TTL=%smin)",
                     cancelled,
                     PENDING_PAYMENT_TTL_MINUTES,
+                )
+            if cancelled_with_link:
+                self._metrics.setdefault("expired_cancelled_with_payment_link", 0)
+                self._metrics["expired_cancelled_with_payment_link"] += cancelled_with_link
+                logger.warning(
+                    "[RELEASE] %s/%s órdenes canceladas por TTL TENÍAN link de pago activo. "
+                    "En operación normal son abandonos; un PICO (o durante un outage de "
+                    "webhook.konvi.co) puede indicar órdenes PAGADAS canceladas → verificar el "
+                    "panel de Wompi y reconciliar. Wompi no permite consultar por reference: sin "
+                    "el txn_id del webhook no se automatiza la detección per-orden.",
+                    cancelled_with_link, cancelled,
                 )
         except Exception as exc:
             logger.error("Error liberando pending_payment expirados: %s", exc)

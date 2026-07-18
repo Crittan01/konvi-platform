@@ -44,6 +44,7 @@ def _stub_supabase_for_release(
     stale_orders: list[dict],
     fresh_payments_by_order: dict[str, list[dict]] | None = None,
     approved_payments_by_order: dict[str, list[dict]] | None = None,
+    link_payments_by_order: dict[str, list[dict]] | None = None,
 ):
     """Construye un supabase mock route-by-table:
 
@@ -56,6 +57,8 @@ def _stub_supabase_for_release(
     """
     fresh = fresh_payments_by_order or {}
     approved = approved_payments_by_order or {}
+    # C' — query de "¿tenía link de pago?" (sin filtro de status).
+    link = link_payments_by_order or {}
     update_calls: list[str] = []
 
     def _make_orders_chain():
@@ -111,11 +114,18 @@ def _stub_supabase_for_release(
         select_chain.eq = _eq_capture
         select_chain.gte.return_value = select_chain
         select_chain.limit.return_value = select_chain
-        select_chain.execute = lambda: MagicMock(
-            data=(approved if captured["status"] == "approved" else fresh).get(
-                captured["order_id"], []
-            )
-        )
+
+        def _pay_execute():
+            st = captured["status"]
+            if st == "approved":
+                src = approved
+            elif st == "pending":
+                src = fresh
+            else:  # C' — query sin status: "¿tenía payment con wompi_link_id?"
+                src = link
+            return MagicMock(data=src.get(captured["order_id"], []))
+
+        select_chain.execute = _pay_execute
 
         payments_table = MagicMock()
         payments_table.select.return_value = select_chain
@@ -181,6 +191,31 @@ class PendingPaymentReleaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(worker._metrics["expired_orders_cancelled"], 1)
         self.assertEqual(worker.supabase._update_calls, ["order-stale-no-regen"])
+
+    async def test_metric_counts_cancelled_orders_that_had_payment_link(self):
+        """C' residual money-path: al cancelar por TTL una orden que TENÍA un link de
+        pago (payment con wompi_link_id), incrementa `expired_cancelled_with_payment_link`
+        — señal por AGREGADO/PICO (ej. outage del webhook) de posibles órdenes pagadas
+        canceladas. En operación normal son abandonos (señal baja)."""
+        worker = _make_worker()
+        worker._last_release_at = 0.0
+        worker.supabase = _stub_supabase_for_release(
+            stale_orders=[
+                {"id": "order-con-link", "tenant_id": "tenant-1"},
+                {"id": "order-sin-link", "tenant_id": "tenant-1"},
+            ],
+            fresh_payments_by_order={},  # ninguna con payment fresco → ambas cancelan
+            link_payments_by_order={
+                "order-con-link": [{"wompi_link_id": "wl-123"}],  # tenía link
+                # order-sin-link: sin fila → no cuenta
+            },
+        )
+
+        await worker._release_expired_pending_payment_orders()
+
+        # Ambas se cancelan; solo 1 tenía link de pago.
+        self.assertEqual(worker._metrics["expired_orders_cancelled"], 2)
+        self.assertEqual(worker._metrics.get("expired_cancelled_with_payment_link"), 1)
 
     async def test_never_cancels_order_with_approved_payment(self):
         """F5 reconciliación (dinero): una orden pending_payment con pago APPROVED
