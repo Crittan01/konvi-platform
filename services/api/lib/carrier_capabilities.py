@@ -131,6 +131,79 @@ def _resolve_cod(
     return canonical_supports_cod
 
 
+def _compose_capability(
+    name_normalized: str,
+    canonical: Optional[dict],
+    tenant_row: Optional[dict],
+    tenant_cod_globally_enabled: bool,
+) -> "CarrierCapability":
+    """Compone la vista efectiva desde canonical + override tenant + gate COD.
+
+    Pure (sin I/O). Compartida por el lookup single y el batch para garantizar
+    que ambos produzcan EXACTAMENTE el mismo CarrierCapability.
+    """
+    if canonical:
+        return CarrierCapability(
+            carrier_name=name_normalized,
+            carrier_id=canonical.get("carrier_id"),
+            supports_cod=_resolve_cod(
+                bool(canonical.get("supports_cod", False)),
+                (tenant_row or {}).get("cod_override"),
+                tenant_cod_globally_enabled,
+            ),
+            cod_min_recaudo_cop=canonical.get("cod_min_recaudo_cop"),
+            cod_min_recaudo_heavy_cop=canonical.get("cod_min_recaudo_heavy_cop"),
+            cod_weight_threshold_kg=(
+                float(canonical["cod_weight_threshold_kg"])
+                if canonical.get("cod_weight_threshold_kg") is not None
+                else None
+            ),
+            cod_commission_pct=(
+                float(canonical["cod_commission_pct"])
+                if canonical.get("cod_commission_pct") is not None
+                else None
+            ),
+            cod_liquidation_days_range=canonical.get("cod_liquidation_days_range"),
+            cod_liquidation_weekday=canonical.get("cod_liquidation_weekday"),
+            charges_return_fee=bool(canonical.get("charges_return_fee", False)),
+            max_weight_kg=(
+                float(canonical["max_weight_kg"])
+                if canonical.get("max_weight_kg") is not None
+                else None
+            ),
+            max_dim_cm=canonical.get("max_dim_cm"),
+            valor_declarado_min_cop=int(canonical.get("valor_declarado_min_cop") or 10000),
+            valor_declarado_max_cop=canonical.get("valor_declarado_max_cop"),
+            enabled_for_tenant=bool((tenant_row or {}).get("enabled", True)),
+            display_label=(tenant_row or {}).get("display_label"),
+            cod_override=(tenant_row or {}).get("cod_override"),
+            fuente_doc_url=canonical.get("fuente_doc_url"),
+            notes=canonical.get("notes"),
+        )
+    # Unknown carrier — capability vacía pero no bloqueante.
+    return CarrierCapability(
+        carrier_name=name_normalized,
+        carrier_id=None,
+        supports_cod=False,
+        cod_min_recaudo_cop=None,
+        cod_min_recaudo_heavy_cop=None,
+        cod_weight_threshold_kg=None,
+        cod_commission_pct=None,
+        cod_liquidation_days_range=None,
+        cod_liquidation_weekday=None,
+        charges_return_fee=False,
+        max_weight_kg=None,
+        max_dim_cm=None,
+        valor_declarado_min_cop=10000,
+        valor_declarado_max_cop=None,
+        enabled_for_tenant=bool((tenant_row or {}).get("enabled", True)),
+        display_label=(tenant_row or {}).get("display_label"),
+        cod_override=(tenant_row or {}).get("cod_override"),
+        fuente_doc_url=None,
+        notes=f"unknown carrier '{name_normalized}' — sin información en canonical",
+    )
+
+
 def get_effective_carrier_capability(
     supabase: Any,
     *,
@@ -193,69 +266,10 @@ def get_effective_carrier_capability(
     except Exception:
         tenant_cod_globally_enabled = True  # fail-open
 
-    # 3. Compose effective view.
-    if canonical:
-        cap = CarrierCapability(
-            carrier_name=name_normalized,
-            carrier_id=canonical.get("carrier_id"),
-            supports_cod=_resolve_cod(
-                bool(canonical.get("supports_cod", False)),
-                (tenant_row or {}).get("cod_override"),
-                tenant_cod_globally_enabled,
-            ),
-            cod_min_recaudo_cop=canonical.get("cod_min_recaudo_cop"),
-            cod_min_recaudo_heavy_cop=canonical.get("cod_min_recaudo_heavy_cop"),
-            cod_weight_threshold_kg=(
-                float(canonical["cod_weight_threshold_kg"])
-                if canonical.get("cod_weight_threshold_kg") is not None
-                else None
-            ),
-            cod_commission_pct=(
-                float(canonical["cod_commission_pct"])
-                if canonical.get("cod_commission_pct") is not None
-                else None
-            ),
-            cod_liquidation_days_range=canonical.get("cod_liquidation_days_range"),
-            cod_liquidation_weekday=canonical.get("cod_liquidation_weekday"),
-            charges_return_fee=bool(canonical.get("charges_return_fee", False)),
-            max_weight_kg=(
-                float(canonical["max_weight_kg"])
-                if canonical.get("max_weight_kg") is not None
-                else None
-            ),
-            max_dim_cm=canonical.get("max_dim_cm"),
-            valor_declarado_min_cop=int(canonical.get("valor_declarado_min_cop") or 10000),
-            valor_declarado_max_cop=canonical.get("valor_declarado_max_cop"),
-            enabled_for_tenant=bool((tenant_row or {}).get("enabled", True)),
-            display_label=(tenant_row or {}).get("display_label"),
-            cod_override=(tenant_row or {}).get("cod_override"),
-            fuente_doc_url=canonical.get("fuente_doc_url"),
-            notes=canonical.get("notes"),
-        )
-    else:
-        # Unknown carrier — capability vacía pero no bloqueante.
-        cap = CarrierCapability(
-            carrier_name=name_normalized,
-            carrier_id=None,
-            supports_cod=False,
-            cod_min_recaudo_cop=None,
-            cod_min_recaudo_heavy_cop=None,
-            cod_weight_threshold_kg=None,
-            cod_commission_pct=None,
-            cod_liquidation_days_range=None,
-            cod_liquidation_weekday=None,
-            charges_return_fee=False,
-            max_weight_kg=None,
-            max_dim_cm=None,
-            valor_declarado_min_cop=10000,
-            valor_declarado_max_cop=None,
-            enabled_for_tenant=bool((tenant_row or {}).get("enabled", True)),
-            display_label=(tenant_row or {}).get("display_label"),
-            cod_override=(tenant_row or {}).get("cod_override"),
-            fuente_doc_url=None,
-            notes=f"unknown carrier '{name_normalized}' — sin información en canonical",
-        )
-
+    # 3. Compose effective view (helper compartido con el batch).
+    cap = _compose_capability(
+        name_normalized, canonical, tenant_row, tenant_cod_globally_enabled,
+    )
     _CACHE[cache_key] = (now, cap)
     return cap
 
@@ -269,23 +283,64 @@ def get_all_capabilities_for_tenant(
 
     Útil para UI Settings tab Carriers + bot prompt block.
     Lista ordenada por: supports_cod desc, carrier_name asc.
+
+    Perf (rev. 114): batch en 3 queries en vez de N+1. Antes: 1 query de nombres
+    + 1 query canónica POR carrier + override + gate → ~2-3 round-trips × N carriers
+    (~20-30) por turno en cache-frío. Ahora: 1 SELECT de todos los canónicos + 1 de
+    todos los overrides del tenant + 1 gate COD (cacheado), componiendo en memoria.
+    Puebla el cache per-carrier (warm para lookups single subsiguientes). Output
+    idéntico (mismo `_compose_capability`).
     """
+    now = time.time()
+
+    # 1. TODOS los canónicos en 1 query (antes: 1 de nombres + 1 por carrier).
     try:
         cap_q = (
-            supabase.table("aveonline_carrier_capabilities")
-            .select("carrier_name")
+            supabase.table("aveonline_carrier_capabilities").select("*").execute()
+        )
+        canonical_rows = cap_q.data or []
+    except Exception:
+        canonical_rows = []
+
+    # 2. TODOS los overrides del tenant en 1 query, indexados por nombre normalizado
+    #    (replica el match case-insensitive `ilike(carrier_code)` del single path).
+    try:
+        tc_q = (
+            supabase.table("tenant_carriers")
+            .select("carrier_code, enabled, display_label, cod_override")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "aveonline")
             .execute()
         )
-        names = [row["carrier_name"] for row in (cap_q.data or [])]
+        overrides = {
+            _normalize_name(r.get("carrier_code") or ""): r
+            for r in (tc_q.data or [])
+        }
     except Exception:
-        names = []
+        overrides = {}
 
-    caps = [
-        get_effective_carrier_capability(
-            supabase, tenant_id=tenant_id, carrier_name=n,
+    # 3. Gate COD tenant-level: 1 sola vez (antes: 1 por carrier; cacheado igual).
+    try:
+        from lib.tenant_payment_methods import is_method_enabled
+        tenant_cod_globally_enabled = is_method_enabled(
+            supabase, tenant_id=tenant_id, method="cod",
         )
-        for n in names
-    ]
+    except Exception:
+        tenant_cod_globally_enabled = True  # fail-open
+
+    # 4. Componer en memoria + poblar el cache per-carrier.
+    caps: list[CarrierCapability] = []
+    for canonical in canonical_rows:
+        name_normalized = _normalize_name(canonical.get("carrier_name") or "")
+        cap = _compose_capability(
+            name_normalized,
+            canonical,
+            overrides.get(name_normalized),
+            tenant_cod_globally_enabled,
+        )
+        _CACHE[(tenant_id, name_normalized)] = (now, cap)
+        caps.append(cap)
+
     caps.sort(key=lambda c: (not c.supports_cod, c.carrier_name))
     return caps
 

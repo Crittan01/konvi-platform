@@ -53,6 +53,26 @@ AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-3.1-flash-lite")
 # tardaba ~160s. Con timeout por llamada, el modelo lento falla rápido y el
 # cascade promueve al fallback (gemini-3.1-flash-lite) → respuesta en segundos.
 AGENTIC_LLM_TIMEOUT_MS = int(os.getenv("AGENTIC_LLM_TIMEOUT_MS", "30000"))  # 30s/llamada
+
+# Reuso del cliente Gemini por proceso (perf rev. 114). Antes se creaba un
+# genai.Client —y su pool TLS— en CADA mensaje. El worker es single-thread
+# secuencial (server.py corre el loop en su propio hilo), así que reusar un
+# cliente por api_key es seguro y ahorra el handshake TLS por turno. Cacheado por
+# api_key para no filtrar entre entornos/tests con distinta key.
+_GENAI_CLIENTS: dict = {}
+
+
+def _get_genai_client(genai, genai_types):
+    """Devuelve un genai.Client reusado por proceso/api_key (no uno nuevo por turno)."""
+    api_key = os.getenv("GEMINI_API_KEY") or ""
+    client = _GENAI_CLIENTS.get(api_key)
+    if client is None:
+        client = genai.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(timeout=AGENTIC_LLM_TIMEOUT_MS),
+        )
+        _GENAI_CLIENTS[api_key] = client
+    return client
 # thinking_budget del turno agéntico. Opcional (solo se aplica si el env está
 # seteado, para no cambiar la coherencia validada sin querer): 0 = sin thinking
 # (más rápido); un entero = presupuesto de tokens de razonamiento.
@@ -165,10 +185,7 @@ async def run_agentic_turn(
     try:
         from google import genai
         from google.genai import types as genai_types
-        client = genai.Client(
-            api_key=os.getenv("GEMINI_API_KEY"),
-            http_options=genai_types.HttpOptions(timeout=AGENTIC_LLM_TIMEOUT_MS),
-        )
+        client = _get_genai_client(genai, genai_types)
     except Exception as exc:
         return AgenticTurnResult(
             outbound_text="",

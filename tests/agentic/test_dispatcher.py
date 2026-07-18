@@ -50,6 +50,13 @@ class _FakeSupabase:
 class TenantFlagReadingTests(unittest.TestCase):
     """is_tenant_agentic_enabled lee meta.agentic_enabled correctamente."""
 
+    def setUp(self):
+        # is_tenant_agentic_enabled cachea el meta agentic (perf rev. 114). Estos
+        # tests reusan "tenant-x" con mocks distintos → resetear el cache entre
+        # cada uno para que cada mock tome efecto (aislamiento).
+        from agentic.dispatcher import invalidate_agentic_meta_cache
+        invalidate_agentic_meta_cache()
+
     def test_flag_true_returns_true(self):
         from agentic.dispatcher import is_tenant_agentic_enabled
         sb = _FakeSupabase()

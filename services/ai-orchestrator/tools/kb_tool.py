@@ -74,25 +74,6 @@ def _detect_categories_from_query(query: str) -> list[str]:
     return detected
 
 
-def _fetch_top_doc_by_category(supabase: Client, tenant_id: str, category: str) -> dict | None:
-    """Trae el doc más reciente activo de una categoría dada. None si no hay."""
-    try:
-        res = (
-            supabase.table("kb_documents")
-            .select("title, content, category")
-            .eq("tenant_id", tenant_id)
-            .eq("category", category)
-            .eq("is_active", True)
-            .order("updated_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        return (res.data or [None])[0]
-    except Exception as e:
-        logger.warning("Error consultando KB por categoría %s: %s", category, e)
-        return None
-
-
 def _missing_category_marker(category: str) -> dict:
     """Documento sintético que avisa al LLM que el tenant no tiene info en esa categoría.
     Evita alucinación: el bot debe escalar/preguntar en vez de inventar."""
@@ -191,17 +172,41 @@ async def get_tenant_kb_rag(supabase: Client, tenant_id: str, query: str) -> lis
     # Si el RAG ya trajo un doc de esa categoría, no se duplica.
     boosted: list[dict] = list(semantic_docs)
     seen_titles = {d.get("title") for d in boosted}
-    for cat in forced_categories:
-        already_in_semantic = any(d.get("category") == cat for d in boosted)
-        if already_in_semantic:
-            continue
-        top = _fetch_top_doc_by_category(supabase, tenant_id, cat)
-        if top and top.get("title") not in seen_titles:
-            boosted.append(top)
-            seen_titles.add(top.get("title"))
-        elif not top:
-            # No hay doc en esta categoría — inyectar marker anti-alucinación.
-            boosted.append(_missing_category_marker(cat))
+    # Categorías forzadas que el RAG semántico NO cubrió.
+    missing = [
+        cat for cat in forced_categories
+        if not any(d.get("category") == cat for d in boosted)
+    ]
+    if missing:
+        # Perf rev. 114: 1 query batch por TODAS las categorías faltantes (antes:
+        # 1 query por cada categoría = N+1). El "top-1 por categoría" se resuelve en
+        # memoria: la query ordena por updated_at desc, así que el PRIMER row de cada
+        # categoría es el más reciente (idéntico al fetch single anterior).
+        try:
+            res = (
+                supabase.table("kb_documents")
+                .select("title, content, category")
+                .eq("tenant_id", tenant_id)
+                .in_("category", missing)
+                .eq("is_active", True)
+                .order("updated_at", desc=True)
+                .execute()
+            )
+            rows = res.data or []
+        except Exception as e:
+            logger.warning("Error consultando KB batch por categorías %s: %s", missing, e)
+            rows = []
+        top_by_cat: dict[str, dict] = {}
+        for r in rows:
+            top_by_cat.setdefault(r.get("category"), r)  # primero (más reciente) gana
+        for cat in missing:
+            top = top_by_cat.get(cat)
+            if top and top.get("title") not in seen_titles:
+                boosted.append(top)
+                seen_titles.add(top.get("title"))
+            elif not top:
+                # No hay doc en esta categoría — marker anti-alucinación.
+                boosted.append(_missing_category_marker(cat))
 
     if boosted:
         return boosted
