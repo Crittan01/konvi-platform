@@ -8,6 +8,7 @@ import {
 import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
+import { ThemeToggle } from '@/components/theme/theme-toggle'
 
 /**
  * Browser title tenant-centric (Sem 7 F2 cierre — segregación Konvi/tenant).
@@ -146,9 +147,12 @@ export default async function DashboardLayout({
           {/* Espacio para el hamburger en mobile */}
           <div className="w-10 lg:hidden" />
           <div className="flex-1" />
-          <div className="flex items-center gap-2 text-xs opacity-90">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="hidden sm:inline">Live</span>
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <div className="flex items-center gap-2 text-xs opacity-90">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="hidden sm:inline">Live</span>
+            </div>
           </div>
         </div>
 

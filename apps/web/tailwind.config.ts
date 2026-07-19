@@ -1,9 +1,11 @@
 import type { Config } from "tailwindcss"
 
 const config = {
-  // darkMode removido (F1 2026-07-04): no existe theming oscuro — decisión
-  // founder: diferir dark mode a post-Platform Console. Re-agregar cuando
-  // exista el bloque .dark + toggle reales.
+  // Web UX Fase 0 (2026-07-18): dark mode reactivado (revierte F1). Clase .dark
+  // en <html> (ThemeProvider opt-in) → el bloque .dark de globals.css redefine
+  // los tokens del canvas. Habilita además las variantes `dark:` para casos
+  // puntuales que no se resuelven solo por tokens.
+  darkMode: 'class',
   content: [
     './pages/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',

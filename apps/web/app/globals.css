@@ -52,6 +52,46 @@
     --sidebar-bg:     168 14%  8%;   /* Sidebar estructurado oscuro */
     --sidebar-bg-end: 168 15%  6%;   /* Extremo inferior del gradiente */
     --topbar-bg:      168 13% 15%;   /* #212B2A — entre sidebar y canvas */
+
+    color-scheme: light;
+  }
+
+  /* ── Modo oscuro — "Kaiu Evening Forest" ───────────────────────────────
+     NO es una inversión naïve: es la versión nocturna del look orgánico —
+     charcoal cálido verde-bosque, texto crema, verde Kaiu más brillante para
+     que resalte sobre oscuro, dorado que conserva calidez. Contraste AA.
+     Solo se sobrescriben tokens del CANVAS; el sidebar/topbar ya son oscuros
+     (mantienen sus valores :root, coherentes en ambos modos, separados por
+     border). Activado por la clase .dark en <html> (ThemeProvider, opt-in).
+  ─────────────────────────────────────────────────────────────────────── */
+  .dark {
+    --background:  165 14% 11%;    /* charcoal verde-bosque profundo */
+    --card:        165 13% 15%;    /* superficie elevada (sobre el canvas) */
+    --popover:     165 13% 15%;
+    --secondary:   165 12% 20%;    /* hover states, off-buttons */
+    --muted:       165 12% 18%;
+    --accent:      43 70% 60%;
+
+    --foreground:           40 30% 92%;   /* crema cálido — contraste alto */
+    --card-foreground:      40 30% 92%;
+    --popover-foreground:   40 30% 92%;
+    --secondary-foreground: 40 30% 92%;
+    --muted-foreground:     150 12% 64%;  /* sage-gris ≥4.5:1 AA sobre el canvas */
+    --accent-foreground:    165 25% 12%;
+
+    --primary:             156 42% 55%;   /* verde Kaiu brillante — resalta en oscuro */
+    --primary-foreground:  165 25% 10%;   /* texto oscuro sobre el verde brillante */
+
+    --destructive:            0 62% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 165 12% 22%;   /* sutil pero visible sobre el canvas oscuro */
+    --input:  165 12% 22%;
+    --ring:   156 42% 55%;
+
+    --amber:  43 70% 60%;
+
+    color-scheme: dark;
   }
 }
 
