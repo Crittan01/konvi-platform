@@ -35,6 +35,7 @@ from integrations.meli_client import (
     update_item_quantity,
     update_item_status,
 )
+from lib.commerce import CatalogItem, ListingRef, get_commerce_adapter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
@@ -126,6 +127,66 @@ def _resolve_variations_for_put(
     ]
 
 
+async def _push_stock_to_meli(
+    supabase, tenant_id: str, external_id: str, meli_variation_id, new_qty: int,
+    price: Optional[float], original_price: Optional[float],
+    meli_variations: list, access_token: str,
+) -> bool:
+    """Delega el PUT de stock/precio a MeLi al CommerceChannelAdapter, o cae a la
+    mecánica legacy IDÉNTICA. Devuelve put_ok (True SÓLO si el PUT tuvo éxito real).
+
+    NO escribe DB — el adapter es PURE I/O y el caller decide los pull-fields según el
+    retorno. Gate ÚNICO por capacidad para TODA la operación (evita split-brain entre las
+    2 ramas): el adapter maneja el PUT sólo si declara AMBAS capacidades; si no, o si no
+    está registrado, cae a legacy. El token ya resuelto (para el GET) se INYECTA al
+    adapter → evita una 2ª resolución (perf en hot-path + cierra la ventana NO_TOKEN).
+    El legacy LANZA en error (raise_for_status) → propaga al except del caller (no toca
+    pull-fields); el adapter retorna ok=False → put_ok=False → el caller hace return.
+    """
+    adapter = get_commerce_adapter("meli")
+    caps = adapter.capabilities() if adapter else set()
+    use_adapter = adapter is not None and {"update", "sync_stock"} <= caps
+    ref = ListingRef(provider="meli", external_id=external_id)
+
+    if price is not None:
+        # BLOQUE D item 2 / review D: array de variaciones vía helper compartido con el
+        # sync forzado manual (evita drift del zero-out de hermanos).
+        variations_for_put = _resolve_variations_for_put(
+            supabase, tenant_id, external_id, meli_variation_id, new_qty, meli_variations,
+        )
+        if use_adapter:
+            # product_id/sku/title vacíos: update_listing sólo lee qty/price/compare_at/raw
+            # (contrato P1). new_qty ya viene NETEADO por el caller (post-decremento) → es el
+            # stock DISPONIBLE que CatalogItem.available_quantity espera, no el bruto.
+            result = await adapter.update_listing(
+                tenant_id=tenant_id, ref=ref,
+                item=CatalogItem(
+                    tenant_id=tenant_id, product_id="", sku="", title="",
+                    available_quantity=new_qty, price=price, compare_at_price=original_price,
+                    raw={"meli_variations": variations_for_put},
+                ),
+                supabase=supabase, access_token=access_token,
+            )
+            if not result.ok:
+                logger.error("MeLi PUT (update_listing) falló para item %s: %s %s",
+                             external_id, result.error_code, result.error_message)
+            return result.ok
+        await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
+        return True
+
+    if use_adapter:
+        result = await adapter.sync_stock(
+            tenant_id=tenant_id, ref=ref, quantity=new_qty,
+            supabase=supabase, access_token=access_token,
+        )
+        if not result.ok:
+            logger.error("MeLi PUT (sync_stock) falló para item %s: %s %s",
+                         external_id, result.error_code, result.error_message)
+        return result.ok
+    await update_item_quantity(external_id, new_qty, access_token)
+    return True
+
+
 async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     """
     Empuja stock + precio + precio tachado de una variante a MeLi si tiene listing activo.
@@ -192,15 +253,16 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             logger.warning("No se pudo verificar status MeLi para %s: %s — intentando sync igual", external_id, check_err)
             meli_variations = []
 
-        if price is not None:
-            # BLOQUE D item 2 / review D: array de variaciones vía helper compartido con el sync
-            # forzado manual (evita drift del zero-out de hermanos).
-            variations_for_put = _resolve_variations_for_put(
-                supabase, tenant_id, external_id, meli_variation_id, new_qty, meli_variations,
-            )
-            await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
-        else:
-            await update_item_quantity(external_id, new_qty, access_token)
+        # ── P1.5 (ADR-0038): el PUT se delega al CommerceChannelAdapter (o legacy) ──
+        put_ok = await _push_stock_to_meli(
+            supabase, tenant_id, external_id, meli_variation_id,
+            new_qty, price, original_price, meli_variations, access_token,
+        )
+
+        # Invariante preservada: los campos pull se actualizan SÓLO tras un PUT exitoso.
+        # (legacy: el PUT lanzaba en error → saltaba al except externo; adapter: ok=False → return.)
+        if not put_ok:
+            return
 
         # Actualizar campos pull desde el GET que ya hicimos (meli_item está disponible)
         try:

@@ -85,7 +85,14 @@ class MeliCommerceAdapter:
         return set(_CAPABILITIES)
 
     # ── resolución de credencial per-tenant ──
-    async def _token(self, tenant_id: str, supabase: Any) -> Optional[str]:
+    async def _token(self, tenant_id: str, supabase: Any,
+                     access_token: Optional[str] = None) -> Optional[str]:
+        # Inyección (P1.5, ADR-0038): si el caller ya resolvió un token válido para una
+        # operación adyacente (p.ej. el GET pre-PUT del money-path), lo reusamos → evita
+        # una 2ª resolución (I/O DB+Vault en hot-path) Y cierra la ventana NO_TOKEN que
+        # abriría re-resolver. Token OPACO: None → self-resolve (comportamiento previo).
+        if access_token:
+            return access_token
         sb = supabase
         if sb is None:
             # Lazy import para no acoplar el módulo al ciclo de dependencias.
@@ -95,8 +102,9 @@ class MeliCommerceAdapter:
 
     # ── B. Sync de campo ──
     async def sync_stock(self, *, tenant_id: str, ref: ListingRef, quantity: int,
-                         siblings: Optional[list] = None, supabase: Any = None) -> StockSyncResult:
-        tok = await self._token(tenant_id, supabase)
+                         siblings: Optional[list] = None, supabase: Any = None,
+                         access_token: Optional[str] = None) -> StockSyncResult:
+        tok = await self._token(tenant_id, supabase, access_token)
         if not tok:
             return StockSyncResult(ok=False, error_code="NO_TOKEN",
                                    error_message="Integración MeLi no conectada o token no disponible.")
@@ -125,11 +133,11 @@ class MeliCommerceAdapter:
 
     # ── A. Ciclo de vida ──
     async def update_listing(self, *, tenant_id: str, ref: ListingRef, item: CatalogItem,
-                             supabase: Any = None) -> PublishResult:
+                             supabase: Any = None, access_token: Optional[str] = None) -> PublishResult:
         """Sync combinado stock+precio en un PUT. Variaciones: si item.raw trae
         'meli_variations' (armadas por el caller desde marketplace_listings), se
-        envían; si no, es item-level."""
-        tok = await self._token(tenant_id, supabase)
+        envían; si no, es item-level. `access_token` inyectable (ver _token)."""
+        tok = await self._token(tenant_id, supabase, access_token)
         if not tok:
             return PublishResult(ok=False, error_code="NO_TOKEN")
         meli_variations = (item.raw or {}).get("meli_variations") if item.raw else None

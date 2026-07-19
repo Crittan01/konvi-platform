@@ -219,6 +219,52 @@ class NotSupportedTests(unittest.TestCase):
         self.assertFalse(v.ok)
 
 
+class TokenInjectionTests(unittest.TestCase):
+    """P1.5: el caller puede inyectar un token ya resuelto → el adapter NO re-resuelve
+    (cierra la ventana NO_TOKEN + evita I/O DB+Vault en hot-path)."""
+
+    def test_sync_stock_uses_injected_token_and_skips_resolution(self):
+        a = MeliCommerceAdapter()
+        ref = ListingRef(provider="meli", external_id="MCO5")
+        with patch("lib.commerce.meli.meli_client.get_valid_token", AsyncMock()) as gvt, \
+             patch("lib.commerce.meli.meli_client.update_item_quantity", AsyncMock(return_value={})) as up:
+            r = asyncio.run(a.sync_stock(tenant_id="t1", ref=ref, quantity=7, supabase=_SB, access_token="INJECTED"))
+        self.assertTrue(r.ok)
+        gvt.assert_not_awaited()                       # NO re-resolvió
+        up.assert_awaited_once_with("MCO5", 7, "INJECTED")
+
+    def test_update_listing_uses_injected_token_and_forwards_body(self):
+        # Paridad de body del PUT: adapter REAL → meli_client, con token inyectado.
+        a = MeliCommerceAdapter()
+        ref = ListingRef(provider="meli", external_id="MCO6")
+        item = CatalogItem(tenant_id="t1", product_id="", sku="", title="",
+                           available_quantity=3, price=1000.0, compare_at_price=1500.0,
+                           raw={"meli_variations": [{"id": 1, "available_quantity": 3}]})
+        with patch("lib.commerce.meli.meli_client.get_valid_token", AsyncMock()) as gvt, \
+             patch("lib.commerce.meli.meli_client.update_item_listing", AsyncMock(return_value={})) as up:
+            r = asyncio.run(a.update_listing(tenant_id="t1", ref=ref, item=item, supabase=_SB, access_token="INJECTED"))
+        self.assertTrue(r.ok)
+        gvt.assert_not_awaited()
+        args, kwargs = up.await_args
+        self.assertEqual(args[0], "MCO6")              # external_id
+        self.assertEqual(args[1], 3)                   # available_quantity
+        self.assertEqual(args[2], 1000.0)              # price
+        self.assertEqual(args[3], 1500.0)              # compare_at (forward; meli_client lo ignora)
+        self.assertEqual(args[4], "INJECTED")          # token inyectado
+        self.assertEqual(kwargs.get("meli_variations"), [{"id": 1, "available_quantity": 3}])
+
+    def test_no_injection_falls_back_to_resolution(self):
+        # Sin access_token → get_valid_token (comportamiento previo intacto).
+        a = MeliCommerceAdapter()
+        ref = ListingRef(provider="meli", external_id="MCO5")
+        with patch("lib.commerce.meli.meli_client.get_valid_token", AsyncMock(return_value="RESOLVED")) as gvt, \
+             patch("lib.commerce.meli.meli_client.update_item_quantity", AsyncMock(return_value={})) as up:
+            r = asyncio.run(a.sync_stock(tenant_id="t1", ref=ref, quantity=7, supabase=_SB))
+        self.assertTrue(r.ok)
+        gvt.assert_awaited_once()
+        up.assert_awaited_once_with("MCO5", 7, "RESOLVED")
+
+
 class RegisterTests(unittest.TestCase):
     def test_register_overrides_stub(self):
         from lib.commerce.meli import register
@@ -227,7 +273,9 @@ class RegisterTests(unittest.TestCase):
             register()
             a = C.get_commerce_adapter("meli")
             self.assertIsInstance(a, MeliCommerceAdapter)
+            # Wiring del money-path: el gate del seam exige AMBAS capacidades declaradas.
             self.assertIn("sync_stock", a.capabilities())
+            self.assertIn("update", a.capabilities())
         finally:
             C.register_commerce_channel("meli", original)  # restaurar stub
 
