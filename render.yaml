@@ -223,6 +223,11 @@ services:
       # Mover el valor desde el servicio web (donde estaba antes) a este.
       - key: GEMINI_API_KEY
         sync: false
+      # Cascade LLM rescue cross-vendor (llm_cascade.py:133): sin esta key el tier
+      # claude-sonnet-4-5 de 'Sugerir con IA' se saltea silencioso. MISMO valor que
+      # el bloque orchestrator (setear en el Dashboard del servicio api).
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-2          # Fase 6: embedding-001 se retira (doc oficial); 2 = 3072-dim (schema OK)
       - key: GEMINI_EMBEDDING_FALLBACK_MODEL

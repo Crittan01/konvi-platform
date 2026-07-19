@@ -141,3 +141,45 @@ def test_assert_not_prod_alias(monkeypatch):
     assert guard.assert_not_prod is guard.assert_safe_target
     with pytest.raises(SystemExit):
         guard.assert_not_prod(PROD_CREDS, action="wipe")
+
+
+# ── Multi-fuente: DATABASE_URL + SUPABASE_PROJECT_REF (cierre del fail-open) ──
+_DBURL_PROD_POOLER = f"postgresql://postgres.{guard.PROD_REF}:pw@aws-0-us.pooler.supabase.com:6543/postgres"
+_DBURL_DEV_DIRECT = f"postgresql://postgres:pw@db.{DEV_REF}.supabase.co:5432/postgres"
+
+
+def test_classify_database_url_prod_pooler_is_prod():
+    assert guard.classify({"DATABASE_URL": _DBURL_PROD_POOLER}) == "prod"
+
+
+def test_classify_database_url_dev_direct_is_dev_safe():
+    assert guard.classify({"DATABASE_URL": _DBURL_DEV_DIRECT}) == "dev-safe"
+
+
+def test_classify_url_dev_but_database_url_prod_is_prod():
+    # EL FAIL-OPEN QUE CERRAMOS: URL Supabase=dev pero DATABASE_URL=prod → NO dev-safe.
+    assert guard.classify({
+        "NEXT_PUBLIC_SUPABASE_URL": f"https://{DEV_REF}.supabase.co",
+        "DATABASE_URL": _DBURL_PROD_POOLER,
+    }) == "prod"
+
+
+def test_classify_project_ref_prod_is_prod():
+    assert guard.classify({"SUPABASE_PROJECT_REF": guard.PROD_REF}) == "prod"
+
+
+def test_classify_project_ref_dev_is_dev_safe():
+    assert guard.classify({"SUPABASE_PROJECT_REF": DEV_REF}) == "dev-safe"
+
+
+def test_classify_database_url_local_is_dev_safe():
+    assert guard.classify(
+        {"DATABASE_URL": "postgresql://postgres:pw@localhost:54322/postgres"}
+    ) == "dev-safe"
+
+
+def test_assert_safe_target_aborts_on_database_url_prod(monkeypatch):
+    monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
+    with pytest.raises(SystemExit) as e:
+        guard.assert_safe_target({"DATABASE_URL": _DBURL_PROD_POOLER}, action="test")
+    assert e.value.code == 2

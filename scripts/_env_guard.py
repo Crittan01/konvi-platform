@@ -72,22 +72,87 @@ def is_local(creds: dict) -> bool:
     return host in _LOCAL_HOSTS or host.endswith(".local")
 
 
+_REF_RE = re.compile(r"^[a-z0-9]{16,}$")
+
+
+def _ref_from_database_url(creds: dict) -> tuple[Optional[str], bool, bool]:
+    """Deriva el ref de una connection string Postgres (`DATABASE_URL`).
+
+      • directo: postgresql://postgres:pwd@db.<ref>.supabase.co:5432/postgres
+      • pooler:  postgres://postgres.<ref>:pwd@aws-0-...pooler.supabase.com:6543/postgres
+
+    Cierra el fail-open (audit cierre prod): antes classify() solo miraba la URL
+    Supabase; una tool que conecte por DATABASE_URL a PROD con URL=dev pasaba como
+    'dev-safe'. Retorna (ref|None, is_set, is_local).
+    """
+    url = (creds.get("DATABASE_URL") or "").strip()
+    if not url:
+        return (None, False, False)
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host in _LOCAL_HOSTS or host.endswith(".local"):
+        return (None, True, True)
+    m = _HOST_REF_RE.match(host)          # directo: db.<ref>.supabase.co
+    if m:
+        return (m.group(1).lower(), True, False)
+    user = parsed.username or ""          # pooler: postgres.<ref>
+    if "." in user:
+        cand = user.split(".", 1)[1].lower()
+        if _REF_RE.match(cand):
+            return (cand, True, False)
+    return (None, True, False)            # seteado pero no identificable → deny
+
+
 def classify(creds: dict) -> str:
     """Clasifica el destino: 'dev-safe' | 'prod' | 'unknown'.
 
-    'unknown' = no se pudo probar que sea dev (host no-parseable, custom domain,
-    pooler, ref no listado). Se trata como no-seguro (deny-by-default).
+    Deny-by-default sobre TODAS las fuentes (URL Supabase + DATABASE_URL +
+    SUPABASE_PROJECT_REF): si CUALQUIERA apunta a prod → 'prod'; si cualquiera está
+    seteada pero no se resuelve a un dev conocido → 'unknown'. Solo 'dev-safe' si
+    todas las fuentes presentes son local o un ref de dev reconocido.
     """
-    if is_local(creds):
-        return "dev-safe"
-    ref = extract_ref(creds)
-    if ref is None:
+    safe = _safe_refs()
+    saw_safe = False
+    saw_unsafe = False
+
+    # Fuente 1 — URL Supabase.
+    if _host(creds):
+        if is_local(creds):
+            saw_safe = True
+        else:
+            ref = extract_ref(creds)
+            if ref == PROD_REF:
+                return "prod"
+            if ref is not None and ref in safe:
+                saw_safe = True
+            else:
+                saw_unsafe = True
+
+    # Fuente 2 — DATABASE_URL (connection string Postgres).
+    db_ref, db_set, db_local = _ref_from_database_url(creds)
+    if db_set:
+        if db_local:
+            saw_safe = True
+        elif db_ref == PROD_REF:
+            return "prod"
+        elif db_ref is not None and db_ref in safe:
+            saw_safe = True
+        else:
+            saw_unsafe = True
+
+    # Fuente 3 — SUPABASE_PROJECT_REF directo.
+    pr = (creds.get("SUPABASE_PROJECT_REF") or "").strip().lower()
+    if pr:
+        if pr == PROD_REF:
+            return "prod"
+        if _REF_RE.match(pr) and pr in safe:
+            saw_safe = True
+        else:
+            saw_unsafe = True
+
+    if saw_unsafe:
         return "unknown"
-    if ref == PROD_REF:
-        return "prod"
-    if ref in _safe_refs():
-        return "dev-safe"
-    return "unknown"
+    return "dev-safe" if saw_safe else "unknown"
 
 
 def is_prod(creds: dict) -> bool:
