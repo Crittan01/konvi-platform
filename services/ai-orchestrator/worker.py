@@ -27,6 +27,15 @@ MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
 # rate_limit_hit (migración 20260425 distributed_rate_limiter), sin estado local.
 INBOUND_LLM_RATE_LIMIT = int(os.getenv("INBOUND_LLM_RATE_LIMIT", "30"))
 INBOUND_LLM_RATE_WINDOW_SECONDS = int(os.getenv("INBOUND_LLM_RATE_WINDOW_SECONDS", "60"))
+
+# A1 (ADR-0037) — este worker orquesta y RESPONDE por WhatsApp. conversations.channel
+# soporta un registro pluggable (whatsapp, meli, telegram, web, messenger, instagram,
+# sms) pero solo 'whatsapp' es canal de CLIENTE vivo hoy (telegram = notificación a
+# operador, no inbound de cliente). El poll de inbound filtra a este canal para que un
+# mensaje de OTRO canal (ej. 'meli') insertado como 'pending' NUNCA se responda por
+# WhatsApp a un teléfono nulo/ajeno (trampa Bloque 4). Defensa en profundidad: hoy no
+# hay ingesta multicanal, pero blinda contra un insert accidental/bug futuro.
+HANDLED_INBOUND_CHANNEL = os.getenv("HANDLED_INBOUND_CHANNEL", "whatsapp")
 # Rev. 85 — debounce/coalescing window. Si el cliente envía múltiples
 # mensajes rápidos, esperamos esta ventana antes de procesar para juntar
 # en un solo input al LLM (no perder contexto al ver solo el último msg).
@@ -622,6 +631,58 @@ class OrchestratorWorker:
             )
             return False
 
+    def _filter_inbound_by_channel(self, rows: list[dict]) -> list[dict]:
+        """A1 (ADR-0037) — defensa en profundidad Bloque 4. Excluye del procesamiento
+        los inbound cuya conversación tenga un canal DISTINTO de HANDLED_INBOUND_CHANNEL
+        (ej. 'meli'), para que este worker WhatsApp NUNCA responda por WhatsApp a un
+        comprador de otro canal.
+
+        CONSERVADOR (fail-open, no dropea legítimos):
+          - Canal desconocido / conversación no encontrada / lookup caído → se PROCESA
+            (la columna es NOT NULL DEFAULT 'whatsapp', así que 'desconocido' es
+            típicamente WhatsApp). Solo se omite un canal NO-WhatsApp EXPLÍCITO.
+        """
+        if not rows:
+            return rows
+        conv_ids = list({r.get("conversation_id") for r in rows if r.get("conversation_id")})
+        if not conv_ids:
+            return rows
+        try:
+            res = (
+                self.supabase.table("conversations")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
+                .select("id, channel")
+                .in_("id", conv_ids)
+                .execute()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[A1] lookup de canal falló (%s) — proceso todo (fail-open, sin regresión)",
+                exc,
+            )
+            return rows
+        channel_by_id = {
+            c.get("id"): (c.get("channel") or HANDLED_INBOUND_CHANNEL)
+            for c in (res.data or [])
+        }
+        kept: list[dict] = []
+        skipped = 0
+        for r in rows:
+            # Desconocido/orphan → default al canal manejado (fail-open, no dropea).
+            ch = channel_by_id.get(r.get("conversation_id"), HANDLED_INBOUND_CHANNEL)
+            if ch == HANDLED_INBOUND_CHANNEL:
+                kept.append(r)
+            else:
+                skipped += 1
+        if skipped:
+            self._metrics["inbound_skipped_other_channel"] = (
+                self._metrics.get("inbound_skipped_other_channel", 0) + skipped
+            )
+            logger.warning(
+                "[A1] %d inbound de canal != %s omitidos (defensa en profundidad Bloque 4)",
+                skipped, HANDLED_INBOUND_CHANNEL,
+            )
+        return kept
+
     async def _poll_inbound_messages(self):
         """Busca mensajes inbound pendientes y los orquesta.
 
@@ -655,7 +716,12 @@ class OrchestratorWorker:
             .execute()
         )
 
-        pending = _round_robin_dequeue_by_tenant(result.data or [], max_total=10)
+        # A1: defensa en profundidad — descartar inbound de canales que este worker
+        # NO responde (ej. 'meli') ANTES del round-robin, para no gastar turnos ni
+        # arriesgar responder por WhatsApp a otro canal.
+        rows = self._filter_inbound_by_channel(result.data or [])
+
+        pending = _round_robin_dequeue_by_tenant(rows, max_total=10)
         if not pending:
             return
         self._metrics["inbound_seen"] += len(pending)
