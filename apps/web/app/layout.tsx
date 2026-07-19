@@ -1,9 +1,10 @@
 import './globals.css'
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import { ConfirmProvider } from '@/components/ui/confirm-dialog'
 import { ThemeProvider } from '@/components/theme/theme-provider'
+import { ServiceWorkerRegister } from '@/components/pwa/sw-register'
 
 // Script anti-FOUC: corre síncrono antes del primer paint y fija la clase .dark
 // desde la preferencia guardada o del sistema → sin flash claro→oscuro. El
@@ -23,6 +24,25 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Konvi Platform',
   description: 'Multi-Tenant Backoffice for WhatsApp Commerce',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Konvi',
+  },
+}
+
+// Viewport móvil correcto + theme-color por tema (colorea la barra del navegador/
+// status bar según claro/oscuro) + viewport-fit cover para respetar el safe-area
+// de dispositivos con notch (necesario para el bottom-nav).
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F8F5F1' },
+    { media: '(prefers-color-scheme: dark)', color: '#1A211F' },
+  ],
 }
 
 export default function RootLayout({
@@ -38,6 +58,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfirmProvider>{children}</ConfirmProvider>
           <Toaster />
+          <ServiceWorkerRegister />
         </ThemeProvider>
       </body>
     </html>

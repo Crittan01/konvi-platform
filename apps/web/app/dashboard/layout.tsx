@@ -9,6 +9,8 @@ import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
+import { InstallButton } from '@/components/pwa/install-button'
+import { BottomNav } from './bottom-nav'
 
 /**
  * Browser title tenant-centric (Sem 7 F2 cierre — segregación Konvi/tenant).
@@ -148,6 +150,7 @@ export default async function DashboardLayout({
           <div className="w-10 lg:hidden" />
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            <InstallButton />
             <ThemeToggle />
             <div className="flex items-center gap-2 text-xs opacity-90">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -172,11 +175,14 @@ export default async function DashboardLayout({
           </div>
         )}
 
-        {/* Page content */}
-        <div className="p-4 sm:p-6 lg:p-8">
+        {/* Page content — pb extra en móvil para no quedar bajo el bottom-nav */}
+        <div className="px-4 pt-4 pb-24 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 lg:pb-8">
           {children}
         </div>
       </main>
+
+      {/* Navegación inferior móvil (fixed, < lg) */}
+      <BottomNav />
     </div>
   )
 }
