@@ -98,7 +98,7 @@ export default async function LoginPage(
   }
 
   return (
-    <div className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-[#131A19]">
+    <div className="light relative flex h-screen w-full items-center justify-center overflow-hidden bg-[#131A19]">
       {/* Textura grano — SVG inline (sin dependencia runtime de terceros en la
           puerta de entrada del producto; el asset externo era un vector de
           supply-chain en el login). */}

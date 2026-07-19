@@ -9,7 +9,6 @@ import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
-import { InstallButton } from '@/components/pwa/install-button'
 import { BottomNav } from './bottom-nav'
 
 /**
@@ -150,7 +149,6 @@ export default async function DashboardLayout({
           <div className="w-10 lg:hidden" />
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <InstallButton />
             <ThemeToggle />
             <div className="flex items-center gap-2 text-xs opacity-90">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />

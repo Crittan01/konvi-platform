@@ -8,7 +8,7 @@ export const metadata = {
 
 export default function ForgotPasswordPage() {
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
+    <div className="light flex h-screen w-full items-center justify-center bg-[#131A19]">
       <div className="w-full max-w-[420px] p-6">
         <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
           <CardHeader className="space-y-1">

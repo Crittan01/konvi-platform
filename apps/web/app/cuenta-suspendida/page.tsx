@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function CuentaSuspendidaPage() {
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-[#131A19] p-6">
+    <div className="light flex min-h-screen w-full items-center justify-center bg-[#131A19] p-6">
       <div className="w-full max-w-[420px]">
         <div className="flex flex-col items-center mb-6">
           <div className="h-12 w-12 rounded-xl bg-primary/20 text-primary flex items-center justify-center mb-3 shadow-lg ring-1 ring-white/10">

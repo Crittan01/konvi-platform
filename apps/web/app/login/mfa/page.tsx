@@ -47,7 +47,7 @@ export default async function MfaChallengePage(
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
+    <div className="light flex h-screen w-full items-center justify-center bg-[#131A19]">
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 mix-blend-overlay pointer-events-none"></div>
 
       <div className="relative w-full max-w-[420px] p-6 sm:p-8">

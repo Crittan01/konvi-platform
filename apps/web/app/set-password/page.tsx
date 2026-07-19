@@ -68,7 +68,7 @@ export default async function SetPasswordPage(
   const submitLabel = isReset ? 'Guardar y entrar' : 'Activar cuenta y entrar'
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
+    <div className="light flex h-screen w-full items-center justify-center bg-[#131A19]">
       <div className="w-full max-w-[420px] p-6">
         <div className="flex flex-col items-center mb-6">
           <div className="h-12 w-12 rounded-xl bg-primary/20 text-primary flex items-center justify-center mb-3 shadow-lg ring-1 ring-white/10">

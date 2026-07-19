@@ -3,7 +3,11 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  /* `.light` recibe los MISMOS tokens que :root (sin duplicar) → permite forzar
+     tema claro en un subárbol aunque <html> tenga .dark (ej. páginas de auth con
+     card clara hardcodeada, cuyos inputs/labels no deben flipear a oscuro). */
+  :root,
+  .light {
     /* --font-inter la provee next/font (app/layout.tsx) — self-hosted, zero CLS. */
 
     /* ── Commerce Ops Design System — Kaiu Organic Style ──────────────────
