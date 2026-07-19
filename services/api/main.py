@@ -107,6 +107,15 @@ def _validate_startup_config() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_startup_config()
+    # ADR-0038 (P1) — activar los commerce adapters reales, sobreescribiendo los
+    # stubs default-deny del registry. Fail-safe: si el registro fallara, se loguea
+    # y el arranque continúa (el registry cae al stub; ningún caller lo usa aún).
+    try:
+        from lib.commerce.meli import register as _register_meli_commerce
+        _register_meli_commerce()
+        logger.info("[STARTUP] commerce adapter MeLi registrado")
+    except Exception as _exc:  # noqa: BLE001
+        logger.warning("[STARTUP] no se pudo registrar el commerce adapter MeLi: %s", _exc)
     yield
 
 
