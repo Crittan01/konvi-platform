@@ -24,6 +24,8 @@ Retry-After) al caller vía error_code/retry_after_seconds, sin acoplarlo a MeLi
 from __future__ import annotations
 
 import logging
+import os
+import re
 from typing import Any, Optional
 
 import httpx
@@ -32,8 +34,13 @@ from integrations import meli_client
 
 from .base import (
     CatalogItem,
+    ChannelCategory,
     ChannelListingState,
+    IngestedOrder,
+    IngestedOrderLine,
     ListingRef,
+    ListingValidation,
+    OrderNotification,
     PriceSyncResult,
     PublishResult,
     StockSyncResult,
@@ -44,7 +51,18 @@ logger = logging.getLogger("api.commerce.meli")
 _CAPABILITIES = frozenset({
     "update", "pause", "resume", "close",
     "sync_stock", "sync_price", "reconcile",
+    "order_ingest",
 })
+
+_ORDER_ID_RE = re.compile(r"/orders/([^/?#]+)")
+
+
+def _allowed_meli_ips() -> frozenset:
+    """Allowlist de IPs MeLi para verify_origin (MeLi NO firma los webhooks).
+    Fuente: env MELI_WEBHOOK_ALLOWED_IPS (CSV). Si no está configurado, verify_origin
+    DEFIERE (el webhook mantiene su verificación primaria hop-aware)."""
+    raw = os.getenv("MELI_WEBHOOK_ALLOWED_IPS", "").strip()
+    return frozenset(ip.strip() for ip in raw.split(",") if ip.strip())
 
 
 def _retry_after(exc: httpx.HTTPStatusError) -> Optional[int]:
@@ -165,6 +183,109 @@ class MeliCommerceAdapter:
             permalink=data.get("permalink"),
             raw=data,
         )
+
+    # ── D. Ingesta de pedidos (canal → Supabase; el CALLER persiste) ──
+    def verify_origin(self, *, headers: dict, raw_body: bytes, tenant_id: str) -> bool:
+        """MeLi NO firma los webhooks — única defensa = IP allowlist. Extrae la IP del
+        leftmost X-Forwarded-For y la compara con el allowlist (env). Sin allowlist
+        configurado → DEFIERE (True): el webhook mantiene la verificación primaria
+        hop-aware (resolve_client_ip). La verificación completa migra aquí en P1.5."""
+        allow = _allowed_meli_ips()
+        if not allow:
+            return True
+        h = headers or {}
+        xff = h.get("x-forwarded-for") or h.get("X-Forwarded-For") or ""
+        ip = xff.split(",")[0].strip() if xff else ""
+        return ip in allow
+
+    def parse_order_notification(self, payload: dict) -> OrderNotification:
+        """IPN (webhook) → OrderNotification. `resource` es la ruta a fetchear."""
+        p = payload or {}
+        resource = p.get("resource")
+        m = _ORDER_ID_RE.search(resource or "")
+        return OrderNotification(
+            provider="meli",
+            topic=p.get("topic", ""),
+            resource=resource,
+            external_order_id=m.group(1) if m else None,
+            user_id=str(p["user_id"]) if p.get("user_id") is not None else None,
+            raw=p,
+        )
+
+    async def fetch_order(self, *, tenant_id: str, external_order_id: str, supabase: Any = None) -> IngestedOrder:
+        """GET /orders/{id} → IngestedOrder normalizado (PURE — sin DB, sin mapear a
+        status interno, sin resolver variation_id: eso es del caller). `status` es el
+        crudo de MeLi (el caller aplica MELI_ORDER_STATUS_MAP)."""
+        tok = await self._token(tenant_id, supabase)
+        if not tok:
+            raise RuntimeError("NO_TOKEN: integración MeLi no conectada")
+        url = f"{meli_client.MELI_API_URL}/orders/{external_order_id}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {tok}"})
+            resp.raise_for_status()
+            data = resp.json()
+        buyer = data.get("buyer") or {}
+        buyer_name = (
+            f"{buyer.get('first_name', '')} {buyer.get('last_name', '')}".strip()
+            or buyer.get("nickname", "")
+        )
+        lines = []
+        for it in (data.get("order_items") or []):
+            item = it.get("item") or {}
+            iid = item.get("id")
+            if not iid:
+                continue
+            lines.append(IngestedOrderLine(
+                external_item_id=str(iid),
+                quantity=int(it.get("quantity", 0) or 0),
+                unit_price=float(it.get("unit_price", 0) or 0),
+                variation_ref=str(item["variation_id"]) if item.get("variation_id") is not None else None,
+                sku=item.get("seller_sku") or item.get("seller_custom_field"),
+            ))
+        return IngestedOrder(
+            provider="meli",
+            external_order_id=str(data.get("id", external_order_id)),
+            status=data.get("status", ""),
+            total_amount=float(data.get("total_amount", 0) or 0),
+            currency=data.get("currency_id", "COP"),
+            lines=lines,
+            buyer={
+                "external_user_id": str(buyer["id"]) if buyer.get("id") is not None else None,
+                "name": buyer_name,
+                "nickname": buyer.get("nickname"),
+                "phone": (buyer.get("billing_info") or {}).get("phone") or buyer.get("phone"),
+            },
+            created_at_iso=data.get("date_created"),
+            shipping=data.get("shipping"),
+            raw=data,
+        )
+
+    async def list_orders(self, *, tenant_id: str, since_iso: str, supabase: Any = None) -> list:
+        """Backfill (/orders/search o /myfeeds) — VERIFY-OFFICIAL-DOC (schema no
+        confirmado en el dossier). No implementado hasta cerrar la doc; devuelve []."""
+        logger.info("[COMMERCE][meli] list_orders backfill pendiente (VERIFY-DOC /myfeeds)")
+        return []
+
+    # ── NOT SUPPORTED hoy (honesto; NO declarado en capabilities) ──
+    # MeLi es import-only hasta P4 (POST /items) + categorías/atributos (P3).
+    async def publish_listing(self, *, tenant_id: str, item: CatalogItem, supabase: Any = None) -> PublishResult:
+        return PublishResult(ok=False, error_code="NOT_SUPPORTED",
+                             error_message="MeLi import-only: publish (POST /items) llega en P4.")
+
+    async def sync_images(self, *, tenant_id: str, ref: ListingRef, image_urls: list, supabase: Any = None) -> PublishResult:
+        return PublishResult(ok=False, error_code="NOT_SUPPORTED")
+
+    async def fetch_categories(self, *, tenant_id: str, root: Optional[str] = None, supabase: Any = None) -> list:
+        return []
+
+    async def fetch_category_attributes(self, *, tenant_id: str, channel_category_id: str, supabase: Any = None) -> list:
+        return []
+
+    async def suggest_category(self, *, tenant_id: str, item: CatalogItem, supabase: Any = None) -> Optional[ChannelCategory]:
+        return None
+
+    def validate_for_publish(self, *, item: CatalogItem, required: list) -> ListingValidation:
+        return ListingValidation(ok=False, errors=["NOT_SUPPORTED"])
 
 
 def register() -> None:
