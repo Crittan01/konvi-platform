@@ -17,8 +17,21 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "k")
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from lib import commerce as C  # noqa: E402
-from lib.commerce.base import CatalogItem, ListingRef  # noqa: E402
+from lib.commerce.base import CatalogItem, CommerceChannelAdapter, ListingRef  # noqa: E402
 from lib.commerce.meli import MeliCommerceAdapter  # noqa: E402
+
+
+class _FakeResp:
+    def __init__(self, data): self._d = data
+    def raise_for_status(self): pass
+    def json(self): return self._d
+
+
+class _FakeClient:
+    def __init__(self, data): self._d = data
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): return False
+    async def get(self, url, headers=None): return _FakeResp(self._d)
 
 _SB = object()  # supabase inyectado (no se usa porque get_valid_token está mockeado)
 
@@ -31,13 +44,13 @@ def _http_error(status: int, retry_after=None):
 
 
 class CapabilitiesTests(unittest.TestCase):
-    def test_declares_outbound_not_publish(self):
+    def test_declares_outbound_and_ingest_not_publish(self):
         caps = MeliCommerceAdapter().capabilities()
-        for c in ("sync_stock", "sync_price", "update", "pause", "resume", "close", "reconcile"):
+        for c in ("sync_stock", "sync_price", "update", "pause", "resume", "close", "reconcile", "order_ingest"):
             self.assertIn(c, caps)
-        # Degradación grácil: MeLi HOY sin publish / categories / order_ingest.
+        # Degradación grácil: MeLi HOY sin publish / categories / attributes (import-only).
         self.assertNotIn("publish", caps)
-        self.assertNotIn("order_ingest", caps)
+        self.assertNotIn("categories", caps)
 
     def test_channel_name(self):
         self.assertEqual(MeliCommerceAdapter().channel_name(), "meli")
@@ -129,6 +142,81 @@ class FetchListingTests(unittest.TestCase):
             self.assertEqual(s.status, "active")
             self.assertEqual(s.available_quantity, 3)
             self.assertEqual(s.permalink, "http://x")
+
+
+class ProtocolCompletenessTests(unittest.TestCase):
+    def test_adapter_satisfies_full_protocol(self):
+        # Todos los métodos del contrato existen (incl. not-supported honestos) →
+        # isinstance pasa → sin warning de Protocol-incompleto al registrar.
+        self.assertIsInstance(MeliCommerceAdapter(), CommerceChannelAdapter)
+
+    def test_order_ingest_declared(self):
+        self.assertIn("order_ingest", MeliCommerceAdapter().capabilities())
+
+
+class InboundTests(unittest.TestCase):
+    def setUp(self):
+        self.a = MeliCommerceAdapter()
+
+    def test_parse_order_notification(self):
+        n = self.a.parse_order_notification(
+            {"resource": "/orders/200000123", "user_id": 12345, "topic": "orders_v2"})
+        self.assertEqual(n.provider, "meli")
+        self.assertEqual(n.topic, "orders_v2")
+        self.assertEqual(n.external_order_id, "200000123")
+        self.assertEqual(n.user_id, "12345")
+
+    def test_parse_order_notification_no_resource(self):
+        n = self.a.parse_order_notification({"topic": "orders_v2"})
+        self.assertIsNone(n.external_order_id)
+
+    def test_fetch_order_normalizes(self):
+        order = {
+            "id": 200000123, "status": "paid", "total_amount": 50000, "currency_id": "COP",
+            "date_created": "2026-07-19T10:00:00.000-05:00",
+            "buyer": {"id": 999, "first_name": "Juan", "last_name": "Pérez", "nickname": "juanp",
+                      "billing_info": {"phone": "3001234567"}},
+            "order_items": [{"item": {"id": "MCO111", "variation_id": 55, "seller_sku": "SKU1"},
+                             "quantity": 2, "unit_price": 25000}],
+            "shipping": {"id": 888},
+        }
+        with patch("lib.commerce.meli.meli_client.get_valid_token", AsyncMock(return_value="TOK")), \
+             patch("lib.commerce.meli.httpx.AsyncClient", return_value=_FakeClient(order)):
+            o = asyncio.run(self.a.fetch_order(tenant_id="t1", external_order_id="200000123", supabase=object()))
+        self.assertEqual(o.external_order_id, "200000123")
+        self.assertEqual(o.status, "paid")   # crudo de MeLi (el caller mapea a interno)
+        self.assertEqual(o.total_amount, 50000.0)
+        self.assertEqual(len(o.lines), 1)
+        self.assertEqual(o.lines[0].external_item_id, "MCO111")
+        self.assertEqual(o.lines[0].quantity, 2)
+        self.assertEqual(o.lines[0].variation_ref, "55")
+        self.assertEqual(o.lines[0].sku, "SKU1")
+        self.assertEqual(o.buyer["name"], "Juan Pérez")
+        self.assertEqual(o.buyer["phone"], "3001234567")
+
+    def test_verify_origin_defers_without_allowlist(self):
+        with patch.dict(os.environ, {"MELI_WEBHOOK_ALLOWED_IPS": ""}, clear=False):
+            self.assertTrue(self.a.verify_origin(headers={}, raw_body=b"", tenant_id="t"))
+
+    def test_verify_origin_checks_ip_when_configured(self):
+        with patch.dict(os.environ, {"MELI_WEBHOOK_ALLOWED_IPS": "1.2.3.4, 5.6.7.8"}):
+            self.assertTrue(self.a.verify_origin(
+                headers={"x-forwarded-for": "1.2.3.4, 9.9.9.9"}, raw_body=b"", tenant_id="t"))
+            self.assertFalse(self.a.verify_origin(
+                headers={"x-forwarded-for": "9.9.9.9"}, raw_body=b"", tenant_id="t"))
+
+
+class NotSupportedTests(unittest.TestCase):
+    def test_publish_and_validate_not_supported(self):
+        a = MeliCommerceAdapter()
+        item = CatalogItem(tenant_id="t", product_id="p", sku="s", title="x",
+                           available_quantity=1, price=1.0)
+        r = asyncio.run(a.publish_listing(tenant_id="t", item=item))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.error_code, "NOT_SUPPORTED")
+        self.assertNotIn("publish", a.capabilities())  # degradación grácil
+        v = a.validate_for_publish(item=item, required=[])
+        self.assertFalse(v.ok)
 
 
 class RegisterTests(unittest.TestCase):
