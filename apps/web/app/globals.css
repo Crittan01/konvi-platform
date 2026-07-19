@@ -200,3 +200,36 @@
     .card-hover:hover { transform: none; }
   }
 }
+
+/* ── Dark mode — colores semánticos legibles (barrido visual 2026-07-19) ──────
+   Muchos badges/cajas usan `bg-{color}-50/100` + `text-{color}-700` (patrón claro).
+   En dark eso quedaba como caja CLARA sobre el canvas oscuro (legible pero inconsistente)
+   y el texto de color SUELTO sobre el canvas perdía brillo (concern founder rojo/azul).
+   Remapeo por PAREJA (fondo → tinte oscuro translúcido, texto → brillante, borde → sutil)
+   por familia → badges dark-consistentes + texto legible, en UN solo lugar (modular).
+   Interino; el fin de juego son tokens danger/warning/success/info. Sin @layer → ganan
+   sobre las utilidades de Tailwind por cascada de capas. NO toca las variantes /15 /20
+   (ya translúcidas → correctas en dark) ni las páginas de auth (forzadas .light). */
+.dark .bg-red-50, .dark .bg-red-100, .dark .bg-rose-50 { background-color: color-mix(in srgb, #ef4444 13%, transparent); }
+.dark .bg-amber-50, .dark .bg-amber-100, .dark .bg-yellow-50 { background-color: color-mix(in srgb, #f59e0b 13%, transparent); }
+.dark .bg-orange-50 { background-color: color-mix(in srgb, #f97316 13%, transparent); }
+.dark .bg-emerald-50, .dark .bg-emerald-100, .dark .bg-green-50 { background-color: color-mix(in srgb, #10b981 13%, transparent); }
+.dark .bg-blue-50, .dark .bg-sky-50 { background-color: color-mix(in srgb, #3b82f6 13%, transparent); }
+.dark .bg-indigo-50, .dark .bg-purple-50 { background-color: color-mix(in srgb, #6366f1 13%, transparent); }
+
+.dark .text-red-600, .dark .text-red-700, .dark .text-red-800, .dark .text-red-900 { color: #f87171; }
+.dark .text-rose-700, .dark .text-rose-800, .dark .text-rose-900 { color: #fb7185; }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900 { color: #fbbf24; }
+.dark .text-yellow-600, .dark .text-yellow-700 { color: #facc15; }
+.dark .text-orange-700 { color: #fb923c; }
+.dark .text-emerald-600, .dark .text-emerald-700, .dark .text-emerald-800, .dark .text-emerald-900 { color: #34d399; }
+.dark .text-green-600, .dark .text-green-700, .dark .text-green-800 { color: #4ade80; }
+.dark .text-blue-700, .dark .text-blue-800 { color: #60a5fa; }
+.dark .text-sky-700 { color: #38bdf8; }
+.dark .text-indigo-700 { color: #818cf8; }
+.dark .text-purple-700 { color: #c084fc; }
+
+.dark .border-red-200, .dark .border-red-300 { border-color: color-mix(in srgb, #ef4444 26%, transparent); }
+.dark .border-amber-200, .dark .border-amber-300 { border-color: color-mix(in srgb, #f59e0b 26%, transparent); }
+.dark .border-emerald-200, .dark .border-emerald-300, .dark .border-green-200 { border-color: color-mix(in srgb, #10b981 26%, transparent); }
+.dark .border-blue-200, .dark .border-sky-200 { border-color: color-mix(in srgb, #3b82f6 26%, transparent); }
