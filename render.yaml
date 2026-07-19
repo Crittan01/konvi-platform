@@ -201,6 +201,16 @@ services:
         value: https://app.konvi.co
       - key: APP_ENV
         value: production
+      # MFA OBLIGATORIO (D1/D2/D3) — enforcement de ENROLAMIENTO para write-roles
+      # (owner/manager). Rollout SEGURO: deploy con ENABLED=false → notificar users →
+      # setear MFA_MANDATORY_START a la fecha del flip → ENABLED=true (todos reciben la
+      # gracia desde START). deadline = max(created_at, START) + GRACE_DAYS. Lee auth.py.
+      - key: MFA_MANDATORY_ENABLED
+        value: "false"                           # flip a "true" en el dashboard cuando listo
+      - key: MFA_MANDATORY_GRACE_DAYS
+        value: "14"
+      - key: MFA_MANDATORY_START
+        sync: false                              # fecha ISO del flip (ej. 2026-08-01); setear al activar
       # URL pública del API para registrar webhooks de providers externos
       # (Aveonline webhookEstadosGuias, futuro Envia, etc.). DEBE ser HTTPS.
       - key: PUBLIC_WEBHOOK_URL

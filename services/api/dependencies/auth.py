@@ -55,6 +55,25 @@ RUNTIME_ROLES = {"owner", "manager", "operator"}
 # Roles con permiso de escritura
 WRITE_ROLES = {"owner", "manager"}
 
+# ─── MFA OBLIGATORIO (D1/D2/D3, 2026-07-18) ────────────────────────────────
+# Enforcement de ENROLAMIENTO — distinto del step-up de enforce_mfa. Los roles
+# de escritura DEBEN tener un factor MFA verificado tras un periodo de gracia; si
+# no, sus mutaciones se rechazan con 403 (los gates de rol lo invocan). Config por
+# env para rollout SEGURO: deploy con ENABLED=false → notificar a usuarios → setear
+# MFA_MANDATORY_START a la fecha del flip → poner ENABLED=true (todos reciben la
+# gracia desde START). FAIL-OPEN ante outage del Auth admin (disponibilidad).
+#   MFA_MANDATORY_ENABLED   — "true"/"false" (default false: no-op hasta el flip).
+#   MFA_MANDATORY_GRACE_DAYS — días de gracia para enrolar (default 14).
+#   MFA_MANDATORY_START      — fecha ISO piso; deadline = max(created_at, START)+gracia.
+MFA_MANDATORY_ROLES = WRITE_ROLES  # D1: owner + manager (operator NO forzado)
+
+
+def _mfa_mandatory_enabled() -> bool:
+    """Lee el flag en runtime (permite rollout/rollback sin redeploy de código)."""
+    return os.getenv("MFA_MANDATORY_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
 
 # F7 — copy RBAC canónico (single source of truth). Otros routers con literales
 # inline (integrations.py, settings.py, …) deberían importar estos helpers para
@@ -187,24 +206,36 @@ async def get_current_user_id(request: Request) -> Optional[str]:
     return payload.get("sub")
 
 
-async def require_write_role(role: str = Depends(get_current_role)) -> str:
+async def require_write_role(
+    request: Request = None,
+    role: str = Depends(get_current_role),
+) -> str:
     """
     Dependencia que exige role owner o manager.
     Lanza 403 si el role es operator.
+    MFA OBLIGATORIO (D1): tras la gracia, exige factor MFA verificado (403 si no).
+    El `sub` se extrae del request SOLO cuando el enforcement está activo (no
+    introduce dependencia auth nueva → no rompe tests que mockean get_current_role).
     """
     if role not in WRITE_ROLES:
         raise HTTPException(status_code=403, detail=msg_require_write_role(role))
+    _enforce_mfa_enrollment_from_request(request, role)
     return role
 
 
-async def require_owner_role(role: str = Depends(get_current_role)) -> str:
+async def require_owner_role(
+    request: Request = None,
+    role: str = Depends(get_current_role),
+) -> str:
     """
     Dependencia que exige role owner exclusivamente.
     Usar para operaciones de configuración crítica: editar tenant, gestionar equipo.
     Lanza 403 si el role es manager u operator.
+    MFA OBLIGATORIO (D1): tras la gracia, exige factor MFA verificado (403 si no).
     """
     if role != "owner":
         raise HTTPException(status_code=403, detail=msg_require_owner_role(role))
+    _enforce_mfa_enrollment_from_request(request, role)
     return role
 
 
@@ -222,14 +253,16 @@ class _MfaLookupError(Exception):
     fail-open (gate amplio) o fail-closed (operaciones crown-jewel)."""
 
 
-def _lookup_verified_mfa_cached(sub: str) -> bool:
-    """¿El usuario tiene un factor MFA verificado? Cacheado (TTL 60s).
-    RAISES _MfaLookupError si el lookup falla — NO decide política aquí."""
+def _lookup_mfa_state_cached(sub: str) -> tuple:
+    """(has_verified_factor: bool, created_at_iso: Optional[str]) del usuario.
+    Cacheado (TTL 60s) — UNA sola llamada al Auth admin sirve a enforce_mfa (step-up)
+    Y a enforce_mfa_enrollment (obligatorio). RAISES _MfaLookupError si el lookup
+    falla — NO decide política aquí (el caller elige fail-open/closed)."""
     import time
     now = time.time()
     hit = _MFA_CACHE.get(sub)
-    if hit and hit[1] > now:
-        return hit[0]
+    if hit and hit[2] > now:
+        return hit[0], hit[1]
     try:
         resp = _get_service_client().auth.admin.get_user_by_id(sub)
         user = getattr(resp, "user", None) or resp
@@ -237,10 +270,20 @@ def _lookup_verified_mfa_cached(sub: str) -> bool:
         def _status(f):
             return getattr(f, "status", None) or (f.get("status") if isinstance(f, dict) else None)
         has = any(_status(f) == "verified" for f in factors)
+        created = getattr(user, "created_at", None)
+        if created is not None and not isinstance(created, str):
+            # datetime → ISO; cualquier otro tipo raro → None (no rompe el enforcement).
+            created = getattr(created, "isoformat", lambda: None)()
     except Exception as exc:  # noqa: BLE001
         raise _MfaLookupError(str(exc)) from exc
-    _MFA_CACHE[sub] = (has, now + _MFA_CACHE_TTL)
-    return has
+    _MFA_CACHE[sub] = (has, created, now + _MFA_CACHE_TTL)
+    return has, created
+
+
+def _lookup_verified_mfa_cached(sub: str) -> bool:
+    """¿El usuario tiene un factor MFA verificado? Cacheado (TTL 60s).
+    RAISES _MfaLookupError si el lookup falla. Wrapper de _lookup_mfa_state_cached."""
+    return _lookup_mfa_state_cached(sub)[0]
 
 
 def _user_has_verified_mfa(sub: str) -> bool:
@@ -252,6 +295,87 @@ def _user_has_verified_mfa(sub: str) -> bool:
     except _MfaLookupError as exc:
         logger.warning("[MFA] lookup de factores falló para sub=%s (%s) — fail-open", sub, exc)
         return False
+
+
+def _within_mfa_grace(created_at_iso: Optional[str]) -> bool:
+    """True si el usuario aún está dentro de la ventana de gracia para enrolar MFA.
+    deadline = max(created_at, MFA_MANDATORY_START) + MFA_MANDATORY_GRACE_DAYS días.
+    Sin ninguna ancla temporal parseable → conservador: True (no bloquear)."""
+    from datetime import datetime, timedelta, timezone
+
+    def _parse(s: Optional[str]):
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    anchors = [d for d in (_parse(created_at_iso), _parse(os.getenv("MFA_MANDATORY_START", ""))) if d]
+    if not anchors:
+        return True
+    try:
+        grace_days = int(os.getenv("MFA_MANDATORY_GRACE_DAYS", "14"))
+    except ValueError:
+        grace_days = 14
+    deadline = max(anchors) + timedelta(days=grace_days)
+    return datetime.now(timezone.utc) <= deadline
+
+
+def _enforce_mfa_enrollment_for(role: str, sub: str) -> None:
+    """Núcleo de MFA OBLIGATORIO (D1/D2/D3). Si el enforcement está activo, el rol
+    está en MFA_MANDATORY_ROLES, el usuario NO tiene factor MFA verificado y venció
+    la gracia → 403. FAIL-OPEN ante outage del lookup (disponibilidad: no encerrar a
+    nadie por un blip del Auth admin; el gate de seguridad primario sigue siendo
+    enforce_mfa/strict + el middleware web). aal2 no necesita chequeo: implica factor
+    verificado → has_factor True lo deja pasar."""
+    if not _mfa_mandatory_enabled():
+        return
+    if role not in MFA_MANDATORY_ROLES or not sub:
+        return
+    try:
+        has_factor, created_at = _lookup_mfa_state_cached(sub)
+    except _MfaLookupError as exc:
+        logger.warning("[MFA obligatorio] lookup falló para sub=%s (%s) — fail-open", sub, exc)
+        return
+    if has_factor or _within_mfa_grace(created_at):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=("Tu cuenta requiere activar la verificación en dos pasos (MFA) para "
+                "continuar. Actívala en Ajustes → Seguridad."),
+    )
+
+
+def _enforce_mfa_enrollment_from_request(request: Optional[Request], role: str) -> None:
+    """Invocado por los gates de rol. Extrae el `sub` del JWT del request SOLO cuando
+    el enforcement está activo — así con MFA off (default) NO toca el request y los
+    tests que mockean solo get_current_role no reciben un 401 espurio. Resiliente a
+    request None (llamada directa) o sin JWT (override en test) → sub vacío → no-op."""
+    if not _mfa_mandatory_enabled():
+        return
+    sub = ""
+    if request is not None:
+        try:
+            sub = _extract_jwt_payload(request).get("sub") or ""
+        except HTTPException:
+            sub = ""  # sin JWT resoluble → no encerrar (el 401 real lo da otro gate)
+    _enforce_mfa_enrollment_for(role, sub)
+
+
+async def enforce_mfa_enrollment(request: Request) -> None:
+    """Dependencia standalone de MFA OBLIGATORIO — para endpoints que NO pasan por
+    require_write_role/require_owner_role pero deben forzar enrolamiento. Los gates de
+    rol ya invocan _enforce_mfa_enrollment_from_request; esta cubre el resto."""
+    if not _mfa_mandatory_enabled():
+        return
+    payload = _extract_jwt_payload(request)
+    app_metadata = payload.get("app_metadata") or {}
+    role = app_metadata.get("role", "operator")
+    if role not in RUNTIME_ROLES:
+        role = "operator"
+    _enforce_mfa_enrollment_for(role, payload.get("sub") or "")
 
 
 async def enforce_mfa(request: Request) -> None:
