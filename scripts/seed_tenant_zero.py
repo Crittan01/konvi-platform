@@ -21,6 +21,14 @@ if not URL or not KEY:
     print("Faltan las variables maestras URL o KEY de servicio.")
     sys.exit(1)
 
+# Guard fail-closed (segregación DEV/PROD): este script es TESTING-ONLY (crea un tenant
+# y user de prueba). Aborta si el destino Supabase NO es un dev reconocido — deny-by-default
+# sobre URL + DATABASE_URL + SUPABASE_PROJECT_REF. Override auditable: KONVI_ALLOW_PROD=1.
+import os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from _env_guard import assert_safe_target  # noqa: E402
+assert_safe_target(creds, action="seed_tenant_zero (crea tenant/user de prueba)")
+
 supabase: Client = create_client(URL, KEY)
 
 ADMIN_EMAIL = "admin@commerce.local"
