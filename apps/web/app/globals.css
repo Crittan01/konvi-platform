@@ -51,6 +51,10 @@
 
     /* Custom */
     --amber:      43 65% 53%;    /* Kaiu Gold */
+    /* Chart P&L — theme-aware (antes OPEX/Beneficio eran literales hsl que no adaptaban
+       a dark: el verde beneficio 32% quedaba tenue). Light = valores originales (sin regresión). */
+    --chart-opex:      0 74% 42%;
+    --chart-beneficio: 152 55% 32%;
     /* Superficies oscuras — fuente única (referenciadas por .sidebar-gradient
        y .topbar-bg; antes duplicadas como literales hsl(...)). */
     --sidebar-bg:     168 14%  8%;   /* Sidebar estructurado oscuro */
@@ -94,6 +98,8 @@
     --ring:   156 42% 55%;
 
     --amber:  43 70% 60%;
+    --chart-opex:      0 72% 63%;    /* rojo más brillante en dark */
+    --chart-beneficio: 152 48% 55%;  /* verde beneficio brillante en dark (paridad --primary) */
 
     color-scheme: dark;
   }
