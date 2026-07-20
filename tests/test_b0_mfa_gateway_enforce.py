@@ -26,7 +26,18 @@ def _mfa_gated_paths():
     (variante dual-auth para endpoints money-movement invocados por el bot), a ambos
     niveles: por-endpoint (r.dependencies[*].dependency) y del include_router
     (r.dependant.dependencies[*].call)."""
-    import main
+    # Robustez xdist: hay 3 main.py (api/connector/orchestrator) y `import main` es AMBIGUO
+    # — otro test puede cachear en sys.modules['main'] un main sin `.app` (p.ej. el worker
+    # del orchestrator sin FastAPI app). Reusamos el main de la API ya cargado (con `.app`,
+    # el MISMO app determinista que construye el import estándar); solo si el cacheado es
+    # el "otro" main (sin app) forzamos el de la API. NO re-ejecutamos main.py (evita
+    # construir un app inconsistente bajo coverage).
+    _m = sys.modules.get("main")
+    if _m is None or not hasattr(_m, "app"):
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.modules.pop("main", None)
+        import main as _m
+    main = _m
     from dependencies.internal_auth import enforce_mfa_internal_or_user
     gate_fns = {A.enforce_mfa, A.enforce_mfa_strict, enforce_mfa_internal_or_user}
     gated = set()

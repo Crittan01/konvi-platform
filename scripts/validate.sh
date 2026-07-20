@@ -83,11 +83,20 @@ export SLOW_TESTS=1
 if python3.11 -c "import pytest" 2>/dev/null; then
   # -m 'not dbharness': el harness DB (tests/dbharness/) requiere un Postgres local y se
   # corre aparte (--db-harness / job CI dedicado), no en la suite de unidad por defecto.
+  # W-cost: paralelizar con pytest-xdist si está disponible (~3.5x más rápido en CI).
+  # Fallback a serial si no está. Bajo coverage se usa pytest-cov (combina la cobertura
+  # de los workers; `coverage run -m pytest` NO captura los subprocesos de xdist → daría
+  # cobertura falsa ~0%). El gate de cobertura (paso 2b) lee el mismo `.coverage`.
+  XDIST=""; python3.11 -c "import xdist" 2>/dev/null && XDIST="-n auto"
   if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
     python3.11 -m coverage erase 2>/dev/null || true
-    result=$(python3.11 -m coverage run --source=services -m pytest tests/ -q -m 'not dbharness' -p no:cacheprovider 2>&1 | tail -4)
+    if [ -n "$XDIST" ] && python3.11 -c "import pytest_cov" 2>/dev/null; then
+      result=$(python3.11 -m pytest tests/ -q -m 'not dbharness' $XDIST --cov=services --cov-report= -p no:cacheprovider 2>&1 | tail -4)
+    else
+      result=$(python3.11 -m coverage run --source=services -m pytest tests/ -q -m 'not dbharness' -p no:cacheprovider 2>&1 | tail -4)
+    fi
   else
-    result=$(python3.11 -m pytest tests/ -q -m 'not dbharness' -p no:cacheprovider 2>&1 | tail -4)
+    result=$(python3.11 -m pytest tests/ -q -m 'not dbharness' $XDIST -p no:cacheprovider 2>&1 | tail -4)
   fi
   # pytest summary line: "N passed, M skipped in Xs" (sin "failed"/"error").
   if echo "$result" | grep -qE "[0-9]+ passed" && \
