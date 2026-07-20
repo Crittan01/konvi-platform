@@ -39,6 +39,20 @@ def main() -> int:
         print("ERROR: META_APP_SECRET no está en .env", file=sys.stderr)
         return 1
 
+    # Guard fail-closed (segregación DEV/PROD): siembra el Vault de DEV (konvi_dev).
+    # Aborta si el destino Supabase no es un dev reconocido — deny-by-default sobre
+    # URL + DATABASE_URL + SUPABASE_PROJECT_REF. Override auditable: KONVI_ALLOW_PROD=1.
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from _env_guard import assert_safe_target  # noqa: E402
+    assert_safe_target(
+        {
+            "NEXT_PUBLIC_SUPABASE_URL": sb_url,
+            "DATABASE_URL": os.getenv("DATABASE_URL"),
+            "SUPABASE_PROJECT_REF": os.getenv("SUPABASE_PROJECT_REF"),
+        },
+        action="seed_konvi_dev_app_secret_vault",
+    )
+
     sb = create_client(sb_url, sb_key)
 
     sys.path.insert(0, "services/ai-orchestrator")
