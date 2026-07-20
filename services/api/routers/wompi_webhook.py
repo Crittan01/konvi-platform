@@ -776,7 +776,8 @@ def _upsert_payment_record(
     if wompi_txn_id:
         res = (
             supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
-            .select("id, tenant_id")
+            # `status` + `amount_in_cents` alimentan la máquina de estados del ledger.
+            .select("id, tenant_id, wompi_txn_id, status, amount_in_cents")
             .eq("wompi_txn_id", wompi_txn_id)
             .limit(1)
             .execute()
@@ -788,7 +789,7 @@ def _upsert_payment_record(
     if not existing and wompi_link_id and order_id:
         res = (
             supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
-            .select("id, tenant_id, wompi_txn_id")
+            .select("id, tenant_id, wompi_txn_id, status, amount_in_cents")
             .eq("order_id", order_id)
             .eq("wompi_link_id", wompi_link_id)
             .limit(1)
@@ -804,6 +805,48 @@ def _upsert_payment_record(
             "raw_webhook": raw_webhook,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+        # ── Máquina de estados del LIBRO DE PAGOS (UAT 2026-07-20) ────────────
+        # Esta función corre ANTES de los guards de monto/moneda/estado-terminal
+        # del flujo (paso 4 vs paso 5b) y antes escribía `status` sin ninguna
+        # restricción → el ledger podía contradecir a la orden en AMBAS
+        # direcciones, ambas reproducidas en UAT:
+        #
+        #   (a) DECLINED tardío sobre un pago ya APROBADO (Wompi reintenta a
+        #       30m/3h/24h; con 2 intentos sobre el MISMO link el txn_id no
+        #       matchea y el lookup por (order_id, link_id) pega en la fila
+        #       aprobada) → orden 'confirmed' con pago 'declined'.
+        #   (b) APPROVED con monto que NO corresponde: el guard de monto impide
+        #       confirmar la orden (bien), pero el ledger igual quedaba
+        #       'approved' → pago inexistente registrado como cobrado.
+        #
+        # No es pérdida de dinero (el estado de la ORDEN se protege correctamente),
+        # pero `payments` es la fuente de verdad de conciliación
+        # (docs/operations/runbooks/wompi-payment-reconciliation.md). Reglas:
+        #   1. Nunca degradar un pago ya aprobado.
+        #   2. Nunca marcar aprobado si el monto no coincide con el registrado.
+        # En ambos casos se preserva `raw_webhook` (auditoría íntegra) y sólo se
+        # congela `status`/`wompi_status`.
+        _prev_status = (existing.get("status") or "").lower()
+        if _prev_status == "approved" and wompi_status != WOMPI_TXN_APPROVED:
+            logger.warning(
+                "[WOMPI] ledger_no_degrada order_id=%s txn_id=%s prev=approved "
+                "entrante=%s — se conserva 'approved' (evento posterior/fuera de orden)",
+                order_id, wompi_txn_id, wompi_status,
+            )
+            update_payload.pop("status", None)
+            update_payload.pop("wompi_status", None)
+        elif wompi_status == WOMPI_TXN_APPROVED:
+            _row_amount = existing.get("amount_in_cents")
+            if _row_amount is not None and int(amount_in_cents or 0) != int(_row_amount):
+                logger.error(
+                    "[WOMPI] ledger_monto_mismatch order_id=%s txn_id=%s "
+                    "entrante_cents=%s registrado_cents=%s — NO se marca aprobado",
+                    order_id, wompi_txn_id, amount_in_cents, _row_amount,
+                )
+                update_payload.pop("status", None)
+                update_payload.pop("wompi_status", None)
+
         if wompi_txn_id and not existing.get("wompi_txn_id"):
             update_payload["wompi_txn_id"] = wompi_txn_id
         supabase.table("payments").update(update_payload).eq("id", existing["id"]).eq("tenant_id", existing["tenant_id"]).execute()

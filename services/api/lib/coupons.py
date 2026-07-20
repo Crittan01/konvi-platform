@@ -557,6 +557,9 @@ def consume_redemption(
     try:
         rpc = supabase.rpc("coupon_increment_redemption", {
             "p_coupon_id": coupon_id,
+            # p_tenant_id: aislamiento multi-tenant dentro del propio UPDATE
+            # (ADR-0025) — no depender de que el UUID del cupón sea secreto.
+            "p_tenant_id": tenant_id,
         }).execute()
         # RPC retorna count actualizado; si NULL = no se incrementó (max alcanzado).
         incremented = bool(rpc.data)
