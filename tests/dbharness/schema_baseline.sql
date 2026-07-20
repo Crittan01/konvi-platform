@@ -6713,6 +6713,10 @@ CREATE INDEX "idx_product_categories_tenant" ON "public"."product_categories" US
 
 
 
+CREATE INDEX "idx_product_variations_product" ON "public"."product_variations" USING "btree" ("product_id");
+
+
+
 CREATE INDEX "idx_products_tenant_category_active" ON "public"."products" USING "btree" ("tenant_id", "category_id") WHERE ("status" = 'active'::"text");
 
 
