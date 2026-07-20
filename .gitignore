@@ -58,6 +58,8 @@ scripts/debug/
 # Lock file regenerado automáticamente — no debe ir al repo.
 .claude/scheduled_tasks.lock
 
+.codex/
+
 # ─── UAT logs (transcripts de conversaciones de prueba) ──────────────────────
 # Generados por scripts/uat/scenarios/*.py — útiles localmente, no compartir.
 scripts/uat/logs/
@@ -85,3 +87,6 @@ pip-selfcheck.json
 
 # Temp del gate anti-drift / harness DB (W8)
 .schema_drift.diff
+.schema_drift_reset_err.log
+# Log del replay de migraciones a DEV (scripts/db/replay_migrations_dev.sh)
+.replay_migrations_dev.log
