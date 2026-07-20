@@ -180,7 +180,7 @@ export function ChatPanel({
 
   return (
     <div className={`
-      flex-1 flex flex-col bg-[#F3F6F4] min-w-0
+      flex-1 flex flex-col chat-canvas min-w-0
       ${mobileView === 'list' || mobileView === 'context' ? 'hidden sm:flex' : 'flex'}
     `}>
       {!selectedConv ? (

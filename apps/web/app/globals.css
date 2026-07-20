@@ -233,3 +233,35 @@
 .dark .border-amber-200, .dark .border-amber-300 { border-color: color-mix(in srgb, #f59e0b 26%, transparent); }
 .dark .border-emerald-200, .dark .border-emerald-300, .dark .border-green-200 { border-color: color-mix(in srgb, #10b981 26%, transparent); }
 .dark .border-blue-200, .dark .border-sky-200 { border-color: color-mix(in srgb, #3b82f6 26%, transparent); }
+
+/* ── OLA 0 barrido UX 2026-07-19 — familias faltantes del remap ───────────────
+   Cierra los gaps que los audits marcaron: neutrales (slate/gray/zinc: bg-slate-200
+   de inbox, StatusBadge/sub-nav de channels) + cyan/violet/teal. Mismo patrón por
+   pareja; scoped a .dark → light mode y páginas .light intactas. */
+.dark .bg-slate-50, .dark .bg-slate-100, .dark .bg-slate-200,
+.dark .bg-gray-50, .dark .bg-gray-100, .dark .bg-gray-200,
+.dark .bg-zinc-50, .dark .bg-zinc-100, .dark .bg-zinc-200 { background-color: color-mix(in srgb, #64748b 16%, transparent); }
+.dark .bg-cyan-50, .dark .bg-cyan-100 { background-color: color-mix(in srgb, #06b6d4 13%, transparent); }
+.dark .bg-violet-50, .dark .bg-violet-100 { background-color: color-mix(in srgb, #8b5cf6 13%, transparent); }
+.dark .bg-teal-50, .dark .bg-teal-100 { background-color: color-mix(in srgb, #14b8a6 13%, transparent); }
+
+.dark .text-slate-600, .dark .text-slate-700, .dark .text-slate-800,
+.dark .text-gray-600, .dark .text-gray-700, .dark .text-gray-800,
+.dark .text-zinc-600, .dark .text-zinc-700, .dark .text-zinc-800 { color: #cbd5e1; }
+.dark .text-slate-900, .dark .text-gray-900, .dark .text-zinc-900 { color: #e2e8f0; }
+.dark .text-cyan-600, .dark .text-cyan-700 { color: #22d3ee; }
+.dark .text-violet-600, .dark .text-violet-700 { color: #a78bfa; }
+.dark .text-teal-600, .dark .text-teal-700 { color: #2dd4be; }
+
+.dark .border-slate-200, .dark .border-slate-300,
+.dark .border-gray-200, .dark .border-gray-300,
+.dark .border-zinc-200, .dark .border-zinc-300 { border-color: color-mix(in srgb, #64748b 30%, transparent); }
+.dark .border-indigo-200, .dark .border-purple-200, .dark .border-violet-200 { border-color: color-mix(in srgb, #8b5cf6 26%, transparent); }
+.dark .border-orange-200, .dark .border-rose-200, .dark .border-yellow-200 { border-color: color-mix(in srgb, #f59e0b 26%, transparent); }
+.dark .border-cyan-200, .dark .border-cyan-300 { border-color: color-mix(in srgb, #06b6d4 26%, transparent); }
+.dark .border-teal-200, .dark .border-teal-300 { border-color: color-mix(in srgb, #14b8a6 26%, transparent); }
+
+/* Canvas del chat de Inbox — antes hex fijo bg-[#F3F6F4] (no adaptaba a dark → área de
+   mensajes gris-blanco brillante). Theme-aware: claro original + superficie sutil en dark. */
+.chat-canvas { background-color: #F3F6F4; }
+.dark .chat-canvas { background-color: color-mix(in srgb, #94a3b8 8%, transparent); }
