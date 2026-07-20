@@ -180,6 +180,34 @@ agotado, y devuelve NULL con un tenant ajeno.
 
 ---
 
+## 4.bis — Regresión introducida por el propio fix #1 (y cómo se atrapó)
+
+Vale la pena registrarlo porque casi se despliega.
+
+La primera versión del fix ensanchaba `_looks_like_summary` con "tu pedido" +
+cualquier precio. Al reiniciar el worker y probar **en vivo**, el primer turno ya
+falló: a *"¿qué precio tiene el Serum de Vitamina C?"* el bot respondió con los
+precios correctos y el invariante la **reescribió** como *"No tengo aún tu pedido
+confirmado"*. Es decir: se rompía una respuesta de catálogo correcta — una
+regresión **peor que el bug original**.
+
+Causa: el bot usa "para tu pedido" / "a tu carrito" en venta normal
+constantemente. Lo que distingue de verdad a un recap es la **línea con
+cantidad** (`* 1 *Producto* — *$45.000*`); un listado de catálogo enumera sin
+cantidad. Ahora se exigen ambas señales, y el patrón de prosa exige además un
+conector (`es/será/sería/de/:`) pegado al `$`.
+
+**La lección**: los tests unitarios pasaban en verde con la versión defectuosa —
+sólo el turno real contra el bot lo expuso. Los 7 casos anti-falso-positivo (2 de
+ellos reproducidos en vivo) quedaron como tests permanentes.
+
+Verificación posterior al ajuste, en vivo:
+- Pregunta de catálogo → respuesta intacta, sin reescritura.
+- Con cupón vivo, el bot dijo *"el total actual es de **$93.500**"*: el patrón de
+  prosa **sí lo extrajo** y lo validó contra el cart real
+  ($110.000 − $16.500 = $93.500) → `invariant=ok`. Antes del fix ese total ni
+  siquiera se parseaba.
+
 ## 5. Observaciones menores (sin fix, para backlog)
 
 - El tenant DEV no tiene fila en `ai_agents` → cae al fallback "Sara Camila"
