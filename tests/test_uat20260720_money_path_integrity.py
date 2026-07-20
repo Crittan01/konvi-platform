@@ -193,6 +193,15 @@ class TotalEnProsaTests(unittest.TestCase):
     def test_formato_etiqueta_sigue_funcionando(self):
         self.assertEqual(_extract_total_cop("*Total:* *$159.950 COP*"), 159950)
 
+    def test_subtotal_sin_total_dispara_el_invariant(self):
+        """Observado en vivo: "Subtotal: *$110.000*" con un cupón vivo dejaba al
+        cliente sin ver su descuento. Un subtotal NO es el total afirmado, así que
+        sólo habilita la evaluación de coherencia, no una comparación de totales."""
+        texto = ("Agregué 1 *Protector Solar Facial SPF 50+* a tu carrito por $65.000.\n"
+                 "Subtotal: *$110.000*.")
+        self.assertTrue(_looks_like_summary(texto))
+        self.assertIsNone(_extract_total_cop(texto), "un subtotal no es un total afirmado")
+
     def test_recap_de_carrito_sin_total_dispara_el_invariant(self):
         """Es el shape donde se perdía la línea de descuento."""
         recap = ("Tu pedido ahora incluye:\n"
@@ -203,11 +212,23 @@ class TotalEnProsaTests(unittest.TestCase):
 
     def test_no_confunde_un_listado_de_catalogo_con_un_resumen(self):
         """Anti-falso-positivo: reescribir una respuesta de catálogo como resumen
-        de pedido sería una regresión peor que el bug original."""
+        de pedido sería una regresión PEOR que el bug original.
+
+        Los dos primeros casos son REGRESIONES REALES observadas en vivo con una
+        versión anterior de este fix: bastaba "tu pedido" + un precio para que el
+        invariant reescribiera una respuesta de catálogo como
+        "No tengo aún tu pedido confirmado". Lo que distingue a un recap es la
+        línea con CANTIDAD, no el posesivo.
+        """
         for catalogo in (
+            "El Serum Facial Vitamina C 15% está en 30ml a $89.000 y 50ml a "
+            "$129.000. ¿Cuál prefieres para tu pedido?",
+            "Para tu pedido tenemos el Protector Solar SPF 50+ a $65.000.",
             "Contamos con el Serum Facial Vitamina C 15% desde $89.000 hasta $129.000.",
             "Tenemos Protector Solar SPF 50+ a $65.000 y Mascarilla de Arcilla a $45.000.",
             "En total tenemos 5 productos en el catálogo.",
+            "En total tenemos 5 productos en el catálogo desde $45.000.",
+            "* *Serum Facial*: $89.000\n* *Protector Solar*: $65.000",
         ):
             with self.subTest(catalogo=catalogo):
                 self.assertFalse(_looks_like_summary(catalogo))

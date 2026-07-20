@@ -74,19 +74,40 @@ _TOTAL_PATTERN = re.compile(
 # un total mentido (caso reproducido: bot afirmó $167.250 con el cart real en
 # $147.900, porque hizo aritmética sobre un descuento viejo del historial).
 #
-# Este patrón acepta hasta 40 caracteres de conector entre "total" y el monto,
-# pero EXIGE el `$` y no cruza fin de oración ni salto de línea (ni otro `$`),
-# para no capturar números que no son el total ("total de 3 productos").
+# Acepta hasta 30 caracteres entre "total" y el monto, no cruza fin de oración ni
+# salto de línea, y EXIGE un conector ("es/será/sería/de/:") pegado al `$`. Sin ese
+# conector el patrón capturaba frases de catálogo del tipo "en total tenemos 5
+# productos … desde $45.000" (nótese que "desde" NO es la palabra "de").
 _TOTAL_PROSE_PATTERN = re.compile(
-    r"\btotal\b[^.\n$]{0,40}?\$\s*([\d.,]+)",
+    r"\btotal\b[^.\n$]{0,30}?\b(?:es|será|sería|queda|quedaría|de|:)\s*\**\s*\$\s*([\d.,]+)",
     re.IGNORECASE,
 )
-# Recap de carrito SIN total explícito: "Tu pedido ahora incluye: * 1 X — $45.000".
-# Con un cupón aplicado, ese formato dejaba al cliente sin ver su descuento y
-# ningún guard disparaba. Se exige el posesivo ("tu/su pedido|carrito|orden")
-# para no confundirlo con un listado de catálogo ("contamos con…", "tenemos…").
+# Recap de carrito SIN total explícito: "Tu pedido ahora incluye:\n* 1 X — $45.000".
+# Con un cupón aplicado ese formato dejaba al cliente sin ver su descuento y ningún
+# guard disparaba.
+#
+# Discriminador (aprendido de una regresión en vivo, 2026-07-20): exigir sólo el
+# posesivo "tu pedido" da FALSO POSITIVO — el bot lo usa en venta normal
+# ("¿cuál prefieres para tu pedido?") y una respuesta de catálogo terminaba
+# reescrita como "no tengo aún tu pedido confirmado". Lo que distingue de verdad a
+# un recap es la LÍNEA CON CANTIDAD ("* 1 *Producto* — *$45.000*"); un listado de
+# catálogo enumera productos sin cantidad. Se exigen AMBAS señales.
 _CART_RECAP_PATTERN = re.compile(
     r"\b(?:tu|su)\s+(?:pedido|carrito|orden)\b",
+    re.IGNORECASE,
+)
+_QTY_LINE_PATTERN = re.compile(
+    r"^\s*[*\-•]\s*\d+\s+.*\$\s*[\d.,]+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# "Subtotal: *$110.000*" — otra forma de citar una cifra DEL CARRITO sin decir
+# "Total", donde también se perdía la línea de descuento (observado en vivo).
+# `\bsubtotal\b` es específico de carrito: no aparece en respuestas de catálogo.
+# Nótese que NO alimenta `_extract_total_cop` (un subtotal no es el total
+# afirmado); sólo hace que el invariant se ejecute y evalúe la coherencia del
+# descuento.
+_SUBTOTAL_PATTERN = re.compile(
+    r"\bsubtotal\b[^.\n$]{0,20}?\$\s*[\d.,]+",
     re.IGNORECASE,
 )
 
@@ -111,8 +132,10 @@ def _looks_like_summary(text: str) -> bool:
     # pero sin total (donde se perdía la línea de descuento). Ver comentarios de
     # _TOTAL_PROSE_PATTERN / _CART_RECAP_PATTERN.
     has_total_prose = bool(_TOTAL_PROSE_PATTERN.search(text))
-    has_cart_recap = bool(_CART_RECAP_PATTERN.search(text)) and bool(_PRICE_PATTERN.search(text))
-    return has_resumen_word or has_total_with_price or has_total_prose or has_cart_recap
+    has_cart_recap = bool(_CART_RECAP_PATTERN.search(text)) and bool(_QTY_LINE_PATTERN.search(text))
+    has_subtotal = bool(_SUBTOTAL_PATTERN.search(text))
+    return (has_resumen_word or has_total_with_price or has_total_prose
+            or has_cart_recap or has_subtotal)
 
 
 def _extract_total_cop(text: str) -> Optional[int]:
