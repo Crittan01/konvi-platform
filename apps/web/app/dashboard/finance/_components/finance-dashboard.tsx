@@ -30,8 +30,8 @@ type Props = {
 const BAR_COLORS: Record<string, string> = {
   Ingresos: 'hsl(var(--primary))',
   COGS: 'hsl(var(--amber))',
-  OPEX: 'hsl(0 74% 42%)',
-  Beneficio: 'hsl(152 55% 32%)',
+  OPEX: 'hsl(var(--chart-opex))',
+  Beneficio: 'hsl(var(--chart-beneficio))',
 }
 
 export default function FinanceDashboard({
