@@ -660,6 +660,33 @@ $$;
 ALTER FUNCTION "public"."contacts_default_shipping_phone"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid", "p_tenant_id" "uuid") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_count integer;
+BEGIN
+  UPDATE public.coupons
+     SET redemptions_count = redemptions_count + 1,
+         updated_at = now()
+   WHERE id = p_coupon_id
+     AND tenant_id = p_tenant_id
+     AND (max_redemptions IS NULL OR redemptions_count < max_redemptions)
+  RETURNING redemptions_count INTO v_count;
+
+  RETURN v_count;  -- NULL si no hubo fila que actualizar
+END;
+$$;
+
+
+ALTER FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid", "p_tenant_id" "uuid") IS 'Incrementa coupons.redemptions_count de forma atómica respetando max_redemptions. Devuelve el nuevo contador o NULL si no incrementó. Solo service_role.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."custom_access_token_hook"("event" "jsonb") RETURNS "jsonb"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public', 'auth'
@@ -9142,6 +9169,11 @@ GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid",
 GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "anon";
 GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 

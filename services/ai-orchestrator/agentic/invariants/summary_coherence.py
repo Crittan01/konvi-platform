@@ -66,6 +66,50 @@ _TOTAL_PATTERN = re.compile(
     r"[\*\s]*\$?\s*([\d.,]+)\s*\**\s*(?:COP)?",
     re.IGNORECASE,
 )
+# UAT 2026-07-20 — el patrón de arriba exige que el monto venga CONTIGUO a
+# "total", así que sólo reconoce el formato etiqueta ("Total: $X"). El LLM también
+# redacta el total en PROSA ("el total con el descuento aplicado es *$167.250*",
+# "el total a pagar es $X", "quedaría en un total de $X") y ahí no matcheaba →
+# `_looks_like_summary` daba False y el invariant NI SE EJECUTABA, dejando pasar
+# un total mentido (caso reproducido: bot afirmó $167.250 con el cart real en
+# $147.900, porque hizo aritmética sobre un descuento viejo del historial).
+#
+# Acepta hasta 30 caracteres entre "total" y el monto, no cruza fin de oración ni
+# salto de línea, y EXIGE un conector ("es/será/sería/de/:") pegado al `$`. Sin ese
+# conector el patrón capturaba frases de catálogo del tipo "en total tenemos 5
+# productos … desde $45.000" (nótese que "desde" NO es la palabra "de").
+_TOTAL_PROSE_PATTERN = re.compile(
+    r"\btotal\b[^.\n$]{0,30}?\b(?:es|será|sería|queda|quedaría|de|:)\s*\**\s*\$\s*([\d.,]+)",
+    re.IGNORECASE,
+)
+# Recap de carrito SIN total explícito: "Tu pedido ahora incluye:\n* 1 X — $45.000".
+# Con un cupón aplicado ese formato dejaba al cliente sin ver su descuento y ningún
+# guard disparaba.
+#
+# Discriminador (aprendido de una regresión en vivo, 2026-07-20): exigir sólo el
+# posesivo "tu pedido" da FALSO POSITIVO — el bot lo usa en venta normal
+# ("¿cuál prefieres para tu pedido?") y una respuesta de catálogo terminaba
+# reescrita como "no tengo aún tu pedido confirmado". Lo que distingue de verdad a
+# un recap es la LÍNEA CON CANTIDAD ("* 1 *Producto* — *$45.000*"); un listado de
+# catálogo enumera productos sin cantidad. Se exigen AMBAS señales.
+_CART_RECAP_PATTERN = re.compile(
+    r"\b(?:tu|su)\s+(?:pedido|carrito|orden)\b",
+    re.IGNORECASE,
+)
+_QTY_LINE_PATTERN = re.compile(
+    r"^\s*[*\-•]\s*\d+\s+.*\$\s*[\d.,]+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# "Subtotal: *$110.000*" — otra forma de citar una cifra DEL CARRITO sin decir
+# "Total", donde también se perdía la línea de descuento (observado en vivo).
+# `\bsubtotal\b` es específico de carrito: no aparece en respuestas de catálogo.
+# Nótese que NO alimenta `_extract_total_cop` (un subtotal no es el total
+# afirmado); sólo hace que el invariant se ejecute y evalúe la coherencia del
+# descuento.
+_SUBTOTAL_PATTERN = re.compile(
+    r"\bsubtotal\b[^.\n$]{0,20}?\$\s*[\d.,]+",
+    re.IGNORECASE,
+)
 
 
 def _looks_like_summary(text: str) -> bool:
@@ -84,12 +128,23 @@ def _looks_like_summary(text: str) -> bool:
         return False
     has_resumen_word = bool(re.search(r"\bresumen\b", text, re.IGNORECASE))
     has_total_with_price = bool(_TOTAL_PATTERN.search(text))
-    return has_resumen_word or has_total_with_price
+    # UAT 2026-07-20: C. total redactado en prosa; D. recap de carrito con precios
+    # pero sin total (donde se perdía la línea de descuento). Ver comentarios de
+    # _TOTAL_PROSE_PATTERN / _CART_RECAP_PATTERN.
+    has_total_prose = bool(_TOTAL_PROSE_PATTERN.search(text))
+    has_cart_recap = bool(_CART_RECAP_PATTERN.search(text)) and bool(_QTY_LINE_PATTERN.search(text))
+    has_subtotal = bool(_SUBTOTAL_PATTERN.search(text))
+    return (has_resumen_word or has_total_with_price or has_total_prose
+            or has_cart_recap or has_subtotal)
 
 
 def _extract_total_cop(text: str) -> Optional[int]:
-    """Extrae el valor 'Total: $X' como entero COP. None si no se encuentra."""
-    m = _TOTAL_PATTERN.search(text)
+    """Extrae el valor 'Total: $X' como entero COP. None si no se encuentra.
+
+    Primero el formato etiqueta (más estricto); si no matchea, el de prosa
+    ("el total ... es $X"), que exige el `$` y no cruza oración.
+    """
+    m = _TOTAL_PATTERN.search(text) or _TOTAL_PROSE_PATTERN.search(text)
     if not m:
         return None
     raw = m.group(1)
@@ -360,6 +415,28 @@ class SummaryCoherenceInvariant:
         real_total = (cart.get("total_cents") or 0) // 100
         affirmed_total = _extract_total_cop(candidate_text)
 
+        # UAT 2026-07-20 — el guard de la línea Descuento (abajo) estaba DESPUÉS
+        # del early-return de "total no parseable", así que quedaba inalcanzable
+        # justo en el peor caso: un recap del carrito con precios por línea y SIN
+        # total, donde el cliente no ve NI el total NI su descuento. Se evalúa
+        # primero: no depende del total afirmado.
+        discount_cents = int(cart.get("discount_cents") or 0)
+        if discount_cents > 0 and not _outbound_mentions_discount(candidate_text):
+            replacement = _build_canonical_summary(
+                cart, cart.get("shipping_meta") or {},
+                contact=_load_contact_safe(supabase, tenant_id, contact_id),
+            )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    f"cart con cupón aplicado (discount=${discount_cents//100:,}) "
+                    f"pero outbound omite línea Descuento — cliente no ve "
+                    f"motivo del rebaja"
+                ),
+            )
+
         if affirmed_total is None:
             # No pudimos extraer total del outbound — quizás formato distinto.
             # Best-effort: OK con warning.
@@ -384,25 +461,8 @@ class SummaryCoherenceInvariant:
                 ),
             )
 
-        # Rev. 109 BUG 38d — cart tiene cupón pero outbound NO menciona
-        # línea descuento → cliente NO ve por qué su total bajó. Riesgo
-        # reclamo SIC + erosión confianza ("¿me cobraron menos por error?").
-        discount_cents = int(cart.get("discount_cents") or 0)
-        if discount_cents > 0 and not _outbound_mentions_discount(candidate_text):
-            replacement = _build_canonical_summary(
-                cart, cart.get("shipping_meta") or {},
-                contact=_load_contact_safe(supabase, tenant_id, contact_id),
-            )
-            return InvariantResult(
-                outcome=InvariantOutcome.REWRITE,
-                invariant_name=self.name,
-                replacement_text=replacement,
-                reason=(
-                    f"cart con cupón aplicado (discount=${discount_cents//100:,}) "
-                    f"pero outbound omite línea Descuento — cliente no ve "
-                    f"motivo del rebaja"
-                ),
-            )
+        # (Rev. 109 BUG 38d — el guard de la línea Descuento se movió ARRIBA, antes
+        # del early-return de "total no parseable"; ver comentario allí.)
 
         # Rev. 109 BUG 41 — cart tiene receptor alterno pero outbound NO
         # distingue Titular vs Receptor → cliente ve datos del titular como
