@@ -11,9 +11,26 @@ strings). Un modelo "prohibir solo lo conocido-malo" hace FAIL-OPEN ante lo que
 no reconoce. Invertirlo — "permitir solo lo conocido-bueno" — convierte todo lo
 no-identificable en fail-closed, la postura correcta para borrado de datos.
 
+ESTADO PRE-LANZAMIENTO (decisión founder 2026-07-20)
+----------------------------------------------------
+`konvi-prod` es hoy el ÚNICO entorno: no atiende clientes reales todavía, y
+mantener un segundo proyecto sólo generaba confusión (el proyecto `konvi-dev` se
+eliminó). Pero apagar el guard —o correr todo con `KONVI_ALLOW_PROD=1`— dejaría el
+hábito instalado justo para el día en que sí importe.
+
+Solución: mientras `LAUNCHED` sea False, el ref de prod se clasifica `prelaunch`:
+los scripts corren, pero SIEMPRE avisando por stderr contra qué están corriendo.
+
+>>> EL DÍA DEL LANZAMIENTO REAL: poner `LAUNCHED = True` (una línea, abajo).
+    Desde ese momento `konvi-prod` vuelve a ser `prod` duro y los 16 scripts
+    testing-only abortan salvo override explícito. Es una decisión deliberada y
+    auditable en git, no un olvido.
+
 Config (env):
-- `KONVI_SAFE_REFS`   : refs de dev permitidos, coma-separado (default: konvi-dev).
+- `KONVI_SAFE_REFS`   : refs de dev permitidos, coma-separado (vacío por default:
+                        ya no hay proyecto dev; local sigue siendo seguro).
 - `KONVI_PROD_REF`    : ref de prod (solo para un mensaje de error explícito).
+- `KONVI_LAUNCHED=1`  : fuerza modo post-lanzamiento sin tocar código.
 - `KONVI_ALLOW_PROD=1`: override auditable para correr contra un destino no-dev.
 
 Uso:
@@ -32,7 +49,17 @@ from typing import Optional
 # Ref inmutable del proyecto Supabase de producción (konvi-prod). El project-ref
 # no cambia aunque se renombre el proyecto (ver docs/infra/environments.md).
 PROD_REF = os.getenv("KONVI_PROD_REF", "xmelwnhhphksbpdjmbbp").strip().lower()
-_DEFAULT_DEV_REF = "qkltqxbhssgnyjqltwcr"  # konvi-dev (org Free separada)
+
+# >>> CAMBIAR A True EL DÍA DEL LANZAMIENTO REAL (ver docstring). <<<
+# False = pre-lanzamiento: konvi-prod se clasifica 'prelaunch' y los scripts
+# testing-only corren, avisando siempre. True = prod duro, fail-closed.
+LAUNCHED = False
+
+# Ya no existe un proyecto dev (konvi-dev eliminado 2026-07-20). La allowlist
+# queda vacía por default: sólo un Supabase LOCAL es 'dev-safe' sin configurar
+# nada. Si algún día vuelve a haber un proyecto dev, basta exportar
+# KONVI_SAFE_REFS=<ref> — no hace falta tocar este archivo.
+_DEFAULT_DEV_REF = ""
 
 # Un ref Supabase es un slug de 20 chars [a-z0-9]; aceptamos `<ref>.supabase.co`
 # y el host directo de Postgres `db.<ref>.supabase.co`.
@@ -103,13 +130,29 @@ def _ref_from_database_url(creds: dict) -> tuple[Optional[str], bool, bool]:
     return (None, True, False)            # seteado pero no identificable → deny
 
 
+def _launched() -> bool:
+    """True si ya se lanzó a producción real (env pisa la constante del módulo)."""
+    env = os.getenv("KONVI_LAUNCHED", "").strip()
+    if env:
+        return env == "1"
+    return LAUNCHED
+
+
+def _prod_kind() -> str:
+    """Etiqueta del ref de prod según el estado de lanzamiento."""
+    return "prod" if _launched() else "prelaunch"
+
+
 def classify(creds: dict) -> str:
-    """Clasifica el destino: 'dev-safe' | 'prod' | 'unknown'.
+    """Clasifica el destino: 'dev-safe' | 'prelaunch' | 'prod' | 'unknown'.
 
     Deny-by-default sobre TODAS las fuentes (URL Supabase + DATABASE_URL +
-    SUPABASE_PROJECT_REF): si CUALQUIERA apunta a prod → 'prod'; si cualquiera está
-    seteada pero no se resuelve a un dev conocido → 'unknown'. Solo 'dev-safe' si
-    todas las fuentes presentes son local o un ref de dev reconocido.
+    SUPABASE_PROJECT_REF): si CUALQUIERA apunta a prod → 'prod'/'prelaunch'; si
+    cualquiera está seteada pero no se resuelve a un dev conocido → 'unknown'. Solo
+    'dev-safe' si todas las fuentes presentes son local o un ref de dev reconocido.
+
+    'prelaunch' es el ref de PROD antes del lanzamiento: mismo proyecto, pero los
+    scripts testing-only pueden correr contra él avisando (ver assert_safe_target).
     """
     safe = _safe_refs()
     saw_safe = False
@@ -122,7 +165,7 @@ def classify(creds: dict) -> str:
         else:
             ref = extract_ref(creds)
             if ref == PROD_REF:
-                return "prod"
+                return _prod_kind()
             if ref is not None and ref in safe:
                 saw_safe = True
             else:
@@ -134,7 +177,7 @@ def classify(creds: dict) -> str:
         if db_local:
             saw_safe = True
         elif db_ref == PROD_REF:
-            return "prod"
+            return _prod_kind()
         elif db_ref is not None and db_ref in safe:
             saw_safe = True
         else:
@@ -144,7 +187,7 @@ def classify(creds: dict) -> str:
     pr = (creds.get("SUPABASE_PROJECT_REF") or "").strip().lower()
     if pr:
         if pr == PROD_REF:
-            return "prod"
+            return _prod_kind()
         if _REF_RE.match(pr) and pr in safe:
             saw_safe = True
         else:
@@ -156,8 +199,12 @@ def classify(creds: dict) -> str:
 
 
 def is_prod(creds: dict) -> bool:
-    """True si el destino es el proyecto de producción conocido."""
-    return classify(creds) == "prod"
+    """True si el destino es el PROYECTO de producción — lanzado o no.
+
+    Deliberadamente cubre 'prelaunch': sigue siendo konvi-prod, sólo que aún sin
+    clientes. Quien pregunte "¿esto es prod?" debe oír que sí.
+    """
+    return classify(creds) in ("prod", "prelaunch")
 
 
 def assert_safe_target(creds: dict, *, action: str = "operación destructiva") -> None:
@@ -165,9 +212,21 @@ def assert_safe_target(creds: dict, *, action: str = "operación destructiva") -
 
     Fail-closed: prod, ref desconocido y host no-parseable requieren override
     explícito `KONVI_ALLOW_PROD=1`. Se evalúa en cada llamada (no cachea el env).
+
+    Excepción PRE-LANZAMIENTO: 'prelaunch' (konvi-prod antes del lanzamiento) SÍ
+    pasa, pero nunca en silencio — se avisa por stderr en cada corrida. Con
+    `LAUNCHED = True` esta rama desaparece y vuelve a ser fail-closed.
     """
     kind = classify(creds)
     if kind == "dev-safe":
+        return
+    if kind == "prelaunch":
+        print(
+            f"⚠️  «{action}» corre contra konvi-prod (PRE-LANZAMIENTO, ref={PROD_REF}).\n"
+            f"   Es el proyecto real: los datos que escribas quedan ahí.\n"
+            f"   Al lanzar, poné LAUNCHED = True en scripts/_env_guard.py y esto abortará.",
+            file=sys.stderr,
+        )
         return
     allow = os.getenv("KONVI_ALLOW_PROD", "").strip() == "1"
     ref = extract_ref(creds)
@@ -187,7 +246,7 @@ def assert_safe_target(creds: dict, *, action: str = "operación destructiva") -
     print(
         f"ABORTADO: «{action}» {reason}.\n"
         f"  Este script es testing-only y borra datos sin preservar audit.\n"
-        f"  Solo corre contra un ref de dev reconocido (KONVI_SAFE_REFS; default konvi-dev).\n"
+        f"  Solo corre contra un Supabase local o un ref listado en KONVI_SAFE_REFS.\n"
         f"  Si REALMENTE necesitás correr contra este destino, exportá KONVI_ALLOW_PROD=1.",
         file=sys.stderr,
     )
