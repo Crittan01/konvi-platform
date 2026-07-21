@@ -55,7 +55,9 @@ jobs:
           echo "changed files:"; echo "$FILES"
           be=false; fe=false
           if echo "$FILES" | grep -qE '^(services/|supabase/migrations/|tests/|scripts/|\.github/workflows/ci\.yml)'; then be=true; fi
-          if echo "$FILES" | grep -qE '^(apps/web/|packages/|pnpm-lock\.yaml|\.github/workflows/ci\.yml)'; then fe=true; fi
+          # `package.json` y `osv-scanner.toml` faltaban: un cambio de dependencias JS
+          # que sólo tocara esos archivos no disparaba NINGÚN job (2026-07-20).
+          if echo "$FILES" | grep -qE '^(apps/web/|packages/|pnpm-lock\.yaml|package\.json|osv-scanner\.toml|\.github/workflows/ci\.yml)'; then fe=true; fi
           # FAIL-SAFE: sin archivos detectados (primer push, force-push, error) → correr TODO.
           if [ -z "$FILES" ]; then be=true; fe=true; fi
           echo "backend=$be" >> "$GITHUB_OUTPUT"
@@ -70,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Sin cambios backend — job omitido (solo frontend)
+      - name: Sin cambios backend — validate.sh omitido (sigue el escaneo de deps JS)
         if: needs.changes.outputs.backend != 'true'
         run: echo "No hubo cambios backend/Python/migraciones/tests → validate.sh no aplica. ✅"
 
@@ -147,6 +149,24 @@ jobs:
         env:
           CI_STRICT: "true"
         run: bash scripts/validate.sh --ci
+
+      # HUECO CERRADO (2026-07-20): el gate de vulnerabilidades JS vive DENTRO de
+      # validate.sh, que está gateado por `backend`. Un cambio SOLO del lockfile
+      # (el caso donde más importa, y el 99% de los PRs de Dependabot JS) no
+      # ejecutaba el escaneo. Se detectó al corregir GHSA-3jxr-9vmj-r5cp /
+      # GHSA-52cp-r559-cp3m: el PR que las arreglaba pasó el CI en 8s sin escanear.
+      #
+      # No se resuelve metiendo el lockfile en el filtro `backend` porque eso
+      # dispararía la pipeline completa (~8 min) en cada PR de Dependabot. Este
+      # paso corre solo el scanner (~2s) cuando cambió el frente JS y no el backend.
+      - name: osv-scanner (deps JS) — solo si cambió el frente JS y NO el backend
+        if: needs.changes.outputs.backend != 'true' && needs.changes.outputs.frontend == 'true'
+        run: |
+          curl -sL --retry 2 -m 90 \
+            "https://github.com/google/osv-scanner/releases/download/v2.2.4/osv-scanner_linux_amd64" \
+            -o /usr/local/bin/osv-scanner
+          sudo chmod +x /usr/local/bin/osv-scanner
+          osv-scanner scan --lockfile pnpm-lock.yaml --config osv-scanner.toml
 
       - name: Upload coverage report
         if: needs.changes.outputs.backend == 'true' && always()
