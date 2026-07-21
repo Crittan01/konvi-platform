@@ -5,7 +5,37 @@
 > **proyectos separados por ambiente** + migraciones como fuente de sincronización de schema.
 > Precios verificados 2026-07-16 ([Supabase pricing](https://supabase.com/pricing), [Render free](https://render.com/docs/free)).
 
-## 1. Estrategia
+## 0. ESTADO ACTUAL (decisión founder 2026-07-20) — UN SOLO AMBIENTE
+
+> **Lo de abajo (§1-§2) describe la estrategia objetivo, hoy SUSPENDIDA.**
+> El proyecto `konvi-dev` fue **eliminado**: `konvi-prod` todavía no atiende
+> clientes reales y mantener dos entornos generaba confusión sin beneficio
+> (ambos costaban $0 de diferencia — el dev estaba en org Free).
+
+**Cómo se preserva la seguridad sin un dev:** el guard `scripts/_env_guard.py`
+introduce el estado **`prelaunch`**. Mientras `LAUNCHED = False`, `konvi-prod`
+clasifica `prelaunch`: los ~16 scripts testing-only corren contra él, pero
+**avisando por stderr en cada corrida** contra qué proyecto están escribiendo.
+
+La alternativa —correr todo con `KONVI_ALLOW_PROD=1`— se descartó a propósito:
+dejaría el hábito instalado justo para el día en que sí importe.
+
+**EL DÍA DEL LANZAMIENTO REAL** (checklist):
+1. Poner `LAUNCHED = True` en `scripts/_env_guard.py` → `konvi-prod` vuelve a ser
+   `prod` duro y los scripts testing-only abortan (fail-closed).
+2. Recrear el ambiente dev siguiendo §1-§2 y exportar `KONVI_SAFE_REFS=<ref nuevo>`
+   (no hace falta editar el guard).
+3. Reconstruirlo con `scripts/db/replay_migrations_dev.sh` +
+   `scripts/db/bootstrap_dev_sandbox.py` (réplica fiel en ~10 min, verificada
+   2026-07-20: 224 migraciones, schema idéntico al baseline canónico).
+
+**Riesgo aceptado mientras tanto:** los datos de UAT (contactos, órdenes, pagos
+Wompi de prueba, cupones) conviven con el dato real de KAIU, y un test destructivo
+no tiene red. Mitigación disponible: `scripts/wipe_conversation.py`.
+
+---
+
+## 1. Estrategia *(objetivo — reactivar al lanzar; ver §0)*
 
 Dos ambientes, **aislados a nivel de organización Supabase** (no solo de proyecto):
 

@@ -4,6 +4,13 @@ Modelo DENY-BY-DEFAULT (allow-only-known-dev): solo un ref de dev reconocido (o
 un Supabase local) pasa; prod, ref desconocido y host no-parseable ABORTAN salvo
 override `KONVI_ALLOW_PROD=1`. Cubre los fail-open que la review adversarial
 encontró (custom domain, pooler, `db.<ref>`, creds vacías).
+
+PRE-LANZAMIENTO (2026-07-20): eliminado el proyecto konvi-dev, konvi-prod es el
+único entorno hasta el lanzamiento real. Mientras `LAUNCHED` sea False el ref de
+prod clasifica 'prelaunch' y los scripts corren AVISANDO. Estos tests cubren los
+DOS modos: el contrato fail-closed completo se re-verifica con `KONVI_LAUNCHED=1`
+(fixture `launched`), de modo que apagar el modo pre-lanzamiento no puede
+introducir un fail-open silencioso.
 """
 import importlib.util
 import os
@@ -27,6 +34,9 @@ def _load_guard():
 
 guard = _load_guard()
 
+# Ref de dev de ejemplo: ya NO viene en la allowlist por default (konvi-dev fue
+# eliminado). Los tests que lo tratan como dev lo habilitan vía KONVI_SAFE_REFS,
+# que es exactamente el mecanismo previsto si vuelve a existir un proyecto dev.
 DEV_REF = "qkltqxbhssgnyjqltwcr"
 PROD_URL = f"https://{guard.PROD_REF}.supabase.co"
 DEV_CREDS = {"NEXT_PUBLIC_SUPABASE_URL": f"https://{DEV_REF}.supabase.co"}
@@ -36,6 +46,18 @@ POOLER_CREDS = {"NEXT_PUBLIC_SUPABASE_URL": "https://aws-0-us-east-1.pooler.supa
 CUSTOM_DOMAIN_CREDS = {"NEXT_PUBLIC_SUPABASE_URL": "https://db.konvi.co"}
 DBHOST_CREDS = {"NEXT_PUBLIC_SUPABASE_URL": f"https://db.{guard.PROD_REF}.supabase.co"}
 LOCAL_CREDS = {"NEXT_PUBLIC_SUPABASE_URL": "http://localhost:54321"}
+
+
+@pytest.fixture
+def launched(monkeypatch):
+    """Modo POST-lanzamiento: konvi-prod vuelve a ser 'prod' duro (fail-closed)."""
+    monkeypatch.setenv("KONVI_LAUNCHED", "1")
+
+
+@pytest.fixture
+def dev_allowed(monkeypatch):
+    """Habilita DEV_REF en la allowlist (ya no viene por default)."""
+    monkeypatch.setenv("KONVI_SAFE_REFS", DEV_REF)
 
 
 # ── extract_ref / _host ─────────────────────────────────────────────────────
@@ -65,18 +87,36 @@ def test_extract_ref_none_for_pooler_custom_empty():
 
 
 # ── classify ────────────────────────────────────────────────────────────────
-def test_classify():
+def test_classify_prelaunch(dev_allowed):
     assert guard.classify(DEV_CREDS) == "dev-safe"
     assert guard.classify(LOCAL_CREDS) == "dev-safe"
-    assert guard.classify(PROD_CREDS) == "prod"
-    assert guard.classify(DBHOST_CREDS) == "prod"
+    assert guard.classify(PROD_CREDS) == "prelaunch"
+    assert guard.classify(DBHOST_CREDS) == "prelaunch"
     assert guard.classify(POOLER_CREDS) == "unknown"
     assert guard.classify(CUSTOM_DOMAIN_CREDS) == "unknown"
     assert guard.classify({}) == "unknown"
 
 
+def test_classify_launched(launched, dev_allowed):
+    assert guard.classify(PROD_CREDS) == "prod"
+    assert guard.classify(DBHOST_CREDS) == "prod"
+    assert guard.classify(DEV_CREDS) == "dev-safe"
+    assert guard.classify(POOLER_CREDS) == "unknown"
+
+
+def test_dev_ref_eliminado_ya_no_es_dev_safe_por_default(monkeypatch):
+    """konvi-dev fue eliminado: su ref no debe seguir siendo seguro por inercia."""
+    monkeypatch.delenv("KONVI_SAFE_REFS", raising=False)
+    assert guard.classify(DEV_CREDS) == "unknown"
+
+
+def test_is_prod_cubre_prelaunch():
+    """'prelaunch' SIGUE siendo el proyecto de producción — is_prod debe decir True."""
+    assert guard.is_prod(PROD_CREDS) is True
+
+
 # ── assert_safe_target: allow known-dev ─────────────────────────────────────
-def test_dev_passes(monkeypatch):
+def test_dev_passes(monkeypatch, dev_allowed):
     monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
     guard.assert_safe_target(DEV_CREDS, action="wipe")  # no debe salir
 
@@ -86,16 +126,34 @@ def test_local_passes(monkeypatch):
     guard.assert_safe_target(LOCAL_CREDS, action="wipe")
 
 
+# ── PRE-LANZAMIENTO: prod pasa, pero NUNCA en silencio ──────────────────────
+def test_prelaunch_pasa_pero_avisa(monkeypatch, capsys):
+    monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
+    guard.assert_safe_target(PROD_CREDS, action="wipe")  # no debe salir
+    err = capsys.readouterr().err
+    assert "PRE-LANZAMIENTO" in err, "el aviso es la única red que queda: no puede faltar"
+    assert guard.PROD_REF in err
+
+
+def test_prelaunch_no_afloja_lo_desconocido(monkeypatch):
+    """El modo pre-lanzamiento habilita SOLO el ref de prod, no un destino opaco."""
+    monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
+    for creds in (POOLER_CREDS, CUSTOM_DOMAIN_CREDS, {}):
+        with pytest.raises(SystemExit) as exc:
+            guard.assert_safe_target(creds, action="wipe")
+        assert exc.value.code == 2
+
+
 # ── assert_safe_target: deny prod / unknown (fail-closed) ───────────────────
 @pytest.mark.parametrize("creds", [PROD_CREDS, DBHOST_CREDS, POOLER_CREDS, CUSTOM_DOMAIN_CREDS, {}])
-def test_non_dev_aborts_fail_closed(monkeypatch, creds):
+def test_non_dev_aborts_fail_closed(monkeypatch, launched, creds):
     monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
     with pytest.raises(SystemExit) as exc:
         guard.assert_safe_target(creds, action="wipe")
     assert exc.value.code == 2
 
 
-def test_invalid_override_still_aborts(monkeypatch):
+def test_invalid_override_still_aborts(monkeypatch, launched):
     # Cualquier valor != "1" NO habilita (fail-closed).
     for val in ("true", "TRUE", "yes", "0", "01", "11", ""):
         monkeypatch.setenv("KONVI_ALLOW_PROD", val)
@@ -104,8 +162,15 @@ def test_invalid_override_still_aborts(monkeypatch):
         assert exc.value.code == 2
 
 
+def test_launched_flag_invalido_no_lanza(monkeypatch):
+    """Sólo "1" activa el modo lanzado; cualquier otro valor deja pre-lanzamiento."""
+    for val in ("true", "TRUE", "yes", "0", "01", ""):
+        monkeypatch.setenv("KONVI_LAUNCHED", val)
+        assert guard.classify(PROD_CREDS) == "prelaunch", f"KONVI_LAUNCHED={val!r}"
+
+
 # ── assert_safe_target: override permite destino no-dev ─────────────────────
-def test_override_allows_prod(monkeypatch, capsys):
+def test_override_allows_prod(monkeypatch, launched, capsys):
     monkeypatch.setenv("KONVI_ALLOW_PROD", "1")
     guard.assert_safe_target(PROD_CREDS, action="wipe")  # no debe salir
     err = capsys.readouterr().err
@@ -117,7 +182,7 @@ def test_override_allows_unknown(monkeypatch):
     guard.assert_safe_target(POOLER_CREDS, action="wipe")  # no debe salir
 
 
-def test_override_tolerates_whitespace(monkeypatch):
+def test_override_tolerates_whitespace(monkeypatch, launched):
     monkeypatch.setenv("KONVI_ALLOW_PROD", "  1  ")
     guard.assert_safe_target(PROD_CREDS, action="wipe")
 
@@ -136,7 +201,7 @@ def test_safe_refs_configurable(monkeypatch):
 
 
 # ── alias de compat ─────────────────────────────────────────────────────────
-def test_assert_not_prod_alias(monkeypatch):
+def test_assert_not_prod_alias(monkeypatch, launched):
     monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
     assert guard.assert_not_prod is guard.assert_safe_target
     with pytest.raises(SystemExit):
@@ -148,15 +213,15 @@ _DBURL_PROD_POOLER = f"postgresql://postgres.{guard.PROD_REF}:pw@aws-0-us.pooler
 _DBURL_DEV_DIRECT = f"postgresql://postgres:pw@db.{DEV_REF}.supabase.co:5432/postgres"
 
 
-def test_classify_database_url_prod_pooler_is_prod():
+def test_classify_database_url_prod_pooler_is_prod(launched):
     assert guard.classify({"DATABASE_URL": _DBURL_PROD_POOLER}) == "prod"
 
 
-def test_classify_database_url_dev_direct_is_dev_safe():
+def test_classify_database_url_dev_direct_is_dev_safe(dev_allowed):
     assert guard.classify({"DATABASE_URL": _DBURL_DEV_DIRECT}) == "dev-safe"
 
 
-def test_classify_url_dev_but_database_url_prod_is_prod():
+def test_classify_url_dev_but_database_url_prod_is_prod(launched, dev_allowed):
     # EL FAIL-OPEN QUE CERRAMOS: URL Supabase=dev pero DATABASE_URL=prod → NO dev-safe.
     assert guard.classify({
         "NEXT_PUBLIC_SUPABASE_URL": f"https://{DEV_REF}.supabase.co",
@@ -164,11 +229,11 @@ def test_classify_url_dev_but_database_url_prod_is_prod():
     }) == "prod"
 
 
-def test_classify_project_ref_prod_is_prod():
+def test_classify_project_ref_prod_is_prod(launched):
     assert guard.classify({"SUPABASE_PROJECT_REF": guard.PROD_REF}) == "prod"
 
 
-def test_classify_project_ref_dev_is_dev_safe():
+def test_classify_project_ref_dev_is_dev_safe(dev_allowed):
     assert guard.classify({"SUPABASE_PROJECT_REF": DEV_REF}) == "dev-safe"
 
 
@@ -178,7 +243,7 @@ def test_classify_database_url_local_is_dev_safe():
     ) == "dev-safe"
 
 
-def test_assert_safe_target_aborts_on_database_url_prod(monkeypatch):
+def test_assert_safe_target_aborts_on_database_url_prod(monkeypatch, launched):
     monkeypatch.delenv("KONVI_ALLOW_PROD", raising=False)
     with pytest.raises(SystemExit) as e:
         guard.assert_safe_target({"DATABASE_URL": _DBURL_PROD_POOLER}, action="test")
