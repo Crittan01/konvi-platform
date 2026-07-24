@@ -23,6 +23,12 @@ export async function register() {
   }
 }
 
-// Sentry SDK 8.x — captura errores en server actions + Next.js route handlers
-// que NO son atrapados por error boundaries de React.
-export { captureRequestError } from '@sentry/nextjs'
+// Captura errores en server actions + Next.js route handlers / RSC que NO son
+// atrapados por error boundaries de React.
+//
+// BUG FIX: Next.js invoca el hook por su nombre EXACTO `onRequestError` exportado
+// desde este archivo (contrato del framework). Antes se exportaba como
+// `captureRequestError` → el hook quedaba MUERTO y los errores server-side NO
+// llegaban a Sentry. Se aliasa al nombre que Next espera.
+// Ref: docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup (onRequestError).
+export { captureRequestError as onRequestError } from '@sentry/nextjs'
