@@ -2,7 +2,13 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 
-export async function middleware(request: NextRequest) {
+// Next 16: `middleware.ts` (Edge) fue renombrado a `proxy.ts` (runtime NODEJS,
+// no configurable). El export DEBE llamarse `proxy` — con otro nombre Next NO lo
+// invoca y el gate MFA/AAL2 desaparecería SIN error de build (bypass silencioso).
+// NO agregar `export const runtime` aquí: el config `runtime` no está disponible
+// en Proxy y LANZA error. El helper HMAC (verifyRecoveryCookie) usa Web Crypto
+// (crypto.subtle), que ya corre en nodejs en el resto del código server-side.
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
@@ -123,7 +129,7 @@ export async function middleware(request: NextRequest) {
         // sistemática, el gate MFA quedaba desactivado de facto sin que nadie lo
         // supiera). console.error queda en los logs de Render / Sentry.
         console.error(
-          '[middleware] AAL2 check falló — fail-open (gate MFA omitido en este request):',
+          '[proxy] AAL2 check falló — fail-open (gate MFA omitido en este request):',
           e instanceof Error ? e.message : e,
         )
       }

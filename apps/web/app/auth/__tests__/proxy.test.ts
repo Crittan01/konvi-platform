@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-// F6 — tests del middleware de enforcement AAL2 (la pieza de seguridad central
-// del módulo auth). Se mockean SÓLO Supabase y la verificación HMAC de la cookie
-// de recovery; NextRequest/NextResponse son reales para no falsear el contrato.
+// F6 — tests del proxy (ex-middleware, Next 16) de enforcement AAL2 (la pieza de
+// seguridad central del módulo auth). Se mockean SÓLO Supabase y la verificación
+// HMAC de la cookie de recovery; NextRequest/NextResponse son reales para no
+// falsear el contrato.
 
 const state = vi.hoisted(() => ({
   user: null as null | { id: string },
@@ -31,7 +32,7 @@ vi.mock('@/lib/mfa-recovery-cookie', () => ({
 }))
 
 // Import DESPUÉS de declarar los mocks.
-import { middleware } from '../../../middleware'
+import { proxy } from '../../../proxy'
 
 function reqFor(path: string, opts: { recoveryCookie?: string } = {}) {
   const r = new NextRequest(`http://localhost:3000${path}`)
@@ -55,9 +56,9 @@ function isPassThrough(res: Response): boolean {
   return res.headers.get('x-middleware-next') === '1'
 }
 
-describe('middleware — sesión ausente', () => {
+describe('proxy — sesión ausente', () => {
   it('redirige /dashboard/* a /login preservando el deep-link en ?next=', async () => {
-    const res = await middleware(reqFor('/dashboard/orders/123'))
+    const res = await proxy(reqFor('/dashboard/orders/123'))
     expect(res.status).toBe(307)
     const loc = res.headers.get('location')!
     expect(loc).toContain('/login')
@@ -66,23 +67,23 @@ describe('middleware — sesión ausente', () => {
   })
 
   it('preserva también el query del destino en next', async () => {
-    const res = await middleware(reqFor('/dashboard/inbox?tab=open'))
+    const res = await proxy(reqFor('/dashboard/inbox?tab=open'))
     const next = new URL(res.headers.get('location')!).searchParams.get('next')
     expect(next).toBe('/dashboard/inbox?tab=open')
   })
 
   it('no toca rutas fuera de /dashboard cuando no hay user', async () => {
-    const res = await middleware(reqFor('/algo-publico'))
+    const res = await proxy(reqFor('/algo-publico'))
     expect(isPassThrough(res)).toBe(true)
   })
 })
 
-describe('middleware — gate AAL2 en /dashboard', () => {
+describe('proxy — gate AAL2 en /dashboard', () => {
   beforeEach(() => { state.user = { id: 'u1' } })
 
   it('redirige al challenge cuando la sesión es AAL1 con factor verified', async () => {
     state.aal = AAL_NEEDS_MFA
-    const res = await middleware(reqFor('/dashboard/settings'))
+    const res = await proxy(reqFor('/dashboard/settings'))
     expect(res.status).toBe(307)
     const loc = new URL(res.headers.get('location')!)
     expect(loc.pathname).toBe('/login/mfa')
@@ -91,40 +92,40 @@ describe('middleware — gate AAL2 en /dashboard', () => {
 
   it('deja pasar cuando la sesión ya es AAL2', async () => {
     state.aal = AAL_OK
-    const res = await middleware(reqFor('/dashboard'))
+    const res = await proxy(reqFor('/dashboard'))
     expect(isPassThrough(res)).toBe(true)
   })
 
   it('deja pasar AAL1 si la cookie de recovery está firmada y vigente (bypass legítimo)', async () => {
     state.aal = AAL_NEEDS_MFA
     state.recoveryValid = true
-    const res = await middleware(reqFor('/dashboard', { recoveryCookie: 'valida' }))
+    const res = await proxy(reqFor('/dashboard', { recoveryCookie: 'valida' }))
     expect(isPassThrough(res)).toBe(true)
   })
 })
 
-describe('middleware — gate AAL2 en /api (F85)', () => {
+describe('proxy — gate AAL2 en /api (F85)', () => {
   beforeEach(() => { state.user = { id: 'u1' }; state.aal = AAL_NEEDS_MFA })
 
   it('bloquea /api/* con 401 JSON (no redirect) cuando falta AAL2', async () => {
-    const res = await middleware(reqFor('/api/audit/export'))
+    const res = await proxy(reqFor('/api/audit/export'))
     expect(res.status).toBe(401)
     const body = await res.json()
     expect(body.detail).toBe('MFA requerida')
   })
 
   it('exceptúa /api/mfa/* (flujo de recovery pre-AAL2)', async () => {
-    const res = await middleware(reqFor('/api/mfa/recovery-codes/verify'))
+    const res = await proxy(reqFor('/api/mfa/recovery-codes/verify'))
     expect(isPassThrough(res)).toBe(true)
   })
 })
 
-describe('middleware — fail-open observable ante outage de Supabase Auth', () => {
+describe('proxy — fail-open observable ante outage de Supabase Auth', () => {
   it('deja pasar Y emite señal (console.error) si el check de AAL lanza', async () => {
     state.user = { id: 'u1' }
     state.aalThrows = true
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await middleware(reqFor('/dashboard'))
+    const res = await proxy(reqFor('/dashboard'))
     expect(isPassThrough(res)).toBe(true)
     expect(spy).toHaveBeenCalledOnce()
     expect(String(spy.mock.calls[0][0])).toContain('fail-open')
