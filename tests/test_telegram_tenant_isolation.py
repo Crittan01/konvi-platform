@@ -158,15 +158,24 @@ class UnmappedChatRejectionTests(unittest.TestCase):
 
 class ConstantTimeTokenTests(unittest.TestCase):
     def test_invalid_token_rejected_401(self):
+        # HERMÉTICO (fix 2026-07-21): patchear el secret aquí — como ya hace el test
+        # de arriba (línea ~142) — en vez de depender del `os.environ.setdefault` de la
+        # cabecera del módulo. Ese setdefault solo surte efecto si `telegram_webhook`
+        # se importa por PRIMERA vez DESPUÉS de él; pero cualquier test que importe
+        # `main` antes (orden alfabético/sharding de xdist) fija ya
+        # TELEGRAM_WEBHOOK_SECRET="" → el handler corta con 503 ("no configurado")
+        # ANTES de llegar a la comparación de token, y este test —cuya INTENCIÓN es
+        # afirmar 401 para un token inválido— nunca ejercía su propio invariante.
         async def _run():
             class _Req:
                 async def json(self):
                     return {}
             from fastapi import HTTPException
             try:
-                await telegram_webhook.telegram_webhook(
-                    _Req(), x_telegram_bot_api_secret_token="wrong-token",
-                )
+                with patch.object(telegram_webhook, "TELEGRAM_WEBHOOK_SECRET", "test-tg-secret"):
+                    await telegram_webhook.telegram_webhook(
+                        _Req(), x_telegram_bot_api_secret_token="wrong-token",
+                    )
                 return None
             except HTTPException as e:
                 return e.status_code
