@@ -30,15 +30,9 @@ reason = "ws 8.20.0→8.21.0. dependabot-tracked."
 [[IgnoredVulns]]
 id = "GHSA-58qx-3vcg-4xpx"
 reason = "ws 8.20.0→8.20.1. dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-qx2v-qp2m-jg93"
-reason = "postcss 8.4.31/8.5.8→8.5.10. dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-h67p-54hq-rp68"
-reason = "js-yaml 4.1.1→4.2.0. dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-jxxr-4gwj-5jf2"
-reason = "brace-expansion 5.0.5→5.0.6. dependabot-tracked."
+# (postcss / js-yaml / brace-expansion: entradas RETIRADAS 2026-07-21 — sus bumps
+# ya están forzados vía pnpm.overrides en package.json, así que estos advisories
+# quedaron resueltos y sus ignores eran ruido — el gate ya no los ve.)
 [[IgnoredVulns]]
 id = "GHSA-8988-4f7v-96qf"
 reason = "@opentelemetry/core 1.30.1→2.8.0 (major). dependabot-tracked."
