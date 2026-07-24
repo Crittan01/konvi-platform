@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "prebuild": "mkdir -p public/docs/legal && cp -f ../../docs/legal/dpa.md ../../docs/legal/privacy-policy.md ../../docs/legal/subprocessors.md public/docs/legal/ 2>/dev/null || true",
-    "build": "next build --webpack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run"

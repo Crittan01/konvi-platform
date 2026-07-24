@@ -91,9 +91,24 @@ volvió estática.
    funciona en 16). `proxy` corre en **nodejs** (NO edge, no configurable) y toca código
    **auth/MFA crítico** → merece su propia validación (login/MFA/recovery), no bundlearlo
    en un bump de deps.
-2. **Turbopack build** (drop `--webpack`) — desbloqueado por Sentry v10; validar sourcemaps
-   bajo Turbopack en su propio PR. Hoy `dev`+`build` en `--webpack` (paridad + sourcemaps).
+2. ~~**Turbopack build**~~ — **HECHO** (follow-up PR, ver §Turbopack abajo).
 3. **Refactor** de los `react-hooks/purity` + `set-state-in-effect` (hoy `warn`).
+
+## Turbopack (follow-up — adopción del bundler default de Next 16)
+
+`dev`+`build` pasaron de `--webpack` a **Turbopack** (default de 16), desbloqueado por Sentry v10.
+
+- **Build verificado** (Node 22): `▲ Next.js 16.2.11 (Turbopack)` — EXIT 0, "Compiled
+  successfully". **La tabla de rutas es BYTE-IDÉNTICA a la de webpack** (78 rutas, diff vacío):
+  ninguna ruta cambió de `ƒ`/`○`, ninguna autenticada se volvió estática. Mismo comportamiento
+  de routing/caching.
+- **Sentry v10 + Turbopack** (verificado en los types del SDK): los **sourcemaps SÍ se suben**
+  vía el hook `runAfterProductionCompile` (`useRunAfterProductionCompileHook` default `true`
+  para Turbopack). Bajo Turbopack, Sentry deja su instrumentación build-time propia y usa la
+  **telemetría nativa de Next.js**; el único efecto es que `excludeServerRoutes` haría no-op
+  — que **no usamos**. La captura de errores server-side sigue intacta vía `instrumentation.ts`
+  (`register()` + `captureRequestError`), el enfoque moderno bundler-agnóstico que ya teníamos.
+- Sin config `turbopack.*` en `next.config.js` (no usamos loaders/aliases custom) → nada que migrar.
 
 ## Plan de validación pre-deploy (cuando el founder dé OK)
 
