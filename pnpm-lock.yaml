@@ -91,12 +91,6 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
     devDependencies:
-      '@eslint/eslintrc':
-        specifier: ^3.3.1
-        version: 3.3.6
-      '@eslint/js':
-        specifier: ^9.39.5
-        version: 9.39.5
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
