@@ -19,35 +19,78 @@ from fastapi import HTTPException
 from dependencies import auth as A
 
 
-def _mfa_gated_paths():
-    """Paths (path, method) cuyo dependency chain incluye un gate MFA en la app real.
-
-    Cubre enforce_mfa (directo/heredado por _MFA_GATE) y enforce_mfa_internal_or_user
-    (variante dual-auth para endpoints money-movement invocados por el bot), a ambos
-    niveles: por-endpoint (r.dependencies[*].dependency) y del include_router
-    (r.dependant.dependencies[*].call)."""
-    # Robustez xdist: hay 3 main.py (api/connector/orchestrator) y `import main` es AMBIGUO
-    # — otro test puede cachear en sys.modules['main'] un main sin `.app` (p.ej. el worker
-    # del orchestrator sin FastAPI app). Reusamos el main de la API ya cargado (con `.app`,
-    # el MISMO app determinista que construye el import estándar); solo si el cacheado es
-    # el "otro" main (sin app) forzamos el de la API. NO re-ejecutamos main.py (evita
-    # construir un app inconsistente bajo coverage).
+def _api_main():
+    """El módulo main de la API (con `.app`), robusto a la ambigüedad de sys.modules['main']
+    (hay 3 main.py: api/connector/orchestrator). No re-ejecuta main.py."""
     _m = sys.modules.get("main")
     if _m is None or not hasattr(_m, "app"):
         sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
         sys.modules.pop("main", None)
         import main as _m
-    main = _m
+    return _m
+
+
+def _mfa_gated_endpoints():
+    """{nombre_de_endpoint: set(nombres de gate MFA)} — la introspección del wiring MFA,
+    VERSION-AGNÓSTICA de FastAPI.
+
+    Por qué NO se lee `main.app.routes` plano (como antes): FastAPI 0.139 cambió
+    `include_router` a LAZY — ya NO aplana las rutas en `app.routes`, las envuelve en
+    objetos `_IncludedRouter` (rutas con path RELATIVO; el prefijo y las `dependencies`
+    del include viven en `include_context`, no en cada sub-ruta). El código de prod corre
+    0.139 (api/ai-orchestrator pinnean 0.139.0); el CI las testeaba bajo 0.128.8 (venv
+    compartido, connector gana) → esta introspección pasaba por accidente. Este helper
+    funciona idéntico bajo 0.128.8 (plano) y 0.139 (lazy): verificado, mismo mapa de gates.
+    Ver docs/reports/ci_sec_hardening_2026_07_24.md §5.
+
+    Se identifica por NOMBRE DE ENDPOINT (no por path): el path completo no es recuperable
+    bajo 0.139 (prefijo opaco), pero la identidad de la función + su gate SÍ. Reúne los
+    gates de 3 fuentes: dependencies por-ruta, walk recursivo del `dependant`, y las
+    `dependencies` de los `include_context` que envuelven la ruta (gate a nivel router)."""
+    main = _api_main()
     from dependencies.internal_auth import enforce_mfa_internal_or_user
-    gate_fns = {A.enforce_mfa, A.enforce_mfa_strict, enforce_mfa_internal_or_user}
-    gated = set()
-    for r in main.app.routes:
-        fns = [getattr(d, "dependency", None) for d in (getattr(r, "dependencies", []) or [])]
-        fns += [getattr(d, "call", None) for d in getattr(getattr(r, "dependant", None), "dependencies", []) or []]
-        if gate_fns & set(fns):
-            for m in getattr(r, "methods", None) or []:
-                gated.add((getattr(r, "path", ""), m))
-    return gated
+    GATES = {A.enforce_mfa, A.enforce_mfa_strict, enforce_mfa_internal_or_user}
+
+    def _deps(lst):
+        return {getattr(d, "dependency", None) for d in (lst or [])} & GATES
+
+    def _tree_calls(dependant):
+        found, seen = set(), set()
+
+        def w(d):
+            if d is None or id(d) in seen:
+                return
+            seen.add(id(d))
+            if getattr(d, "call", None) in GATES:
+                found.add(d.call)
+            for s in getattr(d, "dependencies", []) or []:
+                w(s)
+
+        w(dependant)
+        return found
+
+    out, seen = {}, set()
+
+    def rec(routes, inherited):
+        for r in routes:
+            if id(r) in seen:
+                continue
+            seen.add(id(r))
+            if type(r).__name__ == "_IncludedRouter":  # FastAPI 0.139 lazy include
+                ctx = getattr(r, "include_context", None)
+                inc = _deps(getattr(ctx, "dependencies", None)) if ctx else set()
+                inner = (getattr(ctx, "included_router", None) if ctx else None) \
+                    or getattr(r, "original_router", None)
+                if inner is not None:
+                    rec(getattr(inner, "routes", []), inherited | inc)
+            elif hasattr(r, "dependant") and hasattr(r, "endpoint"):
+                g = inherited | _tree_calls(getattr(r, "dependant", None)) \
+                    | _deps(getattr(r, "dependencies", None))
+                ep = getattr(getattr(r, "endpoint", None), "__name__", "")
+                out.setdefault(ep, set()).update(x.__name__ for x in g)
+
+    rec(main.app.routes, set())
+    return out
 
 
 def _req():
@@ -137,56 +180,45 @@ class MfaGateWiringTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.gated = _mfa_gated_paths()
+        # {endpoint: set(gate_names)}. Keyed por endpoint (no path) para ser
+        # version-agnóstico (ver _mfa_gated_endpoints).
+        cls.gated = _mfa_gated_endpoints()
+
+    # Crown-jewels money/PII/crédito, por FUNCIÓN de endpoint (estable cross-versión):
+    #   export_data/request_deletion → offboarding export/request-deletion
+    #   data_subject_request(_printable) → SAR PII · sic_report → reporte de crédito
+    #   create_payment_link/patch_order/generate_shipping_guide_endpoint → money-movement
+    _CROWN = {"export_data", "request_deletion", "data_subject_request",
+              "data_subject_request_printable", "sic_report"}
+    _MONEY = {"create_payment_link", "patch_order", "generate_shipping_guide_endpoint"}
+    # Recuperación/grace — NUNCA deben exigir AAL2 (o deadlock de recuperación):
+    _RECOVERY = {"offboarding_status", "cancel_deletion", "count_recovery_codes",
+                 "regenerate_recovery_codes", "verify_recovery_code", "clear_recovery_codes",
+                 "recovery_reset_totp", "recovery_change_password"}
 
     def test_crown_jewels_gateados(self):
-        must = {
-            ("/api/v1/tenant/offboarding/export", "POST"),
-            ("/api/v1/tenant/offboarding/request-deletion", "POST"),
-            ("/api/v1/contacts/{contact_id}/data-subject-request", "POST"),
-            ("/api/v1/contacts/{contact_id}/data-subject-request/printable", "GET"),
-            ("/api/v1/sic-report", "GET"),
-        }
-        self.assertTrue(must <= self.gated, f"faltan gateados: {must - self.gated}")
+        faltan = {ep for ep in self._CROWN if not self.gated.get(ep)}
+        self.assertFalse(faltan, f"crown-jewels sin gate MFA: {faltan}")
 
     def test_offboarding_crownjewels_son_fail_closed(self):
         """Ancla la propiedad de seguridad: export (PII) + request-deletion (borrado) usan
         enforce_mfa_strict (FAIL-CLOSED), NO el gate amplio fail-open. Un revert
         strict→enforce_mfa debe ROMPER este test (el de arriba usa la unión y no lo pillaría)."""
-        import main
-        strict_paths = set()
-        for r in main.app.routes:
-            deps = [getattr(d, "dependency", None) for d in (getattr(r, "dependencies", []) or [])]
-            deps += [getattr(d, "call", None) for d in getattr(getattr(r, "dependant", None), "dependencies", []) or []]
-            if A.enforce_mfa_strict in deps:
-                for m in getattr(r, "methods", None) or []:
-                    strict_paths.add((getattr(r, "path", ""), m))
-        must = {
-            ("/api/v1/tenant/offboarding/export", "POST"),
-            ("/api/v1/tenant/offboarding/request-deletion", "POST"),
-        }
-        self.assertTrue(must <= strict_paths, f"crown-jewels no fail-closed (strict): {must - strict_paths}")
+        for ep in ("export_data", "request_deletion"):
+            self.assertIn("enforce_mfa_strict", self.gated.get(ep, set()),
+                          f"{ep} no es fail-closed (falta enforce_mfa_strict)")
 
     def test_orders_money_movement_gateado(self):
         """payment-link (dual-auth, internal-aware) + PATCH (user-only) money-movement
         + generate-shipping-guide (Ola 0 — guía REAL Aveonline = dinero, internal-aware)."""
-        must = {
-            ("/api/v1/orders/{order_id}/payment-link", "POST"),
-            ("/api/v1/orders/{order_id}", "PATCH"),
-            ("/api/v1/orders/{order_id}/generate-shipping-guide", "POST"),
-        }
-        self.assertTrue(must <= self.gated, f"faltan gateados: {must - self.gated}")
+        faltan = {ep for ep in self._MONEY if not self.gated.get(ep)}
+        self.assertFalse(faltan, f"money-movement sin gate MFA: {faltan}")
 
     def test_recovery_paths_no_gateados(self):
         """status/cancel-deletion (deben correr en grace) y el router mfa (para completar
         el 2º factor) NO deben exigir AAL2, o se crea un deadlock de recuperación."""
-        gated_paths = {p for p, _ in self.gated}
-        self.assertNotIn("/api/v1/tenant/offboarding/status", gated_paths)
-        self.assertNotIn("/api/v1/tenant/offboarding/cancel-deletion", gated_paths)
-        self.assertFalse(
-            any(p.startswith("/api/v1/mfa") for p in gated_paths),
-            "el router mfa no debe estar gateado por enforce_mfa",
-        )
+        gateados = {ep for ep in self._RECOVERY if self.gated.get(ep)}
+        self.assertFalse(gateados, f"paths de recuperación gateados (deadlock): {gateados}")
 
 
 class MfaStrictFailClosedTests(unittest.TestCase):

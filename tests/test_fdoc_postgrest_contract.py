@@ -34,10 +34,16 @@ class PostgrestLibraryContractTests(unittest.TestCase):
         # El contrato del que dependen los guards None-safe.
         self.assertIn("return None", src)
 
-    def test_insert_builder_has_no_select_or_single(self):
+    def test_insert_builder_has_no_single(self):
+        """El footgun que este contrato previene es `.insert()/.update() … .single()`
+        (→ AttributeError → endpoint roto). El guard REAL y version-agnóstico es que el
+        insert/update builder NO expone `.single`: verdad en postgrest 2.28.3 (supabase
+        2.28) Y en 2.31 (supabase 2.31, lo que corre prod). `.select` SÍ cambió (2.31 lo
+        agregó al insert builder), pero eso no reintroduce el footgun porque `.single`
+        sigue ausente — por eso el contrato se ancla en `.single`, no en `.select`."""
         from postgrest._sync.request_builder import SyncQueryRequestBuilder
-        self.assertFalse(hasattr(SyncQueryRequestBuilder, "select"))
-        self.assertFalse(hasattr(SyncQueryRequestBuilder, "single"))
+        self.assertFalse(hasattr(SyncQueryRequestBuilder, "single"),
+                         "el insert/update builder no debe exponer .single (footgun)")
 
 
 class MaybeSingleNoneReturns404Tests(unittest.IsolatedAsyncioTestCase):
