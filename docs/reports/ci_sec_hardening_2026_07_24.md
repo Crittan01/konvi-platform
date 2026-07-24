@@ -120,16 +120,32 @@ Efecto colateral: se corrigió una fragilidad **green-by-luck** en
 
 ---
 
+## 7. Node 22 — fidelidad CI↔prod (ENTREGADO)
+
+Igual que el venv de Python (§4), el CI validaba el frontend bajo la versión EQUIVOCADA
+de Node. Verificado (VALIDAR-EN-DOC-OFICIAL, hecho):
+- **Render corre Node 22.22.0** en `konvi-web`: default de servicios creados post-2026-01-15
+  ([Render changelog](https://render.com/changelog/default-node-js-version-updated-to-22-22-0));
+  konvi-web es de 2026-05-31 (Render API). NO hay `NODE_VERSION`/`.nvmrc`/`engines` → usaba el
+  default. **Prod NO cambia** con este PR (ya está en 22).
+- **supabase-js ^2.110 dropeó Node 20** (EOL 2026-04-30; last-con-20 = 2.109;
+  [Supabase changelog](https://supabase.com/changelog/45715-deprecation-notice-dropping-support-for-node-js-20)).
+  `konvi-web` pinnea `^2.110.3` → el CI en Node 20 corría un combo NO soportado (de ahí el
+  warning en el build).
+
+Fix: `ci.yml` `NODE_VERSION` 20→**22**; `package.json` `engines.node` = `>=22 <23` (pin
+explícito con upper bound, guía de Render) + `.nvmrc`=22 (dev local); `@types/node` `^20`→**`^22`**
+(alinea los tipos con el runtime — corrige la dirección de #140, que pedía 26). Verificado bajo
+Node 22 local: tsc/ESLint limpios, Vitest 269/269, `next build` OK (61/61 páginas), **warning de
+deprecación DESAPARECIÓ**. Sin cambio de runtime en prod → sin deploy urgente.
+
 ## 6. Ideas / backlog
 
 **De esta sesión (priorizado):**
-1. **Split de venv (2 legs)** — §4, DIFERIDO. Prerrequisito (#146) ya hecho.
-2. **Upgrade de Node runtime** — tiene presión externa: el build ya emite
-   `Node.js 20 and below are deprecated … @supabase/supabase-js. Upgrade to 22+`.
-   Desbloquea #140.
-3. **Upgrade de Next 15→16** — arrastra #137/#138 (flat config de ESLint). Verificar si
+1. ~~Split de venv~~ — ENTREGADO aditivo (§4, PR #150). ~~Node 22~~ — ENTREGADO (§7).
+2. **Upgrade de Next 15→16** — arrastra #137/#138 (flat config de ESLint). Verificar si
    el "Next.js EOL" del audit de julio sigue vigente lo vuelve no-opcional.
-4. **Migración Tailwind 4** — encaja con el barrido UX (revisión visual).
+3. **Migración Tailwind 4** — encaja con el barrido UX (revisión visual).
 
 **Pre-existente (de sesiones previas — NO verificado hoy, confirmar vigencia antes de
 planear):** perf `@audit_log` async-assuming (~54 handlers), barrido UX Tenant Console

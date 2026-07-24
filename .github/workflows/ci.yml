@@ -16,7 +16,11 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  NODE_VERSION: "20"
+  # Node 22: FIDELIDAD PROD. Render corre Node 22.22.0 en konvi-web (default de servicios
+  # creados post-2026-01-15; konvi-web es de 2026-05-31), y supabase-js ^2.110 DROPEÓ Node 20
+  # (EOL 2026-04-30). El CI en Node 20 validaba un combo no soportado (warning de deprecación
+  # en el build) y bajo una versión que prod no usa. Ver docs/reports/ci_sec_hardening_2026_07_24.md §7.
+  NODE_VERSION: "22"
   PNPM_VERSION: "10.33.0"
 
 jobs:
