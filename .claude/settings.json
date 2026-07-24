@@ -1,9 +1,19 @@
 {
   "permissions": {
     "allow": [
+      "Write(*)",
+      "Edit(*)",
       "WebFetch(*)",
       "Bash(*)",
-      "Read(*)"
+      "WebSearch(*)",
+      "Read(*)",
+      "Bash(git push origin origin/develop:production)",
+      "Bash(psql:*)",
+      "Bash(cp .env.prod .env)",
+      "Bash(python3.11 scripts/uat/e2e_chat.py:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp/lucams-shop-local"
     ]
   }
 }

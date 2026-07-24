@@ -206,19 +206,16 @@ const sentryBuildEnabled =
   Boolean(process.env.SENTRY_ORG) &&
   Boolean(process.env.SENTRY_PROJECT)
 
+// @sentry/nextjs v10: withSentryConfig pasó de 3 args a 2 (config + un único
+// objeto de opciones). `hideSourceMaps` fue removido (v9+ borra los sourcemaps
+// tras subirlos por default) y `automaticVercelMonitors` se movió a
+// `webpack.automaticVercelMonitors` (default false → se omite).
 module.exports = sentryBuildEnabled
-  ? withSentryConfig(
-      nextConfig,
-      {
-        silent: true,
-        org: process.env.SENTRY_ORG,
-        project: process.env.SENTRY_PROJECT,
-        authToken: process.env.SENTRY_AUTH_TOKEN,
-      },
-      {
-        hideSourceMaps: true,
-        disableLogger: true,
-        automaticVercelMonitors: false,
-      },
-    )
+  ? withSentryConfig(nextConfig, {
+      silent: true,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      disableLogger: true,
+    })
   : nextConfig
