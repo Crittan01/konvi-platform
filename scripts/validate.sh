@@ -248,10 +248,19 @@ _hdr "Next.js ESLint (apps/web)"
 # de Next lint que es `<col>  Error: <message>` (no empieza con "Error:").
 # Reforzamos para detectar ese formato + cualquier Error: en columna.
 if command -v pnpm &>/dev/null; then
-  lint_out=$(pnpm --filter web lint 2>&1 || true)
+  # `|| true` + grep de errores de REGLA dejaba pasar un fallo de HERRAMIENTA:
+  # con eslint 10 sobre `.eslintrc.json` la salida es
+  # `Invalid Options: - Unknown options: useEslintrc` — no matchea ningún patrón
+  # de error de regla, así que se reportaba "Lint OK" con el lint completamente
+  # roto (detectado 2026-07-21 con el PR de Dependabot eslint 8→10).
+  # Ahora se conserva el exit code y un fallo no-atribuible a reglas también falla.
+  lint_out=$(pnpm --filter web lint 2>&1); lint_rc=$?
   if echo "$lint_out" | grep -qE "^([0-9]+:[0-9]+ +)?Error:|: error"; then
     _err "Errores de lint bloqueantes (rompen el build):"
     echo "$lint_out" | grep -E "Error:|: error" | head -5
+  elif [ "$lint_rc" -ne 0 ]; then
+    _err "ESLint falló por configuración/herramienta (no por reglas) — exit $lint_rc:"
+    echo "$lint_out" | tail -8
   elif echo "$lint_out" | grep -q "warning"; then
     _ok "Lint OK (con warnings no bloqueantes)"
   else

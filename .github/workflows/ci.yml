@@ -272,6 +272,28 @@ jobs:
         if: needs.changes.outputs.frontend == 'true'
         run: pnpm install --frozen-lockfile
 
+      # HUECO CERRADO (2026-07-21): TypeScript, ESLint y Vitest viven DENTRO de
+      # validate.sh, gateado por `backend`. Un cambio SOLO de frontend (apps/web,
+      # packages/, lockfile) los saltaba TODOS — quedaba únicamente `next build`.
+      #
+      # Se detectó con el PR de eslint 8→10: pasó en verde en 2m34s y el build
+      # imprimió `⨯ ESLint: Invalid Options: - Unknown options: useEslintrc` sin
+      # fallar. O sea: el CI aprobaba un bump que rompe el lint por completo.
+      #
+      # `next build` NO sustituye estos checks: degrada el fallo de ESLint a un
+      # mensaje no fatal y no corre Vitest en absoluto.
+      - name: TypeScript type check (apps/web)
+        if: needs.changes.outputs.frontend == 'true'
+        run: pnpm --filter web exec tsc --noEmit
+
+      - name: ESLint (apps/web)
+        if: needs.changes.outputs.frontend == 'true'
+        run: pnpm --filter web lint
+
+      - name: Vitest (apps/web)
+        if: needs.changes.outputs.frontend == 'true'
+        run: pnpm --filter web test
+
       - name: Build apps/web
         if: needs.changes.outputs.frontend == 'true'
         env:
