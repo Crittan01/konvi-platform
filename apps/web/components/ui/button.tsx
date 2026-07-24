@@ -8,7 +8,7 @@ const buttonVariants = cva(
   // OLA 0 barrido UX 2026-07-19: `max-sm:min-h-11` eleva el tap target a 44px SOLO en
   // móvil (<640px) — accesibilidad táctil sin tocar la densidad desktop (≥640px intacto).
   // Cascadea a todo control que use Button. min-height gana sobre las alturas h-9/h-10 fijas.
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 max-sm:min-h-[44px]",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 max-sm:min-h-[44px]",
   {
     variants: {
       variant: {

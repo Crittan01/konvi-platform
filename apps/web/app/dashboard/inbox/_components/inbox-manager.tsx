@@ -347,7 +347,7 @@ export default function InboxManager() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-[1.25rem] border border-border shadow-sm">
+    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-[1.25rem] border border-border shadow-xs">
 
       {/* ── Panel Lista — Refactor paso 8/10 — ConversationList ─────────────── */}
       <ConversationList

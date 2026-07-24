@@ -228,7 +228,7 @@ export default function SidebarClient({
       {/* ── Overlay mobile ─────────────────────────────────────────────────── */}
       {mobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-xs"
           onClick={() => setMobileOpen(false)}
         />
       )}
@@ -239,7 +239,7 @@ export default function SidebarClient({
           fixed inset-y-0 left-0 z-50 flex flex-col w-64 sidebar-gradient border-r border-border/50
           transition-transform duration-300 ease-in-out
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:relative lg:translate-x-0 lg:z-auto lg:flex-shrink-0
+          lg:relative lg:translate-x-0 lg:z-auto lg:shrink-0
         `}
       >
         {/* ── Header: logo + nombre tenant ───────────────────────────────── */}
@@ -294,7 +294,7 @@ export default function SidebarClient({
                   <div
                     key={item.href}
                     title={lockReason}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground/50 bg-white/2 cursor-not-allowed"
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
                     <span className="flex-1">{item.label}</span>
@@ -372,7 +372,7 @@ export default function SidebarClient({
                           <div
                             key={child.href}
                             title={lockReason}
-                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
+                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground/50 bg-white/2 cursor-not-allowed"
                           >
                             <child.icon className="h-3.5 w-3.5 shrink-0" />
                             <span className="flex-1">{child.label}</span>

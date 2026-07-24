@@ -155,7 +155,7 @@ export default function FinanceDashboard({
                 sub="Marketing, nómina, software…"
                 help="Operating Expenses: gastos operativos no atados a un producto vendido (pauta, nómina, suscripciones, logística)."
               />
-              <Card className={`border-border/50 shadow-sm relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
+              <Card className={`border-border/50 shadow-xs relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
                 <CardContent className="p-5 flex flex-col items-center justify-center text-center">
                   <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
                     <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} />
@@ -175,7 +175,7 @@ export default function FinanceDashboard({
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Gráfico + desglose OPEX */}
               <div className="lg:col-span-1 space-y-6">
-                <Card className="border-border/50 shadow-sm">
+                <Card className="border-border/50 shadow-xs">
                   <CardHeader className="pb-2 text-center border-b">
                     <CardTitle className="text-sm">Estructura del P&amp;L</CardTitle>
                   </CardHeader>
@@ -201,7 +201,7 @@ export default function FinanceDashboard({
                 </Card>
 
                 {opexByCategory.length > 0 && (
-                  <Card className="border-border/50 shadow-sm">
+                  <Card className="border-border/50 shadow-xs">
                     <CardHeader className="pb-2 border-b">
                       <CardTitle className="text-sm">OPEX por categoría</CardTitle>
                     </CardHeader>
@@ -237,7 +237,7 @@ function KpiCard({ icon, iconBg, label, value, valueClass, sub, help }: {
   icon: React.ReactNode; iconBg: string; label: string; value: string; valueClass: string; sub: string; help: string
 }) {
   return (
-    <Card className="border-border/50 shadow-sm">
+    <Card className="border-border/50 shadow-xs">
       <CardContent className="p-5 flex flex-col items-center justify-center text-center">
         <div className={`h-10 w-10 rounded-full ${iconBg} flex items-center justify-center mb-3`}>{icon}</div>
         <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">

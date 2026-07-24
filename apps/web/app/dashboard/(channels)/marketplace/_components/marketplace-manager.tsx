@@ -415,7 +415,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
         </div>
       )}
 
-      <Card className="border-border/50 shadow-sm overflow-hidden">
+      <Card className="border-border/50 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[860px]">
             <thead>
@@ -490,7 +490,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             alt={item.title ?? ''}
                             width={40}
                             height={40}
-                            className="rounded object-cover flex-shrink-0 bg-muted"
+                            className="rounded object-cover shrink-0 bg-muted"
                           />
                         )}
                         <div className="min-w-0">

@@ -153,7 +153,7 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
                         onChange={e => { setLabels(prev => ({ ...prev, [m]: e.target.value })); setSaved(false) }}
                         maxLength={60}
                         placeholder={meta.title}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       />
                       <p className="text-[10px] text-muted-foreground/70">Cómo nombra el bot este método al cliente.</p>
                     </div>
@@ -168,7 +168,7 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
                         onChange={e => { setNotes(prev => ({ ...prev, [m]: e.target.value })); setSaved(false) }}
                         maxLength={240}
                         placeholder="Ej: recargo del 3% · liquidación a 5 días"
-                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       />
                       <p className="text-[10px] text-muted-foreground/70">El bot puede mencionarla al ofrecer el método.</p>
                     </div>

@@ -436,7 +436,7 @@ export default async function AiAgentsPage() {
         kbCriticalCoverage={kbCriticalCoverage}
       />
 
-      <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
+      <div className="rounded-xl border border-primary/20 bg-linear-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
           <div className="h-12 w-12 rounded-xl bg-purple-500/15 border border-purple-700/25 flex items-center justify-center shrink-0">
             <Sparkles className="h-6 w-6 text-purple-700" />

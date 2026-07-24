@@ -116,7 +116,7 @@ export function DocCard({
           <div className="space-y-1">
             <Label htmlFor={catId} className="text-xs">Categoría</Label>
             <select id={catId} name="category" defaultValue={doc.category}
-              className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+              className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-primary">
               {KB_CATEGORIES.map(c => (
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
@@ -125,7 +125,7 @@ export function DocCard({
           <div className="space-y-1">
             <Label htmlFor={contentId} className="text-xs">Contenido</Label>
             <textarea id={contentId} name="content" defaultValue={doc.content} required maxLength={3000} rows={6}
-              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
+              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-hidden focus:ring-1 focus:ring-primary" />
           </div>
           <div className="flex gap-2">
             <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado" className="h-8 text-xs">
@@ -142,7 +142,7 @@ export function DocCard({
   }
 
   return (
-    <div className={`rounded-xl border bg-card p-4 transition-all hover:shadow-sm ${
+    <div className={`rounded-xl border bg-card p-4 transition-all hover:shadow-xs ${
       doc.is_active ? 'border-border' : 'border-border/50 opacity-60'
     }`}>
       <div className="flex items-start justify-between gap-3">

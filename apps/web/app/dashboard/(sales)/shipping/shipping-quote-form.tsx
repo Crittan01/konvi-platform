@@ -453,7 +453,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectRate(idx) }
                 }}
-                className={`rounded-lg border p-3 cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+                className={`rounded-lg border p-3 cursor-pointer transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                   selectedIdx === idx
                     ? 'border-primary bg-primary/10'
                     : accent === 'green'

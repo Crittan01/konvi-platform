@@ -240,7 +240,7 @@ export default async function SettingsPage() {
                       { value: 'juvenil',      label: 'Juvenil',      desc: 'Dinámico, con emojis' },
                     ] as const).map(({ value, label, desc }) => (
                       <label key={value}
-                        className="flex flex-col gap-0.5 rounded-lg border border-border p-2.5 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+                        className="flex flex-col gap-0.5 rounded-lg border border-border p-2.5 cursor-pointer transition-colors hover:border-primary/40 has-checked:border-primary has-checked:bg-primary/5">
                         <input type="radio" name="tono_comunicacion" value={value}
                           defaultChecked={(tenant?.tono_comunicacion ?? 'amigable') === value}
                           className="sr-only" />
@@ -259,7 +259,7 @@ export default async function SettingsPage() {
                       maxLength={280}
                       placeholder={'Ej: "Conectar a los colombianos con tecnología de calidad a precio justo, directamente desde el fabricante."'}
                       rows={4}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">¿Por qué existe tu negocio? Máx 280 chars.</p>
                   </div>
                   {/* Visión */}
@@ -270,7 +270,7 @@ export default async function SettingsPage() {
                       maxLength={280}
                       placeholder={'Ej: "Ser la tienda de tecnología más recomendada de Colombia para 2028."'}
                       rows={4}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">¿Dónde quieres llegar? Máx 280 chars.</p>
                   </div>
                   {/* Valores */}
@@ -281,7 +281,7 @@ export default async function SettingsPage() {
                       maxLength={280}
                       placeholder={'Ej: "Confianza, Calidad, Transparencia y Cercanía con el cliente."'}
                       rows={4}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">¿Qué principios te guían? Máx 280 chars.</p>
                   </div>
                 </div>
@@ -293,7 +293,7 @@ export default async function SettingsPage() {
                     maxLength={160}
                     placeholder={'Ej: "asesora experta en cosmética natural de KAIU"'}
                     rows={2}
-                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                   <p className="text-[10px] text-muted-foreground">Cómo se presenta el asistente al cliente: «Eres [nombre], <strong>esta frase</strong>». Define su rol y expertise. Máx 160 chars.</p>
                 </div>
                 <p className="text-[10px] text-muted-foreground/70">
@@ -359,7 +359,7 @@ export default async function SettingsPage() {
                       defaultValue={tenant?.after_hours_message ?? ''}
                       placeholder={'Ej: ¡Hola! En este momento nuestro equipo descansa.\nTe respondemos mañana entre las 8:00 AM y 6:00 PM.\n¡Gracias por escribirnos!'}
                       rows={3}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">Tip: escríbelo como tú le hablarías al cliente — natural y cálido. El bot lo envía automáticamente antes de escalar.</p>
                   </div>
 
@@ -372,7 +372,7 @@ export default async function SettingsPage() {
                       id="escalation-role"
                       name="escalation_role"
                       defaultValue={tenant?.escalation_role ?? 'asesor'}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       <option value="asesor">Asesor (default — comercial)</option>
                       <option value="especialista">Especialista (servicios profesionales, salud)</option>

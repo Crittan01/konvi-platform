@@ -1,6 +1,133 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+/* Reemplazo mantenido de tailwindcss-animate (mismos nombres de clase: animate-in,
+   fade-in-0, zoom-in-95, slide-in-from-*) — el plugin viejo se cargaba desde el
+   tailwind.config.ts que el codemod eliminó. Ruta oficial shadcn/ui para Tailwind 4. */
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* `inline` OBLIGATORIO: los colores mapean hsl(var(--token)); sin inline Tailwind 4
+   congela el valor y el swap de tokens de .dark deja de reaccionar → dark mode roto. */
+@theme inline {
+  --font-sans:
+    var(--font-inter), system-ui, -apple-system, Segoe UI, Roboto,
+    Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, Twemoji Mozilla,
+    sans-serif;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility sidebar-gradient {
+  /* Sidebar — más oscuro que el canvas (tokens --sidebar-bg*, fuente única) */
+  background: linear-gradient(
+    180deg,
+    hsl(var(--sidebar-bg)) 0%,
+    hsl(var(--sidebar-bg-end)) 100%
+  );
+}
+
+@utility glow-primary {
+  /* Glow verde sutil para el logo */
+  box-shadow: 0 0 16px hsl(var(--primary) / 0.25);
+}
+
+@utility text-gradient {
+  /* Texto degradado verde → dorado */
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--amber)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@utility card-hover {
+  /* card-hover — OPT-IN para cards interactivas (F1: removido de la base de
+     Card; las cards estáticas no deben "flotar"). Transición limitada a las
+     propiedades animadas (no `all`) y respeta prefers-reduced-motion. */
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s ease;
+
+  &:hover {
+    border-color: hsl(var(--primary) / 0.2);
+    box-shadow: 0 8px 30px rgba(34, 68, 56, 0.08); /* Sombra elegante estilo Kaiu */
+    transform: translateY(-2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    &:hover {
+      transform: none;
+    }
+  }
+}
 
 @layer base {
   /* `.light` recibe los MISMOS tokens que :root (sin duplicar) → permite forzar
@@ -162,48 +289,6 @@
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
-  }
-}
-
-@layer utilities {
-  /* Sidebar — más oscuro que el canvas (tokens --sidebar-bg*, fuente única) */
-  .sidebar-gradient {
-    background: linear-gradient(
-      180deg,
-      hsl(var(--sidebar-bg)) 0%,
-      hsl(var(--sidebar-bg-end)) 100%
-    );
-  }
-
-  /* Glow verde sutil para el logo */
-  .glow-primary {
-    box-shadow: 0 0 16px hsl(var(--primary) / 0.25);
-  }
-
-  /* Texto degradado verde → dorado */
-  .text-gradient {
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--amber)));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  /* card-hover — OPT-IN para cards interactivas (F1: removido de la base de
-     Card; las cards estáticas no deben "flotar"). Transición limitada a las
-     propiedades animadas (no `all`) y respeta prefers-reduced-motion. */
-  .card-hover {
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  }
-
-  .card-hover:hover {
-    border-color: hsl(var(--primary) / 0.20);
-    box-shadow: 0 8px 30px rgba(34, 68, 56, 0.08); /* Sombra elegante estilo Kaiu */
-    transform: translateY(-2px);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .card-hover { transition: none; }
-    .card-hover:hover { transform: none; }
   }
 }
 

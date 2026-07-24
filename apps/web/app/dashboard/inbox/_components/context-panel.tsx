@@ -411,7 +411,7 @@ export function ContextPanel({
               placeholder="Buscar producto o SKU..."
               value={productSearch}
               onChange={e => setProductSearch(e.target.value)}
-              className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
             />
             {productSearch && (
               <button onClick={() => setProductSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">

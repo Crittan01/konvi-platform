@@ -195,7 +195,7 @@ export function ReadinessCard({
                       <button
                         type="button"
                         aria-label={`Más información: ${item.label}`}
-                        className="shrink-0 text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+                        className="shrink-0 text-muted-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring rounded-full"
                       >
                         <HelpCircle className="h-3 w-3" />
                       </button>

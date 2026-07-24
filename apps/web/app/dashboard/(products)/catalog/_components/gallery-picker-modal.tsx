@@ -175,7 +175,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
       onClick={onClose}
     >
       <div
@@ -184,7 +184,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
         aria-modal="true"
         aria-labelledby="gallery-picker-title"
         tabIndex={-1}
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col focus:outline-none"
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col focus:outline-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -294,7 +294,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
                       {/* Badge "en uso por" — siempre visible (esquina sup izq) */}
                       {f.usedByProduct && (
                         <div
-                          className="absolute top-1.5 left-1.5 z-10 inline-flex items-center gap-1 max-w-[calc(100%-50px)] px-1.5 py-0.5 rounded-md bg-emerald-500/95 text-white text-[10px] font-medium shadow-sm"
+                          className="absolute top-1.5 left-1.5 z-10 inline-flex items-center gap-1 max-w-[calc(100%-50px)] px-1.5 py-0.5 rounded-md bg-emerald-500/95 text-white text-[10px] font-medium shadow-xs"
                           title={`En uso por: ${f.usedByProduct}`}
                         >
                           <span className="truncate">{f.usedByProduct}</span>

@@ -19,7 +19,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Navegación principal"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75 lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/90 backdrop-blur-sm supports-backdrop-filter:bg-card/75 lg:hidden"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <ul className="flex items-stretch justify-around">

@@ -99,9 +99,9 @@ export function ConversationList({
       >
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full flex-shrink-0 ${st.dot}`} />
+            <div className={`h-2 w-2 rounded-full shrink-0 ${st.dot}`} />
             <span
-              className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'} ${opts.isHistorical ? 'text-muted-foreground' : ''} truncate max-w-[11rem]`}
+              className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'} ${opts.isHistorical ? 'text-muted-foreground' : ''} truncate max-w-44`}
               title={conv.contact_name ? `${conv.contact_name} · ${formatPhone(conv.customer_phone)}` : formatPhone(conv.customer_phone)}
             >
               {opts.isHistorical
@@ -112,7 +112,7 @@ export function ConversationList({
             </span>
             {hasUnread && (
               <span
-                className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"
+                className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
                 role="status"
                 aria-label="Mensaje sin leer"
                 title="Mensaje sin leer"
@@ -196,7 +196,7 @@ export function ConversationList({
             placeholder="Buscar por nombre o teléfono..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-border bg-background placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
           />
           {search && (
             <button
