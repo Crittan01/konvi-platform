@@ -17,6 +17,18 @@ reason = "xlsx 0.18.5 prototype pollution — sin fix upstream. Follow-up T7-02 
 id = "GHSA-5pgg-2g8v-p4x9"
 reason = "xlsx 0.18.5 ReDoS — sin fix upstream. Follow-up T7-02 split read-path."
 
+# ── brace-expansion ReDoS — SIN versión fixed+compatible ──────────────────────
+# GHSA-mh99 afecta TODAS las versiones < 5.0.8. La única fixed (5.0.8) cambió el
+# export CJS (ESM-first: `{default: expand}`) y rompe minimatch@3.1.5 con
+# `TypeError: expand is not a function` (minimatch es transitivo de glob/eslint y
+# hace `require('brace-expansion')()` directo). Todas las versiones CALLABLE (1.x/2.x)
+# están afectadas. Build-time only: minimatch matchea paths/globs CONFIABLES, no input
+# de atacante en runtime → sin superficie explotable. Los consumidores 5.x-native SÍ
+# van a la 5.0.8 fixed (override @5). Re-evaluar si minimatch upstream adopta el nuevo export.
+[[IgnoredVulns]]
+id = "GHSA-mh99-v99m-4gvg"
+reason = "brace-expansion ReDoS: única fixed (5.0.8) rompe minimatch@3.1.5 (export CJS cambiado); todas las callable (1.x/2.x) afectadas. Build-time only (glob/eslint sobre paths confiables). 5.x-native ya en 5.0.8."
+
 # ── FIJABLES — rastreadas por dependabot (se quitan al mergear el bump) ────────
 [[IgnoredVulns]]
 id = "GHSA-mw96-cpmx-2vgc"
