@@ -58,8 +58,16 @@ filterwarnings = [
 # W4 T1 — el harness DB ejecutable (tests/dbharness/) requiere un Postgres local con
 # el esquema aplicado. Se EXCLUYE del run por defecto (`-m 'not dbharness'`) para no
 # romper la suite en máquinas sin DB; se corre explícito con `-m dbharness`.
+# --strict-markers: un marker sin registrar FALLA la colección (evita drift silencioso
+# del manifest CONNECTOR_OWNED). Solo se usan dbharness + connector (verificado).
+addopts = "--strict-markers"
 markers = [
     "dbharness: prueba que requiere un Postgres real con el esquema de prod (W4/T1)",
+    # Split de venv por dominio de pins: el connector pinnea fastapi 0.128.8 / supabase
+    # 2.28.3 (diverge de api+orch en 0.139/2.31). El leg `connector` del CI corre estos
+    # tests bajo el venv del connector (su versión real de prod); el leg `core` corre el
+    # resto bajo api+orch. El marker lo aplica tests/conftest.py desde CONNECTOR_OWNED.
+    "connector: prueba propiedad del connector-whatsapp (leg CI aislado, fastapi 0.128.8)",
 ]
 
 [tool.coverage.run]

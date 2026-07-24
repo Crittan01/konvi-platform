@@ -79,21 +79,29 @@ Del workflow de análisis (8 agentes). **No son 3 servicios, son 2 DOMINIOS DE P
 > introspección MFA pasan hoy *por accidente* (bajo 0.128.8); un bump del connector a
 > 0.139 (#134) los desenmascara.
 
-### Plan (DIFERIDO a bloque dedicado — decisión founder)
+### Solución ENTREGADA (aditiva, no la matriz restructurada)
 
-**Split de 2 legs** (no 3 venvs — caro: marcar ~263 tests + residuo cross-service):
-- leg `core` (api+orch, resolución coherente por pins idénticos) + leg `connector`
-  (aislado).
-- `ci.yml` → job matriz 2 legs (borrar el loop `for svc … pip install` compartido);
-  `validate.sh` → flag `--service core|connector` + `--py-tests-only` (default sin flag
-  = pase único actual, no rompe local); `conftest` root → manifest `CONNECTOR_OWNED`
-  (~7-9 archivos) + guard AST anti-drift OBLIGATORIO; marker `connector` en pyproject +
-  `--strict-markers`.
-- **Fase 0 (prerrequisito, YA ENTREGADA):** el test ASGI de disparo MFA (#146) — porque
-  el leg `core`, al correr bajo 0.139 real, desenmascara los 2 tests de introspección
-  MFA + 1 de contrato postgrest. Adaptar/de-brittle esos 3 va en el mismo PR del split.
+Tras la Fase 0 (#148, tests fieles a prod), el hueco restante era estrecho: **el CI corría
+los tests CORE bajo 0.128.8** (el connector gana el venv compartido), no bajo su 0.139 de
+prod. El **connector ya se testea bajo su 0.128.8 real** en el job `validate` (donde gana
+el venv). Entonces, en vez de restructurar el pipeline a una matriz de 2 legs (alto
+blast-radius, requería `validate.sh --service` y cambiar el flujo local), se resolvió
+**aditivo, blast-radius mínimo**:
+- **Job `py-core` nuevo en `ci.yml`**: venv con SOLO api+orch (fastapi 0.139, pins de prod)
+  → corre `pytest -m 'not dbharness and not connector'`. Cierra el defecto de fidelidad
+  (core bajo su versión de prod) como gate ONGOING, sin tocar el job `validate` existente
+  (que conserva la suite completa + coverage bajo 0.128.8).
+- **Marker `connector`** (`pyproject` + `--strict-markers`) aplicado por
+  `tests/conftest.py` desde `tests/connector_manifest.CONNECTOR_OWNED` (6 archivos) — fuente
+  única. **Guard anti-drift** (`tests/test_connector_split_guard.py`): un connector-test
+  nuevo sin registrar FALLA el CI (dientes verificados).
+- **Verificado en venvs aislados:** core 3313 verdes bajo 0.139 + connector 65 verdes bajo
+  0.128.8 + suite completa 3378 bajo 0.128.8 (job existente, sin regresión).
 
-Plan de 8 fases completo en memoria (`reference_ci_shared_venv_dep_coupling`).
+Lo que NO se hizo (y por qué no hace falta ahora): la matriz de 2 legs con
+`validate.sh --service` y el leg connector aislado — el connector ya está cubierto por el
+job `validate`, y el flujo local queda intacto. Si algún día api/orch DIVERGEN en un
+paquete, se escala a la matriz completa (marker + guard ya listos).
 
 ---
 
