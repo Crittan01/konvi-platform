@@ -73,6 +73,9 @@ def persist_inbox(body_sha: str, tenant_id: str, payload: dict) -> None:
 def mark_processed(body_sha: str) -> None:
     """Marca la fila como procesada para que el re-drive no la repita."""
     try:
+        # body_sha256 es PK (sha256 del body, globalmente único): el filtro por tenant no
+        # agregaría aislamiento porque identifica UNA sola fila.
+        # tenant_filter:exempt:update_by_pk
         _client().table("whatsapp_webhook_inbox").update({
             "processed_at": datetime.now(timezone.utc).isoformat(),
             "last_error": None,
@@ -87,6 +90,7 @@ def mark_processed(body_sha: str) -> None:
 def mark_failed(body_sha: str, error: str) -> None:
     """Deja la fila pendiente con el error, para que el re-drive la reintente."""
     try:
+        # tenant_filter:exempt:update_by_pk — ídem: se marca la fila por su PK.
         _client().table("whatsapp_webhook_inbox").update({
             "last_error": error,
         }).eq("body_sha256", body_sha).execute()
@@ -107,6 +111,11 @@ def redrive_once() -> int:
 
     try:
         pend = (
+            # El re-drive barre pendientes de TODOS los tenants a propósito (infra de webhook
+            # con service_role, igual que wompi_webhook_inbox). El aislamiento se preserva donde
+            # importa: cada fila se reprocesa con SU tenant_id guardado (el HMAC-verificado del
+            # request original), nunca con uno inferido del body.
+            # tenant_filter:exempt:backend_sweeper
             sb.table("whatsapp_webhook_inbox")
             .select("body_sha256, tenant_id, raw_payload, attempts, claimed_at")
             .is_("processed_at", "null")
@@ -132,6 +141,7 @@ def redrive_once() -> int:
         sha = row["body_sha256"]
         attempts = int(row.get("attempts") or 0) + 1
         try:
+            # tenant_filter:exempt:update_by_pk — reclama la fila por su PK.
             sb.table("whatsapp_webhook_inbox").update({
                 "claimed_at": now.isoformat(), "attempts": attempts,
             }).eq("body_sha256", sha).execute()
@@ -168,6 +178,9 @@ def cleanup_processed() -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
     try:
         res = (
+            # Purga por retención de filas YA procesadas, de todos los tenants (infra de
+            # webhook, service_role).
+            # tenant_filter:exempt:backend_sweeper
             _client().table("whatsapp_webhook_inbox")
             .delete()
             .lt("processed_at", cutoff)
