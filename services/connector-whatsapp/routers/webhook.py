@@ -7,6 +7,7 @@ Endpoints:
   POST /api/v1/whatsapp/webhook/{tenant_id}  — Recibe payloads, HMAC validado con app_secret per-tenant
   GET  /api/v1/whatsapp/health/metrics       — Snapshot in-memory metrics (público read-only, sin PII)
 """
+import hashlib
 import json
 import logging
 
@@ -18,6 +19,12 @@ from dependencies.meta import (
     _resolve_tenant_verify_token,
     get_metrics_snapshot,
 )
+from services.inbox import (
+    persist_inbox,
+    mark_processed,
+    mark_failed,
+    get_inbox_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +34,12 @@ router = APIRouter()
 @router.get("/health/metrics")
 async def health_metrics():
     """Snapshot in-memory de métricas Model B (HMAC ok/fail, Vault hits, cache hits,
-    unique tenants seen). Sin PII, agregado, lectura pública per Q10 ADR-0023."""
-    return get_metrics_snapshot()
+    unique tenants seen) + inbox durable. Sin PII, agregado, lectura pública per Q10 ADR-0023.
+
+    `inbox_depth` y `inbox_dead_lettered` son los alertables: profundidad creciente significa que
+    el re-drive no da abasto o falla; dead-lettered significa mensajes de clientes que NO entraron
+    y necesitan revisión manual."""
+    return {**get_metrics_snapshot(), **get_inbox_metrics()}
 
 
 @router.get("/webhook/{tenant_id}")
@@ -67,7 +78,7 @@ async def verify_webhook_for_tenant(
     raise HTTPException(status_code=400, detail="Bad Request")
 
 
-def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
+def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str, body_sha: str | None = None):
     # F53: SIN async — no contiene ningún await y hace I/O síncrona pesada (persist_whatsapp_message:
     # varios .execute() de Supabase). Como background task sync, Starlette la corre en el threadpool
     # → no bloquea el event loop del webhook (que debe ACKear 200 a Meta de inmediato).
@@ -125,11 +136,18 @@ def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
                 "[WH_EVENT] tenant=%s dispatcher fallo (no crítico, inbound OK): %s",
                 tenant_id_from_path, e_disp,
             )
+        # Procesado OK → se marca en el inbox para que el re-drive no lo repita.
+        if body_sha:
+            mark_processed(body_sha)
     except Exception as e:
         logger.error(
             "[WH_POST] tenant=%s falla silenciosa en background task: %s",
             tenant_id_from_path, e,
         )
+        # NO se marca processed_at: la fila queda pendiente y el re-drive la reintenta.
+        # Antes, este except era el final del camino y el mensaje se perdía acá.
+        if body_sha:
+            mark_failed(body_sha, str(e)[:500])
 
 
 @router.post("/webhook/{tenant_id}")
@@ -146,7 +164,29 @@ async def receive_message(
     """
     try:
         body_dict = json.loads(raw_body)
-        background_tasks.add_task(decouple_and_enqueue, body_dict, tenant_id)
+
+        # ── DURABILIDAD: persistir el payload CRUDO en el inbox ANTES del 200 ─────
+        # Meta NO reintenta ante un 200 y no ofrece pull. Si el proceso muere entre
+        # este ACK y el fin de `decouple_and_enqueue` (deploy, OOM, crash), el mensaje
+        # del cliente se perdía PARA SIEMPRE, sin más rastro que un logger.error.
+        # El inbox lo captura durable; el re-drive procesa lo que quedó pendiente.
+        #
+        # A diferencia del inbox de Wompi, acá el payload YA está HMAC-verificado
+        # (`verify_meta_signature_for_tenant` corre como dependencia, antes del cuerpo
+        # del handler) → no hay superficie de filas forjadas.
+        #
+        # Best-effort: si el insert falla NO se bloquea el ACK — se degrada al flujo
+        # previo para ESTE mensaje (peor caso: el comportamiento de antes).
+        body_sha = hashlib.sha256(raw_body).hexdigest()
+        try:
+            persist_inbox(body_sha, tenant_id, body_dict)
+        except Exception as inbox_exc:  # noqa: BLE001
+            logger.warning(
+                "[WH_INBOX] tenant=%s persist falló (best-effort, se sigue): %s",
+                tenant_id, inbox_exc,
+            )
+
+        background_tasks.add_task(decouple_and_enqueue, body_dict, tenant_id, body_sha)
     except Exception as e:
         logger.error(
             "[WH_POST] tenant=%s fallo grave parseando/encolando post-firma: %s",
