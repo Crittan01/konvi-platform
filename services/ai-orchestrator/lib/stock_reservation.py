@@ -214,6 +214,19 @@ def consume_by_cart(
                 "[STOCK_RES] consume falló res=%s order=%s: %s",
                 row["id"], order_id, exc,
             )
+
+    # CONSUMO PARCIAL = SOBREVENTA. Si alguna reserva no se consumió, el cliente pagó por
+    # unidades que NO se descontaron del inventario. Antes esto quedaba en un warning por
+    # reserva y nadie comparaba el total: el pedido se confirmaba igual y la deriva era
+    # invisible hasta que faltaba mercadería.
+    # Se eleva a ERROR (visible en Sentry/logs) con los números concretos para poder cuadrar.
+    if consumed < len(rows):
+        logger.error(
+            "[STOCK_RES] SOBREVENTA order=%s tenant=%s: %s de %s reservas consumidas — "
+            "el inventario NO refleja lo vendido, requiere ajuste manual",
+            order_id, tenant_id, consumed, len(rows),
+        )
+
     return consumed
 
 
