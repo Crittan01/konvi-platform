@@ -1723,9 +1723,13 @@ DECLARE
     v_secret  TEXT;
     v_pass_id UUID;
 BEGIN
-    -- Verificación tenant_users (defensa: solo authenticated del tenant
-    -- pueden ejecutar esto via API). El service_role bypasa porque
-    -- maneja todos los tenants.
+    -- Fail-closed: `anon` NUNCA lee credenciales, aunque alguien re-otorgue el EXECUTE.
+    IF auth.role() = 'anon' THEN
+        RETURN NULL;
+    END IF;
+
+    -- Verificación tenant_users (solo authenticated del tenant vía API).
+    -- service_role bypasa porque maneja todos los tenants.
     IF auth.uid() IS NOT NULL THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.tenant_users
@@ -1750,15 +1754,12 @@ BEGIN
     v_pass_id := NULLIF(v_creds->>'password_secret_id', '')::uuid;
     IF v_pass_id IS NOT NULL THEN
         SELECT decrypted_secret INTO v_secret
-        FROM vault.decrypted_secrets
-        WHERE id = v_pass_id;
-        v_creds := v_creds || jsonb_build_object('password', v_secret);
+        FROM vault.decrypted_secrets WHERE id = v_pass_id;
+        IF v_secret IS NOT NULL THEN
+            v_creds := v_creds || jsonb_build_object('password', v_secret);
+        END IF;
     END IF;
 
-    -- Retornar credentials con password resuelto.
-    -- Campos esperados: usuario, password (resuelto), empresa_id,
-    -- asesorlogistico, nombreasesor, jwt_token, jwt_expires_at,
-    -- tiempoToken, auth_version.
     RETURN v_creds;
 END;
 $$;
@@ -1767,7 +1768,7 @@ $$;
 ALTER FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") IS 'Retorna credenciales Aveonline del tenant con password resuelto desde Vault. NULL si no hay integración connected. Usado por AveonlineClient al refresh JWT en runtime.';
+COMMENT ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") IS 'Devuelve credenciales Aveonline del tenant (password resuelto desde Vault). anon SIN acceso (revocado + fail-closed). authenticated: solo miembros del tenant. service_role: acceso backend.';
 
 
 
@@ -9156,7 +9157,7 @@ GRANT ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() TO "serv
 
 
 
-GRANT ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) TO "anon";
+REVOKE ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) TO "service_role";
 
@@ -9190,7 +9191,7 @@ GRANT ALL ON FUNCTION "public"."assign_purchase_order_number"() TO "service_role
 
 
 
-GRANT ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) TO "service_role";
 
@@ -9207,7 +9208,7 @@ GRANT ALL ON FUNCTION "public"."cleanup_expired_bot_source_log"("retention_days"
 
 
 
-GRANT ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) TO "service_role";
 
@@ -9218,7 +9219,7 @@ GRANT ALL ON FUNCTION "public"."cleanup_expired_meli_webhook_dedup"() TO "servic
 
 
 
-GRANT ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) TO "service_role";
 
@@ -9235,7 +9236,7 @@ GRANT ALL ON FUNCTION "public"."consent_audit_log_block_modify"() TO "service_ro
 
 
 
-GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") TO "anon";
+REVOKE ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") TO "service_role";
 
@@ -9252,12 +9253,13 @@ GRANT ALL ON FUNCTION "public"."coupon_increment_redemption"("p_coupon_id" "uuid
 
 
 
+REVOKE ALL ON FUNCTION "public"."custom_access_token_hook"("event" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."custom_access_token_hook"("event" "jsonb") TO "service_role";
 GRANT ALL ON FUNCTION "public"."custom_access_token_hook"("event" "jsonb") TO "supabase_auth_admin";
 
 
 
-GRANT ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) TO "service_role";
 
@@ -9268,7 +9270,7 @@ GRANT ALL ON FUNCTION "public"."dequeue_whatsapp_outbound_messages"("p_vt" integ
 
 
 
-GRANT ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() TO "service_role";
 
@@ -9279,7 +9281,7 @@ GRANT ALL ON FUNCTION "public"."enqueue_whatsapp_outbound_message"("p_message" "
 
 
 
-GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "anon";
+REVOKE ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "service_role";
 
@@ -9328,7 +9330,7 @@ GRANT ALL ON FUNCTION "public"."fn_document_last4"("p_doc" "text") TO "service_r
 
 
 
-GRANT ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() TO "service_role";
 
@@ -9356,7 +9358,6 @@ GRANT ALL ON FUNCTION "public"."fn_log_tenant_offboarding_event"("p_tenant_id" "
 
 
 REVOKE ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) TO "anon";
 GRANT ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) TO "service_role";
 
@@ -9367,7 +9368,7 @@ GRANT ALL ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "
 
 
 
-GRANT ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") TO "anon";
+REVOKE ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") TO "service_role";
 
@@ -9400,26 +9401,25 @@ GRANT ALL ON FUNCTION "public"."fn_variation_available_stock"("p_variation_id" "
 
 
 
-GRANT ALL ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."get_tenant_team"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") TO "service_role";
 
@@ -9436,31 +9436,31 @@ GRANT ALL ON FUNCTION "public"."meli_webhook_seen"("p_application_id" "text", "p
 
 
 
-GRANT ALL ON FUNCTION "public"."metrics_orders_summary"("p_from" timestamp with time zone, "p_to" timestamp with time zone) TO "anon";
+REVOKE ALL ON FUNCTION "public"."metrics_orders_summary"("p_from" timestamp with time zone, "p_to" timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."metrics_orders_summary"("p_from" timestamp with time zone, "p_to" timestamp with time zone) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."metrics_orders_summary"("p_from" timestamp with time zone, "p_to" timestamp with time zone) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_bucket" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_bucket" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_bucket" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_bucket" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) TO "service_role";
 
@@ -9517,7 +9517,7 @@ GRANT ALL ON FUNCTION "public"."rate_limit_hit"("p_key" "text", "p_limit" intege
 
 
 
-GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."reject_audit_log_mutation"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "service_role";
 
@@ -9530,85 +9530,85 @@ GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."seed_tenant_subscription_default"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."seed_tenant_subscription_default"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."seed_tenant_subscription_default"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."seed_tenant_subscription_default"() TO "service_role";
 
@@ -9632,7 +9632,7 @@ GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "servic
 
 
 
-GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "anon";
+REVOKE ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "service_role";
 
@@ -9734,7 +9734,7 @@ GRANT ALL ON FUNCTION "public"."update_order_tracking_updated_at"() TO "service_
 
 
 
-GRANT ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) TO "anon";
+REVOKE ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) TO "service_role";
 
@@ -10323,7 +10323,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQ
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
 
