@@ -542,6 +542,131 @@ class RateSelection(BaseModel):
 #   - Pickup / Cancel: agendado via API Aveonline si se necesita (no via Konvi hoy)
 
 
+def _sincronizar_envio_en_orden(
+    supabase: Client, *, tenant_id: str, order_id: str, nuevo_envio: float,
+) -> tuple[Optional[float], Optional[str]]:
+    """Baja la tarifa confirmada a la orden SIN dejar sus cifras contradiciéndose.
+
+    Antes esto era un UPDATE de una sola columna:
+
+        .update({"shipping_cost": rate.total_price})
+
+    `total_amount` quedaba con el envío ESTIMADO adentro, y es el que se cobra
+    de verdad: `orders.py` arma el link de pago con
+    `amount_in_cents = int(round(total_amount * 100))`. Nadie lo recalculaba
+    después. Resultado: al cliente se le cobraba un total que ya no correspondía
+    a las líneas de su propio pedido — de más o de menos según hacia dónde se
+    hubiera movido la tarifa. En contra entrega es peor todavía, porque el
+    transportador cobra el total viejo en la puerta.
+
+    Aparte del dinero, deja el pedido diciendo dos cosas a la vez: la suma de
+    ítems + envío − descuento no da el total impreso. Ley 1480 art. 26: si al
+    consumidor le aparecen dos precios distintos, solo está obligado al menor.
+
+    LA REGLA: nunca cambiar en silencio lo que un cliente ya pagó.
+      • Sin cobro todavía  → se baja la tarifa Y se recalcula el total desde la
+        fuente de verdad (suma de order_items + envío − descuento).
+      • Ya cobrado, o el pedido está cerrado → NO se toca el dinero. Se registra
+        ERROR y se devuelve el aviso para que un humano concilie la diferencia.
+        La tarifa del envío sí queda guardada en `shipments`: ese es un hecho
+        operativo real y no depende de esta decisión.
+
+    "Ya cobrado" se decide por un pago aprobado, no por la etiqueta de estado:
+    un pedido contra entrega nace 'confirmed' y todavía NO se cobró, así que
+    mirar el estado dejaría fuera justo el caso más frecuente.
+
+    Devuelve (total recalculado o None, aviso o None).
+    """
+    try:
+        orden = (
+            supabase.table("orders")
+            .select("id, status, total_amount, shipping_cost, discount_amount")
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        if not orden or not orden.data:
+            logger.warning("[ENVIO] orden %s no encontrada para el tenant", order_id[:8])
+            return None, None
+        o = orden.data
+
+        cobrado = (
+            supabase.table("payments")
+            .select("id")
+            .eq("order_id", order_id)
+            .eq("tenant_id", tenant_id)
+            .eq("status", "approved")
+            .limit(1)
+            .execute()
+        )
+        ya_cobrado = bool(cobrado.data)
+        cerrado = o.get("status") in ("cancelled", "delivered")
+
+        if ya_cobrado or cerrado:
+            envio_actual = float(o.get("shipping_cost") or 0)
+            if abs(envio_actual - nuevo_envio) < 0.01:
+                return None, None   # misma tarifa: nada que conciliar
+            motivo = "ya tiene un pago aprobado" if ya_cobrado else f"está en '{o.get('status')}'"
+            aviso = (
+                f"La tarifa confirmada (${nuevo_envio:,.0f}) no coincide con el envío "
+                f"cobrado (${envio_actual:,.0f}) y el pedido {motivo}. "
+                f"El total del pedido NO se modificó: la diferencia requiere revisión manual."
+            )
+            logger.error(
+                "[ENVIO] conciliación manual order=%s tenant=%s: envío cobrado=%.2f "
+                "tarifa confirmada=%.2f (%s) — total intacto",
+                order_id[:8], tenant_id[:8], envio_actual, nuevo_envio, motivo,
+            )
+            return None, aviso
+
+        items = (
+            supabase.table("order_items")
+            .select("unit_price, quantity")
+            .eq("order_id", order_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        subtotal = sum(
+            float(i.get("unit_price") or 0) * int(i.get("quantity") or 0)
+            for i in (items.data or [])
+        )
+        descuento = float(o.get("discount_amount") or 0)
+        # Mismo clamp que el cálculo original en orders.py: un total negativo
+        # sería peor que uno incoherente. Pero si dispara, las cifras impresas
+        # NO van a cuadrar, así que queda registrado en vez de pasar callado.
+        bruto = subtotal + nuevo_envio - descuento
+        total = round(max(0.0, bruto), 2)
+        if bruto < 0:
+            logger.warning(
+                "[ENVIO] order=%s: el descuento (%.2f) supera ítems+envío (%.2f) → total en 0. "
+                "Las cifras del pedido no van a cuadrar entre sí.",
+                order_id[:8], descuento, subtotal + nuevo_envio,
+            )
+
+        supabase.table("orders").update({
+            "shipping_cost": nuevo_envio,
+            "total_amount": total,
+        }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
+
+        logger.info(
+            "[ENVIO] order=%s envío %.2f→%.2f, total recalculado a %.2f "
+            "(ítems %.2f − descuento %.2f)",
+            order_id[:8], float(o.get("shipping_cost") or 0), nuevo_envio,
+            total, subtotal, descuento,
+        )
+        return total, None
+
+    except Exception as exc:
+        # No tumbar la confirmación de tarifa: el envío ya quedó registrado y es
+        # un hecho operativo. Pero que no pase inadvertido.
+        logger.error(
+            "[ENVIO] no pude sincronizar el total de order=%s: %s",
+            order_id[:8], exc, exc_info=True,
+        )
+        return None, None
+
+
 @router.patch("/{shipment_id}/rate", response_model=dict)
 def confirm_rate(
     shipment_id: str,
@@ -599,12 +724,24 @@ def confirm_rate(
         supabase.table("shipments").update(update).eq("id", shipment_id).eq("tenant_id", tenant_id).execute()
 
         order_id = result.data.get("order_id")
+        total_recalculado = None
+        incoherencia = None
         if order_id:
-            supabase.table("orders").update(
-                {"shipping_cost": rate.total_price}
-            ).eq("id", order_id).eq("tenant_id", tenant_id).execute()
+            total_recalculado, incoherencia = _sincronizar_envio_en_orden(
+                supabase,
+                tenant_id=tenant_id,
+                order_id=order_id,
+                nuevo_envio=float(rate.total_price or 0),
+            )
 
         response_body = {"ok": True}
+        if total_recalculado is not None:
+            response_body["total_amount"] = total_recalculado
+        if incoherencia:
+            # La consola necesita poder mostrarlo: un operador que confirma una
+            # tarifa distinta sobre un pedido ya cobrado tiene que enterarse en
+            # el momento, no descubrirlo al conciliar.
+            response_body["aviso"] = incoherencia
         finalize_idempotency(
             supabase=supabase,
             tenant_id=tenant_id,
