@@ -114,8 +114,34 @@ Ordenados por severidad. `[F]` = requiere acción del founder.
 11. **Aviso de privacidad no publicado** `[F]` — el archivo es un template con placeholders que
     **declara por escrito** que no se publica al titular. La autorización de Habeas Data no es
     "informada" (Decreto 1377). → Founder: redactar el aviso real. Código: 1-2 días.
-12. **Facturación DIAN / Ley 1480** `[F]` — el sistema no emite **ningún** documento de compra ni
-    tiene campo de impuestos. → Decisión legal/contable + proveedor (semanas de lead time).
+12. **El comprador no recibe NINGÚN documento de compra** — ni factura, ni recibo, ni comprobante.
+    → Un **comprobante de compra no fiscal** (número de pedido, ítems, totales, vendedor
+    identificable, fecha) es barato, no necesita proveedor de facturación y cubre la expectativa
+    razonable del comprador + la identificación del vendedor de Ley 1480. **Esto sí es de lanzamiento.**
+
+    > **CORRECCIÓN (2026-07-25)** — la versión previa listaba "facturación electrónica DIAN" como
+    > bloqueante duro. **Reclasificado a "verificar aplicabilidad con el contador"**, tras revisar
+    > fuente oficial y por observación del founder:
+    > - El umbral de **3.500 UVT** define ser **responsable de IVA** (Art. 437 ET) — **no** la
+    >   obligación de facturar, que según la DIAN es **independiente** de esa condición
+    >   ([Concepto 106 de 2022](https://normograma.dian.gov.co/dian/compilacion/docs/concepto_tributario_dian_0000106_2022.htm)).
+    > - Los **no obligados** están en el **Art. 616-2 ET** + Resolución DIAN 000042/2020.
+    > - **Persona jurídica → obligada sin importar ingresos.** Persona natural bajo 3.500 UVT →
+    >   puede igual estarlo si debe llevar contabilidad (patrimonio > 4.500 UVT o ingresos > 500 SMMLV)
+    >   o si la DIAN la incorporó por resolución. Existe la vía del **documento equivalente** (POS).
+    > - **Conclusión**: depende de la forma jurídica y los ingresos de cada tenant → **decisión del
+    >   contador, no de código**, y **no bloquea el día 1** si el tenant está bajo los supuestos de
+    >   exención. Lo que sí queda es el comprobante de compra de arriba.
+    > **VALIDAR EN FUENTE OFICIAL DIAN** antes de cualquier decisión definitiva.
+
+13. **El tenant no tiene modelo de identidad legal en la DB** — `public.tenants` solo tiene un `nit`
+    suelto (text, nullable, sin validación). **No existe**: razón social (el `name` es marca
+    comercial), tipo de persona (natural/jurídica), tipo y número de documento, dígito de
+    verificación, régimen de IVA, ni domicilio fiscal. Verificado sobre el esquema real de prod.
+    → Es la causa de que el aviso de privacidad sea un template con placeholders: **no hay datos que
+    poner**. Bloquea la identificación del **Responsable del Tratamiento** (Habeas Data) y del
+    vendedor (Ley 1480), y es el prerrequisito de cualquier facturación futura. → 1-2 días
+    (migración aditiva + sección "Datos legales" en la consola + consumo en el aviso).
 13. **Prerrequisitos Meta sin verificar** `[F]` — modo de la App (Development vs Live), Business
     Verification, Display Name aprobado, número registrado con PIN. Tier observado **TIER_250**
     (250 destinatarios únicos/24 h). → ~1 h de verificación; los trámites pendientes son días.
