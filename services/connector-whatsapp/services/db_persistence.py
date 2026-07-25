@@ -187,16 +187,49 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         # Nueva conv. Si contact ya está revocado (raro pero posible si
         # contact existió en otro canal antes), respeta opt-out.
         initial_status = "opted_out" if contact_revoked else "bot_active"
-        new_conv = supabase.table("conversations").insert({
-            "tenant_id": tenant_id,
-            "customer_phone": customer_phone,
-            "status": initial_status,
-        }).execute()
-        conversation_id = new_conv.data[0]["id"]
-        logger.info(
-            f"Nueva conversación creada: {conversation_id} para {customer_phone} "
-            f"status={initial_status}"
-        )
+        try:
+            new_conv = supabase.table("conversations").insert({
+                "tenant_id": tenant_id,
+                "customer_phone": customer_phone,
+                "status": initial_status,
+            }).execute()
+            conversation_id = new_conv.data[0]["id"]
+            logger.info(
+                f"Nueva conversación creada: {conversation_id} para {customer_phone} "
+                f"status={initial_status}"
+            )
+        except Exception as exc:
+            # CARRERA: en WhatsApp lo normal es que el cliente mande 2-3 mensajes seguidos.
+            # El connector los procesa en BackgroundTasks concurrentes: ambos hacen el SELECT
+            # de arriba (no encuentran nada) y ambos llegan acá. El índice único
+            # conversations_tenant_phone_channel_uniq deja pasar UNO y rechaza el otro con
+            # 23505 — que es exactamente lo que queremos, porque antes se creaban DOS
+            # conversaciones y el carrito, la FSM y la escalación quedaban partidos en silencio.
+            # El perdedor de la carrera reutiliza la conversación que ganó.
+            if "23505" not in str(exc) and "duplicate key" not in str(exc).lower():
+                raise
+            retry = (
+                supabase.table("conversations")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("customer_phone", customer_phone)
+                .order("last_interaction_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not retry.data:
+                # No debería ocurrir: el 23505 implica que la fila existe. Si pasa, es un
+                # problema real (¿otro constraint único?) y no debe enmascararse.
+                logger.error(
+                    f"Conflicto único al crear conv para {customer_phone} pero el re-SELECT "
+                    f"no encontró la fila ganadora; se propaga el error original"
+                )
+                raise
+            conversation_id = retry.data[0]["id"]
+            logger.info(
+                f"Carrera de conversación resuelta: se reutiliza {conversation_id} para "
+                f"{customer_phone} (otro mensaje concurrente la creó primero)"
+            )
 
     return conversation_id
 

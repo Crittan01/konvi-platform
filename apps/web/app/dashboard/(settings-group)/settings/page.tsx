@@ -1,7 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
+import { saveTenant, saveDatosLegales, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
 import ActionResultForm from './action-result-form'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
@@ -37,6 +37,16 @@ type Tenant = {
   id: string; name: string; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
   nit?: string | null
+  tipo_persona?: string | null
+  razon_social?: string | null
+  doc_tipo?: string | null
+  doc_numero?: string | null
+  doc_dv?: string | null
+  regimen_iva?: string | null
+  domicilio_direccion?: string | null
+  domicilio_ciudad?: string | null
+  domicilio_departamento?: string | null
+  email_habeas_data?: string | null
   email_contacto?: string | null
   telefono_contacto?: string | null
   store_type?: 'fisica' | 'virtual' | 'fisica_virtual' | null
@@ -96,7 +106,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, business_pitch, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
+      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, business_pitch, tono_comunicacion, support_schedule, after_hours_message, escalation_role, tipo_persona, razon_social, doc_tipo, doc_numero, doc_dv, regimen_iva, domicilio_direccion, domicilio_ciudad, domicilio_departamento, email_habeas_data')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -218,6 +228,122 @@ export default async function SettingsPage() {
               </div>
             )}
           </FormSection>
+
+          {/* Datos legales — identifican al Responsable (Ley 1581) y al vendedor (Ley 1480) */}
+          {isOwner && (
+            <FormSection id="section-datos-legales" icon={Scale} title="Datos legales"
+              description="Identifican legalmente a tu negocio ante tus clientes y ante la ley. Se usan en el aviso de privacidad (Habeas Data) y para identificarte como vendedor.">
+              <div className="flex items-start gap-1.5 mb-1 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
+                <Scale className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Son distintos del nombre comercial: aquí va tu <strong>nombre legal</strong> tal como
+                  figura en tu documento o certificado de existencia. Si tu negocio debe facturar
+                  electrónicamente, confirmalo con tu contador — la plataforma no lo determina.
+                </span>
+              </div>
+              <ActionResultForm action={saveDatosLegales} successMessage="Datos legales guardados" className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="tipo-persona">Tipo de persona</Label>
+                    <select id="tipo-persona" name="tipo_persona"
+                      defaultValue={tenant?.tipo_persona ?? ''}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm">
+                      <option value="">Sin definir</option>
+                      <option value="natural">Persona natural</option>
+                      <option value="juridica">Persona jurídica (empresa)</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Determina qué documento aplica.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="razon-social">Razón social / Nombre legal</Label>
+                    <Input id="razon-social" name="razon_social"
+                      defaultValue={tenant?.razon_social ?? ''}
+                      placeholder="Ej: Comercializadora Kaiu S.A.S."
+                      maxLength={200} className="h-9" />
+                    <p className="text-[10px] text-muted-foreground">Distinto de la marca comercial.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="doc-tipo">Documento</Label>
+                    <select id="doc-tipo" name="doc_tipo"
+                      defaultValue={tenant?.doc_tipo ?? ''}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm">
+                      <option value="">—</option>
+                      <option value="NIT">NIT</option>
+                      <option value="CC">Cédula</option>
+                      <option value="CE">C. extranjería</option>
+                      <option value="PAS">Pasaporte</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5 col-span-1 sm:col-span-2">
+                    <Label className="text-xs font-medium" htmlFor="doc-numero">Número</Label>
+                    <Input id="doc-numero" name="doc_numero"
+                      defaultValue={tenant?.doc_numero ?? ''}
+                      placeholder="900123456" inputMode="numeric" className="h-9" />
+                    <p className="text-[10px] text-muted-foreground">Solo dígitos (los puntos se quitan solos).</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="doc-dv">DV</Label>
+                    <Input id="doc-dv" name="doc_dv"
+                      defaultValue={tenant?.doc_dv ?? ''}
+                      placeholder="7" inputMode="numeric" maxLength={1} className="h-9" />
+                    <p className="text-[10px] text-muted-foreground">Solo NIT.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="regimen-iva">Régimen de IVA</Label>
+                    <select id="regimen-iva" name="regimen_iva"
+                      defaultValue={tenant?.regimen_iva ?? ''}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm">
+                      <option value="">Sin definir</option>
+                      <option value="no_responsable">No responsable de IVA</option>
+                      <option value="responsable">Responsable de IVA</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Dato informativo; lo confirma tu contador.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="email-hd">Email para Habeas Data</Label>
+                    <Input id="email-hd" name="email_habeas_data" type="email"
+                      defaultValue={tenant?.email_habeas_data ?? ''}
+                      placeholder="habeasdata@minegocio.com" className="h-9" />
+                    <p className="text-[10px] text-muted-foreground">
+                      Donde tus clientes ejercen sus derechos. Debe ser un buzón que alguien lea.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label className="text-xs font-medium" htmlFor="dom-dir">Dirección</Label>
+                    <Input id="dom-dir" name="domicilio_direccion"
+                      defaultValue={tenant?.domicilio_direccion ?? ''}
+                      placeholder="Calle 123 # 45-67" maxLength={200} className="h-9" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="dom-ciudad">Ciudad</Label>
+                    <Input id="dom-ciudad" name="domicilio_ciudad"
+                      defaultValue={tenant?.domicilio_ciudad ?? ''}
+                      placeholder="Medellín" maxLength={100} className="h-9" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="dom-depto">Departamento</Label>
+                    <Input id="dom-depto" name="domicilio_departamento"
+                      defaultValue={tenant?.domicilio_departamento ?? ''}
+                      placeholder="Antioquia" maxLength={100} className="h-9" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  La dirección aparece en el aviso de privacidad como domicilio del Responsable.
+                </p>
+
+                <SubmitButton size="sm">Guardar datos legales</SubmitButton>
+              </ActionResultForm>
+            </FormSection>
+          )}
 
           {/* Filosofía del negocio — alimenta automáticamente al bot */}
           {isOwner && (
