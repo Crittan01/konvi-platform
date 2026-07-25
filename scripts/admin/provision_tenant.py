@@ -277,6 +277,15 @@ def main() -> None:
     }).execute()
     tenant_id = res.data
 
+    # Stamp app_metadata.tenant_id + role en el registro auth del owner. El dashboard
+    # (apps/web utils/supabase/cached-user.ts) lee getUser().app_metadata — que devuelve
+    # raw_app_meta_data (registro DB), NO los claims que custom_access_token_hook inyecta
+    # al token. Sin este stamp el owner ve "no tienda asignada" pese a tener la membresía
+    # activa (el tenant se crea pero el owner no es usable en la consola). Los owners
+    # reales YA están estampados; esto lo hace parte del flujo canónico de provisioning.
+    sb.auth.admin.update_user_by_id(
+        owner_id, {"app_metadata": {"tenant_id": tenant_id, "role": "owner"}})
+
     _write_audit(sb, tenant_id=tenant_id, owner_id=owner_id, actor_email=args.actor_email,
                  plan=args.plan, name=name)
 
