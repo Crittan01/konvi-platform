@@ -5848,6 +5848,29 @@ COMMENT ON CONSTRAINT "chk_whatsapp_templates_name_format" ON "public"."whatsapp
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."whatsapp_webhook_inbox" (
+    "body_sha256" "text" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "raw_payload" "jsonb" NOT NULL,
+    "received_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "processed_at" timestamp with time zone,
+    "attempts" integer DEFAULT 0 NOT NULL,
+    "claimed_at" timestamp with time zone,
+    "last_error" "text"
+);
+
+
+ALTER TABLE "public"."whatsapp_webhook_inbox" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."whatsapp_webhook_inbox" IS 'Inbox durable del webhook de WhatsApp: el payload (ya HMAC-verificado) se persiste ANTES del 200 a Meta. Como Meta no reintenta un 200, sin esto un crash entre el ACK y el procesamiento perdía el mensaje del cliente para siempre.';
+
+
+
+COMMENT ON COLUMN "public"."whatsapp_webhook_inbox"."tenant_id" IS 'Tenant HMAC-verificado del path. El re-drive lo usa como autoridad en vez de re-resolver por el body (cierra cross-talk, A11/WH-01).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."wompi_events_seen" (
     "event_id" "text" NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -6453,6 +6476,11 @@ ALTER TABLE ONLY "public"."whatsapp_templates"
 
 
 
+ALTER TABLE ONLY "public"."whatsapp_webhook_inbox"
+    ADD CONSTRAINT "whatsapp_webhook_inbox_pkey" PRIMARY KEY ("body_sha256");
+
+
+
 ALTER TABLE ONLY "public"."wompi_events_seen"
     ADD CONSTRAINT "wompi_events_seen_pkey" PRIMARY KEY ("event_id");
 
@@ -6976,6 +7004,14 @@ CREATE INDEX "idx_tenant_usage_events_lookup" ON "public"."tenant_usage_events" 
 
 
 CREATE INDEX "idx_tenant_users_tenant_id" ON "public"."tenant_users" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "idx_wa_inbox_processed" ON "public"."whatsapp_webhook_inbox" USING "btree" ("processed_at") WHERE ("processed_at" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_wa_inbox_unprocessed" ON "public"."whatsapp_webhook_inbox" USING "btree" ("received_at") WHERE ("processed_at" IS NULL);
 
 
 
@@ -8797,6 +8833,9 @@ CREATE POLICY "whatsapp_templates_tenant_iud" ON "public"."whatsapp_templates" U
 
 
 
+ALTER TABLE "public"."whatsapp_webhook_inbox" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."wompi_events_seen" ENABLE ROW LEVEL SECURITY;
 
 
@@ -10500,6 +10539,11 @@ GRANT ALL ON SEQUENCE "public"."webhook_events_seen_id_seq" TO "service_role";
 GRANT ALL ON TABLE "public"."whatsapp_templates" TO "anon";
 GRANT ALL ON TABLE "public"."whatsapp_templates" TO "authenticated";
 GRANT ALL ON TABLE "public"."whatsapp_templates" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."whatsapp_webhook_inbox" TO "authenticated";
+GRANT ALL ON TABLE "public"."whatsapp_webhook_inbox" TO "service_role";
 
 
 
