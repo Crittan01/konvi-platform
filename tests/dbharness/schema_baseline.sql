@@ -9514,7 +9514,6 @@ GRANT ALL ON FUNCTION "public"."assign_purchase_order_number"() TO "service_role
 
 
 REVOKE ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cart_add_item"("p_tenant_id" "uuid", "p_cart_id" "uuid", "p_product_id" "uuid", "p_variation_id" "uuid", "p_quantity" integer, "p_unit_price_cents" bigint, "p_expected_version" integer) TO "service_role";
 
 
@@ -9653,7 +9652,6 @@ GRANT ALL ON FUNCTION "public"."fn_document_last4"("p_doc" "text") TO "service_r
 
 
 REVOKE ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_expire_abandoned_carts"() TO "service_role";
 
 
@@ -9876,61 +9874,51 @@ GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid"
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release_by_conversation"("p_conversation_id" "uuid") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_reserve"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_cart_id" "uuid", "p_conversation_id" "uuid", "p_ttl_minutes" integer) TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_stock_restore"("p_tenant_id" "uuid", "p_variation_id" "uuid", "p_qty" integer, "p_order_id" "uuid", "p_reason" "text") TO "service_role";
 
 
