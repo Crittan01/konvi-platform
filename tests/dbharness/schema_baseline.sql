@@ -247,6 +247,31 @@ $$;
 ALTER FUNCTION "public"."ai_insights_set_updated_at"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."app_current_role"() RETURNS "text"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
+    AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_role', true), ''),
+    (
+      SELECT tu.role
+      FROM public.tenant_users tu
+      WHERE tu.user_id  = auth.uid()
+        AND tu.tenant_id = public.app_current_tenant()
+        AND tu.status    = 'active'
+      LIMIT 1
+    )
+  );
+$$;
+
+
+ALTER FUNCTION "public"."app_current_role"() OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."app_current_role"() IS 'Rol del usuario actual (owner|manager|operator) leído FRESCO de tenant_users para el tenant activo. SECURITY DEFINER para evitar recursión de RLS; solo devuelve el rol del propio auth.uid(). Devuelve NULL para service_role (que además bypassea RLS) y para sesiones sin membresía activa.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."app_current_tenant"() RETURNS "uuid"
     LANGUAGE "sql" STABLE
     AS $$
@@ -8614,6 +8639,142 @@ CREATE POLICY "user upserts own dismissed alerts" ON "public"."user_dismissed_al
 ALTER TABLE "public"."user_dismissed_alerts" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "w2_money_no_delete" ON "public"."conversation_cart_items" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."conversation_carts" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."coupon_redemptions" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."coupons" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."order_items" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."orders" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."product_variations" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."products" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."stock_movements" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."stock_reservations" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_delete" ON "public"."tenant_subscriptions" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."conversation_cart_items" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."conversation_carts" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."coupon_redemptions" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."coupons" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."order_items" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."orders" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."product_variations" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."products" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."stock_movements" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."stock_reservations" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_insert" ON "public"."tenant_subscriptions" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."conversation_cart_items" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."conversation_carts" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."coupon_redemptions" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."coupons" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."order_items" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."orders" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+COMMENT ON POLICY "w2_money_no_update" ON "public"."orders" IS 'W2b: cierra la escritura directa por PostgREST a usuarios con sesión. Toda mutación de pedidos debe ir por services/api (service_role, que bypassea RLS) donde viven la FSM, el gate de rol, @audit_log y el step-up MFA.';
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."product_variations" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."products" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."stock_movements" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."stock_reservations" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "w2_money_no_update" ON "public"."tenant_subscriptions" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
 ALTER TABLE "public"."webhook_events_seen" ENABLE ROW LEVEL SECURITY;
 
 
@@ -9210,6 +9371,12 @@ GRANT ALL ON FUNCTION "public"."add_member_to_tenant"("p_user_id" "uuid", "p_ten
 GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."app_current_role"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."app_current_role"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."app_current_role"() TO "service_role";
 
 
 
