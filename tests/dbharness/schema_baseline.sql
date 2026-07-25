@@ -5545,8 +5545,22 @@ CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "deletion_requested_by" "uuid",
     "deletion_reason" "text",
     "deleted_at" timestamp with time zone,
+    "tipo_persona" "text",
+    "razon_social" "text",
+    "doc_tipo" "text",
+    "doc_numero" "text",
+    "doc_dv" "text",
+    "regimen_iva" "text",
+    "domicilio_direccion" "text",
+    "domicilio_ciudad" "text",
+    "domicilio_departamento" "text",
+    "domicilio_pais" "text" DEFAULT 'CO'::"text" NOT NULL,
+    "email_habeas_data" "text",
+    CONSTRAINT "tenants_doc_tipo_check" CHECK ((("doc_tipo" IS NULL) OR ("doc_tipo" = ANY (ARRAY['NIT'::"text", 'CC'::"text", 'CE'::"text", 'PAS'::"text"])))),
     CONSTRAINT "tenants_escalation_role_check" CHECK (("escalation_role" = ANY (ARRAY['asesor'::"text", 'especialista'::"text", 'consultor'::"text", 'agente'::"text"]))),
+    CONSTRAINT "tenants_regimen_iva_check" CHECK ((("regimen_iva" IS NULL) OR ("regimen_iva" = ANY (ARRAY['responsable'::"text", 'no_responsable'::"text"])))),
     CONSTRAINT "tenants_store_type_check" CHECK (("store_type" = ANY (ARRAY['fisica'::"text", 'virtual'::"text", 'fisica_virtual'::"text"]))),
+    CONSTRAINT "tenants_tipo_persona_check" CHECK ((("tipo_persona" IS NULL) OR ("tipo_persona" = ANY (ARRAY['natural'::"text", 'juridica'::"text"])))),
     CONSTRAINT "tenants_tono_comunicacion_check" CHECK (("tono_comunicacion" = ANY (ARRAY['formal'::"text", 'amigable'::"text", 'cercano'::"text", 'profesional'::"text", 'juvenil'::"text"])))
 );
 
@@ -5562,7 +5576,7 @@ COMMENT ON COLUMN "public"."tenants"."logo_url" IS 'URL del logo del tenant en S
 
 
 
-COMMENT ON COLUMN "public"."tenants"."nit" IS 'NIT o razón social del tenant';
+COMMENT ON COLUMN "public"."tenants"."nit" IS 'LEGADO: identificador mezclado (NIT o CC). Reemplazado por doc_tipo + doc_numero + doc_dv. Se conserva porque lo consume el system prompt del bot; migrar consumidores y retirar.';
 
 
 
@@ -5643,6 +5657,26 @@ COMMENT ON COLUMN "public"."tenants"."deletion_reason" IS 'Razón textual del ow
 
 
 COMMENT ON COLUMN "public"."tenants"."deleted_at" IS 'Cuando el cron ejecutó hard-delete. NULL = aún recoverable.';
+
+
+
+COMMENT ON COLUMN "public"."tenants"."tipo_persona" IS 'natural | juridica. Determina el documento aplicable y las obligaciones fiscales (la aplicabilidad la confirma el contador del tenant).';
+
+
+
+COMMENT ON COLUMN "public"."tenants"."razon_social" IS 'Nombre LEGAL (razón social o nombres y apellidos). Distinto de `name`, que es la marca comercial.';
+
+
+
+COMMENT ON COLUMN "public"."tenants"."doc_dv" IS 'Dígito de verificación del NIT. Solo aplica a doc_tipo = NIT.';
+
+
+
+COMMENT ON COLUMN "public"."tenants"."regimen_iva" IS 'responsable | no_responsable (Art. 437 ET, umbral 3.500 UVT). Dato informativo: NO determina por sí solo la obligación de facturar.';
+
+
+
+COMMENT ON COLUMN "public"."tenants"."email_habeas_data" IS 'Canal para que el titular ejerza derechos (Ley 1581). Puede diferir del email comercial.';
 
 
 
