@@ -2248,6 +2248,13 @@ DECLARE
     v_name  text;
     v_owner uuid;
 BEGIN
+    -- Fail-closed: `anon` NUNCA puede leer secretos, aunque alguien re-otorgue el EXECUTE.
+    -- (auth.role() lee el claim `role` del JWT de PostgREST: 'anon' | 'authenticated' | 'service_role'.
+    --  Si es NULL — p. ej. llamada por SQL directo del admin — el comportamiento no cambia.)
+    IF auth.role() = 'anon' THEN
+        RETURN NULL;
+    END IF;
+
     SELECT name INTO v_name FROM vault.secrets WHERE id = p_id;
     IF v_name IS NULL THEN
         RETURN NULL;
@@ -2272,6 +2279,10 @@ $$;
 
 
 ALTER FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") IS 'Lee un secreto de Vault. anon SIN acceso (revocado + fail-closed). authenticated: solo owner/manager del tenant dueño del secreto. service_role: acceso backend.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."pgsec_update_secret"("p_id" "uuid", "p_secret" "text") RETURNS "void"
@@ -2378,8 +2389,13 @@ BEGIN
   INSERT INTO public.tenant_users (user_id, tenant_id, role, status)
   VALUES (p_owner_user_id, v_tenant_id, 'owner', 'active');
 
+  -- FIX: el trigger trg_seed_tenant_subscription_default ya insertó una fila 'basic' al crear el
+  -- tenant. ON CONFLICT DO UPDATE hace que el plan elegido por el RPC prevalezca (antes: duplicate).
   INSERT INTO public.tenant_subscriptions (tenant_id, plan_code, status)
-  VALUES (v_tenant_id, COALESCE(NULLIF(btrim(p_plan_code), ''), 'basic'), 'active');
+  VALUES (v_tenant_id, COALESCE(NULLIF(btrim(p_plan_code), ''), 'basic'), 'active')
+  ON CONFLICT (tenant_id) DO UPDATE
+    SET plan_code = EXCLUDED.plan_code,
+        status = EXCLUDED.status;
 
   -- F5 decisión #1: nacer agentic. Row dedicado provider='agentic' (mismo patrón
   -- whatsapp/wompi/aveonline) leído por dispatcher.is_tenant_agentic_enabled.
@@ -3047,6 +3063,61 @@ ALTER FUNCTION "public"."sync_conversation_last_interaction"() OWNER TO "postgre
 
 
 COMMENT ON FUNCTION "public"."sync_conversation_last_interaction"() IS 'Updates conversations.last_interaction_at when a new message is inserted.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."sync_tenant_stamp_to_auth"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
+    AS $$
+DECLARE
+  v_user_id   uuid;
+  v_tenant_id text;
+  v_role      text;
+BEGIN
+  -- Usuario afectado: NEW en insert/update, OLD en delete.
+  v_user_id := COALESCE(NEW.user_id, OLD.user_id);
+  IF v_user_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  -- Membresía ACTIVA actual — determinística (prioriza owner, luego la más antigua),
+  -- idéntica a custom_access_token_hook para que stamp y token coincidan.
+  SELECT tu.tenant_id::text, tu.role
+  INTO v_tenant_id, v_role
+  FROM public.tenant_users tu
+  WHERE tu.user_id = v_user_id
+    AND tu.status  = 'active'
+  ORDER BY
+    CASE tu.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 WHEN 'operator' THEN 2 ELSE 3 END,
+    tu.created_at ASC,
+    tu.tenant_id ASC
+  LIMIT 1;
+
+  IF v_tenant_id IS NOT NULL THEN
+    UPDATE auth.users
+    SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
+      || jsonb_build_object('tenant_id', v_tenant_id, 'role', v_role)
+    WHERE id = v_user_id;
+  ELSE
+    -- Sin membresía activa (removido/inactivado): limpia el stamp → el dashboard deja de
+    -- resolver el tenant viejo (cierra el hueco de acceso residual).
+    UPDATE auth.users
+    SET raw_app_meta_data = (COALESCE(raw_app_meta_data, '{}'::jsonb) - 'tenant_id' - 'role')
+    WHERE id = v_user_id;
+  END IF;
+
+  -- Reasignación de membresía a otro usuario (OLD.user_id != NEW.user_id) es un caso que
+  -- no ocurre en el flujo real; si algún día se hace, re-evaluar OLD.user_id aparte.
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."sync_tenant_stamp_to_auth"() OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."sync_tenant_stamp_to_auth"() IS 'Mantiene auth.users.raw_app_meta_data.tenant_id/role en sync con la membresía activa de tenant_users (fix drift del stamp que lee el dashboard). Espeja custom_access_token_hook.';
 
 
 
@@ -7196,6 +7267,10 @@ CREATE OR REPLACE TRIGGER "trg_sync_document_derived" BEFORE INSERT OR UPDATE OF
 
 
 
+CREATE OR REPLACE TRIGGER "trg_sync_tenant_stamp" AFTER INSERT OR DELETE OR UPDATE ON "public"."tenant_users" FOR EACH ROW EXECUTE FUNCTION "public"."sync_tenant_stamp_to_auth"();
+
+
+
 CREATE OR REPLACE TRIGGER "trg_tenant_cancellation_policy_updated_at" BEFORE UPDATE ON "public"."tenant_cancellation_policy" FOR EACH ROW EXECUTE FUNCTION "public"."touch_updated_at"();
 
 
@@ -9391,13 +9466,13 @@ GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "tex
 
 
 
-GRANT ALL ON FUNCTION "public"."pgsec_create_secret"("p_secret" "text", "p_name" "text", "p_description" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."pgsec_create_secret"("p_secret" "text", "p_name" "text", "p_description" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pgsec_create_secret"("p_secret" "text", "p_name" "text", "p_description" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."pgsec_create_secret"("p_secret" "text", "p_name" "text", "p_description" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."pgsec_delete_secret"("p_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."pgsec_delete_secret"("p_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pgsec_delete_secret"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."pgsec_delete_secret"("p_id" "uuid") TO "service_role";
 
@@ -9408,19 +9483,19 @@ GRANT ALL ON FUNCTION "public"."pgsec_list_secrets_by_name_pattern"("p_pattern" 
 
 
 
-GRANT ALL ON FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") TO "anon";
+REVOKE ALL ON FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."pgsec_read_secret"("p_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."pgsec_update_secret"("p_id" "uuid", "p_secret" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."pgsec_update_secret"("p_id" "uuid", "p_secret" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pgsec_update_secret"("p_id" "uuid", "p_secret" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."pgsec_update_secret"("p_id" "uuid", "p_secret" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."pgsec_upsert_secret"("p_name" "text", "p_secret" "text", "p_description" "text") TO "anon";
+REVOKE ALL ON FUNCTION "public"."pgsec_upsert_secret"("p_name" "text", "p_secret" "text", "p_description" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pgsec_upsert_secret"("p_name" "text", "p_secret" "text", "p_description" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."pgsec_upsert_secret"("p_name" "text", "p_secret" "text", "p_description" "text") TO "service_role";
 
@@ -9554,6 +9629,12 @@ GRANT ALL ON FUNCTION "public"."stamp_human_takeover_at"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "anon";
 GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "anon";
+GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "service_role";
 
 
 
