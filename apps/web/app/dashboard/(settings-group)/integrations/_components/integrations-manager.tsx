@@ -56,7 +56,7 @@ interface Props {
   saveTelegram: (fd: FormData) => Promise<void>
   disconnectTelegram: () => Promise<void>
   testTelegram: () => Promise<void>
-  testWhatsApp: () => Promise<void>
+  testWhatsApp: (formData: FormData) => Promise<void>
   // Fase 0 F6: saveWhatsApp (form 3 campos) retirado — onboarding WhatsApp
   // Model B se hace SOLO en /integrations/whatsapp (6 credenciales, ADR-0023).
   disconnectWhatsApp: () => Promise<void>
@@ -275,9 +275,12 @@ export function IntegrationsManager(props: Props) {
 
       {/* Banners WhatsApp test */}
       {waTest === 'success' && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-700/30 bg-emerald-500/10 text-sm text-emerald-700">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          WhatsApp verificado — el token es válido y el número está activo. El bot puede enviar mensajes a los clientes.
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-emerald-700/30 bg-emerald-500/10 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">WhatsApp verificado</p>
+            {waMsg && <p className="text-xs text-emerald-700/80 mt-0.5">{waMsg}</p>}
+          </div>
         </div>
       )}
       {waTest === 'error' && (
@@ -389,17 +392,24 @@ export function IntegrationsManager(props: Props) {
                     </span>
                   </a>
                   {isOwner && (
-                    <div className="flex gap-2">
-                      <form action={testWhatsApp} className="flex-1">
+                    <div className="space-y-2">
+                      <form action={testWhatsApp} className="flex gap-2">
+                        <input
+                          name="test_phone"
+                          type="tel"
+                          inputMode="tel"
+                          placeholder="Tu WhatsApp p/ prueba (ej. 573001234567)"
+                          className="flex-1 min-w-0 h-8 text-xs px-2.5 rounded-md border border-input bg-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                        />
                         <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
-                          className="w-full h-8 text-xs gap-1.5">
+                          className="h-8 text-xs gap-1.5 shrink-0 px-3">
                           <SendHorizonal className="h-3 w-3" /> Probar
                         </SubmitButton>
                       </form>
                       <DisconnectIntegrationButton
                         provider="whatsapp" providerLabel="WhatsApp"
                         action={disconnectWhatsApp}
-                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                        className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
                       />
                     </div>
                   )}

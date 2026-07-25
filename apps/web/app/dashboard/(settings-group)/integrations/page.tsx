@@ -260,7 +260,14 @@ export default async function IntegrationsPage(
     redirect('/dashboard/integrations?tg_test=success')
   }
 
-  async function testWhatsApp() {
+  // "Probar" WhatsApp — valida las 3 patas de una conexión Model B usable, no solo
+  // el token (que daba un falso verde cuando el app_secret estaba mal y el inbound roto):
+  //   1) token + número (envío / outbound, GET al phone_number)
+  //   2) app_secret (firma HMAC de los webhooks ENTRANTES — debug_token {app_id}|{app_secret});
+  //      si no coincide, Meta firma con otro secreto → el connector rechaza cada mensaje entrante.
+  //   3) opcional: si el owner ingresa su WhatsApp, ENVÍA un mensaje de prueba real → así el
+  //      éxito = "te llegó un WhatsApp", no un texto que promete sin ejecutar.
+  async function testWhatsApp(formData: FormData) {
     'use server'
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
@@ -270,44 +277,83 @@ export default async function IntegrationsPage(
     const { data: waRow } = await sb.from('tenant_integrations')
       .select('credentials').eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp').maybeSingle()
 
-    const creds    = (waRow?.credentials as Record<string, string>) ?? {}
-    const phoneId  = creds.phone_number_id
-    const secretId = creds.access_token_secret_id
-    const { data: token } = secretId
-      ? await sb.rpc('pgsec_read_secret', { p_id: secretId })
-      : { data: null }
+    const creds   = (waRow?.credentials as Record<string, string>) ?? {}
+    const phoneId = creds.phone_number_id
+    const appId   = creds.app_id
+    const { data: token }     = creds.access_token_secret_id
+      ? await sb.rpc('pgsec_read_secret', { p_id: creds.access_token_secret_id }) : { data: null }
+    const { data: appSecret } = creds.app_secret_secret_id
+      ? await sb.rpc('pgsec_read_secret', { p_id: creds.app_secret_secret_id }) : { data: null }
+
+    const testPhone = String(formData.get('test_phone') ?? '').replace(/\D/g, '')
 
     if (!phoneId || !token) {
-      redirect('/dashboard/integrations?wa_test=error&wa_msg=Credenciales+incompletas.+Reconecta+WhatsApp.')
+      redirect('/dashboard/integrations?wa_test=error&wa_msg=' +
+        encodeURIComponent('Credenciales incompletas. Reconecta WhatsApp.'))
     }
 
-    // Patrón correcto: redirect() NO puede ir dentro de try/catch
-    // — Next.js lo implementa como throw y el catch lo interceptaría
+    // redirect() NO puede ir dentro de try/catch — Next.js lo implementa como throw.
     let waError: string | null = null
+    let okMsg = ''
     try {
-      const controller = new AbortController()
-      const timeout    = setTimeout(() => controller.abort(), 10000)
-      try {
-        const res  = await fetch(`https://graph.facebook.com/v22.0/${phoneId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: controller.signal,
-        })
-        clearTimeout(timeout)
-        const json = await res.json() as { error?: { message?: string } }
-        if (!res.ok) {
-          waError = json.error?.message ?? `Error ${res.status}`
+      const graph = async (url: string, init?: RequestInit) => {
+        const ctl = new AbortController()
+        const t = setTimeout(() => ctl.abort(), 10000)
+        try { return await fetch(url, { ...init, signal: ctl.signal }) }
+        finally { clearTimeout(t) }
+      }
+
+      // 1) Token + número (outbound)
+      const infoRes = await graph(
+        `https://graph.facebook.com/v22.0/${phoneId}?fields=verified_name,quality_rating,display_phone_number`,
+        { headers: { Authorization: `Bearer ${token}` } })
+      const info = await infoRes.json() as {
+        error?: { message?: string }; display_phone_number?: string; quality_rating?: string }
+      if (!infoRes.ok) {
+        waError = `Token / número: ${info.error?.message ?? `Error ${infoRes.status}`}`
+      } else {
+        // 2) app_secret (firma HMAC de webhooks entrantes)
+        let inbound: 'OK' | 'INVÁLIDO' | 'no verificable' = 'no verificable'
+        if (appId && appSecret) {
+          const dbg = await graph(
+            `https://graph.facebook.com/debug_token?input_token=${token}&access_token=${appId}|${appSecret}`)
+          inbound = dbg.ok ? 'OK' : 'INVÁLIDO'
         }
-      } finally {
-        clearTimeout(timeout)
+        if (inbound === 'INVÁLIDO') {
+          waError = 'El App Secret no coincide con el App: los mensajes ENTRANTES serán rechazados por firma inválida (el bot no responderá). Reingresá el App Secret desde Meta → Configuración → Básica.'
+        } else if (testPhone) {
+          // 3) Envío de prueba REAL
+          const sendRes = await graph(
+            `https://graph.facebook.com/v22.0/${phoneId}/messages`,
+            { method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp', to: testPhone, type: 'text',
+                text: { body: '✅ Prueba de Konvi: tu WhatsApp Business está conectado y puede enviar mensajes.' },
+              }) })
+          const send = await sendRes.json() as { error?: { message?: string; code?: number } }
+          if (!sendRes.ok) {
+            const code = send.error?.code
+            const friendly =
+              code === 131030 ? 'El número no está en la lista de destinatarios de prueba (Test Number). Agregalo en Meta → WhatsApp → API Setup, o usá un número de negocio real.'
+              : code === 131047 ? 'El destinatario debe haberte escrito en las últimas 24h para recibir texto libre. Escribile al bot y reintentá.'
+              : (send.error?.message ?? `Error ${sendRes.status}`)
+            waError = `Envío de prueba: ${friendly}`
+          } else {
+            okMsg = `Mensaje de prueba enviado a +${testPhone} — revisá tu WhatsApp. Número ${info.display_phone_number} activo (calidad ${info.quality_rating}); webhooks entrantes OK.`
+          }
+        } else {
+          okMsg = `Token válido, número ${info.display_phone_number} activo (calidad ${info.quality_rating}), webhooks entrantes ${inbound}. Ingresá tu WhatsApp arriba y volvé a "Probar" para recibir un mensaje de prueba real.`
+        }
       }
     } catch (err) {
       waError = err instanceof Error ? err.message : 'No se pudo conectar con Meta API'
     }
 
     if (waError) {
-      redirect(`/dashboard/integrations?wa_test=error&wa_msg=${encodeURIComponent(waError)}`)
+      redirect('/dashboard/integrations?wa_test=error&wa_msg=' + encodeURIComponent(waError))
     }
-    redirect('/dashboard/integrations?wa_test=success')
+    redirect('/dashboard/integrations?wa_test=success&wa_msg=' + encodeURIComponent(okMsg))
   }
 
   // Nota rev. 109: testEnvia eliminado. Aveonline tiene test endpoint en
