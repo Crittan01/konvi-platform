@@ -1281,10 +1281,38 @@ class OrchestratorWorker:
                     .limit(1)
                     .execute()
                 )
-                if not escalation_audit.data:
-                    # Sin audit row, no podemos calcular SLA. Skip.
-                    continue
-                escalated_at_iso = escalation_audit.data[0]["created_at"]
+                if escalation_audit.data:
+                    escalated_at_iso = escalation_audit.data[0]["created_at"]
+                else:
+                    # Sin fila de auditoría, el ancla es `human_takeover_at`.
+                    #
+                    # Antes se hacía `continue` acá, y eso dejaba fuera del SLA a 7 de las
+                    # ~12 rutas que escalan: solo 5 escriben `escalation_audit`, y entre las
+                    # que NO están justo el retracto de la Ley 1480, las solicitudes de
+                    # Habeas Data y la detección de menor de edad. Es decir: las rutas
+                    # legales y de dinero, que son las que menos pueden quedar sin respuesta,
+                    # eran precisamente las invisibles. Un cliente escalado por esas vías
+                    # esperaba para siempre sin que el SLA disparara nunca.
+                    #
+                    # `human_takeover_at` lo estampa el trigger conversations_stamp_human_
+                    # takeover_at en la TRANSICIÓN de estado, así que existe para las ~12
+                    # rutas por igual — y para las que se agreguen después, que es lo que
+                    # evita que este agujero se vuelva a abrir. El audit row sigue siendo
+                    # preferido cuando está: es el instante real de la escalación y trae el
+                    # motivo para la traza.
+                    escalated_at_iso = conv.get("human_takeover_at")
+                    if not escalated_at_iso:
+                        # Ni ancla ni auditoría: el registro es anterior al trigger o se
+                        # insertó directo. Antes esto era invisible; ahora al menos se ve.
+                        logger.warning(
+                            "[SLA] conv=%s en takeover sin ancla temporal — no puedo medir "
+                            "el SLA, revisar a mano", str(conv_id)[:8],
+                        )
+                        continue
+                    logger.info(
+                        "[SLA] conv=%s sin escalation_audit — anclando en human_takeover_at",
+                        str(conv_id)[:8],
+                    )
 
                 # 2. ¿Ya alertamos previamente esta breach?
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
