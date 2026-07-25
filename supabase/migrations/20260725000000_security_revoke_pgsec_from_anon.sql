@@ -26,18 +26,19 @@
 --      auth.role() no es 'anon' el comportamiento queda idéntico al actual.
 
 -- ── A. Revocar el acceso de anon/PUBLIC ──────────────────────────────────────
-REVOKE ALL ON FUNCTION public.pgsec_read_secret(uuid)              FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.pgsec_create_secret(text, text)      FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.pgsec_update_secret(uuid, text)      FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.pgsec_delete_secret(uuid)            FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.pgsec_upsert_secret(text, text)      FROM PUBLIC, anon;
+-- Firmas verificadas contra prod (pg_proc.oid::regprocedure), no asumidas.
+REVOKE ALL ON FUNCTION public.pgsec_read_secret(uuid)                    FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.pgsec_create_secret(text, text, text)      FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.pgsec_update_secret(uuid, text)            FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.pgsec_delete_secret(uuid)                  FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.pgsec_upsert_secret(text, text, text)      FROM PUBLIC, anon;
 
 -- Re-afirmar explícitamente quién SÍ debe poder ejecutarlas (idempotente).
-GRANT EXECUTE ON FUNCTION public.pgsec_read_secret(uuid)           TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.pgsec_create_secret(text, text)   TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.pgsec_update_secret(uuid, text)   TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.pgsec_delete_secret(uuid)         TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.pgsec_upsert_secret(text, text)   TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.pgsec_read_secret(uuid)                 TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.pgsec_create_secret(text, text, text)   TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.pgsec_update_secret(uuid, text)         TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.pgsec_delete_secret(uuid)               TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.pgsec_upsert_secret(text, text, text)   TO authenticated, service_role;
 
 -- ── B. Fail-closed dentro de la función de LECTURA (defensa en profundidad) ──
 -- Cuerpo idéntico al de prod salvo el rechazo explícito de `anon` al inicio.
