@@ -106,7 +106,7 @@ export default async function MarketplacePage(props: {
             <p className="text-muted-foreground text-sm leading-relaxed">
               La integración parece conectada, pero falló la consulta de publicaciones.
             </p>
-            <p className="text-xs text-red-700 break-words">{marketplaceLoadError}</p>
+            <p className="text-xs text-red-700 wrap-break-word">{marketplaceLoadError}</p>
           </div>
           <div className="flex items-center gap-2">
             <a

@@ -373,7 +373,7 @@ export default function PromotionsManager({
                               type="button"
                               onClick={() => openRedemptions(c)}
                               aria-label={`Ver las ${c.total_historical_redemptions} redenciones del cupón ${c.code}`}
-                              className="-mx-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="-mx-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left hover:bg-muted/50 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               <span className="underline decoration-dotted underline-offset-2">{usageStr}</span>
                               {c.total_historical_redemptions > c.redemptions_count && (

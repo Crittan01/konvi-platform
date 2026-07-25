@@ -178,7 +178,7 @@ export function OrderMiniForm({
                 placeholder="Buscar producto..."
                 value={productSearch}
                 onChange={e => setProductSearch(e.target.value)}
-                className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
               />
             </div>
             <div className="max-h-40 overflow-y-auto space-y-1">
@@ -234,7 +234,7 @@ export function OrderMiniForm({
                       ...prev,
                       [v.variationId]: Math.max(1, parseInt(e.target.value) || 1),
                     }))}
-                    className="w-14 px-1 py-0.5 text-xs rounded border border-border bg-background text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-14 px-1 py-0.5 text-xs rounded border border-border bg-background text-center focus:outline-hidden focus:ring-1 focus:ring-primary"
                   />
                   <button onClick={() => handleToggleVariation(v)} className="text-muted-foreground hover:text-red-700">
                     <X className="h-3.5 w-3.5" />
@@ -258,7 +258,7 @@ export function OrderMiniForm({
               value={orderShipping}
               onChange={e => setOrderShipping(e.target.value)}
               placeholder="0"
-              className="mt-0.5 w-full px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              className="mt-0.5 w-full px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
             />
           </div>
 
@@ -270,7 +270,7 @@ export function OrderMiniForm({
               onChange={e => setOrderNotes(e.target.value)}
               rows={2}
               placeholder="Instrucciones de entrega, referencia, etc."
-              className="mt-0.5 w-full resize-none px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              className="mt-0.5 w-full resize-none px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
             />
           </div>
 

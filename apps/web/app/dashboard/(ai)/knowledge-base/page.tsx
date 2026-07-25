@@ -387,7 +387,7 @@ export default async function KnowledgeBasePage(
               name="q"
               defaultValue={q}
               placeholder="Buscar en título o contenido..."
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
             />
           </div>
           {cat && <input type="hidden" name="cat" value={cat} />}
@@ -400,7 +400,7 @@ export default async function KnowledgeBasePage(
             return (
               <a key={opt.value}
                 href={`/dashboard/knowledge-base?cat=${opt.value}${q ? `&q=${encodeURIComponent(q)}` : ''}`}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                   cat === opt.value
                     ? 'bg-primary/15 text-primary border-primary/40'
                     : 'border-border text-muted-foreground hover:text-foreground'

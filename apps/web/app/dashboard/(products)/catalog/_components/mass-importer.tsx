@@ -216,7 +216,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
 
         <div className="space-y-2 pt-2 border-t border-border/40">
           <Label>2. Descarga tu Plantilla</Label>
-          <Button type="button" variant="secondary" className="w-full gap-2 border shadow-sm hover:!bg-primary/5 hover:text-primary transition-all" onClick={handleDownloadTemplate}>
+          <Button type="button" variant="secondary" className="w-full gap-2 border shadow-xs hover:bg-primary/5! hover:text-primary transition-all" onClick={handleDownloadTemplate}>
             <Download className="h-4 w-4" /> Bajar Plantilla .xlsx
           </Button>
           
@@ -232,8 +232,8 @@ export default function MassImporter({ productCategories, onImported = () => {},
           </div>
         </div>
 
-        {error && <p className="text-xs text-destructive font-medium bg-destructive/10 p-2.5 rounded-lg border border-destructive/20 shadow-sm">{error}</p>}
-        {success && <p className="text-xs text-emerald-700 font-medium bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-700/20 shadow-sm flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0"/>{success}</p>}
+        {error && <p className="text-xs text-destructive font-medium bg-destructive/10 p-2.5 rounded-lg border border-destructive/20 shadow-xs">{error}</p>}
+        {success && <p className="text-xs text-emerald-700 font-medium bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-700/20 shadow-xs flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0"/>{success}</p>}
 
         <div className="pt-2">
           <Button type="button" className="w-full gap-2 font-medium" onClick={handleProcessImport} disabled={uploading}>

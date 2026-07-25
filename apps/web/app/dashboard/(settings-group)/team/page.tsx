@@ -733,7 +733,7 @@ export default async function TeamPage(
                   name="role"
                   defaultValue="operator"
                   aria-label="Rol del nuevo miembro"
-                  className="text-xs rounded-lg border border-input bg-background px-2.5 h-9 focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="text-xs rounded-lg border border-input bg-background px-2.5 h-9 focus:outline-hidden focus:ring-1 focus:ring-primary"
                 >
                   <option value="manager">Supervisor</option>
                   <option value="operator">Gestor</option>

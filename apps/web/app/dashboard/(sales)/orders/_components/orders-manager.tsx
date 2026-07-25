@@ -443,7 +443,7 @@ export default function OrdersManager({
               onClick={() => setStatus(s)}
               aria-pressed={active}
               aria-label={`Filtrar por ${s === 'all' ? 'todos' : STATUS_LABELS[s]}${counts[s] ? ` (${counts[s]})` : ''}`}
-              className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 active
                   ? 'bg-primary/15 text-primary border-primary/40'
                   : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -505,7 +505,7 @@ export default function OrdersManager({
                 const revenue   = o.total_amount ?? (subtotal + shipping - discount)
 
                 return (
-                  <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all focus-within:border-primary/50">
+                  <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-xs transition-all focus-within:border-primary/50">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">

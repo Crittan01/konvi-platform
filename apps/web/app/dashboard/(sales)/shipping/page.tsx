@@ -304,7 +304,7 @@ export default async function ShippingPage(
           <div className="space-y-3">
             {shipments.map((s) => {
               return (
-                <div key={s.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all">
+                <div key={s.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-xs transition-all">
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                     {/* Info principal */}
                     <div className="space-y-1">

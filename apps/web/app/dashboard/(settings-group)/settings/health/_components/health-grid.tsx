@@ -201,20 +201,20 @@ export function HealthGrid({
                         className={idx !== metrics.length - 1 ? 'border-b border-border' : ''}
                       >
                         <td className="px-4 py-2.5 align-top w-1/3">
-                          <p className="font-medium text-foreground/90 break-words">{m.metric}</p>
+                          <p className="font-medium text-foreground/90 wrap-break-word">{m.metric}</p>
                           {m.threshold && (
                             <p className="text-[10px] text-muted-foreground mt-0.5">{m.threshold}</p>
                           )}
                         </td>
                         <td className="px-4 py-2.5 align-top">
-                          <code className="text-sm font-mono break-words">{m.value || 'N/A'}</code>
+                          <code className="text-sm font-mono wrap-break-word">{m.value || 'N/A'}</code>
                           {hint && (
-                            <p className="text-[10px] text-muted-foreground mt-1 break-words">
+                            <p className="text-[10px] text-muted-foreground mt-1 wrap-break-word">
                               {hint}
                             </p>
                           )}
                           {remediation && (
-                            <p className="text-[10px] text-muted-foreground mt-1 break-words">
+                            <p className="text-[10px] text-muted-foreground mt-1 wrap-break-word">
                               {remediation}
                             </p>
                           )}

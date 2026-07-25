@@ -208,7 +208,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
                   </div>
 
                   {/* Footer con nombre/ tamaño */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/80 to-transparent px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <p className="text-[10px] text-white/90 truncate">{file.name.split('-').slice(2).join('-') || file.name}</p>
                     {size > 0 && <p className="text-[10px] text-white/60">{formatBytes(size)}</p>}
                   </div>

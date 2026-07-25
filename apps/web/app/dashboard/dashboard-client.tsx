@@ -196,7 +196,7 @@ export default function DashboardClient({
             <button
               type="button"
               onClick={() => setTab('operaciones')}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-sm hover:bg-amber-100 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-xs hover:bg-amber-100 transition-colors"
             >
               <Zap className="h-4 w-4 shrink-0" />
               <span>Ver {totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
@@ -363,7 +363,7 @@ export default function DashboardClient({
                   <Link
                     key={href}
                     href={href}
-                    className="group relative rounded-xl border border-border bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-200 card-hover"
+                    className="group relative rounded-xl border border-border bg-card p-4 shadow-xs hover:shadow-md hover:border-primary/40 transition-all duration-200 card-hover"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
@@ -565,7 +565,7 @@ function OpsCard({
   return (
     <Link
       href={href}
-      className={`group rounded-xl border bg-card p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-200 card-hover ${
+      className={`group rounded-xl border bg-card p-4 sm:p-5 shadow-xs hover:shadow-md transition-all duration-200 card-hover ${
         urgent ? 'border-primary/40 bg-primary/5' : 'border-border'
       }`}
     >
@@ -582,7 +582,7 @@ function OpsCard({
 
 function KpiCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-sm">
+    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-xs">
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className="text-2xl sm:text-3xl font-bold text-primary">{value}</p>
       <p className="text-xs mt-1 text-muted-foreground">Total acumulado</p>
@@ -600,7 +600,7 @@ function MoneyKpiCard({ label, value }: { label: string; value: number | null })
   const border = negative ? 'border-red-700/25 bg-red-500/5' : 'border-emerald-700/25 bg-emerald-500/5'
   const text = negative ? 'text-red-700' : 'text-emerald-700'
   return (
-    <div className={`rounded-xl border p-4 sm:p-5 shadow-sm ${border}`}>
+    <div className={`rounded-xl border p-4 sm:p-5 shadow-xs ${border}`}>
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${text}`}>
         {value === null ? '—' : negative ? formatCOPNegative(value) : formatCOP(value)}

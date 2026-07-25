@@ -170,7 +170,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
         className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/20 transition-colors"
       >
         {/* thumbnail */}
-        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted border border-border flex-shrink-0">
+        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted border border-border shrink-0">
           {p.cover_image_url ? (
             <Image src={p.cover_image_url} alt={p.title} fill className="object-cover" sizes="48px" />
           ) : (
@@ -199,13 +199,13 @@ const ProductMobileCard = memo(function ProductMobileCard({
           </div>
         </div>
 
-        <div className="text-right flex-shrink-0 mr-1">
+        <div className="text-right shrink-0 mr-1">
           <p className="font-bold text-sm text-primary">{fmtPrice(vars)}</p>
           <p className={`text-[10px] tabular-nums ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
             {totalStock} u.
           </p>
         </div>
-        {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+        {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
       </button>
 
       {isExpanded && (
@@ -290,7 +290,7 @@ const ArchivedSection = memo(function ArchivedSection({
         <div className="divide-y divide-border/30">
           {archivedProducts.map(p => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10 hover:bg-muted/20 transition-colors">
-              <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-muted border border-border flex-shrink-0 opacity-60">
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-muted border border-border shrink-0 opacity-60">
                 {p.cover_image_url ? (
                   <Image src={p.cover_image_url} alt={p.title} fill className="object-cover grayscale" sizes="36px" />
                 ) : (
@@ -305,7 +305,7 @@ const ArchivedSection = memo(function ArchivedSection({
                   <p className="text-[10px] text-muted-foreground/60">{catMap[p.category_id]}</p>
                 )}
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 <ActionResultForm action={restoreProductAction}>
                   <input type="hidden" name="product_id" value={p.id} />
                   <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Restaurado" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
@@ -422,7 +422,7 @@ export default function CatalogTable({
         {canWrite && (
           <div className="flex flex-col sm:flex-row gap-2.5 text-xs text-muted-foreground mt-1">
             {['Agrega manualmente', 'Importa desde Excel'].map((label, i) => (
-              <span key={i} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-card border border-border shadow-sm">
+              <span key={i} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-card border border-border shadow-xs">
                 <span className="w-5 h-5 rounded-full bg-primary text-white font-bold flex items-center justify-center text-[10px]">{i + 1}</span>
                 {label}
               </span>
@@ -460,7 +460,7 @@ export default function CatalogTable({
             title={mode === 'list' ? 'Vista Lista' : 'Vista Cuadrícula'}
             className={`p-1.5 rounded-md transition-colors ${
               viewMode === mode
-                ? 'bg-background shadow-sm text-foreground'
+                ? 'bg-background shadow-xs text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -559,7 +559,7 @@ export default function CatalogTable({
                 return [
                   <tr
                     key={p.id}
-                    className="cursor-pointer hover:bg-muted/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                    className="cursor-pointer hover:bg-muted/30 transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
                     onClick={() => toggle(p.id)}
                     role="button"
                     tabIndex={0}
@@ -568,7 +568,7 @@ export default function CatalogTable({
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(p.id) } }}
                   >
                     <td className="px-3 py-3">
-                      <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted border border-border flex-shrink-0">
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted border border-border shrink-0">
                         {p.cover_image_url ? (
                           <Image src={p.cover_image_url} alt={p.title} fill className="object-cover" sizes="40px" />
                         ) : (
@@ -669,11 +669,11 @@ export default function CatalogTable({
             return (
               <div
                 key={p.id}
-                className={`rounded-2xl border ${isExpanded ? 'border-primary/40' : 'border-border'} bg-card shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md`}
+                className={`rounded-2xl border ${isExpanded ? 'border-primary/40' : 'border-border'} bg-card shadow-xs overflow-hidden transition-all duration-200 hover:shadow-md`}
               >
                 {/* Card image */}
                 <div
-                  className="relative aspect-[4/3] bg-muted cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="relative aspect-4/3 bg-muted cursor-pointer overflow-hidden focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
                   onClick={() => toggle(p.id)}
                   role="button"
                   tabIndex={0}
@@ -690,7 +690,7 @@ export default function CatalogTable({
                     </div>
                   )}
                   {/* Click hint overlay — visible on mobile, hover on desktop */}
-                  <div className="absolute bottom-2 right-2 bg-black/30 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-sm opacity-100 md:opacity-0 md:hover:opacity-100 transition-opacity">
+                  <div className="absolute bottom-2 right-2 bg-black/30 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-xs opacity-100 md:opacity-0 md:hover:opacity-100 transition-opacity">
                     {isExpanded ? 'Cerrar' : 'Ver detalle'}
                   </div>
                 </div>
@@ -706,7 +706,7 @@ export default function CatalogTable({
                         </span>
                       )}
                     </div>
-                    <div className="text-right flex-shrink-0">
+                    <div className="text-right shrink-0">
                       <p className="font-bold text-primary text-sm">{fmtPrice(vars)}</p>
                       <p className={`text-[11px] tabular-nums font-medium ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
                         {totalStock} u.

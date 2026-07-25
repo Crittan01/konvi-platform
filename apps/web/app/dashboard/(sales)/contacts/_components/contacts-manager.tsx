@@ -657,7 +657,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
             placeholder="Buscar por nombre, teléfono o email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
           />
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Filtrar por estado de consentimiento">
@@ -672,7 +672,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
               type="button"
               aria-pressed={consentFilter === opt.value}
               onClick={() => setConsentFilter(opt.value)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 consentFilter === opt.value
                   ? 'bg-primary/15 text-primary border-primary/40'
                   : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -689,7 +689,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
             onClick={handleRefresh}
             disabled={isRefreshing}
             title="Refrescar lista (ver cambios recientes del bot u otros operadores)"
-            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all disabled:opacity-50"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Actualizando…' : 'Refrescar'}
@@ -714,7 +714,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                       value={addPhoneCountry}
                       onChange={e => setAddPhoneCountry(e.target.value)}
                       title="Código de país"
-                      className="inline-flex items-center px-2 h-9 border border-r-0 border-input rounded-l-md text-xs bg-muted shrink-0 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="inline-flex items-center px-2 h-9 border border-r-0 border-input rounded-l-md text-xs bg-muted shrink-0 focus:outline-hidden focus:ring-1 focus:ring-primary"
                     >
                       {PHONE_COUNTRIES.map(c => (
                         <option key={c.code} value={c.code}>

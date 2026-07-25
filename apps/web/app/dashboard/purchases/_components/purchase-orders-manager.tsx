@@ -365,7 +365,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                 </div>
 
                 {editingId === o.id ? (
-                  <div className="mt-2 border border-primary/40 rounded-md p-3 bg-primary/[0.03] space-y-3">
+                  <div className="mt-2 border border-primary/40 rounded-md p-3 bg-primary/3 space-y-3">
                     <p className="text-xs font-semibold text-muted-foreground uppercase">Editando orden</p>
                     <ItemsEditor variations={variations} items={editItems} onChange={setEditItems} idPrefix={`po-edit-${o.id}`} />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -544,7 +544,7 @@ function ItemsEditor({
         />
       </div>
       {search.trim() !== '' && (
-        <div className="mt-1 border rounded-md max-h-52 overflow-y-auto bg-background shadow-sm divide-y">
+        <div className="mt-1 border rounded-md max-h-52 overflow-y-auto bg-background shadow-xs divide-y">
           {filteredVariations.length === 0 && (
             <p className="p-3 text-xs text-muted-foreground">Sin coincidencias en el catálogo activo.</p>
           )}

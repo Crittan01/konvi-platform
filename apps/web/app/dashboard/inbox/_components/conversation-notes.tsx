@@ -234,7 +234,7 @@ export function ConversationNotes({ conversationId }: Props) {
           rows={2}
           maxLength={2000}
           placeholder="Agregar nota interna (no se envía al cliente)..."
-          className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-muted-foreground"
+          className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-border bg-background focus:outline-hidden focus:ring-1 focus:ring-amber-500 placeholder:text-muted-foreground"
         />
         <div className="flex items-center justify-between">
           <label className="text-[10px] text-muted-foreground flex items-center gap-1 cursor-pointer">
@@ -297,7 +297,7 @@ export function ConversationNotes({ conversationId }: Props) {
                     rows={2}
                     maxLength={2000}
                     autoFocus
-                    className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-amber-700/40 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-amber-700/40 bg-background focus:outline-hidden focus:ring-1 focus:ring-amber-500"
                   />
                   <div className="flex items-center justify-end gap-1">
                     <button
@@ -319,7 +319,7 @@ export function ConversationNotes({ conversationId }: Props) {
                   </div>
                 </div>
               ) : (
-                <p className="whitespace-pre-wrap break-words mb-1.5">{note.content}</p>
+                <p className="whitespace-pre-wrap wrap-break-word mb-1.5">{note.content}</p>
               )}
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1">

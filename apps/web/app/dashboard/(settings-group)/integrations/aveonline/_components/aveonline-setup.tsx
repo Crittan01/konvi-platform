@@ -164,7 +164,7 @@ export default function AveonlineSetup({
                   minLength={3}
                   autoComplete="username"
                   placeholder="ej. mi-empresa-ecommerce"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
                 />
               </div>
 
@@ -180,7 +180,7 @@ export default function AveonlineSetup({
                   minLength={4}
                   autoComplete="current-password"
                   placeholder="••••••••"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -198,7 +198,7 @@ export default function AveonlineSetup({
                     id="auth_version"
                     name="auth_version"
                     defaultValue="v1.0"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
                   >
                     <option value="v1.0">v1.0 — legacy, vigente (recomendado)</option>
                     <option value="v2.0">v2.0 — JWT 12h (más reciente)</option>
@@ -221,7 +221,7 @@ export default function AveonlineSetup({
                     min="3600"
                     max="31536000"
                     defaultValue="100000"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Cuánto dura el JWT antes de expirar y necesitar re-autenticar.
@@ -401,7 +401,7 @@ export default function AveonlineSetup({
                 id="idagente"
                 name="idagente"
                 defaultValue={idagente ?? agents.find(a => a.principal)?.id ?? ''}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
               >
                 <option value="">— sin asignar —</option>
                 {agents.map(a => (

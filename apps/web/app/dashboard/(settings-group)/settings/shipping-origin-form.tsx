@@ -105,7 +105,7 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
           <select
             value={selectedSede}
             onChange={e => handleSedeSelect(e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
           >
             <option value="">Seleccionar sede para auto-completar…</option>
             {sedesValidas.map((s, i) => (
@@ -161,7 +161,7 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
           <input type="hidden" name="origin_state" value={nombreDpto} />
           <select id="origin-state" value={codigoDpto}
             onChange={e => { setCodigoDpto(e.target.value); setCity(''); setMunicipioCodigo('') }}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring">
             <option value="">Seleccionar…</option>
             {DEPARTAMENTOS.map(d => <option key={d.codigo} value={d.codigo}>{d.nombre}</option>)}
           </select>
@@ -177,7 +177,7 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
               setMunicipioCodigo(municipios.find(m => m.nombre === e.target.value)?.codigo ?? '')
             }}
             disabled={!codigoDpto}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed">
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed">
             <option value="">{codigoDpto ? 'Seleccionar…' : 'Primero selecciona departamento'}</option>
             {municipios.map(m => <option key={m.codigo} value={m.nombre}>{m.nombre}</option>)}
           </select>

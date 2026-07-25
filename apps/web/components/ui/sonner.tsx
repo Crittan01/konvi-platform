@@ -20,9 +20,9 @@ export function Toaster() {
             'group border-border bg-card text-card-foreground shadow-lg rounded-lg',
           title: 'text-sm font-medium',
           description: 'text-xs text-muted-foreground',
-          success: '!border-emerald-700/30',
-          error: '!border-red-700/30',
-          warning: '!border-amber-700/30',
+          success: 'border-emerald-700/30!',
+          error: 'border-red-700/30!',
+          warning: 'border-amber-700/30!',
           closeButton: 'border-border bg-card text-muted-foreground',
         },
       }}

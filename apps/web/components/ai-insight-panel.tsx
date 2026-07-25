@@ -157,7 +157,7 @@ export default function AiInsightPanel({ module, label = module }: Props) {
   const hasAlert = Boolean(insight.alerta)
 
   return (
-    <div className="rounded-xl border border-primary/25 bg-gradient-to-br from-primary/5 to-background overflow-hidden">
+    <div className="rounded-xl border border-primary/25 bg-linear-to-br from-primary/5 to-background overflow-hidden">
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-primary/15">

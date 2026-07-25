@@ -546,7 +546,7 @@ export default function ClaimsManager({
                 aria-label={`Ticket ${ticketLabel(claim.ticket_number)}, ${st.label}, cliente ${customerLabel(claim.customer)}`}
                 onClick={() => selectClaim(claim)}
                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectClaim(claim) } }}
-                className={`cursor-pointer rounded-xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                className={`cursor-pointer rounded-xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 ${
                   selected
                     ? 'ring-1 ring-primary/50 border-primary/40 bg-primary/5'
                     : 'border-border'

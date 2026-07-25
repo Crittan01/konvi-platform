@@ -45,7 +45,7 @@ export function NewDocForm({
           name="category"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
         >
           {categories.map((c) => {
             const isEmpty = emptyCategories.includes(c.value)
@@ -85,7 +85,7 @@ export function NewDocForm({
           required
           maxLength={maxContent}
           placeholder={guide?.placeholder ?? 'Escribe el texto tal como quieres que la IA lo lea.'}
-          className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-hidden focus:ring-1 focus:ring-primary"
         />
         <p className="text-xs text-muted-foreground">
           La IA usará búsqueda semántica para encontrar el doc más relevante.

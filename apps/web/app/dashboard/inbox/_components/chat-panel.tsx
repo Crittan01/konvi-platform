@@ -399,11 +399,11 @@ export function ChatPanel({
               return (
                 <div key={msg.id} className={`flex gap-2 ${isInbound ? 'justify-start' : 'justify-end'}`}>
                   {isInbound && (
-                    <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-1">
+                    <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
                       <User className="h-3.5 w-3.5 text-muted-foreground" />
                     </div>
                   )}
-                  <div className={`max-w-[75%] sm:max-w-[65%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm border border-border/50 ${
+                  <div className={`max-w-[75%] sm:max-w-[65%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-xs border border-border/50 ${
                     isInbound
                       ? 'bg-card text-foreground rounded-tl-sm'
                       : 'bg-primary text-primary-foreground rounded-tr-sm border-transparent'
@@ -426,7 +426,7 @@ export function ChatPanel({
                               Plantilla{tpl.name ? ` · ${tpl.name}` : ''}
                             </div>
                             {tpl.body && (
-                              <div className="whitespace-pre-wrap break-words">
+                              <div className="whitespace-pre-wrap wrap-break-word">
                                 {renderWhatsAppFormat(tpl.body)}
                               </div>
                             )}
@@ -499,7 +499,7 @@ export function ChatPanel({
                       // div (no <p>): renderWhatsAppFormat emite bloques <ul>/<ol>,
                       // inválidos dentro de <p> → hydration error en React 19 / Next 15.
                       // 'template' ya renderiza su cuerpo arriba (etiqueta + body).
-                      <div className="whitespace-pre-wrap break-words">
+                      <div className="whitespace-pre-wrap wrap-break-word">
                         {renderWhatsAppFormat(msg.content)}
                       </div>
                     )}
@@ -566,7 +566,7 @@ export function ChatPanel({
                     </p>
                   </div>
                   {!isInbound && (
-                    <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-1">
+                    <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-1">
                       <Bot className="h-3.5 w-3.5 text-primary" />
                     </div>
                   )}
@@ -602,7 +602,7 @@ export function ChatPanel({
                   placeholder="Escribe tu respuesta...  (Enter envía · Shift+Enter salto de línea · Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código)"
                   disabled={sending}
                   rows={2}
-                  className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                  className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50"
                 />
                 <Button
                   size="sm"
@@ -616,7 +616,7 @@ export function ChatPanel({
               {replyText.trim() && (
                 <div className="rounded-lg bg-background/50 border border-border/40 px-3 py-2 text-xs">
                   <p className="text-[10px] text-muted-foreground mb-1">Vista previa:</p>
-                  <div className="whitespace-pre-wrap break-words">
+                  <div className="whitespace-pre-wrap wrap-break-word">
                     {renderWhatsAppFormat(replyText)}
                   </div>
                 </div>

@@ -104,7 +104,7 @@ function SedeRow({
         <div className="space-y-1">
           <Label className="text-[10px] text-muted-foreground">Departamento</Label>
           <select value={dptoCodigo} onChange={e => handleDpto(e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring">
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs focus:outline-hidden focus:ring-2 focus:ring-ring">
             <option value="">Seleccionar…</option>
             {DEPARTAMENTOS.map(d => <option key={d.codigo} value={d.codigo}>{d.nombre}</option>)}
           </select>
@@ -115,7 +115,7 @@ function SedeRow({
           <Label className="text-[10px] text-muted-foreground">Municipio / Ciudad</Label>
           <select value={loc.city} onChange={e => onChange('city', e.target.value)}
             disabled={!dptoCodigo}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed">
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs focus:outline-hidden focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed">
             <option value="">{dptoCodigo ? 'Seleccionar…' : 'Primero elige departamento'}</option>
             {municipios.map(m => <option key={m.codigo} value={m.nombre}>{m.nombre}</option>)}
           </select>

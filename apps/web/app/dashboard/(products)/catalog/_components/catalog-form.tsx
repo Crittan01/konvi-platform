@@ -581,14 +581,14 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
                     </span>
                     {opts.length ? (
                       <select value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
-                        className="h-7 text-xs flex-[2] rounded-md border border-input bg-background px-2 text-foreground">
+                        className="h-7 text-xs flex-2 rounded-md border border-input bg-background px-2 text-foreground">
                         <option value="">-- elegir --</option>
                         {opts.map(o => <option key={o} value={o}>{o}</option>)}
                         {orphan && <option value={orphan}>{orphan} (fuera de contrato)</option>}
                       </select>
                     ) : (
                       <Input value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
-                        placeholder={d.unit ? `Ej: 30${d.unit}` : d.label} className="h-7 text-xs flex-[2]" />
+                        placeholder={d.unit ? `Ej: 30${d.unit}` : d.label} className="h-7 text-xs flex-2" />
                     )}
                   </div>
                 )

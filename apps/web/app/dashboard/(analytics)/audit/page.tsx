@@ -306,7 +306,7 @@ export default async function AuditPage(
                 href={buildHref({ entity: opt.key, page: '' })}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'flex-shrink-0 px-3 py-1 rounded-lg text-xs font-medium border transition-all',
+                  'shrink-0 px-3 py-1 rounded-lg text-xs font-medium border transition-all',
                   active
                     ? 'bg-primary/15 text-primary border-primary/40'
                     : 'border-border text-muted-foreground hover:text-foreground',
