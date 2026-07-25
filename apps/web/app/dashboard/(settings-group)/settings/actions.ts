@@ -98,6 +98,68 @@ export async function saveTenant(formData: FormData): Promise<ActionResult> {
   return res
 }
 
+/**
+ * Datos legales del tenant — identifican al RESPONSABLE DEL TRATAMIENTO (Ley 1581) y al
+ * VENDEDOR frente al comprador (Ley 1480). Son los datos que el aviso de privacidad necesita
+ * para dejar de ser un template con placeholders.
+ *
+ * Nota: `regimen_iva` se guarda como DATO informativo. El umbral de 3.500 UVT (Art. 437 ET)
+ * define ser responsable de IVA, que es INDEPENDIENTE de la obligación de facturar
+ * (Concepto DIAN 106/2022). La aplicabilidad fiscal la confirma el contador del tenant;
+ * la plataforma no la infiere ni la impone.
+ */
+export async function saveDatosLegales(formData: FormData): Promise<ActionResult> {
+  const tenantId = await getOwnerTenantId()
+
+  const tipoPersona = (formData.get('tipo_persona') as string)?.trim() || ''
+  const razonSocial = (formData.get('razon_social') as string)?.trim() || ''
+  const docTipo     = (formData.get('doc_tipo') as string)?.trim() || ''
+  // Se acepta el formato con puntos/guiones que la gente copia del RUT y se normaliza a dígitos.
+  const docNumero   = ((formData.get('doc_numero') as string) || '').replace(/[.\s-]/g, '').trim()
+  const docDv       = ((formData.get('doc_dv') as string) || '').trim()
+  const regimenIva  = (formData.get('regimen_iva') as string)?.trim() || ''
+  const emailHd     = (formData.get('email_habeas_data') as string)?.trim() || ''
+
+  if (tipoPersona && !['natural', 'juridica'].includes(tipoPersona)) {
+    return { ok: false, error: 'Tipo de persona inválido.' }
+  }
+  if (docTipo && !['NIT', 'CC', 'CE', 'PAS'].includes(docTipo)) {
+    return { ok: false, error: 'Tipo de documento inválido.' }
+  }
+  if (tipoPersona === 'juridica' && docTipo && docTipo !== 'NIT') {
+    return { ok: false, error: 'Una persona jurídica se identifica con NIT.' }
+  }
+  if (docNumero && !/^\d{5,15}$/.test(docNumero)) {
+    return { ok: false, error: 'El número de documento debe tener entre 5 y 15 dígitos.' }
+  }
+  // Solo se valida el FORMATO del dígito de verificación. La comprobación aritmética del DV
+  // del NIT requiere confirmar el algoritmo en la especificación oficial DIAN — follow-up.
+  if (docDv && !/^\d$/.test(docDv)) {
+    return { ok: false, error: 'El dígito de verificación es un solo número (0-9).' }
+  }
+  if (regimenIva && !['responsable', 'no_responsable'].includes(regimenIva)) {
+    return { ok: false, error: 'Régimen de IVA inválido.' }
+  }
+  if (emailHd && !EMAIL_RE.test(emailHd)) {
+    return { ok: false, error: 'El email de Habeas Data no tiene un formato válido.' }
+  }
+
+  const res = await updateTenant(tenantId, {
+    tipo_persona:           tipoPersona || null,
+    razon_social:           razonSocial || null,
+    doc_tipo:               docTipo || null,
+    doc_numero:             docNumero || null,
+    doc_dv:                 docDv || null,
+    regimen_iva:            regimenIva || null,
+    domicilio_direccion:    (formData.get('domicilio_direccion') as string)?.trim() || null,
+    domicilio_ciudad:       (formData.get('domicilio_ciudad') as string)?.trim() || null,
+    domicilio_departamento: (formData.get('domicilio_departamento') as string)?.trim() || null,
+    email_habeas_data:      emailHd || null,
+  })
+  if (res.ok) revalidateSettings()
+  return res
+}
+
 export async function saveFilosofia(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
   const res = await updateTenant(tenantId, {
