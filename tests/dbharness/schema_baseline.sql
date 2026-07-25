@@ -6498,6 +6498,14 @@ CREATE INDEX "conversations_tenant_channel_idx" ON "public"."conversations" USIN
 
 
 
+CREATE UNIQUE INDEX "conversations_tenant_phone_channel_uniq" ON "public"."conversations" USING "btree" ("tenant_id", "customer_phone", "channel");
+
+
+
+COMMENT ON INDEX "public"."conversations_tenant_phone_channel_uniq" IS 'Impide conversaciones duplicadas para el mismo (tenant, teléfono, canal). Cierra la carrera del read-then-insert del connector cuando el cliente manda varios mensajes seguidos, que partía carrito/FSM/escalación en silencio.';
+
+
+
 CREATE INDEX "credential_access_log_accessed_at_idx" ON "public"."credential_access_log" USING "btree" ("accessed_at" DESC);
 
 
