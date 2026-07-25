@@ -2573,6 +2573,72 @@ $$;
 ALTER FUNCTION "public"."rpc_dashboard_revenue"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer DEFAULT 10, "p_window_hours" integer DEFAULT 24, "p_limit" integer DEFAULT 25) RETURNS TABLE("conversation_id" "uuid", "tenant_id" "uuid", "customer_phone" "text", "last_inbound_at" timestamp with time zone, "silence_minutes" integer)
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    WITH last_inbound AS (
+        -- Último inbound por conversación, ya en estado terminal. Si sigue en
+        -- 'pending'/'processing' es trabajo de _reclaim_stale_inbound, no de
+        -- este detector: alertar ahí sería competir con el reintento en curso.
+        SELECT DISTINCT ON (m.conversation_id)
+               m.conversation_id,
+               m.tenant_id,
+               m.created_at
+        FROM public.messages m
+        WHERE m.direction = 'inbound'
+          AND m.processing_status IN ('processed', 'failed')
+          -- Cota superior: fuera de la ventana de servicio de Meta ya no
+          -- podríamos responder free-form, así que alertar no sirve de nada.
+          AND m.created_at >= NOW() - make_interval(hours => p_window_hours)
+          AND m.created_at <= NOW() - make_interval(mins  => p_silence_minutes)
+        ORDER BY m.conversation_id, m.created_at DESC
+    )
+    SELECT li.conversation_id,
+           li.tenant_id,
+           c.customer_phone,
+           li.created_at,
+           (EXTRACT(EPOCH FROM (NOW() - li.created_at)) / 60)::INT
+    FROM last_inbound li
+    JOIN public.conversations c ON c.id = li.conversation_id
+    WHERE
+        -- human_takeover ya lo vigila el tracker de SLA; en closed/opted_out el
+        -- silencio es correcto (el cliente pidió la baja o la conv se archivó).
+        c.status NOT IN ('human_takeover', 'closed', 'opted_out')
+      AND NOT EXISTS (
+            SELECT 1
+            FROM public.messages o
+            WHERE o.conversation_id = li.conversation_id
+              AND o.direction = 'outbound'
+              AND o.created_at >= li.created_at
+              AND o.content_type NOT LIKE '%audit%'
+              AND (
+                    o.meta_message_id IS NOT NULL
+                 OR o.processing_status IN ('pending', 'processing')
+              )
+        )
+        -- Idempotencia: una alerta por episodio de silencio. Sin esto el
+        -- barrido re-alertaría cada 5 min sobre la misma conversación durante
+        -- 24h y el ruido enterraría los casos nuevos.
+      AND NOT EXISTS (
+            SELECT 1
+            FROM public.messages a
+            WHERE a.conversation_id = li.conversation_id
+              AND a.content_type = 'silent_conversation_audit'
+              AND a.created_at >= li.created_at
+        )
+    ORDER BY li.created_at ASC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) IS 'Conversaciones donde el cliente escribió y no le llegó respuesta. Detecta el síntoma, no la causa: cubre los seis caminos conocidos de mensaje perdido y los que aparezcan después. La consume el worker (_detect_silent_conversations_if_due) para escalar a un humano.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text" DEFAULT 'mercadolibre'::"text", "p_max_fails" integer DEFAULT 3) RETURNS boolean
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -9783,6 +9849,11 @@ REVOKE ALL ON FUNCTION "public"."rpc_dashboard_revenue"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) TO "service_role";
 
 
 

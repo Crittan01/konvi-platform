@@ -197,6 +197,24 @@ HUMAN_TAKEOVER_SLA_HOURS = int(
     os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
 )
 
+# Detector de "cliente mudo" — el cliente escribió y no le llegó respuesta.
+# Red de seguridad transversal: vigila el SÍNTOMA (silencio) en vez de cada
+# causa, así que cubre de una vez los seis caminos conocidos por los que un
+# inbound termina sin respuesta, y también los que aparezcan después.
+SILENT_CONV_DETECTOR_ENABLED = os.getenv(
+    "SILENT_CONV_DETECTOR_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+SILENT_CONV_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("SILENT_CONV_CHECK_INTERVAL_SECONDS", "300")  # 5 min
+)
+# Umbral GENEROSO a propósito: el procesamiento normal tarda ~9-60s y el
+# reclaim de mensajes atascados corre antes. A los 10 min sin nada entregado
+# ya no es demora, es un mensaje perdido.
+SILENT_CONV_SILENCE_MINUTES = int(
+    os.getenv("SILENT_CONV_SILENCE_MINUTES", "10")
+)
+SILENT_CONV_BATCH = int(os.getenv("SILENT_CONV_BATCH", "25"))
+
 # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
 TENANT_HARD_DELETE_ENABLED = os.getenv(
     "TENANT_HARD_DELETE_ENABLED", "false"
@@ -314,6 +332,8 @@ class OrchestratorWorker:
         self._last_wompi_inbox_reconcile_at = 0.0
         self._last_wompi_inbox_cleanup_at = 0.0
         self._last_sla_check_at = 0.0
+        self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
+        self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
         self._last_stale_sweep_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
@@ -348,6 +368,10 @@ class OrchestratorWorker:
             "payment_reminders_sent_via_hsm": 0,
             "payment_reminders_hsm_failed": 0,
             "payment_reminders_hsm_not_approved": 0,
+            # Cliente mudo: escribió y no le llegó nada. Cada unidad es un
+            # cliente real que se quedó esperando — no un contador técnico.
+            "silent_conversations_detected": 0,
+            "silent_conversations_recovered": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -420,6 +444,7 @@ class OrchestratorWorker:
         await self._run_job("wompi_inbox_reconcile", self._reconcile_wompi_inbox_if_due())
         await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
+        await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
         await self._run_job("health_metrics", self._collect_health_metrics_if_due())
 
@@ -1381,6 +1406,171 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
                 continue
+
+    async def _detect_silent_conversations_if_due(self) -> None:
+        """El cliente escribió y no le llegó respuesta: alerta + escala a un humano.
+
+        Es la red de seguridad transversal del bot. Los otros dos mecanismos dejan
+        un hueco justo en el medio:
+          • _reclaim_stale_inbound recupera inbounds que quedaron SIN PROCESAR.
+          • el tracker de SLA vigila conversaciones YA escaladas a human_takeover.
+        Falta el caso en que el inbound se procesó "bien" y aun así al cliente no
+        le llegó nada: envío que devolvió None, cola outbound que agotó intentos,
+        rate limit, degradación que no emitió, crash entre 'processed' y el envío.
+        Todos terminan igual — silencio — y ninguno avisa a nadie.
+
+        Vigilar el síntoma en vez de cada causa cubre los seis caminos conocidos
+        de una vez, y también los que aparezcan después.
+
+        Por cada conversación silenciosa hace tres cosas, en orden de importancia:
+          1. Escala a human_takeover → aparece en el Inbox y el tracker de SLA
+             pasa a vigilarla. Es lo crítico: alguien se entera.
+          2. Avisa al equipo (Telegram), igual que cualquier otra escalada.
+          3. Le escribe al cliente para que no siga esperando en el vacío.
+        El paso 3 es best-effort: si lo que está roto es justo el envío, falla y
+        queda logueado — pero la escalada (1) ya ocurrió.
+
+        La fila `silent_conversation_audit` da idempotencia: una alerta por
+        episodio, no una cada 5 minutos durante 24 horas.
+        """
+        if not self._silent_conv_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if now - self._last_silent_conv_check_at < max(60, SILENT_CONV_CHECK_INTERVAL_SECONDS):
+            return
+        self._last_silent_conv_check_at = now
+
+        try:
+            res = self.supabase.rpc(
+                "rpc_find_silent_conversations",
+                {
+                    "p_silence_minutes": SILENT_CONV_SILENCE_MINUTES,
+                    "p_window_hours": META_CSW_HOURS,
+                    "p_limit": SILENT_CONV_BATCH,
+                },
+            ).execute()
+            silent = res.data or []
+        except Exception as exc:
+            # La RPC puede no existir si la migración no está aplicada todavía.
+            logger.warning("[SILENCIO] no pude consultar convs silenciosas: %s", exc)
+            return
+
+        if not silent:
+            return
+
+        self._metrics["silent_conversations_detected"] += len(silent)
+        logger.error(
+            "[SILENCIO] %d cliente(s) escribieron y no recibieron respuesta — escalando",
+            len(silent),
+        )
+
+        for conv in silent:
+            conv_id = conv.get("conversation_id")
+            tenant_id = conv.get("tenant_id")
+            phone = conv.get("customer_phone") or "?"
+            silence_min = conv.get("silence_minutes")
+            if not (conv_id and tenant_id):
+                continue
+
+            logger.error(
+                "[SILENCIO] conv=%s tenant=%s lleva %s min sin respuesta al cliente",
+                str(conv_id)[:8], str(tenant_id)[:8], silence_min,
+            )
+
+            # 1. Escalar: es lo único que NO puede fallar en silencio.
+            try:
+                self.supabase.table("conversations").update({
+                    "status": "human_takeover",
+                }).eq("id", conv_id).eq("tenant_id", tenant_id).execute()
+            except Exception as exc:
+                logger.error(
+                    "[SILENCIO] conv=%s no pude escalar a human_takeover: %s",
+                    str(conv_id)[:8], exc,
+                )
+                continue
+
+            # 2. Auditoría: idempotencia del detector + traza del episodio.
+            #    También es el `escalation_audit` que el tracker de SLA busca
+            #    para calcular desde cuándo la conversación espera a un humano;
+            #    sin él la escalada quedaría fuera de su radar.
+            payload = {
+                "reason": "cliente_sin_respuesta",
+                "silence_minutes": silence_min,
+                "last_inbound_at": conv.get("last_inbound_at"),
+                "source": "worker_silent_detector",
+            }
+            for ctype in ("silent_conversation_audit", "escalation_audit"):
+                try:
+                    self.supabase.table("messages").insert({
+                        "conversation_id": conv_id,
+                        "tenant_id": tenant_id,
+                        "direction": "outbound",
+                        "content": "",
+                        "content_type": ctype,
+                        "payload": payload,
+                        "processed": True,
+                        "processing_status": "processed",
+                    }).execute()
+                except Exception as exc:
+                    logger.warning(
+                        "[SILENCIO] audit %s falló conv=%s: %s", ctype, str(conv_id)[:8], exc,
+                    )
+
+            # 3. Avisar al equipo.
+            try:
+                from telegram_notifications import notify_escalation_async
+                await notify_escalation_async(
+                    self.supabase,
+                    tenant_id=tenant_id,
+                    conversation_id=conv_id,
+                    reason=f"El cliente escribió hace {silence_min} min y no recibió respuesta",
+                )
+            except Exception as exc:
+                logger.warning("[SILENCIO] notificación al equipo falló: %s", exc)
+
+            # 4. Y decirle algo al cliente, que es quien está esperando.
+            #    Dentro de la ventana de 24h de Meta por construcción de la RPC,
+            #    así que free-form es válido y no cuesta.
+            try:
+                from agentic.degraded_messages import DEGRADED_GENERIC
+                meta_message_id = await send_whatsapp_message(
+                    tenant_id=tenant_id,
+                    supabase=self.supabase,
+                    to_phone=phone,
+                    text=DEGRADED_GENERIC,
+                )
+            except Exception as exc:
+                logger.error("[SILENCIO] envío al cliente falló conv=%s: %s",
+                             str(conv_id)[:8], exc)
+                meta_message_id = None
+
+            if not meta_message_id:
+                # El envío es justo lo que puede estar roto. Queda escalado igual.
+                logger.error(
+                    "[SILENCIO] conv=%s escalada pero NO pude escribirle al cliente",
+                    str(conv_id)[:8],
+                )
+                continue
+
+            self._metrics["silent_conversations_recovered"] += 1
+            try:
+                self.supabase.table("messages").insert({
+                    "conversation_id": conv_id,
+                    "tenant_id": tenant_id,
+                    "direction": "outbound",
+                    "content_type": "text",
+                    "content": DEGRADED_GENERIC,
+                    "meta_message_id": meta_message_id,
+                    "processed": True,
+                    "processing_status": "processed",
+                }).execute()
+            except Exception as exc:
+                logger.warning(
+                    "[SILENCIO] persistir outbound falló conv=%s: %s", str(conv_id)[:8], exc,
+                )
 
     async def _reclaim_stale_inbound(
         self, *, threshold_minutes: int, statuses: list[str], label: str,
