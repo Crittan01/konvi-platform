@@ -2785,8 +2785,16 @@ BEGIN
    WHERE id = r.variation_id AND tenant_id = p_tenant_id
    RETURNING stock_quantity INTO v_new_stock;
 
+  -- ON CONFLICT ACUMULATIVO: si este pedido ya consumió otra reserva de la MISMA variación,
+  -- se suma el delta a la fila existente del ledger en vez de reventar. Antes, esta colisión
+  -- abortaba la transacción y el descuento de stock se perdía → sobreventa silenciosa.
+  -- El índice objetivo es PARCIAL, así que el predicado va en la inferencia del ON CONFLICT.
   INSERT INTO public.stock_movements (tenant_id, variation_id, delta, new_stock, reason, order_id)
-  VALUES (p_tenant_id, r.variation_id, -r.qty, v_new_stock, 'reservation_consumed', p_order_id);
+  VALUES (p_tenant_id, r.variation_id, -r.qty, v_new_stock, 'reservation_consumed', p_order_id)
+  ON CONFLICT (order_id, variation_id, reason) WHERE order_id IS NOT NULL
+  DO UPDATE SET
+    delta     = stock_movements.delta - r.qty,
+    new_stock = v_new_stock;
 
   UPDATE public.stock_reservations
      SET status = 'consumed', consumed_at = NOW(), order_id = p_order_id, updated_at = NOW()
@@ -2798,7 +2806,7 @@ $$;
 ALTER FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") IS 'A11 IDOR fix: consume reserva exigiendo tenant del caller (filtra cross-tenant). Reemplaza a la firma (UUID,UUID) en fase contract.';
+COMMENT ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Consume una reserva (scopeada por tenant): descuenta stock y asienta en el ledger. El INSERT es ACUMULATIVO por (order_id, variation_id, reason): un pedido puede consumir VARIAS reservas de la misma variación ("agregame 2 más") y antes la 2ª colisionaba con el índice único, abortaba la transacción y perdía el descuento → sobreventa silenciosa.';
 
 
 
