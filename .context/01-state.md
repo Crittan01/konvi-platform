@@ -1,8 +1,47 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-07-12 (rev. 112 · iniciativa production-grade bloques 0→H DESPLEGADA a producción)
-**Branch activo**: `develop` (= `origin/production` = `0dbf1180`). `main` está 249 commits atrás (no es deploy target).
+**Última actualización**: 2026-07-25 (readiness pre-lanzamiento · 7 de 8 bloqueantes de código cerrados)
+**Branch activo**: `develop` = `9fd6f99b`. `origin/production` = `91dbfeda` → **develop va 14 commits adelante**.
 **Deploy**: `production` autodespliega en Render (los 4 servicios live). NO hay freeze.
+
+> ⚠️ **Hay una brecha abierta entre `develop` y `production`.** Las migraciones SÍ están aplicadas a
+> prod, así que los arreglos de BASE DE DATOS ya protegen; los de CÓDIGO no protegen a nadie hasta
+> desplegar. Lo que traba el despliegue es Tailwind 4 (#158), que espera visto bueno estético del
+> founder. **Mergeado ≠ vivo — verificar funcionalmente contra prod antes de dar algo por cerrado.**
+
+---
+
+## 2026-07-25 — Readiness pre-lanzamiento (respuesta a "¿qué falta para abrir el número real?")
+
+Auditoría de 9 subsistemas → `docs/reports/launch_readiness_2026_07_25.md`. Veredicto inicial:
+`falta-trabajo-significativo`. **7 de los 8 bloqueantes de CÓDIGO cerrados en la misma sesión.**
+
+**Seguridad — 3 capas, todas vivas en prod:**
+
+| PR | Qué cerró |
+|---|---|
+| #162 | 🔴 CRÍTICO: `anon` (llave del navegador) leía/sobreescribía secretos de Vault de cualquier tenant **sin login**. Patrón culpable: `IF auth.uid() IS NOT NULL THEN <check> END IF` — escrito para `service_role`, pero `anon` comparte `uid` NULL → el check se saltaba entero |
+| #164 | **Causa raíz**: sin `ALTER DEFAULT PRIVILEGES`, toda función nacía con GRANT a `anon`. 68 `SECURITY DEFINER` revocadas (38 expuestas → 0) |
+| #165 | RBAC de dinero en la DB: policies `RESTRICTIVE` por rol (un `operator` cambiaba totales y confirmaba pedidos sin pago) |
+| #173 | **La segunda puerta**: una policy gobierna la TABLA, pero las `SECURITY DEFINER` NO evalúan RLS. `cart_add_item` recibe `p_unit_price_cents` como **parámetro** → el candado de #165 se saltaba llamando la función. 12 funciones cerradas |
+
+**Fiabilidad del bot y del dinero:** #166 conversación duplicada (índice único + reintento) ·
+#167 inbox durable del inbound (Meta no reintenta tras el 200) · #168 sobreventa del segundo consume ·
+#169 pago huérfano (alerta + void + marcado consultable) · #170 "Cancelar" con pedido activo ya no
+dispara el opt-out de por vida · #171 detector de cliente sin respuesta · #172 el SLA ya vigila las
+escaladas de retracto Ley 1480 / Habeas Data / menor de edad.
+
+**Dos patrones que conviene reusar:**
+- **Vigilar el síntoma, no la causa** (#171): en vez de instrumentar los 6 caminos por los que un
+  mensaje se pierde, se detecta el *silencio* — cubre los 6 y los que aparezcan después.
+- **Anclar en el trigger, no en la convención** (#172): el `escalation_audit` lo escribían 5 de ~12
+  rutas; `human_takeover_at` lo estampa un trigger en la transición, así que cubre las 12 y las futuras.
+
+**Stack:** Next 15→16 + ESLint 9 flat + Sentry v10 (#152-#155, desplegado) · Tailwind 3→4 (#158,
+mergeado, **espera visto bueno estético**) · identidad legal del tenant persona natural/jurídica (#163).
+
+**Abierto:** comprobante de compra (en curso) + 4 bloqueantes founder-gated (plantillas Meta, Wompi
+producción, Aveonline producción, aviso de privacidad).
 
 ---
 
