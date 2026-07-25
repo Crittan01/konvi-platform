@@ -3880,6 +3880,39 @@ async def _handle_optout_if_keyword(
         logger.warning("[OPTOUT_GATE] lookup conv/contact falló: %s", exc)
         return False
 
+    # DESAMBIGUACIÓN de keywords ambiguas ("cancelar", "salir").
+    # En un canal de COMPRA, un cliente con un pedido vivo que escribe "Cancelar" casi siempre
+    # quiere cancelar SU PEDIDO, no dejar de recibir mensajes. Tratarlo como opt-out lo dejaba
+    # MUDO DE POR VIDA (solo revive con SUSCRIBIR/START/REACTIVAR, que nadie adivina) y encima
+    # su pedido seguía vivo — el peor de los dos mundos.
+    # Con un pedido activo, se deja pasar el mensaje al bot, que atiende la intención real.
+    # Las keywords INEQUÍVOCAS (STOP, BAJA, UNSUBSCRIBE, "cancelar suscripción"...) siguen dando
+    # de baja siempre, así que el derecho del titular a revocar NO se pierde.
+    try:
+        from lib.whatsapp_optout import is_ambiguous_optout_keyword  # noqa: PLC0415
+
+        if is_ambiguous_optout_keyword(content):
+            activa = (
+                supabase.table("orders")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("conversation_id", conversation_id)
+                .not_.in_("status", ["cancelled", "delivered"])
+                .limit(1)
+                .execute()
+            )
+            if activa.data:
+                logger.info(
+                    "[OPTOUT_GATE] '%s' con pedido activo conv=%s — NO se da de baja, "
+                    "se deja que el bot atienda la intención (probablemente cancelar el pedido)",
+                    content.strip()[:20], conversation_id[:8],
+                )
+                return False
+    except Exception as exc:  # noqa: BLE001
+        # Ante duda, se conserva el comportamiento previo (dar de baja): es la dirección segura
+        # para Habeas Data — nunca ignorar una posible revocación por un fallo de lookup.
+        logger.warning("[OPTOUT_GATE] chequeo de pedido activo falló (se procesa la baja): %s", exc)
+
     logger.info(
         "[OPTOUT_GATE] STOP detectado msg=%s conv=%s contact=%s",
         message_id[:8], conversation_id[:8], contact_id[:8] if contact_id else "?",

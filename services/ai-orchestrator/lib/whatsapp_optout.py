@@ -44,27 +44,57 @@ logger = logging.getLogger(__name__)
 # detectado como opt-out.
 #
 # Compilamos cada pattern con re.IGNORECASE + anchors ^...$.
-_OPTOUT_PATTERNS = [
+# INEQUÍVOCAS: solo pueden significar "no me mandes más mensajes". Siempre dan de baja.
+_OPTOUT_PATTERNS_UNAMBIGUOUS = [
     r"^stop$",
     r"^baja$",
-    r"^cancelar$",
     r"^cancelar\s+suscripci[oó]n$",
     r"^no\s+m[aá]s\s+mensajes$",
     r"^unsubscribe$",
     r"^opt[\s-]?out$",
-    r"^salir$",
     r"^remover$",
 ]
+
+# AMBIGUAS: en un canal de COMPRA, un cliente que escribe "cancelar" casi siempre quiere
+# cancelar SU PEDIDO, no dejar de recibir mensajes. Tratarlas como opt-out lo dejaba MUDO de
+# por vida (y encima sin entender por qué su pedido seguía vivo).
+# Cuando hay un pedido activo, el caller NO las trata como opt-out y deja que el bot atienda la
+# intención real. Sin pedido activo conservan el significado de baja — no se pierde el derecho
+# del titular, y las inequívocas siguen disponibles siempre.
+_OPTOUT_PATTERNS_AMBIGUOUS = [
+    r"^cancelar$",
+    r"^salir$",
+]
+
+_OPTOUT_PATTERNS = _OPTOUT_PATTERNS_UNAMBIGUOUS + _OPTOUT_PATTERNS_AMBIGUOUS
 
 _COMPILED_PATTERNS = [
     re.compile(p, re.IGNORECASE) for p in _OPTOUT_PATTERNS
 ]
+_COMPILED_AMBIGUOUS = [
+    re.compile(p, re.IGNORECASE) for p in _OPTOUT_PATTERNS_AMBIGUOUS
+]
 
 # Mensaje confirmación (decisión Q2 founder).
+# Nombra la palabra EXACTA para volver: la versión anterior decía "escríbenos un nuevo mensaje
+# cuando quieras", pero reactivar exige una keyword de _OPTIN_PATTERNS. Un cliente que escribía
+# "hola" NO se reactivaba → el texto prometía algo que el sistema no hacía.
 OPTOUT_CONFIRMATION_TEXT = (
     "Has sido dado de baja. Ya no recibirás mensajes nuestros. "
-    "Si cambias de opinión, escríbenos un nuevo mensaje cuando quieras."
+    "Si cambias de opinión, escríbenos la palabra SUSCRIBIR y te reactivamos."
 )
+
+
+def is_ambiguous_optout_keyword(text: Optional[str]) -> bool:
+    """True si el texto es una keyword AMBIGUA ('cancelar', 'salir').
+
+    En un canal de compra pueden significar "cancelar mi pedido". El caller decide según el
+    contexto (¿hay pedido activo?) si tratarlas como baja o dejarlas pasar al bot.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    return any(p.match(stripped) for p in _COMPILED_AMBIGUOUS)
 
 # Estado de conversación tras opt-out — separa visualmente del flujo normal.
 CONVERSATION_STATUS_OPTED_OUT = "opted_out"

@@ -279,9 +279,26 @@ class MarkConversationOptedOutTests(unittest.TestCase):
 
 class PublicConstantsTests(unittest.TestCase):
     def test_confirmation_text_es_q2_aprobado(self):
-        # Decisión Q2 founder 2026-05-06.
+        # Decisión Q2 founder 2026-05-06: debe comunicar la baja.
         self.assertIn("dado de baja", optout.OPTOUT_CONFIRMATION_TEXT.lower())
-        self.assertIn("nuevo mensaje", optout.OPTOUT_CONFIRMATION_TEXT.lower())
+
+    def test_confirmation_text_nombra_una_keyword_que_REALMENTE_reactiva(self):
+        """El texto original decía "escríbenos un nuevo mensaje cuando quieras", pero reactivar
+        exige una keyword de _OPTIN_PATTERNS (START/SUSCRIBIR/REACTIVAR): un cliente que escribía
+        "hola" NO se reactivaba. El texto prometía algo que el sistema no hace, y el cliente
+        quedaba mudo creyendo que podía volver.
+
+        Se asierta la PROPIEDAD (la palabra mencionada tiene que funcionar de verdad), no la
+        cadena literal — así el test sigue siendo válido si se reescribe el mensaje.
+        """
+        texto = optout.OPTOUT_CONFIRMATION_TEXT
+        palabras = [w.strip(".,;:!¡¿?").lower() for w in texto.split()]
+        reactivan = [w for w in palabras if optout.is_optin_keyword(w)]
+        self.assertTrue(
+            reactivan,
+            f"el texto de baja debe nombrar una keyword que reactive de verdad; "
+            f"ninguna palabra de {texto!r} pasa is_optin_keyword",
+        )
 
     def test_revocation_reason_es_canonico(self):
         self.assertIn("STOP", optout.OPTOUT_REVOCATION_REASON)
@@ -340,3 +357,36 @@ class RestoreConsentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ─── Desambiguación de keywords ambiguas en canal de compra ──────────────────
+
+class AmbiguousKeywordTests(unittest.TestCase):
+    """En un canal de COMPRA, "cancelar" casi siempre significa "cancelá mi PEDIDO", no
+    "no me mandes más mensajes". Tratarlo como opt-out dejaba al cliente MUDO de por vida
+    (solo revive con SUSCRIBIR/START/REACTIVAR, que nadie adivina) y encima su pedido seguía
+    vivo — el peor de los dos mundos.
+
+    El caller usa `is_ambiguous_optout_keyword` para, si hay un pedido activo, dejar que el bot
+    atienda la intención real en vez de dar de baja.
+    """
+
+    def test_cancelar_y_salir_son_ambiguas(self):
+        for kw in ("cancelar", "Cancelar", "  salir  ", "SALIR"):
+            self.assertTrue(optout.is_ambiguous_optout_keyword(kw), kw)
+
+    def test_las_inequivocas_no_son_ambiguas(self):
+        """STOP/BAJA/UNSUBSCRIBE solo pueden significar baja → nunca se desambiguan,
+        así el derecho del titular a revocar se conserva siempre."""
+        for kw in ("stop", "baja", "unsubscribe", "cancelar suscripción", "remover", "opt-out"):
+            self.assertFalse(optout.is_ambiguous_optout_keyword(kw), kw)
+
+    def test_las_ambiguas_siguen_siendo_optout_keywords(self):
+        """Sin pedido activo conservan su significado de baja: la desambiguación la decide el
+        caller por contexto, no se pierde la keyword."""
+        for kw in ("cancelar", "salir"):
+            self.assertTrue(optout.is_optout_keyword(kw), kw)
+
+    def test_texto_libre_no_es_ambiguo(self):
+        for txt in ("cancelar mi pedido por favor", "quiero salir del centro comercial", ""):
+            self.assertFalse(optout.is_ambiguous_optout_keyword(txt), txt)
