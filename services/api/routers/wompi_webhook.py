@@ -26,7 +26,9 @@ from dependencies.security import _client_ip, webhook_rate_limit_check
 from integrations.wompi_client import (
     create_payment_link_sync,
     get_tenant_wompi_creds,
+    is_void_eligible,
     verify_event_signature,
+    void_transaction_sync,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,6 +154,94 @@ def _process_wompi_event_durable(payload: dict) -> None:
         _record_inbox_error(_get_service_client(), checksum, str(exc))
         return
     _mark_inbox_processed(_get_service_client(), checksum)
+
+
+def _handle_orphan_payment(
+    *,
+    supabase,
+    order: dict,
+    txn_id: str,
+    amount_in_cents: int,
+    payload: dict,
+    current_status: str,
+) -> None:
+    """Un pago APPROVED llegó sobre una orden en estado terminal: el dinero entró y NO hay
+    pedido que lo respalde.
+
+    Escenario real y frecuente (no un borde): el cliente recibe el link de pago, luego aplica un
+    cupón o cambia el carrito. El bot invalida la orden y crea otra — pero Wompi NO expone API
+    para invalidar un `payment_link` (lo documenta `wompi_client`), así que el link viejo sigue
+    pagable ~30 min. Si el cliente paga el viejo: PAGÓ Y NO TIENE PEDIDO.
+
+    Antes esto se descartaba con un `logger.info` y nadie se enteraba. El pago SÍ quedaba en
+    `payments` (se registra antes de este punto), así que el rastro existía — pero sin alerta,
+    sin intento de anulación y sin nada que lo hiciera consultable como "pago huérfano".
+
+    Qué hace ahora:
+      1. ERROR (visible en Sentry) con los datos accionables.
+      2. Intenta el VOID automático si aplica (solo CARD pre-settlement, per el dossier Wompi).
+      3. Marca `payments.status` para que sea CONSULTABLE: 'orphan_voided' si se anuló, o
+         'orphan_refund_pending' si hay que devolver a mano (NEQUI/PSE/Bancolombia no se pueden
+         voidear: los fondos ya se transfirieron).
+    """
+    order_id = order["id"]
+    tenant_id = order["tenant_id"]
+    txn = ((payload.get("data") or {}).get("transaction") or {})
+    method = (txn.get("payment_method_type") or "").upper()
+    paid_at = txn.get("finalized_at") or txn.get("created_at")
+
+    logger.error(
+        "[WOMPI][ORPHAN] pago APPROVED sobre orden en estado '%s' — el cliente PAGÓ y no hay "
+        "pedido que lo respalde. order_id=%s txn_id=%s monto=%s método=%s",
+        current_status, order_id, txn_id, amount_in_cents, method or "desconocido",
+    )
+
+    nuevo_estado = "orphan_refund_pending"
+    if is_void_eligible(method, paid_at):
+        try:
+            private_key, _, environment = get_tenant_wompi_creds(supabase, tenant_id)
+            if private_key:
+                res = void_transaction_sync(
+                    private_key=private_key, environment=environment, transaction_id=txn_id,
+                )
+                if (res or {}).get("status") == "VOIDED":
+                    nuevo_estado = "orphan_voided"
+                    logger.warning(
+                        "[WOMPI][ORPHAN] void OK txn_id=%s order_id=%s — el cobro se anuló",
+                        txn_id, order_id,
+                    )
+                else:
+                    logger.error(
+                        "[WOMPI][ORPHAN] void RECHAZADO txn_id=%s res=%s — queda reembolso manual",
+                        txn_id, res,
+                    )
+            else:
+                logger.error(
+                    "[WOMPI][ORPHAN] sin private_key del tenant %s — no se pudo intentar el void",
+                    tenant_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            # El void es best-effort: si falla, el pago queda marcado para reembolso manual.
+            # NO se propaga: el webhook debe cerrar igual (Wompi bloquea la API ante 5xx).
+            logger.error("[WOMPI][ORPHAN] void falló txn_id=%s: %s", txn_id, exc)
+    else:
+        logger.error(
+            "[WOMPI][ORPHAN] método '%s' NO admite void (solo CARD pre-settlement) — "
+            "REQUIERE REEMBOLSO MANUAL de %s centavos al cliente. order_id=%s txn_id=%s",
+            method or "desconocido", amount_in_cents, order_id, txn_id,
+        )
+
+    # Deja el pago CONSULTABLE: `payments.status` pasa a reflejar que es huérfano, para poder
+    # listar "pagos que necesitan devolución" en vez de tener que cruzar logs.
+    try:
+        supabase.table("payments").update({"status": nuevo_estado}).eq(
+            "wompi_txn_id", txn_id
+        ).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[WOMPI][ORPHAN] no se pudo marcar el pago %s como '%s': %s",
+            txn_id, nuevo_estado, exc,
+        )
 
 
 def _process_wompi_event(payload: dict) -> None:
@@ -303,6 +393,11 @@ def _process_wompi_event(payload: dict) -> None:
                 )
 
     # ── 4. Registrar/actualizar pago en tabla payments (idempotente por txn_id) ─
+    # Se inicializa ANTES del try: si el upsert falla, el except continúa el flujo y más abajo
+    # se consulta `was_duplicate` para distinguir un replay idempotente de un pago huérfano.
+    # False es además la opción SEGURA: si no pudimos registrar el pago, no sabemos que sea un
+    # duplicado, así que se trata como huérfano (que alerta) en vez de descartarlo en silencio.
+    was_duplicate = False
     try:
         was_duplicate = _upsert_payment_record(
             supabase=supabase,
@@ -373,9 +468,38 @@ def _process_wompi_event(payload: dict) -> None:
         and (order.get("cancelled_by_actor") or "") == "system_auto"
     )
     if current_status in TERMINAL_STATES and not _reconcile_ttl_cancel:
-        logger.info(
-            "[WOMPI] orden_estado_terminal order_id=%s txn_id=%s status=%s — idempotente, skip",
-            order_id, txn_id, current_status,
+        # Antes: TODOS estos casos se descartaban con un log INFO. Pero no son el mismo caso:
+        # solo uno es realmente idempotente; los otros dos son DINERO QUE ENTRÓ y que nadie
+        # atendía.
+        #
+        # (a) REPLAY del mismo webhook sobre una orden ya confirmada → idempotente de verdad.
+        #     `was_duplicate` (paso 4) lo distingue: el txn ya estaba en el ledger.
+        # (b) Pago HUÉRFANO sobre una orden CANCELADA. Escenario real y frecuente: el cliente
+        #     recibe el link, luego aplica un cupón o cambia el carrito; el bot invalida la orden
+        #     y crea otra — pero Wompi NO expone API para invalidar un payment_link (lo documenta
+        #     wompi_client) y el link viejo sigue pagable ~30 min. Si el cliente paga el viejo:
+        #     PAGÓ Y NO TIENE PEDIDO.
+        # (c) Pago DISTINTO sobre una orden ya confirmada = posible DOBLE COBRO.
+        #
+        # El pago YA quedó registrado en `payments` (paso 4, antes de este punto), así que el
+        # dinero deja rastro. Lo que faltaba era que alguien ACTUARA. Ahora: se eleva a ERROR
+        # (visible en Sentry), se intenta el void automático si aplica, y si no se puede se
+        # marca para reembolso manual.
+        if was_duplicate and current_status == "confirmed":
+            logger.info(
+                "[WOMPI] replay_idempotente order_id=%s txn_id=%s status=%s — el txn ya estaba "
+                "en el ledger, skip",
+                order_id, txn_id, current_status,
+            )
+            return
+
+        _handle_orphan_payment(
+            supabase=supabase,
+            order=order,
+            txn_id=txn_id,
+            amount_in_cents=amount_in_cents,
+            payload=payload,
+            current_status=current_status,
         )
         return
     if _reconcile_ttl_cancel:
