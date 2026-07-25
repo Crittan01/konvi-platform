@@ -73,7 +73,33 @@ Baseline regenerado con replay real (podman + supabase CLI).
 
 Ordenados por severidad. `[F]` = requiere acción del founder.
 
-1. **RBAC de dinero inexistente en la DB** — las policies de `orders`/`coupons`/`product_variations`
+> ### Avance al cierre del 2026-07-25
+>
+> **7 de los 8 bloqueantes de código están cerrados.** Los 4 que quedan abiertos dependen de
+> acciones externas del founder (Wompi, Aveonline, plantillas Meta, aviso de privacidad) o son el
+> comprobante de compra, en curso.
+>
+> Distinguir dos estados importa, porque no significan lo mismo para un cliente real:
+>
+> | # | Bloqueante | Estado |
+> |---|---|---|
+> | 1 | RBAC de dinero | ✅ **vivo en prod** (#165) |
+> | 5 | Sobreventa | ✅ **vivo en prod** (#168) |
+> | 8 | Conversación duplicada | ✅ **vivo en prod** (#166) |
+> | 6 | Inbound sin durabilidad | ✅ cerrado (#167) — **espera despliegue** |
+> | 7 | Pago huérfano | ✅ cerrado (#169) — **espera despliegue** |
+> | 9 | Cliente mudo | ✅ cerrado (#170 + #171) — **espera despliegue** |
+> | 10 | Escalación sin red | ✅ cerrado (#172) — **espera despliegue** |
+> | 12 | Comprobante de compra | 🔄 en curso |
+> | 2, 3, 4, 11 | Plantillas Meta, Wompi, Aveonline, aviso de privacidad | ⏸️ `[F]` founder |
+>
+> **"Espera despliegue" quiere decir que el arreglo NO protege a nadie todavía.** Las migraciones
+> sí están aplicadas (por eso 1, 5 y 8 están vivos: su arreglo es de base de datos), pero el código
+> de los servicios sigue siendo el anterior. Un despliegue de `develop` incluiría además la
+> migración a Tailwind 4, que espera el visto bueno estético del founder — esa es la decisión que
+> mantiene la brecha abierta.
+
+1. ✅ **CERRADO Y VIVO EN PROD (#165).** **RBAC de dinero inexistente en la DB** — las policies de `orders`/`coupons`/`product_variations`
    son `FOR ALL USING (tenant_id = ...)` **sin distinción de rol**, y `authenticated` conserva los
    GRANT de escritura. Un `operator` (el empleado del Inbox, el caso de uso central) puede cambiar
    `total_amount`, marcar pedidos `confirmed` sin pago y emitir cupones 100% off escribiendo directo
@@ -92,23 +118,23 @@ Ordenados por severidad. `[F]` = requiere acción del founder.
 4. **Guías Aveonline simuladas** `[F]` — con `AVEONLINE_GENERATE_REAL_GUIDES=false` el código fuerza
    `simulate=True` siempre; el cliente recibe por WhatsApp **un tracking que no existe**, sin marcador
    de simulación. → Founder: credenciales productivas + `idagente` correcto. Código: 1-2 días.
-5. **Sobreventa reproducida** — dos reservas activas de la misma variación (camino NORMAL: "agrégame
+5. ✅ **CERRADO Y VIVO EN PROD (#168).** **Sobreventa reproducida** — dos reservas activas de la misma variación (camino NORMAL: "agrégame
    2 más"); el 2.º consume choca con el índice único, **la excepción se traga** y el corte de circuito
    no lo detecta. El cliente paga y el inventario no baja lo vendido. → 2-3 días.
-6. **Inbound sin durabilidad** — el connector ACKea 200 a Meta **antes** de persistir y delega a un
+6. ✅ **CERRADO (#167) — espera despliegue.** **Inbound sin durabilidad** — el connector ACKea 200 a Meta **antes** de persistir y delega a un
    `BackgroundTask` in-process. Si el proceso muere entre el ACK y el INSERT (deploy, OOM, crash), el
    mensaje del cliente **se pierde para siempre** (Meta no reintenta). Contraste: Wompi **sí** tiene
    inbox durable. → 2-3 días.
-7. **Pago APPROVED sobre orden terminal se descarta con log INFO** — el cliente aplica un cupón, el
+7. ✅ **CERRADO (#169) — espera despliegue.** **Pago APPROVED sobre orden terminal se descarta con log INFO** — el cliente aplica un cupón, el
    bot invalida la orden, pero el link viejo sigue pagable ~30 min. Si paga el viejo: **pagó y no
    tiene pedido**, sin void, sin reembolso, sin alerta. → 1-2 días.
-8. **Conversación duplicada** — no existe constraint único sobre `conversations(tenant_id,
+8. ✅ **CERRADO Y VIVO EN PROD (#166).** **Conversación duplicada** — no existe constraint único sobre `conversations(tenant_id,
    customer_phone)` y el upsert es read-then-insert. En WhatsApp lo normal es mandar 2-3 mensajes
    seguidos → dos conversaciones → carrito, FSM y escalación se parten en silencio. → 1 día.
-9. **Paquete "cliente mudo"** — seis caminos independientes donde el cliente queda sin respuesta y
+9. ✅ **CERRADO (#170 + #171) — espera despliegue.** **Paquete "cliente mudo"** — seis caminos independientes donde el cliente queda sin respuesta y
    nadie se entera (entre ellos: escribir "Cancelar" queriendo anular el pedido dispara el **opt-out
    de WhatsApp** y lo deja mudo de por vida). → 2-3 días + 1 día el detector "inbound sin outbound".
-10. **Escalación sin red en las rutas de dinero y legales** — el SLA ancla en `escalation_audit` y
+10. ✅ **CERRADO (#172) — espera despliegue.** **Escalación sin red en las rutas de dinero y legales** — el SLA ancla en `escalation_audit` y
     hace `continue` si no existe; solo 4 de ~10 rutas la escriben, y quedan fuera justo retracto
     Ley 1480, DSR Habeas Data y menor de edad. → 2 días.
 11. **Aviso de privacidad no publicado** `[F]` — el archivo es un template con placeholders que
