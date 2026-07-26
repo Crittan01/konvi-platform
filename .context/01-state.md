@@ -59,8 +59,15 @@ por la etiqueta de estado (un COD nace `confirmed` sin haberse cobrado).
 **Stack:** Next 15→16 + ESLint 9 flat + Sentry v10 (#152-#155, desplegado) · Tailwind 3→4 (#158,
 mergeado, **espera visto bueno estético**) · identidad legal del tenant persona natural/jurídica (#163).
 
-**Abierto:** comprobante de compra (en curso) + 4 bloqueantes founder-gated (plantillas Meta, Wompi
-producción, Aveonline producción, aviso de privacidad).
+**Comprobante de compra (ADR-0040): IMPLEMENTADO y en prod** (#180-#186). El comprador recibe
+acuse corto por WhatsApp + detalle completo por correo, y el comerciante lo imprime desde
+`/dashboard/receipts`. Se emite solo unos minutos después de confirmar y se anula solo si el pedido
+se cancela. **La guarda que más importa: si las cifras de un pedido no cuadran, NO se emite
+documento — se emite alerta** (Ley 1480 art. 26: ante dos precios el consumidor solo debe el menor).
+
+**Abierto — todo founder-gated, nada de código:** plantillas Meta, Wompi producción, Aveonline
+producción, aviso de privacidad, la dirección de notificación judicial de KAIU (único campo legal
+que le falta al comprobante), y validar si el crash de función de trigger es alcanzable vía REST.
 
 ---
 

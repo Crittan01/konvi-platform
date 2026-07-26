@@ -1,6 +1,6 @@
 # ADR-0040 — Comprobante de compra no fiscal
 
-**Estado:** PROPUESTO · 7 decisiones abiertas del founder (§6), una de ellas bloqueante del diseño de datos
+**Estado:** **IMPLEMENTADO Y EN PRODUCCIÓN** (2026-07-25, PRs #180-#186) · quedan 2 decisiones del founder (§6.1 y §6.3), ninguna bloqueante para lo ya desplegado
 **Fecha:** 2026-07-25
 **Origen:** bloqueante 12 de `docs/reports/launch_readiness_2026_07_25.md` — *"el comprador no recibe
 NINGÚN documento de compra"*.
@@ -192,3 +192,47 @@ Correcciones que produjo esa segunda pasada, y que muestran por qué hacía falt
 
 Todo lo que no pudo anclarse en fuente oficial quedó marcado como no verificado y **no** se usó para
 justificar decisiones de diseño.
+
+---
+
+## 8. Estado de implementación (2026-07-25)
+
+Todo lo de §3 y §4 está **desplegado y verificado en producción**. La vista imprimible se
+certificó con Chromium contra prod (HTTP 200, sin errores de consola, entrada en el menú).
+
+| Pieza | PR | Cómo se resolvió |
+|---|---|---|
+| Coherencia del dinero — la guarda | #180 | `rpc_order_money` + barrido que alerta. **Prod: 0 pedidos incoherentes en toda la historia** |
+| Armado congelado | #181 | `order_receipts` + snapshot + `content_hash` + consecutivo propio |
+| Identidad del vendedor | #181 | `tenant_seller_identity()` en SQL |
+| Emisión automática | #182 | Barrido diferido |
+| Anulación | #182 | Trigger en `orders` + red de reconciliación |
+| Acuse al comprador | #183 | WhatsApp, corto |
+| Detalle completo | #185 | Correo (Resend) |
+| Imprimible | #186 | `/dashboard/receipts` — Cmd+P → PDF, cero dependencias |
+
+### Tres decisiones que se tomaron durante la implementación, con su motivo
+
+**La emisión NO es un trigger, aunque era lo natural.** En contra entrega el pedido nace
+`confirmed` en el INSERT y sus `order_items` se escriben DESPUÉS: un trigger vería subtotal
+0 contra un total mayor, concluiría "cifras incoherentes" y no emitiría **nunca** — justo
+en uno de los caminos más frecuentes. Es un barrido diferido unos minutos, holgadamente
+dentro del plazo del lit. d).
+
+**La identidad del vendedor vive en SQL, no en Python.** Se escribió primero como módulo de
+`services/api` y se retiró antes de shippearlo: `services/api` y `services/ai-orchestrator`
+no pueden importarse entre sí (rootDir separados en Render) y los cinco caminos a
+`confirmed` están repartidos entre ambos, así que habría que duplicar la cascada.
+
+**El correo es un barrido HERMANO del de WhatsApp, con columnas propias.** No es estilo: el
+estado compartido no puede expresar "WhatsApp saltado, correo enviado", y el barrido de
+acuses excluye justamente las filas que el correo viene a rescatar.
+
+### Lo que quedó FUERA, con su motivo
+
+- **Tiempo de entrega** (parte del contenido tasado del lit. d): no existe en el snapshot ni
+  en `orders`; solo aparece como `eta_days` no persistido de la cotización Aveonline.
+  **Es la única pieza del contenido tasado que falta** y requiere decidir de dónde leerla.
+- **Enlace público firmado, PDF server-side, plantillas HSM, MercadoLibre** — diferidos
+  según §4.
+- **Enganche con supresión de Habeas Data** — depende de §6.1, que necesita abogado.
