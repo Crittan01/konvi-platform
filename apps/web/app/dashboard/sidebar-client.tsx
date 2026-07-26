@@ -11,8 +11,7 @@ import {
   Menu, X, ChevronDown, TrendingUp, Building2,
   Wallet, DollarSign, AlertCircle, Bot, Lock,
   Store, Crown, Briefcase, Headphones, Tag, Tags,
-  Shield, Activity, Scale, Archive, Trash2,
-} from 'lucide-react'
+  Shield, Activity, Scale, Archive, Trash2, Receipt } from 'lucide-react'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +64,7 @@ const NAV_ITEMS: NavItem[] = [
       { kind: 'leaf', href: '/dashboard/shipping',   label: 'Cotizador',   icon: Truck,       roles: [], integration: 'shipping' },
       { kind: 'leaf', href: '/dashboard/promotions', label: 'Promociones', icon: Tag,         roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/claims',     label: 'Reclamos',    icon: AlertCircle, roles: [] },
+      { kind: 'leaf', href: '/dashboard/receipts',   label: 'Comprobantes', icon: Receipt,    roles: [] },
     ],
   },
 
