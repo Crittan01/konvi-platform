@@ -241,6 +241,9 @@ RECEIPT_BATCH = int(os.getenv("RECEIPT_BATCH", "50"))
 RECEIPT_ACK_ENABLED = os.getenv(
     "RECEIPT_ACK_ENABLED", "true"
 ).lower() in {"1", "true", "yes", "on"}
+RECEIPT_EMAIL_ENABLED = os.getenv(
+    "RECEIPT_EMAIL_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
 TENANT_HARD_DELETE_ENABLED = os.getenv(
@@ -363,6 +366,7 @@ class OrchestratorWorker:
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
         self._receipt_enabled = RECEIPT_ISSUE_ENABLED
         self._receipt_ack_enabled = RECEIPT_ACK_ENABLED
+        self._receipt_email_enabled = RECEIPT_EMAIL_ENABLED
         self._last_receipt_at = 0.0
         self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
@@ -411,6 +415,8 @@ class OrchestratorWorker:
             "receipts_voided": 0,
             "receipt_acks_sent": 0,
             "receipt_acks_out_of_window": 0,
+            "receipt_emails_sent": 0,
+            "receipt_emails_failed": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -1556,6 +1562,7 @@ class OrchestratorWorker:
             )
 
         await self._send_receipt_acks()
+        await self._send_receipt_emails()
 
         # Red que atrapa lo que el trigger de cancelación no cubrió: filas anteriores a
         # él, o una anulación que falló. Un comprobante vivo sobre un pedido cancelado es
@@ -1692,6 +1699,96 @@ class OrchestratorWorker:
                 }).execute()
             except Exception as exc:
                 logger.warning("[COMPROBANTE] acuse enviado pero no persistido: %s", exc)
+
+    async def _send_receipt_emails(self) -> None:
+        """Le manda al comprador el DETALLE COMPLETO del comprobante por correo.
+
+        Es un barrido HERMANO del acuse por WhatsApp, no un paso dentro de él, y la razón
+        es concreta: el barrido de acuses excluye las filas con `ack_skipped_reason` y las
+        que no tienen conversación — que son exactamente la población que el correo viene
+        a rescatar. Hasta ahora el worker prometía "queda disponible por correo" sobre
+        filas que habían quedado fuera para siempre.
+
+        Los dos canales son independientes a propósito: un comprobante puede haber llegado
+        por uno y no por el otro, y el estado tiene que poder decirlo.
+        """
+        if not self._receipt_email_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        try:
+            pendientes = self.supabase.rpc(
+                "rpc_find_receipts_pending_email", {"p_limit": RECEIPT_BATCH},
+            ).execute().data or []
+        except Exception as exc:
+            logger.warning("[COMPROBANTE][EMAIL] no pude buscar pendientes: %s", exc)
+            return
+
+        for r in pendientes:
+            receipt_id, tenant_id = r.get("receipt_id"), r.get("tenant_id")
+            if not (receipt_id and tenant_id):
+                continue
+
+            destinatario = r.get("email")
+            if not destinatario:
+                # No es un fallo: es un hecho del comprador. Se marca con motivo para que
+                # no quede pendiente para siempre, y el acuse de WhatsApp ya lo cubrió.
+                self._marcar_email(receipt_id, tenant_id, None, "comprador_sin_correo")
+                continue
+
+            try:
+                from receipt_email import send_receipt_email  # noqa: PLC0415
+                ok = await send_receipt_email(
+                    receipt_id=receipt_id, tenant_id=tenant_id,
+                    numero=r.get("numero"), snapshot=r.get("snapshot") or {},
+                    destinatario=destinatario,
+                    politica=self._politica_cancelacion(tenant_id),
+                )
+            except Exception as exc:
+                logger.error("[COMPROBANTE][EMAIL] fallo enviando %s: %s", r.get("numero"), exc)
+                self._metrics["receipt_emails_failed"] += 1
+                continue
+
+            if not ok:
+                # No se marca: el próximo barrido reintenta. Un comprobante tiene plazo
+                # legal, así que darlo por perdido en el primer fallo sería peor.
+                self._metrics["receipt_emails_failed"] += 1
+                logger.error("[COMPROBANTE][EMAIL] %s no salió — se reintenta", r.get("numero"))
+                continue
+
+            if self._marcar_email(receipt_id, tenant_id, destinatario, None):
+                self._metrics["receipt_emails_sent"] += 1
+                logger.info("[COMPROBANTE][EMAIL] %s enviado", r.get("numero"))
+
+    def _politica_cancelacion(self, tenant_id: str) -> dict:
+        """Condiciones de retracto del tenant. Se LEEN, no se hardcodean: son
+        configurables por comerciante. Los mínimos de ley los aplica el renderizador."""
+        try:
+            res = (
+                self.supabase.table("tenant_cancellation_policy")
+                .select("enable_retracto_flow, retracto_window_business_days, "
+                        "retracto_return_paid_by, manual_refund_legal_days")
+                .eq("tenant_id", tenant_id)
+                .limit(1).execute()
+            )
+            return (res.data or [{}])[0]
+        except Exception as exc:
+            logger.warning("[COMPROBANTE][EMAIL] sin política de cancelación de %s: %s",
+                           str(tenant_id)[:8], exc)
+            return {}
+
+    def _marcar_email(self, receipt_id, tenant_id, email_to, motivo) -> bool:
+        """True si esta corrida fue la que marcó. Espejo de `_marcar_acuse`."""
+        try:
+            res = self.supabase.rpc("rpc_mark_receipt_email", {
+                "p_receipt_id": receipt_id, "p_tenant_id": tenant_id,
+                "p_email": email_to, "p_skipped": motivo,
+            }).execute()
+            return bool(res.data)
+        except Exception as exc:
+            logger.error("[COMPROBANTE][EMAIL] no pude marcar %s: %s", receipt_id, exc)
+            return False
 
     def _marcar_acuse(self, receipt_id, tenant_id, canal, motivo) -> bool:
         """True si esta corrida fue la que marcó. False si otra ya lo había hecho."""

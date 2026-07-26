@@ -2658,6 +2658,35 @@ COMMENT ON FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integ
 
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_receipts_pending_email"("p_limit" integer DEFAULT 50) RETURNS TABLE("receipt_id" "uuid", "tenant_id" "uuid", "numero" "text", "snapshot" "jsonb", "email" "text")
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT r.id, r.tenant_id, r.numero, r.snapshot,
+           NULLIF(trim(c.email), '')
+    FROM public.order_receipts r
+    JOIN public.orders   o ON o.id = r.order_id AND o.tenant_id = r.tenant_id
+    LEFT JOIN public.contacts c ON c.id = o.contact_id AND c.tenant_id = r.tenant_id
+    WHERE r.email_sent_at IS NULL
+      AND r.email_skipped_reason IS NULL
+      -- Un comprobante anulado no se remite: mandar un documento que ya no es
+      -- cierto sería peor que no mandarlo.
+      AND r.voided_at IS NULL
+      -- A propósito NO se filtra por el estado del acuse de WhatsApp: los dos
+      -- canales son independientes, y los que WhatsApp no alcanzó son justamente
+      -- los que más necesitan el correo.
+    ORDER BY r.issued_at ASC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_receipts_pending_email"("p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_receipts_pending_email"("p_limit" integer) IS 'Comprobantes cuyo detalle completo todavía no salió por correo. Devuelve el email en NULL cuando el comprador no tiene: el caller lo marca como saltado con motivo, en vez de dejarlo pendiente para siempre.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "numero" "text", "estado_pedido" "text")
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public', 'pg_temp'
@@ -2866,6 +2895,27 @@ ALTER FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_
 
 
 COMMENT ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") IS 'Registra que el acuse salió (o por qué no). El guard ack_sent_at IS NULL es la idempotencia: un reintento del barrido no le manda dos acuses al mismo comprador.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_email" "text" DEFAULT NULL::"text", "p_skipped" "text" DEFAULT NULL::"text") RETURNS boolean
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    UPDATE public.order_receipts
+       SET email_sent_at = CASE WHEN p_skipped IS NULL THEN NOW() ELSE NULL END,
+           email_to      = CASE WHEN p_skipped IS NULL THEN left(p_email, 320) ELSE NULL END,
+           email_skipped_reason = left(p_skipped, 200)
+     WHERE id = p_receipt_id AND tenant_id = p_tenant_id
+       AND email_sent_at IS NULL     -- nadie recibe dos veces el mismo comprobante
+    RETURNING true;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_email" "text", "p_skipped" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_email" "text", "p_skipped" "text") IS 'Registra que el correo salió (o por qué no). El guard email_sent_at IS NULL es la idempotencia: un reintento del barrido no le manda dos veces el mismo documento.';
 
 
 
@@ -5000,7 +5050,10 @@ CREATE TABLE IF NOT EXISTS "public"."order_receipts" (
     "void_reason" "text",
     "ack_sent_at" timestamp with time zone,
     "ack_channel" "text",
-    "ack_skipped_reason" "text"
+    "ack_skipped_reason" "text",
+    "email_sent_at" timestamp with time zone,
+    "email_to" "text",
+    "email_skipped_reason" "text"
 );
 
 
@@ -5020,6 +5073,14 @@ COMMENT ON COLUMN "public"."order_receipts"."ack_sent_at" IS 'Cuándo se le remi
 
 
 COMMENT ON COLUMN "public"."order_receipts"."ack_skipped_reason" IS 'Por qué no se pudo remitir. Sin esto, un acuse que nunca sale es indistinguible de uno pendiente — y el plazo legal corre igual.';
+
+
+
+COMMENT ON COLUMN "public"."order_receipts"."email_sent_at" IS 'Cuándo salió el correo con el detalle completo. Independiente de ack_sent_at: son dos canales y un comprobante puede haber llegado por uno y no por el otro.';
+
+
+
+COMMENT ON COLUMN "public"."order_receipts"."email_skipped_reason" IS 'Por qué no se pudo enviar (típicamente: el comprador no tiene correo). Sin esto, un correo que nunca sale es indistinguible de uno pendiente.';
 
 
 
@@ -7381,6 +7442,10 @@ CREATE INDEX "idx_order_receipts_ack_pendiente" ON "public"."order_receipts" USI
 
 
 CREATE INDEX "idx_order_receipts_anulados" ON "public"."order_receipts" USING "btree" ("tenant_id", "voided_at") WHERE ("voided_at" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_order_receipts_email_pendiente" ON "public"."order_receipts" USING "btree" ("tenant_id", "issued_at") WHERE (("email_sent_at" IS NULL) AND ("email_skipped_reason" IS NULL) AND ("voided_at" IS NULL));
 
 
 
@@ -10367,6 +10432,11 @@ GRANT ALL ON FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" int
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_find_receipts_pending_email"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_receipts_pending_email"("p_limit" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) TO "service_role";
 
@@ -10384,6 +10454,11 @@ GRANT ALL ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenan
 
 REVOKE ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_email" "text", "p_skipped" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_email" "text", "p_skipped" "text") TO "service_role";
 
 
 

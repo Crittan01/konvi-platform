@@ -428,6 +428,36 @@ services:
       # exponen aquí para evitar cambios silenciosos y dar un runbook operable.
       # Valores = default del código. Runbook + semántica: services/ai-orchestrator/README.md.
       #
+      # Cliente mudo: el cliente escribió y no le llegó respuesta. Vigila el SÍNTOMA,
+      # así que cubre de una vez los seis caminos por los que un mensaje se pierde.
+      - key: SILENT_CONV_DETECTOR_ENABLED
+        value: "true"
+      - key: SILENT_CONV_CHECK_INTERVAL_SECONDS
+        value: "300"                             # 5 min
+      - key: SILENT_CONV_SILENCE_MINUTES
+        value: "10"                              # procesar tarda ~9-60s; 10 min ya es pérdida
+      # Coherencia del dinero: pedidos cuyas cifras no cuadran consigo mismas.
+      # Ley 1480 art. 26 — ante dos precios el consumidor solo debe el menor.
+      - key: ORDER_COHERENCE_CHECK_ENABLED
+        value: "true"
+      - key: ORDER_COHERENCE_INTERVAL_SECONDS
+        value: "1800"                            # 30 min
+      - key: ORDER_COHERENCE_WINDOW_HOURS
+        value: "48"
+      # Comprobante de compra (ADR-0040). Ley 1480 art. 50 lit. d) obliga a remitir
+      # acuse de recibo a más tardar el día calendario siguiente.
+      - key: RECEIPT_ISSUE_ENABLED
+        value: "true"
+      - key: RECEIPT_ISSUE_INTERVAL_SECONDS
+        value: "600"                             # 10 min
+      - key: RECEIPT_MIN_AGE_MINUTES
+        value: "10"                              # margen para que existan los order_items
+      - key: RECEIPT_WINDOW_HOURS
+        value: "72"
+      - key: RECEIPT_ACK_ENABLED
+        value: "true"                            # acuse corto por WhatsApp
+      - key: RECEIPT_EMAIL_ENABLED
+        value: "true"                            # detalle completo por correo
       # Poll de anulaciones Wompi (voids) tras cancelación/expiry (R-01 sibling).
       - key: WOMPI_VOID_POLL_ENABLED
         value: "true"
