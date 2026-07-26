@@ -227,6 +227,18 @@ ORDER_COHERENCE_INTERVAL_SECONDS = int(
 ORDER_COHERENCE_WINDOW_HOURS = int(os.getenv("ORDER_COHERENCE_WINDOW_HOURS", "48"))
 ORDER_COHERENCE_BATCH = int(os.getenv("ORDER_COHERENCE_BATCH", "50"))
 
+# Comprobante de compra (ADR-0040). La emisión es diferida y no un trigger porque en
+# contra entrega el pedido NACE confirmado y sus order_items se insertan después: un
+# trigger vería subtotal 0 y concluiría que las cifras no cuadran. Ley 1480 art. 50
+# lit. d) da hasta el día calendario siguiente, así que unos minutos sobran.
+RECEIPT_ISSUE_ENABLED = os.getenv(
+    "RECEIPT_ISSUE_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+RECEIPT_ISSUE_INTERVAL_SECONDS = int(os.getenv("RECEIPT_ISSUE_INTERVAL_SECONDS", "600"))
+RECEIPT_MIN_AGE_MINUTES = int(os.getenv("RECEIPT_MIN_AGE_MINUTES", "10"))
+RECEIPT_WINDOW_HOURS = int(os.getenv("RECEIPT_WINDOW_HOURS", "72"))
+RECEIPT_BATCH = int(os.getenv("RECEIPT_BATCH", "50"))
+
 # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
 TENANT_HARD_DELETE_ENABLED = os.getenv(
     "TENANT_HARD_DELETE_ENABLED", "false"
@@ -346,6 +358,8 @@ class OrchestratorWorker:
         self._last_sla_check_at = 0.0
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
+        self._receipt_enabled = RECEIPT_ISSUE_ENABLED
+        self._last_receipt_at = 0.0
         self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
@@ -388,6 +402,9 @@ class OrchestratorWorker:
             "silent_conversations_recovered": 0,
             # Cada unidad es plata que no cuadra en un pedido real.
             "incoherent_orders_detected": 0,
+            "receipts_issued": 0,
+            "receipts_blocked_incoherent": 0,
+            "receipts_voided": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -462,6 +479,7 @@ class OrchestratorWorker:
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
         await self._run_job("order_coherence", self._check_order_coherence_if_due())
+        await self._run_job("receipts", self._issue_receipts_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
         await self._run_job("health_metrics", self._collect_health_metrics_if_due())
 
@@ -1451,6 +1469,114 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
                 continue
+
+    async def _issue_receipts_if_due(self) -> None:
+        """Emite el comprobante de los pedidos confirmados que aún no lo tienen.
+
+        Ley 1480 art. 50 lit. d) obliga a remitir acuse de recibo del pedido a más tardar
+        el DÍA CALENDARIO SIGUIENTE. Hoy el comprador no recibe ningún documento.
+
+        POR QUÉ UN BARRIDO Y NO UN TRIGGER: hay cinco caminos a 'confirmed' repartidos en
+        tres servicios, así que enganchar la emisión en cada uno garantiza que el sexto no
+        la tenga. Pero un trigger tampoco sirve — en contra entrega el pedido nace
+        confirmado y sus `order_items` se insertan DESPUÉS, así que vería subtotal 0
+        contra un total mayor, concluiría "cifras incoherentes" y no emitiría nunca.
+        Diferir unos minutos resuelve ambas cosas y sigue estando holgadamente dentro
+        del plazo legal.
+
+        Un pedido cuyas cifras no cuadran NO recibe comprobante: se registra y se alerta.
+        Documentar una contradicción es peor que no documentar (art. 26).
+
+        Este barrido solo EMITE. La entrega al comprador es el paso siguiente.
+        """
+        if not self._receipt_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if now - self._last_receipt_at < max(60, RECEIPT_ISSUE_INTERVAL_SECONDS):
+            return
+        self._last_receipt_at = now
+
+        try:
+            res = self.supabase.rpc(
+                "rpc_find_orders_pending_receipt",
+                {
+                    "p_min_age_minutes": RECEIPT_MIN_AGE_MINUTES,
+                    "p_window_hours": RECEIPT_WINDOW_HOURS,
+                    "p_limit": RECEIPT_BATCH,
+                },
+            ).execute()
+            pendientes = res.data or []
+        except Exception as exc:
+            logger.warning("[COMPROBANTE] no pude buscar pedidos sin comprobante: %s", exc)
+            return
+
+        for p in pendientes:
+            order_id, tenant_id = p.get("order_id"), p.get("tenant_id")
+            if not (order_id and tenant_id):
+                continue
+            try:
+                r = self.supabase.rpc(
+                    "rpc_issue_receipt",
+                    {"p_order_id": order_id, "p_tenant_id": tenant_id},
+                ).execute()
+                fila = (r.data or [{}])[0] if isinstance(r.data, list) else (r.data or {})
+            except Exception as exc:
+                logger.error("[COMPROBANTE] fallo emitiendo order=%s: %s",
+                             str(order_id)[:8], exc)
+                continue
+
+            motivo = fila.get("motivo")
+            if motivo == "cifras_incoherentes":
+                self._metrics["receipts_blocked_incoherent"] += 1
+                logger.error(
+                    "[COMPROBANTE] order=%s tenant=%s SIN comprobante: sus cifras no cuadran. "
+                    "Corregir el pedido antes de documentarlo (Ley 1480 art. 26).",
+                    str(order_id)[:8], str(tenant_id)[:8],
+                )
+                continue
+            if motivo:
+                logger.warning("[COMPROBANTE] order=%s no emitido: %s", str(order_id)[:8], motivo)
+                continue
+            if fila.get("ya_existia"):
+                continue
+
+            self._metrics["receipts_issued"] += 1
+            logger.info(
+                "[COMPROBANTE] %s emitido para order=%s tenant=%s",
+                fila.get("numero"), str(order_id)[:8], str(tenant_id)[:8],
+            )
+
+        # Red que atrapa lo que el trigger de cancelación no cubrió: filas anteriores a
+        # él, o una anulación que falló. Un comprobante vivo sobre un pedido cancelado es
+        # un comprador con un documento que afirma una compra que ya no existe.
+        try:
+            colgados = self.supabase.rpc(
+                "rpc_find_receipts_to_void", {"p_limit": RECEIPT_BATCH},
+            ).execute().data or []
+        except Exception as exc:
+            logger.warning("[COMPROBANTE] no pude buscar comprobantes por anular: %s", exc)
+            return
+
+        for c in colgados:
+            order_id, tenant_id = c.get("order_id"), c.get("tenant_id")
+            if not (order_id and tenant_id):
+                continue
+            try:
+                self.supabase.rpc("rpc_void_receipt", {
+                    "p_order_id": order_id, "p_tenant_id": tenant_id,
+                    "p_reason": "pedido cancelado (reconciliación)",
+                }).execute()
+                self._metrics["receipts_voided"] += 1
+                logger.warning(
+                    "[COMPROBANTE] %s anulado por reconciliación — el pedido %s está cancelado",
+                    c.get("numero"), str(order_id)[:8],
+                )
+            except Exception as exc:
+                logger.error("[COMPROBANTE] no pude anular el de order=%s: %s",
+                             str(order_id)[:8], exc)
 
     async def _check_order_coherence_if_due(self) -> None:
         """Pedidos cuyas cifras no cuadran consigo mismas.

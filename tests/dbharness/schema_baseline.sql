@@ -2595,6 +2595,55 @@ COMMENT ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integ
 
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer DEFAULT 10, "p_window_hours" integer DEFAULT 72, "p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "confirmado_hace_min" integer)
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT o.id, o.tenant_id,
+           (EXTRACT(EPOCH FROM (NOW() - o.created_at)) / 60)::INT
+    FROM public.orders o
+    WHERE o.status IN ('confirmed', 'processing', 'shipped', 'delivered')
+      -- Margen para que los `order_items` ya estén escritos (ver cabecera).
+      AND o.created_at <= NOW() - make_interval(mins => p_min_age_minutes)
+      -- Cota inferior: no reprocesar el histórico entero en cada barrido. Un
+      -- pedido más viejo que la ventana ya no se documenta automáticamente.
+      AND o.created_at >= NOW() - make_interval(hours => p_window_hours)
+      AND NOT EXISTS (
+            SELECT 1 FROM public.order_receipts r
+            WHERE r.order_id = o.id AND r.tenant_id = o.tenant_id
+      )
+    ORDER BY o.created_at ASC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) IS 'Pedidos confirmados que todavía no tienen comprobante. Cross-tenant por diseño (lo corre un cron sin JWT). La emisión es diferida y no un trigger porque en contra entrega el pedido nace confirmado ANTES de que existan sus order_items.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "numero" "text", "estado_pedido" "text")
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT r.order_id, r.tenant_id, r.numero, o.status
+    FROM public.order_receipts r
+    JOIN public.orders o ON o.id = r.order_id AND o.tenant_id = r.tenant_id
+    WHERE r.voided_at IS NULL AND o.status = 'cancelled'
+    ORDER BY r.issued_at ASC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) IS 'Comprobantes vivos sobre pedidos cancelados: la red que atrapa lo que el trigger no cubrió (filas anteriores a él, o una anulación que falló).';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer DEFAULT 10, "p_window_hours" integer DEFAULT 24, "p_limit" integer DEFAULT 25) RETURNS TABLE("conversation_id" "uuid", "tenant_id" "uuid", "customer_phone" "text", "last_inbound_at" timestamp with time zone, "silence_minutes" integer)
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public', 'pg_temp'
@@ -3671,6 +3720,33 @@ $$;
 
 
 ALTER FUNCTION "public"."touch_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."trg_void_receipt_on_cancel"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+    IF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+        -- Best-effort a propósito: que falle la anulación del documento NO puede
+        -- impedir que se cancele el pedido. Queda el WARNING y el barrido de
+        -- consistencia lo levanta después.
+        BEGIN
+            PERFORM public.rpc_void_receipt(NEW.id, NEW.tenant_id, 'pedido cancelado');
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING '[COMPROBANTE] no pude anular el de order=% : %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."trg_void_receipt_on_cancel"() OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."trg_void_receipt_on_cancel"() IS 'Anula el comprobante cuando el pedido se cancela, venga la cancelación de donde venga. Es trigger y no barrido porque acá no hay dependencia de orden de INSERT, y porque cada minuto de demora es un comprador con un documento que ya no es cierto.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."update_claims_updated_at"() RETURNS "trigger"
@@ -7666,6 +7742,10 @@ CREATE OR REPLACE TRIGGER "kb_documents_updated_at" BEFORE UPDATE ON "public"."k
 
 
 
+CREATE OR REPLACE TRIGGER "orders_void_receipt_on_cancel" AFTER UPDATE OF "status" ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."trg_void_receipt_on_cancel"();
+
+
+
 CREATE OR REPLACE TRIGGER "pii_access_log_no_delete" BEFORE DELETE ON "public"."pii_access_log" FOR EACH ROW EXECUTE FUNCTION "public"."pii_access_log_block_modify"();
 
 
@@ -10217,6 +10297,16 @@ GRANT ALL ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" int
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) TO "service_role";
 
@@ -10405,6 +10495,11 @@ GRANT ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() TO "service_
 GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() TO "service_role";
 
 
 
