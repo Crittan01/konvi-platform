@@ -215,6 +215,18 @@ SILENT_CONV_SILENCE_MINUTES = int(
 )
 SILENT_CONV_BATCH = int(os.getenv("SILENT_CONV_BATCH", "25"))
 
+# Pedidos cuyas cifras no cuadran consigo mismas (ítems + envío − descuento ≠ total).
+# `confirm_rate` las producía en silencio hasta #175; sin este barrido la única forma de
+# enterarse era que alguien mirara ese pedido en concreto.
+ORDER_COHERENCE_CHECK_ENABLED = os.getenv(
+    "ORDER_COHERENCE_CHECK_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+ORDER_COHERENCE_INTERVAL_SECONDS = int(
+    os.getenv("ORDER_COHERENCE_INTERVAL_SECONDS", "1800")  # 30 min
+)
+ORDER_COHERENCE_WINDOW_HOURS = int(os.getenv("ORDER_COHERENCE_WINDOW_HOURS", "48"))
+ORDER_COHERENCE_BATCH = int(os.getenv("ORDER_COHERENCE_BATCH", "50"))
+
 # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
 TENANT_HARD_DELETE_ENABLED = os.getenv(
     "TENANT_HARD_DELETE_ENABLED", "false"
@@ -333,6 +345,8 @@ class OrchestratorWorker:
         self._last_wompi_inbox_cleanup_at = 0.0
         self._last_sla_check_at = 0.0
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
+        self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
+        self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
         self._last_stale_sweep_at = 0.0
@@ -372,6 +386,8 @@ class OrchestratorWorker:
             # cliente real que se quedó esperando — no un contador técnico.
             "silent_conversations_detected": 0,
             "silent_conversations_recovered": 0,
+            # Cada unidad es plata que no cuadra en un pedido real.
+            "incoherent_orders_detected": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -445,6 +461,7 @@ class OrchestratorWorker:
         await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
+        await self._run_job("order_coherence", self._check_order_coherence_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
         await self._run_job("health_metrics", self._collect_health_metrics_if_due())
 
@@ -1434,6 +1451,65 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
                 continue
+
+    async def _check_order_coherence_if_due(self) -> None:
+        """Pedidos cuyas cifras no cuadran consigo mismas.
+
+        La suma de los ítems más el envío menos el descuento debería dar el total que se
+        cobra. Cuando no da, el pedido dice dos precios distintos a la vez — y Ley 1480
+        art. 26 es explícita: en ese caso el consumidor solo está obligado al menor.
+
+        No es hipotético. `confirm_rate` bajaba la tarifa real de envío a la orden y NO
+        recalculaba el total, así que se cobraba una cifra que ya no correspondía a las
+        líneas del pedido (cerrado en #175). Nadie se enteraba: la incoherencia solo
+        aparecía si alguien miraba ese pedido en concreto.
+
+        El cálculo vive en `rpc_order_money` y no acá a propósito: hay cinco caminos a
+        'confirmed' repartidos en tres servicios, y una convención que solo cumplen
+        algunas rutas es exactamente el error que ya se pagó dos veces hoy.
+
+        Es además la guarda previa del comprobante de compra: si las cifras no cuadran no
+        se emite documento, se emite alerta. Documentar una contradicción es peor que no
+        documentar (ADR-0040).
+        """
+        if not self._order_coherence_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if now - self._last_order_coherence_at < max(60, ORDER_COHERENCE_INTERVAL_SECONDS):
+            return
+        self._last_order_coherence_at = now
+
+        try:
+            res = self.supabase.rpc(
+                "rpc_find_incoherent_orders",
+                {
+                    "p_window_hours": ORDER_COHERENCE_WINDOW_HOURS,
+                    "p_limit": ORDER_COHERENCE_BATCH,
+                },
+            ).execute()
+            malos = res.data or []
+        except Exception as exc:
+            # La RPC puede no existir todavía si el worker se desplegó antes que la migración.
+            logger.warning("[DINERO] no pude revisar la coherencia de los pedidos: %s", exc)
+            return
+
+        if not malos:
+            return
+
+        self._metrics["incoherent_orders_detected"] += len(malos)
+        logger.error(
+            "[DINERO] %d pedido(s) con cifras que no cuadran — revisar antes de cobrar o documentar",
+            len(malos),
+        )
+        for o in malos:
+            logger.error(
+                "[DINERO] order=%s tenant=%s estado=%s cobrado=%s calculado=%s diferencia=%s",
+                str(o.get("order_id"))[:8], str(o.get("tenant_id"))[:8], o.get("status"),
+                o.get("total_registrado"), o.get("total_calculado"), o.get("diferencia"),
+            )
 
     async def _detect_silent_conversations_if_due(self) -> None:
         """El cliente escribió y no le llegó respuesta: alerta + escala a un humano.

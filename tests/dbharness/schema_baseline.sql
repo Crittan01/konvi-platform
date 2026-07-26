@@ -2573,6 +2573,28 @@ $$;
 ALTER FUNCTION "public"."rpc_dashboard_revenue"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer DEFAULT 48, "p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "status" "text", "total_registrado" numeric, "total_calculado" numeric, "diferencia" numeric)
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT o.id, o.tenant_id, o.status, m.total_registrado, m.total_calculado, m.diferencia
+    FROM public.orders o
+    CROSS JOIN LATERAL public.rpc_order_money(o.id, o.tenant_id) m
+    WHERE o.status NOT IN ('cancelled', 'pending')
+      AND o.created_at >= NOW() - make_interval(hours => p_window_hours)
+      AND NOT m.coherente
+    ORDER BY ABS(m.diferencia) DESC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer, "p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer, "p_limit" integer) IS 'Pedidos recientes cuyas cifras no cuadran consigo mismas. Cross-tenant por diseño (lo corre un cron sin JWT) — de ahí que solo service_role la ejecute.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer DEFAULT 10, "p_window_hours" integer DEFAULT 24, "p_limit" integer DEFAULT 25) RETURNS TABLE("conversation_id" "uuid", "tenant_id" "uuid", "customer_phone" "text", "last_inbound_at" timestamp with time zone, "silence_minutes" integer)
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public', 'pg_temp'
@@ -2725,6 +2747,56 @@ ALTER FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_pr
 
 
 COMMENT ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) IS 'ML reliability — single-flight del refresh de token: UPDATE condicional atómico. Devuelve un fencing token (uuid) si este caller ganó el lease, NULL si otro lo tiene. TTL evita deadlock si el holder crashea.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") RETURNS TABLE("subtotal" numeric, "descuento_nominal" numeric, "descuento_aplicado" numeric, "envio" numeric, "total_calculado" numeric, "total_registrado" numeric, "coherente" boolean, "diferencia" numeric)
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    WITH o AS (
+        SELECT ord.id,
+               COALESCE(ord.shipping_cost, 0)   AS envio,
+               COALESCE(ord.discount_amount, 0) AS descuento,
+               COALESCE(ord.total_amount, 0)    AS total
+        FROM public.orders ord
+        WHERE ord.id = p_order_id AND ord.tenant_id = p_tenant_id
+    ),
+    items AS (
+        SELECT COALESCE(SUM(oi.unit_price * oi.quantity), 0) AS subtotal
+        FROM public.order_items oi
+        WHERE oi.order_id = p_order_id AND oi.tenant_id = p_tenant_id
+    ),
+    calc AS (
+        SELECT i.subtotal,
+               o.descuento AS descuento_nominal,
+               -- Tope real: no se puede descontar más de lo que hay que pagar.
+               LEAST(o.descuento, i.subtotal + o.envio) AS descuento_aplicado,
+               o.envio,
+               o.total AS total_registrado
+        FROM o CROSS JOIN items i
+    )
+    SELECT ROUND(c.subtotal, 2),
+           ROUND(c.descuento_nominal, 2),
+           ROUND(c.descuento_aplicado, 2),
+           ROUND(c.envio, 2),
+           ROUND(c.subtotal + c.envio - c.descuento_aplicado, 2),
+           ROUND(c.total_registrado, 2),
+           -- Tolerancia de UN CENTAVO. Los totales son numeric(10,2) pero se
+           -- construyen en float en Python, y el peso colombiano no circula en
+           -- centavos: un centavo es ruido de redondeo, no un error de dinero.
+           -- Un error real es de miles (el de #175 era de 8.000). Un peso entero
+           -- sí se marca: ahí la aritmética ya no cierra.
+           ABS((c.subtotal + c.envio - c.descuento_aplicado) - c.total_registrado) <= 0.01,
+           ROUND((c.subtotal + c.envio - c.descuento_aplicado) - c.total_registrado, 2)
+    FROM calc c;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Cifras de un pedido calculadas desde la fuente de verdad (order_items) y si cuadran con orders.total_amount. `descuento_aplicado` es el efectivo (tope subtotal+envío); imprimir ése y no el nominal es lo que evita un documento que se contradice. Guarda previa a emitir cualquier comprobante (Ley 1480 art. 26).';
 
 
 
@@ -9850,6 +9922,11 @@ GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer, "p_limit" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minutes" integer, "p_window_hours" integer, "p_limit" integer) TO "service_role";
 
@@ -9870,6 +9947,12 @@ GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "u
 REVOKE ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
