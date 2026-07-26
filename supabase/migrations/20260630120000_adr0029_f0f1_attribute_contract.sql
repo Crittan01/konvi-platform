@@ -1,3 +1,13 @@
+-- IDEMPOTENCIA (2026-07-25): las tablas usan CREATE TABLE IF NOT EXISTS pero los
+-- CREATE POLICY no tenían guarda, así que re-correr la migración sobre una base
+-- donde parte ya existe abortaba con 'policy ... already exists'. Se detectó al
+-- intentar aplicarla a prod: `product_attribute_definitions` YA estaba creada por
+-- otra vía y su policy también, mientras `category_attributes` y `attribute_values`
+-- no existían — o sea, prod quedó a medio camino y la migración no podía completarla.
+-- Añadir DROP POLICY IF EXISTS antes de cada CREATE la vuelve re-ejecutable sin
+-- cambiar el esquema resultante (mismo patrón que ya usa
+-- 20260627120000_product_categories_per_tenant.sql).
+
 -- ADR-0029 F0+F1 — Fundación del modelo de producto multi-vertical: contrato de atributos por categoría.
 --
 -- ADITIVA · idempotente (IF NOT EXISTS) · nullable · sin NOT NULL sobre datos existentes → NO rompe
@@ -40,6 +50,7 @@ CREATE TABLE IF NOT EXISTS public.category_attributes (
     UNIQUE (platform_category_id, code)
 );
 ALTER TABLE public.category_attributes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "category_attributes readable by authenticated" ON public.category_attributes;
 CREATE POLICY "category_attributes readable by authenticated"
   ON public.category_attributes FOR SELECT TO authenticated USING (true);
 
@@ -54,6 +65,7 @@ CREATE TABLE IF NOT EXISTS public.attribute_values (
     UNIQUE (category_attribute_id, value)
 );
 ALTER TABLE public.attribute_values ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "attribute_values readable by authenticated" ON public.attribute_values;
 CREATE POLICY "attribute_values readable by authenticated"
   ON public.attribute_values FOR SELECT TO authenticated USING (true);
 
@@ -75,6 +87,7 @@ CREATE TABLE IF NOT EXISTS public.product_attribute_definitions (
     UNIQUE (tenant_id, product_category_id, code)
 );
 ALTER TABLE public.product_attribute_definitions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Tenant Isolation" ON public.product_attribute_definitions;
 CREATE POLICY "Tenant Isolation"
   ON public.product_attribute_definitions FOR ALL
   USING (tenant_id = public.app_current_tenant())
