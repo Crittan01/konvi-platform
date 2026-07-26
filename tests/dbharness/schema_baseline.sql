@@ -3629,9 +3629,6 @@ CREATE OR REPLACE FUNCTION "public"."tenant_seller_identity"("p_tenant_id" "uuid
     AS $$
     WITH t AS (
         SELECT
-            -- NULLIF(trim(...)) trata '', '   ' y NULL como lo mismo: ausencia.
-            -- Un campo con espacios pasa cualquier chequeo de NULL y después
-            -- imprime una línea vacía.
             NULLIF(trim(tn.razon_social), '')            AS razon_social,
             NULLIF(trim(tn.name), '')                    AS nombre_comercial,
             NULLIF(trim(tn.doc_tipo), '')                AS doc_tipo,
@@ -3643,8 +3640,6 @@ CREATE OR REPLACE FUNCTION "public"."tenant_seller_identity"("p_tenant_id" "uuid
             NULLIF(trim(tn.domicilio_direccion), '')     AS calle,
             NULLIF(trim(tn.domicilio_ciudad), '')        AS ciudad,
             NULLIF(trim(tn.domicilio_departamento), '')  AS depto,
-            -- La columna trae el código ISO por defecto ('CO'), que en un documento
-            -- para un comprador se lee como un error. Se expande al nombre.
             CASE upper(NULLIF(trim(tn.domicilio_pais), ''))
                 WHEN 'CO' THEN 'Colombia'
                 ELSE NULLIF(trim(tn.domicilio_pais), '')
@@ -3654,25 +3649,45 @@ CREATE OR REPLACE FUNCTION "public"."tenant_seller_identity"("p_tenant_id" "uuid
         FROM public.tenants tn
         WHERE tn.id = p_tenant_id
     ),
+    partes AS (
+        -- Tramos en orden, ya sin los ausentes.
+        SELECT t.*, ARRAY(
+            SELECT x FROM unnest(ARRAY[t.calle, t.ciudad, t.depto, t.pais]) WITH ORDINALITY AS u(x, n)
+             WHERE x IS NOT NULL ORDER BY n
+        ) AS tramos
+        FROM t
+    ),
+    direccion AS (
+        SELECT p.*, (
+            SELECT string_agg(x, ', ' ORDER BY n)
+            FROM (
+                SELECT x, n,
+                       -- Compara contra el tramo ANTERIOR, sin tildes ni mayúsculas.
+                       lag(translate(lower(x),
+                           'áàäâéèëêíìïîóòöôúùüûñ',
+                           'aaaaeeeeiiiioooouuuun')) OVER (ORDER BY n) AS previo_norm,
+                       translate(lower(x),
+                           'áàäâéèëêíìïîóòöôúùüûñ',
+                           'aaaaeeeeiiiioooouuuun') AS norm
+                FROM unnest(p.tramos) WITH ORDINALITY AS u(x, n)
+            ) s
+            WHERE previo_norm IS DISTINCT FROM norm
+        ) AS direccion_texto
+        FROM partes p
+    ),
     calc AS (
         SELECT
-            COALESCE(t.razon_social, t.nombre_comercial) AS nombre,
-            CASE WHEN t.doc_numero IS NULL THEN NULL
-                 -- El guion solo si hay dígito de verificación: 'NIT 900123456-'
-                 -- con el guion colgando delata un dato a medias.
-                 WHEN t.doc_dv IS NULL THEN COALESCE(t.doc_tipo,'NIT') || ' ' || t.doc_numero
-                 ELSE COALESCE(t.doc_tipo,'NIT') || ' ' || t.doc_numero || '-' || t.doc_dv
+            COALESCE(d.razon_social, d.nombre_comercial) AS nombre,
+            CASE WHEN d.doc_numero IS NULL THEN NULL
+                 WHEN d.doc_dv IS NULL THEN COALESCE(d.doc_tipo,'NIT') || ' ' || d.doc_numero
+                 ELSE COALESCE(d.doc_tipo,'NIT') || ' ' || d.doc_numero || '-' || d.doc_dv
             END AS documento,
-            -- Sin calle ni ciudad no hay dirección: 'Colombia' a secas no sirve
-            -- para notificar judicialmente a nadie (art. 50 lit. a).
-            CASE WHEN t.calle IS NULL AND t.ciudad IS NULL THEN NULL
-                 ELSE array_to_string(
-                        ARRAY(SELECT x FROM unnest(ARRAY[t.calle, t.ciudad, t.depto, t.pais]) x
-                              WHERE x IS NOT NULL), ', ')
-            END AS direccion,
-            t.email, t.email_habeas_data, t.tipo_persona, t.regimen_iva,
-            (t.razon_social IS NULL AND t.nombre_comercial IS NOT NULL) AS usa_nombre_comercial
-        FROM t
+            -- Sin calle ni ciudad no hay dirección de notificación judicial.
+            CASE WHEN d.calle IS NULL AND d.ciudad IS NULL THEN NULL
+                 ELSE d.direccion_texto END AS direccion,
+            d.email, d.email_habeas_data, d.tipo_persona, d.regimen_iva,
+            (d.razon_social IS NULL AND d.nombre_comercial IS NOT NULL) AS usa_nombre_comercial
+        FROM direccion d
     )
     SELECT jsonb_strip_nulls(jsonb_build_object(
         'nombre',       c.nombre,
@@ -3683,11 +3698,9 @@ CREATE OR REPLACE FUNCTION "public"."tenant_seller_identity"("p_tenant_id" "uuid
         'regimen_iva',  c.regimen_iva,
         'email_habeas_data', c.email_habeas_data
     )) || jsonb_build_object(
-        -- Fuera del strip_nulls: son banderas, y un false tiene que sobrevivir.
         'usa_nombre_comercial', COALESCE(c.usa_nombre_comercial, false),
         'completa', (c.nombre IS NOT NULL AND c.documento IS NOT NULL
                      AND c.direccion IS NOT NULL AND c.email IS NOT NULL),
-        -- En palabras del comerciante: decirle "falta doc_dv" no le permite actuar.
         'faltantes', ARRAY(
             SELECT x FROM unnest(ARRAY[
                 CASE WHEN c.nombre    IS NULL THEN 'razón social o nombre' END,

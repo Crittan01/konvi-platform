@@ -460,3 +460,44 @@ def test_los_faltantes_se_dicen_en_palabras_del_comerciante(ctx):
         cur.execute("SELECT public.tenant_seller_identity(%s)", (ids["tenant_a"],))
         v = cur.fetchone()[0]
     assert not any("_" in f for f in v["faltantes"]), "no deben filtrarse nombres de columnas"
+
+
+def test_la_direccion_no_repite_ciudad_y_departamento(ctx):
+    """En DIVIPOLA hay municipios con el mismo nombre que su departamento — Bogotá D.C. es
+    el caso obvio. Concatenar sin mirar producía "Bogotá D.C., Bogotá D.C.", que en un
+    comprobante se lee como un error de la plataforma, no como un dato."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE public.tenants SET domicilio_direccion='Calle 123 # 45-67', "
+            "domicilio_ciudad='Bogotá D.C.', domicilio_departamento='Bogotá D.C.', "
+            "domicilio_pais='CO' WHERE id=%s", (ids["tenant_a"],))
+        cur.execute("SELECT public.tenant_seller_identity(%s)->>'direccion'", (ids["tenant_a"],))
+        direccion = cur.fetchone()[0]
+    assert direccion == "Calle 123 # 45-67, Bogotá D.C., Colombia"
+    assert direccion.count("Bogotá") == 1
+
+
+def test_pero_no_borra_una_ciudad_distinta_del_departamento(ctx):
+    """El riesgo del arreglo: pasarse y perder el departamento cuando SÍ aporta."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE public.tenants SET domicilio_direccion='Cra 50 # 10-20', "
+            "domicilio_ciudad='Medellín', domicilio_departamento='Antioquia', "
+            "domicilio_pais='CO' WHERE id=%s", (ids["tenant_a"],))
+        cur.execute("SELECT public.tenant_seller_identity(%s)->>'direccion'", (ids["tenant_a"],))
+        assert cur.fetchone()[0] == "Cra 50 # 10-20, Medellín, Antioquia, Colombia"
+
+
+def test_la_comparacion_ignora_tildes(ctx):
+    """Defensa para los datos viejos escritos a mano, de antes del desplegable DIVIPOLA."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE public.tenants SET domicilio_direccion='Calle 1', "
+            "domicilio_ciudad='Bogota D.C.', domicilio_departamento='Bogotá D.C.' "
+            "WHERE id=%s", (ids["tenant_a"],))
+        cur.execute("SELECT public.tenant_seller_identity(%s)->>'direccion'", (ids["tenant_a"],))
+        d = cur.fetchone()[0]
+    assert d.lower().count("bogot") == 1, f"repitió pese a la tilde: {d}"
