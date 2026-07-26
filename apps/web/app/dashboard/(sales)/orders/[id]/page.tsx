@@ -33,7 +33,7 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
 
 const cop = (n: number) => `$${(n || 0).toLocaleString('es-CO', { minimumFractionDigits: 0 })}`
 const fmtDate = (s: string) =>
-  new Date(s).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  new Date(s).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 type OrderItem = { id: string; title: string; unit_price: number; quantity: number }
 type Contact = { name: string | null; phone: string } | null
@@ -214,7 +214,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
             {shipment.estimated_delivery && (
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Entrega estimada</span>
-                <span>{new Date(shipment.estimated_delivery).toLocaleDateString('es-CO')}</span>
+                <span>{new Date(shipment.estimated_delivery).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</span>
               </div>
             )}
             {shipment.tracking_url && (

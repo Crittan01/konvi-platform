@@ -134,7 +134,7 @@ function ExistingAttachmentCard({
           <p className="text-xs font-medium text-emerald-700">Evidencia física adjunta</p>
           <p className="text-[10px] text-muted-foreground">
             {mimeShort}{sizeKb != null && ` · ${sizeKb} KB`}
-            {uploadedAt && ` · subida ${new Date(uploadedAt).toLocaleDateString('es-CO')}`}
+            {uploadedAt && ` · subida ${new Date(uploadedAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}`}
           </p>
         </div>
         <Button
@@ -983,7 +983,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                           ) : c.consent_given ? (
                             <span className="flex items-center gap-1 text-[11px] text-emerald-700">
                               <ShieldCheck className="h-3 w-3" /> Consent.{' '}
-                              {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO')}</span>}
+                              {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</span>}
                             </span>
                           ) : c.consent_revoked_at ? (
                             <span className="flex items-center gap-1 text-[11px] text-amber-700">
@@ -1021,7 +1021,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                         {c.consent_revoked_at && (
                           <div className="mt-0.5 flex flex-wrap items-center gap-2">
                             <p className="text-xs text-amber-700">
-                              Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}
+                              Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                               {c.consent_revoked_reason ? ` · ${c.consent_revoked_reason}` : ''}
                             </p>
                             {/* Rev. 105 H.4.1.x — Reactivar consent solo aplicable
@@ -1092,7 +1092,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground shrink-0">
-                      {new Date(c.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                      {new Date(c.created_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
 
@@ -1128,7 +1128,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                             <div className="flex items-start gap-2 text-xs text-amber-700">
                               <ShieldOff className="h-4 w-4 shrink-0 mt-0.5" />
                               <div className="flex-1">
-                                <p className="font-semibold">Contacto anonimizado el {c.consent_revoked_at && new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}.</p>
+                                <p className="font-semibold">Contacto anonimizado el {c.consent_revoked_at && new Date(c.consent_revoked_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}.</p>
                                 <p className="mt-0.5 text-muted-foreground">
                                   Para volver a registrar PII el sistema requiere consentimiento
                                   renovado del titular. Confirma que cuentas con esa autorización,
@@ -1328,7 +1328,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                       <strong>Consentimiento activo</strong> (Ley 1581/2012)
                                       {c.consent_date && (
                                         <span className="text-muted-foreground">
-                                          {' '}desde {new Date(c.consent_date).toLocaleDateString('es-CO')}
+                                          {' '}desde {new Date(c.consent_date).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                                         </span>
                                       )}.
                                       <p className="text-[11px] text-muted-foreground mt-0.5">

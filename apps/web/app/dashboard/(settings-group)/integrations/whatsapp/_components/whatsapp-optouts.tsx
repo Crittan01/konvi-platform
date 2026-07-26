@@ -16,7 +16,7 @@ type Props = {
 function formatDateTime(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
-  return d.toLocaleString('es-CO', {
+  return d.toLocaleString('es-CO', { timeZone: 'America/Bogota',
     year: 'numeric', month: 'short', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })

@@ -32,7 +32,7 @@ function fmt(ts: string | null): string {
   if (!ts) return ''
   const d = new Date(ts)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('es-CO', {
+  return d.toLocaleString('es-CO', { timeZone: 'America/Bogota',
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })

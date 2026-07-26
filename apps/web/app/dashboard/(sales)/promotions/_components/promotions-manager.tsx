@@ -71,7 +71,7 @@ function formatDate(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: '2-digit' })
+  return d.toLocaleDateString('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: 'short', day: '2-digit' })
 }
 
 // Fecha + hora en zona Colombia (los timestamps se persisten en UTC). Para el

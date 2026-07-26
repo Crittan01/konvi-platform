@@ -312,7 +312,7 @@ export default async function ShippingPage(
                         <span className="text-xs font-mono text-muted-foreground">#...{s.id.slice(-8)}</span>
                         <span className="text-xs text-muted-foreground flex items-center gap-0.5">
                           <Clock className="h-3 w-3" />
-                          {new Date(s.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {new Date(s.created_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric' })}
                         </span>
                       </div>
                       <p className="font-medium text-sm">{s.carrier ?? 'Carrier por confirmar'}</p>
@@ -359,7 +359,7 @@ export default async function ShippingPage(
                       <StatusBadge status={s.status} />
                       {s.estimated_delivery && (
                         <p className="text-xs text-muted-foreground">
-                          Est: {new Date(s.estimated_delivery).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                          Est: {new Date(s.estimated_delivery).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short' })}
                         </p>
                       )}
                     </div>

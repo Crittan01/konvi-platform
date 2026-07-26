@@ -176,7 +176,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
     const content = [
       `Códigos de respaldo MFA — Konvi`,
       `Usuario: ${userId}`,
-      `Generados: ${new Date().toLocaleString('es-CO')}`,
+      `Generados: ${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}`,
       ``,
       `Cada código sirve UNA SOLA VEZ. Guárdalos en lugar seguro.`,
       ``,

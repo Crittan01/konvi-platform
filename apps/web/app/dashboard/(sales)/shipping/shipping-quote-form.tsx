@@ -508,7 +508,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                       </p>
                       {rate.delivery_date && (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric' })}
                         </p>
                       )}
                       {/* Breakdown costos Aveonline (si disponible).

@@ -236,7 +236,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
                 const isDeleting = deletingName === f.name
                 const sizeKB = Math.round(f.size / 1024)
                 const dateStr = f.createdAt
-                  ? new Date(f.createdAt).toLocaleDateString('es-CO', {
+                  ? new Date(f.createdAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota',
                       day: '2-digit', month: 'short', year: 'numeric',
                     })
                   : ''

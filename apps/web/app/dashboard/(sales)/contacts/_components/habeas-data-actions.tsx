@@ -370,7 +370,7 @@ export default function HabeasDataActions({
           const buttonDisabled = isPending || running !== null || isEraseOnAnonymized
           const buttonTitle = isEraseOnAnonymized
             ? `Este contacto ya fue anonimizado${
-                anonymizedAt ? ` el ${new Date(anonymizedAt).toLocaleDateString('es-CO')}` : ''
+                anonymizedAt ? ` el ${new Date(anonymizedAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}` : ''
               }. Acción no disponible.`
             : m.description
           const hoverClasses = m.isDestructive

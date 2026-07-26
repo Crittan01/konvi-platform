@@ -808,7 +808,7 @@ export default async function TeamPage(
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Desde {new Date(m.joined_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        Desde {new Date(m.joined_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric' })}
                       </p>
                     </div>
                   </div>

@@ -457,7 +457,7 @@ export default function AveonlineSetup({
             label="JWT expira en"
             value={
               jwtExpiresAt
-                ? new Date(jwtExpiresAt).toLocaleString('es-CO')
+                ? new Date(jwtExpiresAt).toLocaleString('es-CO', { timeZone: 'America/Bogota' })
                 : '—'
             }
           />
@@ -730,14 +730,14 @@ function AveonlineWebhookSection() {
               <div>
                 <div className="text-muted-foreground">Última rotación</div>
                 <div className="text-foreground">
-                  {new Date(status.rotated_at).toLocaleString('es-CO')}
+                  {new Date(status.rotated_at).toLocaleString('es-CO', { timeZone: 'America/Bogota' })}
                 </div>
               </div>
               {status.expires_at && (
                 <div>
                   <div className="text-muted-foreground">Recomendado rotar antes de</div>
                   <div className="text-foreground">
-                    {new Date(status.expires_at).toLocaleDateString('es-CO')}
+                    {new Date(status.expires_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                   </div>
                 </div>
               )}

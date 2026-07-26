@@ -66,7 +66,7 @@ export default function WhatsAppSetup({ connected, credentials, canWrite, tenant
         {tokenRotatedAt && (
           <p className="text-xs text-muted-foreground">
             Última rotación de token:{' '}
-            {new Date(tokenRotatedAt).toLocaleDateString('es-CO')}
+            {new Date(tokenRotatedAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
           </p>
         )}
         {canWrite && (

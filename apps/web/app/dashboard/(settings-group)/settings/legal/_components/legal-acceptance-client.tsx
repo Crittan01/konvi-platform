@@ -91,7 +91,7 @@ export default function LegalAcceptanceClient({
                     <p className="text-xs text-emerald-700 mt-1.5">
                       ✓ Aceptado por <strong>{acceptance.accepted_by_email || '(usuario)'}</strong>
                       {' · '}
-                      {new Date(acceptance.accepted_at).toLocaleString('es-CO', {
+                      {new Date(acceptance.accepted_at).toLocaleString('es-CO', { timeZone: 'America/Bogota',
                         dateStyle: 'medium', timeStyle: 'short',
                       })}
                     </p>
@@ -142,7 +142,7 @@ export default function LegalAcceptanceClient({
                 <span>·</span>
                 <span>{h.accepted_by_email || '(sin email)'}</span>
                 <span>·</span>
-                <span>{new Date(h.accepted_at).toLocaleString('es-CO')}</span>
+                <span>{new Date(h.accepted_at).toLocaleString('es-CO', { timeZone: 'America/Bogota' })}</span>
               </div>
             ))}
           </div>
