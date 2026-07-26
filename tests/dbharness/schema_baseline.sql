@@ -9979,8 +9979,7 @@ GRANT ALL ON FUNCTION "public"."_ai_agents_fallback_roles_valid"("roles" "jsonb"
 
 
 
-GRANT ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() TO "service_role";
 
 
@@ -10001,8 +10000,7 @@ GRANT ALL ON FUNCTION "public"."add_member_to_tenant"("p_user_id" "uuid", "p_ten
 
 
 
-GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."ai_insights_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."ai_insights_set_updated_at"() TO "service_role";
 
 
@@ -10019,8 +10017,7 @@ GRANT ALL ON FUNCTION "public"."app_current_tenant"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."assign_purchase_order_number"() TO "anon";
-GRANT ALL ON FUNCTION "public"."assign_purchase_order_number"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."assign_purchase_order_number"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."assign_purchase_order_number"() TO "service_role";
 
 
@@ -10063,8 +10060,7 @@ GRANT ALL ON FUNCTION "public"."cleanup_wompi_inbox"("p_processed_retention_days
 
 
 
-GRANT ALL ON FUNCTION "public"."consent_audit_log_block_modify"() TO "anon";
-GRANT ALL ON FUNCTION "public"."consent_audit_log_block_modify"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."consent_audit_log_block_modify"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."consent_audit_log_block_modify"() TO "service_role";
 
 
@@ -10075,8 +10071,7 @@ GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid",
 
 
 
-GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "anon";
-GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."contacts_default_shipping_phone"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."contacts_default_shipping_phone"() TO "service_role";
 
 
@@ -10104,7 +10099,6 @@ GRANT ALL ON FUNCTION "public"."dequeue_whatsapp_outbound_messages"("p_vt" integ
 
 
 REVOKE ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."enqueue_human_takeover_notification"() TO "service_role";
 
 
@@ -10120,8 +10114,7 @@ GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_ru
 
 
 
-GRANT ALL ON FUNCTION "public"."fn_block_legal_acceptance_modify"() TO "anon";
-GRANT ALL ON FUNCTION "public"."fn_block_legal_acceptance_modify"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."fn_block_legal_acceptance_modify"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_block_legal_acceptance_modify"() TO "service_role";
 
 
@@ -10216,8 +10209,7 @@ GRANT ALL ON FUNCTION "public"."fn_request_tenant_deletion"("p_tenant_id" "uuid"
 
 
 
-GRANT ALL ON FUNCTION "public"."fn_sync_document_derived"() TO "anon";
-GRANT ALL ON FUNCTION "public"."fn_sync_document_derived"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."fn_sync_document_derived"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_sync_document_derived"() TO "service_role";
 
 
@@ -10333,8 +10325,7 @@ GRANT ALL ON FUNCTION "public"."pgsec_upsert_secret"("p_name" "text", "p_secret"
 
 
 
-GRANT ALL ON FUNCTION "public"."pii_access_log_block_modify"() TO "anon";
-GRANT ALL ON FUNCTION "public"."pii_access_log_block_modify"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."pii_access_log_block_modify"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pii_access_log_block_modify"() TO "service_role";
 
 
@@ -10350,7 +10341,6 @@ GRANT ALL ON FUNCTION "public"."rate_limit_hit"("p_key" "text", "p_limit" intege
 
 
 REVOKE ALL ON FUNCTION "public"."reject_audit_log_mutation"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "service_role";
 
 
@@ -10477,49 +10467,41 @@ GRANT ALL ON FUNCTION "public"."rpc_void_receipt"("p_order_id" "uuid", "p_tenant
 
 
 REVOKE ALL ON FUNCTION "public"."seed_tenant_subscription_default"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."seed_tenant_subscription_default"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."seed_tenant_subscription_default"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."set_claim_ticket_number"() TO "anon";
-GRANT ALL ON FUNCTION "public"."set_claim_ticket_number"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."set_claim_ticket_number"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_claim_ticket_number"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."stamp_human_takeover_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."stamp_human_takeover_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."stamp_human_takeover_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."stamp_human_takeover_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."sync_conversation_last_interaction"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."sync_conversation_last_interaction"() TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."sync_tenant_stamp_to_auth"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tenant_carriers_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tenant_carriers_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tenant_carriers_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tenant_carriers_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tenant_provider_capabilities_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tenant_provider_capabilities_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tenant_provider_capabilities_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tenant_provider_capabilities_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tenant_provider_identity_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tenant_provider_identity_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tenant_provider_identity_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tenant_provider_identity_set_updated_at"() TO "service_role";
 
 
@@ -10530,85 +10512,72 @@ GRANT ALL ON FUNCTION "public"."tenant_seller_identity"("p_tenant_id" "uuid") TO
 
 
 
-GRANT ALL ON FUNCTION "public"."tenant_shipping_provider_config_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tenant_shipping_provider_config_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tenant_shipping_provider_config_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tenant_shipping_provider_config_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tenant_webhook_secrets_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tenant_webhook_secrets_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tenant_webhook_secrets_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tenant_webhook_secrets_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tg_aveonline_carrier_capabilities_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tg_aveonline_carrier_capabilities_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tg_aveonline_carrier_capabilities_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_aveonline_carrier_capabilities_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tg_coupons_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tg_coupons_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tg_coupons_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_coupons_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tg_release_coupon_on_cart_terminal"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tg_release_coupon_on_cart_terminal"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tg_release_coupon_on_cart_terminal"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_release_coupon_on_cart_terminal"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tg_tenant_payment_methods_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tg_tenant_payment_methods_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tg_tenant_payment_methods_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_tenant_payment_methods_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."touch_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_claims_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_claims_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_claims_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_claims_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_idempotency_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_idempotency_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_idempotency_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_idempotency_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_kb_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_kb_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_kb_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_kb_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_marketplace_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_marketplace_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_marketplace_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_marketplace_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_order_tracking_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_order_tracking_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_order_tracking_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_order_tracking_updated_at"() TO "service_role";
 
 
