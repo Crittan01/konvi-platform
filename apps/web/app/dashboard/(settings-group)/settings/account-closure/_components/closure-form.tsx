@@ -162,7 +162,7 @@ export function ClosureForm({ tenantName, status }: Props) {
               </h2>
               <p className="text-sm text-amber-800 mt-1">
                 Tu cuenta será eliminada permanentemente el{' '}
-                <strong>{scheduledFor?.toLocaleDateString('es-CO')}</strong>{' '}
+                <strong>{scheduledFor?.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</strong>{' '}
                 ({daysRemaining} día{daysRemaining !== 1 ? 's' : ''} restante).
                 Durante el grace period la cuenta está en lectura-solo.
               </p>

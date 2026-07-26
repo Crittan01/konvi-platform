@@ -407,7 +407,7 @@ export default function ClaimsManager({
                   ${selectedClaim.refunded_amount.toLocaleString('es-CO')}
                   {selectedClaim.refunded_at && (
                     <span className="ml-2 text-[11px] text-muted-foreground">
-                      {new Date(selectedClaim.refunded_at).toLocaleDateString('es-CO')}
+                      {new Date(selectedClaim.refunded_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                     </span>
                   )}
                 </p>
@@ -563,7 +563,7 @@ export default function ClaimsManager({
                 </div>
                 <div className="flex justify-between mt-1.5 text-xs text-muted-foreground">
                   <span className="truncate">{customerLabel(claim.customer)}</span>
-                  <span className="shrink-0">{new Date(claim.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}</span>
+                  <span className="shrink-0">{new Date(claim.created_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short' })}</span>
                 </div>
               </div>
             )
@@ -651,7 +651,7 @@ export default function ClaimsManager({
                     <SelectItem key={o.id} value={o.id}>
                       <span className="font-mono">{orderShort(o.id)}</span>
                       {o.customer_name ? ` · ${o.customer_name}` : ''}
-                      {` · ${new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}`}
+                      {` · ${new Date(o.created_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: 'short' })}`}
                       {` · $${o.total_amount?.toLocaleString('es-CO') ?? '0'}`}
                     </SelectItem>
                   ))}
