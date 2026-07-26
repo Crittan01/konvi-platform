@@ -1,13 +1,22 @@
 # Current Scope — Estado Real de Implementación
 
 **Última actualización**: 2026-07-25 (readiness pre-lanzamiento · 7 de 8 bloqueantes de código cerrados)
-**Branch activo**: `develop` = `9fd6f99b`. `origin/production` = `91dbfeda` → **develop va 14 commits adelante**.
+**Branch activo**: `develop` == `origin/production` == `0dfa15d3` — **sin brecha**.
 **Deploy**: `production` autodespliega en Render (los 4 servicios live). NO hay freeze.
+**Ledger**: 237 migraciones en repo = 237 en prod. **Cero drift** (normalizado 2026-07-25).
 
-> ⚠️ **Hay una brecha abierta entre `develop` y `production`.** Las migraciones SÍ están aplicadas a
-> prod, así que los arreglos de BASE DE DATOS ya protegen; los de CÓDIGO no protegen a nadie hasta
-> desplegar. Lo que traba el despliegue es Tailwind 4 (#158), que espera visto bueno estético del
-> founder. **Mergeado ≠ vivo — verificar funcionalmente contra prod antes de dar algo por cerrado.**
+> ✅ **Todo desplegado y verificado en vivo el 2026-07-25.** `konvi-api` reporta
+> `version: 0dfa15d3`, idéntico al HEAD de `production`; el connector expone las métricas
+> `inbox_*` que solo existen en este código; el worker del orchestrator reinició y late.
+> Certificación visual con Chromium contra prod: 4/4 rutas públicas limpias, cero errores de
+> consola, Tailwind 4 aplicado (236 reglas, fondo `rgb(247,245,242)`), y `/dashboard` sin sesión
+> redirige a login.
+>
+> **Lección que costó casi un arreglo entero: mergeado ≠ aplicado ≠ vivo.** Se encontraron 3
+> migraciones mergeadas y sin aplicar — prod seguía vendiendo de más mientras el fix vivía solo en
+> el repo y el reporte lo daba por cerrado. **Cerrar siempre con verificación FUNCIONAL contra prod**
+> (`pg_get_functiondef`, un marcador de código que solo exista en la versión nueva), nunca con el
+> ledger ni con "el PR está mergeado".
 
 ---
 
@@ -36,6 +45,16 @@ escaladas de retracto Ley 1480 / Habeas Data / menor de edad.
   mensaje se pierde, se detecta el *silencio* — cubre los 6 y los que aparezcan después.
 - **Anclar en el trigger, no en la convención** (#172): el `escalation_audit` lo escribían 5 de ~12
   rutas; `human_takeover_at` lo estampa un trigger en la transición, así que cubre las 12 y las futuras.
+
+**Bug de dinero encontrado al diseñar el comprobante (#175):** `confirm_rate` actualizaba
+`shipping_cost` sin recalcular `total_amount` — que es el que se cobra. El cliente pagaba un total que
+ya no correspondía a las líneas de su pedido; en contra entrega el transportador cobraba el viejo en la
+puerta. Era el "COD quote incoherence" anotado sin diagnóstico en el UAT de julio. Regla adoptada:
+nunca cambiar en silencio lo que un cliente ya pagó — y "ya pagado" se decide por un pago aprobado, no
+por la etiqueta de estado (un COD nace `confirmed` sin haberse cobrado).
+
+**Comprobante de compra (ADR-0040, #176):** diseñado y verificado legalmente, **no implementado** —
+7-8 días gated por 7 decisiones del founder, una de ellas necesita abogado.
 
 **Stack:** Next 15→16 + ESLint 9 flat + Sentry v10 (#152-#155, desplegado) · Tailwind 3→4 (#158,
 mergeado, **espera visto bueno estético**) · identidad legal del tenant persona natural/jurídica (#163).
