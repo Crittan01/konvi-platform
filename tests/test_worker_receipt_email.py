@@ -113,6 +113,16 @@ def test_manda_el_detalle_completo():
     assert inst._metrics["receipt_emails_sent"] == 1
 
 
+def test_el_reply_to_sale_del_snapshot_no_del_tenant_vivo():
+    """Si el vendedor cambia su correo, el comprobante viejo debe seguir apuntando al que
+    tenía cuando se emitió — es parte de lo que hace al documento un comprobante."""
+    snap = {"vendedor": {"email": "viejo@kaiu.co"}, "totales": {"total": 1000}}
+    sb = _FakeSB(pendientes=[_pend(snapshot=snap)])
+    _, inst = _worker(sb)
+    send = _correr(inst)
+    assert send.await_args.kwargs["responder_a"] == "viejo@kaiu.co"
+
+
 def test_le_pasa_el_snapshot_congelado_no_datos_vivos():
     sb = _FakeSB(pendientes=[_pend()])
     _, inst = _worker(sb)

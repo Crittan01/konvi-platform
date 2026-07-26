@@ -1744,6 +1744,9 @@ class OrchestratorWorker:
                     numero=r.get("numero"), snapshot=r.get("snapshot") or {},
                     destinatario=destinatario,
                     politica=self._politica_cancelacion(tenant_id),
+                    # Del SNAPSHOT, no del tenant vivo: el comprobante debe apuntar al
+                    # correo que el vendedor tenía cuando se emitió.
+                    responder_a=((r.get("snapshot") or {}).get("vendedor") or {}).get("email"),
                 )
             except Exception as exc:
                 logger.error("[COMPROBANTE][EMAIL] fallo enviando %s: %s", r.get("numero"), exc)

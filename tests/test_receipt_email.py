@@ -243,3 +243,33 @@ def test_un_fallo_de_resend_no_propaga():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ─── Que el comprador pueda llegar al vendedor ──────────────────────────────
+
+def test_responder_le_llega_al_vendedor():
+    """El correo sale de `noreply@` de la PLATAFORMA, pero quien vende es el tenant. Sin
+    reply_to, el comprador que le da "Responder" a su comprobante escribe a un buzón que
+    nadie lee — y responder es lo que una persona hace de verdad, aunque el documento
+    traiga impreso el correo del vendedor. Ley 1480 art. 50 lit. a)."""
+    import notifications
+    with patch.object(notifications, "RESEND_API_KEY", "re_x"), \
+         patch.object(notifications, "_send_email_via_resend",
+                      new=AsyncMock(return_value=True)) as send:
+        asyncio.run(re_mod.send_receipt_email(
+            receipt_id="r-1", tenant_id="t-1", numero="CP-1",
+            snapshot=SNAP, destinatario="ana@example.com",
+            responder_a="hola@kaiu.co"))
+    assert send.await_args.kwargs["reply_to"] == "hola@kaiu.co"
+
+
+def test_sin_correo_del_vendedor_no_manda_un_reply_to_vacio():
+    """Un reply_to vacío sería peor que ninguno: Resend podría rechazar el envío entero."""
+    import notifications
+    with patch.object(notifications, "RESEND_API_KEY", "re_x"), \
+         patch.object(notifications, "_send_email_via_resend",
+                      new=AsyncMock(return_value=True)) as send:
+        asyncio.run(re_mod.send_receipt_email(
+            receipt_id="r-1", tenant_id="t-1", numero="CP-1",
+            snapshot=SNAP, destinatario="ana@example.com"))
+    assert send.await_args.kwargs["reply_to"] is None

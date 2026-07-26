@@ -156,7 +156,7 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 
 async def _send_email_via_resend(
     *, to: str, subject: str, html: str, text: str | None = None,
-    idempotency_key: str | None = None,
+    idempotency_key: str | None = None, reply_to: str | None = None,
 ) -> bool:
     """Rev. 94 — Envío real vía Resend API.
 
@@ -184,6 +184,13 @@ async def _send_email_via_resend(
     }
     if text:
         payload["text"] = text
+    if reply_to:
+        # Los correos salen de `noreply@` de la PLATAFORMA, pero quien vende es el tenant.
+        # Sin esto, el comprador que le da "Responder" a su comprobante escribe a un buzón
+        # que nadie lee — y responder es lo que una persona hace de verdad, aunque el
+        # documento traiga impreso el correo del vendedor.
+        # Campo verificado en la doc oficial de Resend: `reply_to`, string o array.
+        payload["reply_to"] = reply_to
 
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY}",
