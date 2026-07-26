@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import DomicilioSelector from './_components/domicilio-selector'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { saveTenant, saveDatosLegales, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
@@ -323,21 +324,17 @@ export default async function SettingsPage() {
                       defaultValue={tenant?.domicilio_direccion ?? ''}
                       placeholder="Calle 123 # 45-67" maxLength={200} className="h-9" />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="dom-ciudad">Ciudad</Label>
-                    <Input id="dom-ciudad" name="domicilio_ciudad"
-                      defaultValue={tenant?.domicilio_ciudad ?? ''}
-                      placeholder="Medellín" maxLength={100} className="h-9" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="dom-depto">Departamento</Label>
-                    <Input id="dom-depto" name="domicilio_departamento"
-                      defaultValue={tenant?.domicilio_departamento ?? ''}
-                      placeholder="Antioquia" maxLength={100} className="h-9" />
-                  </div>
+                  {/* Lista oficial DIVIPOLA en vez de texto libre: esta dirección va
+                      impresa en cada comprobante y además la usa la cotización de envíos,
+                      que resuelve el código DANE por nombre normalizado. */}
+                  <DomicilioSelector
+                    departamentoInicial={tenant?.domicilio_departamento}
+                    ciudadInicial={tenant?.domicilio_ciudad}
+                  />
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  La dirección aparece en el aviso de privacidad como domicilio del Responsable.
+                  Aparece en el aviso de privacidad y en cada comprobante de compra, como el
+                  lugar donde se te puede notificar (Ley 1480 art. 50 lit. a).
                 </p>
 
                 <SubmitButton size="sm">Guardar datos legales</SubmitButton>
