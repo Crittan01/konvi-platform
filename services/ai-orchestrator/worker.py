@@ -238,6 +238,9 @@ RECEIPT_ISSUE_INTERVAL_SECONDS = int(os.getenv("RECEIPT_ISSUE_INTERVAL_SECONDS",
 RECEIPT_MIN_AGE_MINUTES = int(os.getenv("RECEIPT_MIN_AGE_MINUTES", "10"))
 RECEIPT_WINDOW_HOURS = int(os.getenv("RECEIPT_WINDOW_HOURS", "72"))
 RECEIPT_BATCH = int(os.getenv("RECEIPT_BATCH", "50"))
+RECEIPT_ACK_ENABLED = os.getenv(
+    "RECEIPT_ACK_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
 TENANT_HARD_DELETE_ENABLED = os.getenv(
@@ -359,6 +362,7 @@ class OrchestratorWorker:
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
         self._receipt_enabled = RECEIPT_ISSUE_ENABLED
+        self._receipt_ack_enabled = RECEIPT_ACK_ENABLED
         self._last_receipt_at = 0.0
         self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
@@ -405,6 +409,8 @@ class OrchestratorWorker:
             "receipts_issued": 0,
             "receipts_blocked_incoherent": 0,
             "receipts_voided": 0,
+            "receipt_acks_sent": 0,
+            "receipt_acks_out_of_window": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -1549,6 +1555,8 @@ class OrchestratorWorker:
                 fila.get("numero"), str(order_id)[:8], str(tenant_id)[:8],
             )
 
+        await self._send_receipt_acks()
+
         # Red que atrapa lo que el trigger de cancelación no cubrió: filas anteriores a
         # él, o una anulación que falló. Un comprobante vivo sobre un pedido cancelado es
         # un comprador con un documento que afirma una compra que ya no existe.
@@ -1577,6 +1585,125 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.error("[COMPROBANTE] no pude anular el de order=%s: %s",
                              str(order_id)[:8], exc)
+
+    def _texto_acuse(self, numero, total, forma_pago) -> str:
+        """El acuse que ve el comprador. CORTO a propósito.
+
+        Va a `messages`, que alimenta el contexto conversacional del LLM. Meter acá el
+        documento completo costaría tokens en CADA turno posterior y le daría al modelo
+        un texto lleno de cifras para parafrasear — choca con "el LLM no decide verdad
+        transaccional" y con el hallazgo de UAT del "total mentido". El detalle completo
+        va por correo y por la consola.
+
+        No dice "factura": no lo es, y aparentarlo sería inducir a error (art. 30).
+        """
+        try:
+            monto = f"${int(round(float(total or 0))):,}".replace(",", ".")
+        except (TypeError, ValueError):
+            monto = "—"
+        pago = "contra entrega" if (forma_pago or "") == "cod" else "pago en línea"
+        return (
+            f"📄 *Comprobante {numero}*\n"
+            f"Total: *{monto}* COP · {pago}\n\n"
+            f"Es tu comprobante de compra. Guárdalo para cualquier reclamo o garantía."
+        )
+
+    async def _send_receipt_acks(self) -> None:
+        """Le remite al comprador el acuse de su comprobante.
+
+        Ley 1480 art. 50 lit. d) habla de REMITIR el acuse, no de tenerlo disponible:
+        emitirlo y dejarlo en una tabla no cumple nada.
+
+        WhatsApp es el canal primario por COBERTURA, no por estética — `contacts.phone`
+        es NOT NULL mientras `contacts.email` es opcional, y el envío de correo se salta
+        en silencio cuando no hay dirección. Llega al 100% de los compradores.
+
+        Fuera de la ventana de servicio de Meta no se puede escribir free-form y las
+        plantillas están diferidas: se marca el motivo en vez de intentar y fallar con un
+        error opaco. Un acuse que nunca sale no puede ser indistinguible de uno pendiente.
+        """
+        if not self._receipt_ack_enabled:
+            return
+        try:
+            pendientes = self.supabase.rpc(
+                "rpc_find_receipts_pending_ack",
+                {"p_csw_hours": META_CSW_HOURS, "p_limit": RECEIPT_BATCH},
+            ).execute().data or []
+        except Exception as exc:
+            logger.warning("[COMPROBANTE] no pude buscar acuses pendientes: %s", exc)
+            return
+
+        for r in pendientes:
+            receipt_id, tenant_id = r.get("receipt_id"), r.get("tenant_id")
+            conv_id = r.get("conversation_id")
+            if not (receipt_id and tenant_id and conv_id):
+                continue
+
+            if not r.get("dentro_de_csw"):
+                self._metrics["receipt_acks_out_of_window"] += 1
+                logger.warning(
+                    "[COMPROBANTE] %s sin remitir: fuera de la ventana de 24h de Meta. "
+                    "Queda disponible en la consola y por correo.", r.get("numero"),
+                )
+                self._marcar_acuse(receipt_id, tenant_id, None, "fuera_de_ventana_csw")
+                continue
+
+            texto = self._texto_acuse(r.get("numero"), r.get("total"), r.get("forma_pago"))
+            try:
+                conv = (
+                    self.supabase.table("conversations")
+                    .select("customer_phone")
+                    .eq("id", conv_id).eq("tenant_id", tenant_id)
+                    .limit(1).execute()
+                )
+                telefono = (conv.data or [{}])[0].get("customer_phone")
+                if not telefono:
+                    self._marcar_acuse(receipt_id, tenant_id, None, "sin_telefono")
+                    continue
+                meta_id = await send_whatsapp_message(
+                    tenant_id=tenant_id, supabase=self.supabase,
+                    to_phone=telefono, text=texto,
+                )
+            except Exception as exc:
+                logger.error("[COMPROBANTE] fallo remitiendo %s: %s", r.get("numero"), exc)
+                continue
+
+            if not meta_id:
+                # No se marca nada: el próximo barrido reintenta. Un acuse tiene plazo
+                # legal, así que darlo por perdido en el primer fallo sería peor.
+                logger.error("[COMPROBANTE] %s no salió — se reintenta", r.get("numero"))
+                continue
+
+            if not self._marcar_acuse(receipt_id, tenant_id, "whatsapp", None):
+                # Otro tick ganó la carrera: no re-persistir el mensaje.
+                continue
+
+            self._metrics["receipt_acks_sent"] += 1
+            try:
+                self.supabase.table("messages").insert({
+                    "conversation_id": conv_id,
+                    "tenant_id": tenant_id,
+                    "direction": "outbound",
+                    "content_type": "text",
+                    "content": texto,
+                    "meta_message_id": meta_id,
+                    "processed": True,
+                    "processing_status": "processed",
+                }).execute()
+            except Exception as exc:
+                logger.warning("[COMPROBANTE] acuse enviado pero no persistido: %s", exc)
+
+    def _marcar_acuse(self, receipt_id, tenant_id, canal, motivo) -> bool:
+        """True si esta corrida fue la que marcó. False si otra ya lo había hecho."""
+        try:
+            res = self.supabase.rpc("rpc_mark_receipt_ack", {
+                "p_receipt_id": receipt_id, "p_tenant_id": tenant_id,
+                "p_channel": canal, "p_skipped": motivo,
+            }).execute()
+            return bool(res.data)
+        except Exception as exc:
+            logger.error("[COMPROBANTE] no pude marcar el acuse de %s: %s", receipt_id, exc)
+            return False
 
     async def _check_order_coherence_if_due(self) -> None:
         """Pedidos cuyas cifras no cuadran consigo mismas.
