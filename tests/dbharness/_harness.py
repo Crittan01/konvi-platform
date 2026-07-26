@@ -152,6 +152,26 @@ def cleanup_tenants(conn) -> None:
 
 
 @contextmanager
+def as_anon():
+    """Context manager: ejecuta como `anon`, el rol de la llave publishable que viaja en el
+    bundle del navegador — sin login, sin claims.
+
+    OJO con el detalle que lo hace fácil de escribir mal: `SET LOCAL ROLE` NO surte efecto
+    con autocommit, porque cada sentencia es su propia transacción y el rol se revierte de
+    inmediato. Un test así corre como `postgres`, que tiene BYPASSRLS, y reporta VERDE
+    mientras verifica exactamente nada. De ahí la conexión con autocommit=False.
+    """
+    conn = connect(autocommit=False)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL ROLE anon")
+            yield cur
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+@contextmanager
 def as_user(sub: str, tenant_id: str, role: str, email: str = "u@harness.test"):
     """Context manager: ejecuta como authenticated user con esos claims JWT (app_metadata
     anidado, como emite custom_access_token_hook). Transacción con ROLLBACK — las
