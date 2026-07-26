@@ -105,6 +105,28 @@ class TenantPatch(BaseModel):
     telefono_contacto:  Optional[str] = Field(
         default=None, pattern=r'^3[0-9]{9}$'
     )
+    # Identidad legal completa (#163). ESTABAN AUSENTES DEL CONTRATO: la migración creó
+    # las columnas y el formulario los enviaba, pero acá no existían — y Pydantic descarta
+    # los campos desconocidos EN SILENCIO, así que la API respondía 200 y no guardaba nada.
+    # El comerciante veía "guardado" y al recargar seguía vacío.
+    #
+    # Los Literal replican los CHECK de la tabla: un valor inválido debe fallar con un 422
+    # explicable, no con un error de constraint de Postgres.
+    tipo_persona:        Optional[Literal['natural', 'juridica']] = None
+    razon_social:        Optional[str] = Field(default=None, max_length=200)
+    doc_tipo:            Optional[Literal['NIT', 'CC', 'CE', 'PAS']] = None
+    # Solo dígitos: el formulario ya limpia puntos y guiones, pero el frontend no es
+    # seguridad (principio 2 del proyecto).
+    doc_numero:          Optional[str] = Field(default=None, pattern=r'^\d{5,15}$')
+    doc_dv:              Optional[str] = Field(default=None, pattern=r'^\d$')
+    regimen_iva:         Optional[Literal['responsable', 'no_responsable']] = None
+    domicilio_direccion: Optional[str] = Field(default=None, max_length=200)
+    domicilio_ciudad:    Optional[str] = Field(default=None, max_length=100)
+    domicilio_departamento: Optional[str] = Field(default=None, max_length=100)
+    domicilio_pais:      Optional[str] = Field(default=None, max_length=60)
+    email_habeas_data:   Optional[str] = Field(
+        default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    )
     low_stock_threshold: Optional[int] = Field(default=None, ge=1, le=999)
     # Filosofía de marca — alimenta el system prompt del bot
     mision:              Optional[str] = Field(default=None, max_length=280)
@@ -180,6 +202,8 @@ def patch_tenant(
 
     Soporta: name, meta_waba_id, shipping_origin (incl. dane_code), store_type,
     social_links, store_locations, nit, email_contacto, telefono_contacto,
+    identidad legal (tipo_persona, razon_social, doc_*, regimen_iva, domicilio_*,
+    email_habeas_data),
     low_stock_threshold, support_schedule, after_hours_message, escalation_role,
     business_pitch, mision, vision, valores, tono_comunicacion.
 
