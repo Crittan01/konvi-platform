@@ -2624,6 +2624,40 @@ COMMENT ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minute
 
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integer DEFAULT 24, "p_limit" integer DEFAULT 50) RETURNS TABLE("receipt_id" "uuid", "tenant_id" "uuid", "order_id" "uuid", "conversation_id" "uuid", "numero" "text", "total" numeric, "forma_pago" "text", "dentro_de_csw" boolean)
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT r.id, r.tenant_id, r.order_id, o.conversation_id, r.numero,
+           (r.snapshot->'totales'->>'total')::NUMERIC,
+           r.snapshot->'pedido'->>'forma_pago',
+           -- Fuera de la ventana de servicio de Meta solo se puede escribir con
+           -- plantilla aprobada, y las plantillas están diferidas (ADR-0040 §4).
+           -- Se marca en vez de intentar y fallar con un error opaco de Meta.
+           EXISTS (
+               SELECT 1 FROM public.messages m
+               WHERE m.conversation_id = o.conversation_id
+                 AND m.direction = 'inbound'
+                 AND m.created_at >= NOW() - make_interval(hours => p_csw_hours)
+           )
+    FROM public.order_receipts r
+    JOIN public.orders o ON o.id = r.order_id AND o.tenant_id = r.tenant_id
+    WHERE r.ack_sent_at IS NULL
+      AND r.voided_at IS NULL          -- un comprobante anulado no se remite
+      AND r.ack_skipped_reason IS NULL -- ya se decidió que no se podía
+      AND o.conversation_id IS NOT NULL
+    ORDER BY r.issued_at ASC
+    LIMIT GREATEST(1, p_limit);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integer, "p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integer, "p_limit" integer) IS 'Comprobantes emitidos cuyo acuse todavía no le llegó al comprador. Excluye los anulados: remitir un documento que ya no es cierto sería peor que no remitirlo.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "numero" "text", "estado_pedido" "text")
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public', 'pg_temp'
@@ -2811,6 +2845,27 @@ ALTER FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenant_id" "
 
 
 COMMENT ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Emite el comprobante de un pedido, idempotente por (tenant_id, order_id). NO emite si las cifras del pedido no cuadran (Ley 1480 art. 26): devuelve motivo=cifras_incoherentes. El consecutivo es del comprobante, no del pedido.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text" DEFAULT NULL::"text") RETURNS boolean
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    UPDATE public.order_receipts
+       SET ack_sent_at = CASE WHEN p_skipped IS NULL THEN NOW() ELSE NULL END,
+           ack_channel = CASE WHEN p_skipped IS NULL THEN p_channel ELSE NULL END,
+           ack_skipped_reason = left(p_skipped, 200)
+     WHERE id = p_receipt_id AND tenant_id = p_tenant_id
+       AND ack_sent_at IS NULL       -- nadie recibe dos acuses
+    RETURNING true;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") IS 'Registra que el acuse salió (o por qué no). El guard ack_sent_at IS NULL es la idempotencia: un reintento del barrido no le manda dos acuses al mismo comprador.';
 
 
 
@@ -4942,7 +4997,10 @@ CREATE TABLE IF NOT EXISTS "public"."order_receipts" (
     "content_hash" "text" NOT NULL,
     "issued_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "voided_at" timestamp with time zone,
-    "void_reason" "text"
+    "void_reason" "text",
+    "ack_sent_at" timestamp with time zone,
+    "ack_channel" "text",
+    "ack_skipped_reason" "text"
 );
 
 
@@ -4954,6 +5012,14 @@ COMMENT ON TABLE "public"."order_receipts" IS 'Comprobante de compra NO FISCAL (
 
 
 COMMENT ON COLUMN "public"."order_receipts"."numero" IS 'Consecutivo POR TENANT del comprobante, no del pedido: el bot cancela y recrea la orden pending_payment al cambiar el carrito, así que numerar allí dejaría huecos en pedidos que nunca existieron comercialmente.';
+
+
+
+COMMENT ON COLUMN "public"."order_receipts"."ack_sent_at" IS 'Cuándo se le remitió el acuse al comprador (Ley 1480 art. 50 lit. d). NULL = todavía no salió. Es la idempotencia del envío: nadie recibe dos acuses.';
+
+
+
+COMMENT ON COLUMN "public"."order_receipts"."ack_skipped_reason" IS 'Por qué no se pudo remitir. Sin esto, un acuse que nunca sale es indistinguible de uno pendiente — y el plazo legal corre igual.';
 
 
 
@@ -7307,6 +7373,10 @@ CREATE INDEX "idx_order_cancellations_tenant" ON "public"."order_cancellations" 
 
 
 CREATE INDEX "idx_order_items_order" ON "public"."order_items" USING "btree" ("order_id");
+
+
+
+CREATE INDEX "idx_order_receipts_ack_pendiente" ON "public"."order_receipts" USING "btree" ("tenant_id", "issued_at") WHERE (("ack_sent_at" IS NULL) AND ("voided_at" IS NULL));
 
 
 
@@ -10302,6 +10372,11 @@ GRANT ALL ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minu
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_receipts_pending_ack"("p_csw_hours" integer, "p_limit" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_find_receipts_to_void"("p_limit" integer) TO "service_role";
 
@@ -10314,6 +10389,11 @@ GRANT ALL ON FUNCTION "public"."rpc_find_silent_conversations"("p_silence_minute
 
 REVOKE ALL ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") TO "service_role";
 
 
 
