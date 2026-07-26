@@ -66,6 +66,26 @@ _worker_ref = {"instance": None}
 HEALTH_HEARTBEAT_STALE_SECONDS = 120
 
 
+def _estado_canales() -> dict:
+    """Qué canales de salida al comprador están realmente configurados.
+
+    Solo booleanos derivados de la PRESENCIA de cada credencial: exponer el valor sería
+    filtrar un secreto por un endpoint público. Se leen como atributos de módulo porque el
+    env se resuelve en import-time.
+    """
+    try:
+        import notifications
+        email_ok = bool(getattr(notifications, "RESEND_API_KEY", ""))
+    except Exception:
+        email_ok = False
+    return {
+        "email_configurado": email_ok,
+        # WhatsApp es per-tenant (credenciales en Vault), así que no hay un booleano
+        # global honesto: depende de cada tenant. Se omite a propósito en vez de
+        # inventar uno que mienta.
+    }
+
+
 @app.get("/health")
 def health():
     """Health check de Render. Devuelve 503 si el worker está caído o colgado
@@ -89,6 +109,14 @@ def health():
         "status": "ok" if reason is None else "degraded",
         "worker": _worker_status,
         "heartbeat_age_s": round(age, 1) if age is not None else None,
+        # Canales de salida al comprador. Son BOOLEANOS: nunca el valor del secreto.
+        #
+        # `email_configurado` responde una pregunta que hasta ahora no tenía respuesta sin
+        # entrar al panel de Render: si está en false, el comprobante NO le llega por correo
+        # a nadie. No se pierde en silencio (el envío se niega a marcarse como remitido),
+        # pero el comprador solo recibe el acuse corto de WhatsApp — y el detalle completo,
+        # que es el que sirve para una garantía o un retracto, no sale.
+        "canales": _estado_canales(),
     }
     if reason is not None:
         body["reason"] = reason
