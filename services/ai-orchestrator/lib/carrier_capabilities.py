@@ -108,19 +108,31 @@ def _resolve_cod(
     canonical_supports_cod: bool,
     cod_override: Optional[str],
     tenant_cod_globally_enabled: bool = True,
+    tenant_supports_cod: Optional[bool] = None,
 ) -> bool:
     """Resuelve `supports_cod` efectivo.
 
     Precedencia:
-      1. Si tenant globalmente DISABLED COD (tenant_payment_methods.cod
-         enabled=false) → SIEMPRE false (gate tenant-level).
-      2. Si cod_override='force_enable' → true.
-      3. Si cod_override='force_disable' → false.
-      4. Fallback: canonical_supports_cod.
+      1. Si el tenant tiene COD globalmente apagado → SIEMPRE false.
+      2. cod_override='force_enable' → true.
+      3. cod_override='force_disable' → false.
+      4. Si el tenant tiene fila para ese carrier → canonical Y su opt-in.
+      5. Sin fila del tenant → canonical.
 
-    El gate tenant-level (#1) es el switch maestro modular: tenant que
-    NO quiere COD apaga 1 vez, todos los carriers quedan ✗COD sin tocar
-    overrides per-carrier.
+    EL PASO 4 FALTABA, y su ausencia era un bug con consecuencia comercial.
+    `tenant_carriers.supports_cod` es el interruptor que el comerciante mueve en la
+    consola —"con esta transportadora sí tengo recaudo pactado"— y nace en `false`
+    justamente porque es un opt-in explícito post-onboarding. Pero nadie lo leía: esta
+    función solo miraba `cod_override`, que la consola NUNCA escribe.
+
+    Resultado, verificado en producción el 2026-07-27: KAIU tiene ENVIA con
+    `supports_cod=false` y aun así el bot se lo ofreció a una clienta para un pedido
+    contra entrega. Si lo hubiera elegido, el paquete sale y nadie recauda.
+
+    Se combina con Y y no se reemplaza: una transportadora que la canónica dice que NO
+    recauda no empieza a hacerlo porque el comerciante marque una casilla. El opt-in del
+    tenant puede QUITAR, no puede INVENTAR. Para forzar en contra de la canónica está
+    `cod_override`, que sigue teniendo la última palabra.
     """
     if not tenant_cod_globally_enabled:
         return False
@@ -128,6 +140,8 @@ def _resolve_cod(
         return True
     if cod_override == "force_disable":
         return False
+    if tenant_supports_cod is not None:
+        return canonical_supports_cod and bool(tenant_supports_cod)
     return canonical_supports_cod
 
 
@@ -150,6 +164,10 @@ def _compose_capability(
                 bool(canonical.get("supports_cod", False)),
                 (tenant_row or {}).get("cod_override"),
                 tenant_cod_globally_enabled,
+                # None cuando el tenant no tiene fila para este carrier: ahí manda la
+                # canónica sola, como antes. `.get` sin default lo distingue de un False
+                # explícito, que sí es una decisión del comerciante.
+                (tenant_row or {}).get("supports_cod"),
             ),
             cod_min_recaudo_cop=canonical.get("cod_min_recaudo_cop"),
             cod_min_recaudo_heavy_cop=canonical.get("cod_min_recaudo_heavy_cop"),
@@ -243,7 +261,7 @@ def get_effective_carrier_capability(
     try:
         tc_q = (
             supabase.table("tenant_carriers")
-            .select("enabled, display_label, cod_override")
+            .select("enabled, display_label, cod_override, supports_cod")
             .eq("tenant_id", tenant_id)
             .eq("provider", "aveonline")
             .ilike("carrier_code", name_normalized.lower())
@@ -307,7 +325,7 @@ def get_all_capabilities_for_tenant(
     try:
         tc_q = (
             supabase.table("tenant_carriers")
-            .select("carrier_code, enabled, display_label, cod_override")
+            .select("carrier_code, enabled, display_label, cod_override, supports_cod")
             .eq("tenant_id", tenant_id)
             .eq("provider", "aveonline")
             .execute()
