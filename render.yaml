@@ -476,13 +476,11 @@ services:
         value: "72"                              # antigüedad máxima (fuera → no se molesta)
       - key: CART_ABANDONED_DISCOUNT_LABEL
         value: "10%"
-      # Quiet hours (no enviar HSM de madrugada, hora Colombia). Default OFF.
-      - key: CART_ABANDONED_QUIET_HOURS_ENABLED
-        value: "false"
-      - key: CART_ABANDONED_QUIET_START_HOUR
-        value: "21"                              # 21:00 CO
-      - key: CART_ABANDONED_QUIET_END_HOUR
-        value: "8"                               # hasta 08:00 CO
+      # Retirados los CART_ABANDONED_QUIET_*: el horario de contacto lo aplica ahora
+      # el gate (lib/outbound_gate.py) con la ventana LEGAL de la Ley 2300
+      # (L-V 7-19, sáb 8-15, nunca domingos ni festivos) y la zona real
+      # America/Bogota. Los knobs viejos estaban apagados, usaban una ventana que
+      # no era la de la ley y no miraban día de semana ni festivos.
       - key: COLOMBIA_UTC_OFFSET_HOURS
         value: "-5"
       # Tope de envíos cart_abandoned por tenant por ciclo (anti-ráfaga).

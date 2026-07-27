@@ -22,6 +22,7 @@ import importlib.util
 import os
 import sys
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -341,6 +342,24 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
 # ─── _send_cart_abandoned_reminders_if_due ───────────────────────────────────
 
 
+@contextmanager
+def _en_horario_habil():
+    """Congela la ventana de contacto de la Ley 2300 como ABIERTA.
+
+    Sin esto, estos tests pasan o fallan según la hora a la que se corran — a la 1 de la
+    mañana el gate bloquea correctamente y el test parecía roto. El horario tiene sus
+    propias pruebas en test_festivos_colombia.py y test_outbound_gate.py; acá se prueba el
+    cron del carrito, no el reloj.
+    """
+    import lib.outbound_gate as _gate
+    original = _gate.puede_contactar_comercialmente
+    _gate.puede_contactar_comercialmente = lambda *a, **k: (True, "")
+    try:
+        yield
+    finally:
+        _gate.puede_contactar_comercialmente = original
+
+
 class CartAbandonedCronTests(unittest.TestCase):
     def setUp(self):
         self.sb = _FakeSupabase()
@@ -350,7 +369,8 @@ class CartAbandonedCronTests(unittest.TestCase):
 
     def _seed_cart(self, *, cart_id="cart_1", consent=True, hours_ago=25,
                    has_contact=True, reminder_sent=False, status="abandoned",
-                   revoked_at=None):
+                   revoked_at=None, consent_comercial=True,
+    ):
         cart_updated_at = (
             datetime.now(timezone.utc) - timedelta(hours=hours_ago)
         ).isoformat()
@@ -372,6 +392,13 @@ class CartAbandonedCronTests(unittest.TestCase):
                 "tenant_id": "tenant-A",
                 "consent_given": consent,
                 "consent_revoked_at": revoked_at,
+                # Ley 2300 art. 5 par. 2: el consentimiento COMERCIAL es explícito y
+                # separado del transaccional. `consent_given` autoriza procesar el pedido,
+                # NO mandar publicidad — y el carrito abandonado es publicidad.
+                "consent_comercial_at": (
+                    "2026-01-01T00:00:00Z" if consent_comercial else None
+                ),
+                "consent_comercial_revoked_at": None,
                 "name": "Camila",   # F44: columna real
             })
         self.sb._tables["conversation_cart_items"].append({
@@ -409,8 +436,11 @@ class CartAbandonedCronTests(unittest.TestCase):
         mock_send.assert_not_called()
         self.assertEqual(self.w._metrics["cart_abandoned_reminders_skipped_no_consent"], 1)
 
-    def test_con_consent_template_approved_envia(self):
-        self._seed_cart(consent=True)
+    def test_con_consentimiento_COMERCIAL_y_template_approved_envia(self):
+        """El consentimiento que autoriza esto es el COMERCIAL, no el transaccional.
+        Antes bastaba `consent_given` — que es el de Habeas Data para procesar el pedido —
+        y eso es justo lo que la Ley 2300 art. 5 par. 2 prohíbe."""
+        self._seed_cart(consent=True, consent_comercial=True)
         captured = {}
 
         async def fake_send_template(*a, **kw):
@@ -418,8 +448,9 @@ class CartAbandonedCronTests(unittest.TestCase):
             captured["template_name"] = kw.get("template_name")
             return "wamid.cart_OK", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
-                          side_effect=fake_send_template):
+        with _en_horario_habil(), patch.object(
+            self.worker_mod, "send_whatsapp_template", side_effect=fake_send_template,
+        ):
             _run(self.w._send_cart_abandoned_reminders_if_due())
         self.assertEqual(captured["template_name"], "cart_abandoned_24h_v1")
         self.assertEqual(captured["body_params"][0], "Camila")
@@ -433,8 +464,9 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return None, self.worker_mod.TEMPLATE_ERR_TEMPLATE_NOT_APPROVED
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
-                          side_effect=fake_send_template):
+        with _en_horario_habil(), patch.object(
+            self.worker_mod, "send_whatsapp_template", side_effect=fake_send_template,
+        ):
             _run(self.w._send_cart_abandoned_reminders_if_due())
         self.assertEqual(self.w._metrics["cart_abandoned_reminders_hsm_not_approved"], 1)
         # Idempotencia marcada — no reintentar cada 5min
@@ -491,3 +523,20 @@ class CartAbandonedCronTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_SIN_consentimiento_comercial_no_sale_publicidad(self):
+        """El caso real de hoy: todos los contactos tienen `consent_given` (aceptaron que
+        se procese su pedido) y NINGUNO tiene consentimiento comercial. Hasta que exista un
+        opt-in explícito, el marketing no sale — fail-closed."""
+        self._seed_cart(consent=True, consent_comercial=False)
+        enviado = {}
+
+        async def fake_send_template(*a, **kw):
+            enviado["si"] = True
+            return "wamid.X", None
+
+        with _en_horario_habil(), patch.object(
+            self.worker_mod, "send_whatsapp_template", side_effect=fake_send_template,
+        ):
+            _run(self.w._send_cart_abandoned_reminders_if_due())
+        self.assertNotIn("si", enviado, "no debe salir publicidad sin consentimiento comercial")
