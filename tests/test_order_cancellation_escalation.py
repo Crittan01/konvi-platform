@@ -123,26 +123,26 @@ class DetectEscalationReasonsTests(unittest.TestCase):
 
 class EscalationCustomerMessageTests(unittest.TestCase):
     def test_in_transit_message(self):
-        msg = _escalation_customer_message(["ORDER_IN_TRANSIT"], "ABC123", {})
+        msg = _escalation_customer_message(["ORDER_IN_TRANSIT"], "ABC123", {}, TenantPolicy())
         self.assertIn("en ruta", msg.lower())
         self.assertIn("ABC123", msg)
 
     def test_delivered_message_cites_retracto(self):
-        msg = _escalation_customer_message(["ORDER_DELIVERED"], "ABC123", {})
+        msg = _escalation_customer_message(["ORDER_DELIVERED"], "ABC123", {}, TenantPolicy())
         self.assertIn("retracto", msg.lower())
         self.assertIn("1480", msg)
 
     def test_defect_message_cites_garantia(self):
-        msg = _escalation_customer_message(["PRODUCT_DEFECT_CLAIMED"], "ABC123", {})
+        msg = _escalation_customer_message(["PRODUCT_DEFECT_CLAIMED"], "ABC123", {}, TenantPolicy())
         self.assertIn("garantía", msg.lower())
 
     def test_missing_package_message(self):
-        msg = _escalation_customer_message(["MISSING_PACKAGE"], "ABC123", {})
+        msg = _escalation_customer_message(["MISSING_PACKAGE"], "ABC123", {}, TenantPolicy())
         self.assertIn("courier", msg.lower())
 
     def test_uses_primary_reason_first(self):
         # El primer reason es el primario → mensaje de ORDER_DELIVERED, no de HIGH_VALUE.
-        msg = _escalation_customer_message(["ORDER_DELIVERED", "HIGH_VALUE"], "X", {})
+        msg = _escalation_customer_message(["ORDER_DELIVERED", "HIGH_VALUE"], "X", {}, TenantPolicy())
         self.assertIn("retracto", msg.lower())
 
 

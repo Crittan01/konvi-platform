@@ -215,40 +215,45 @@ class CustomerMessageTests(unittest.TestCase):
             refund_amount_cents=10000000, policy=policy,
         )
         self.assertIn("$100.000", msg)
-        self.assertIn("30 días calendario", msg)
+        # El plazo en comercio electrónico es de 15 días calendario (art. 47, mod. art. 3
+        # Ley 2439 de 2024). Este test afirmaba 30 y CONGELABA el error como comportamiento
+        # esperado — por eso nadie lo detectó hasta la revalidación legal del 2026-07-26.
+        self.assertIn("15 días calendario", msg)
+        self.assertNotIn("30 días", msg)
         self.assertIn("Ley 1480", msg)
+        self.assertNotIn("Art. 49", msg)
 
 
 class EscalationMessageTests(unittest.TestCase):
     def test_in_transit(self):
         msg = _escalation_customer_message(
-            ["ORDER_IN_TRANSIT"], "ABC12345", {},
+            ["ORDER_IN_TRANSIT"], "ABC12345", {}, TenantPolicy(),
         )
         self.assertIn("rechazarlo", msg.lower())
         self.assertIn("courier", msg.lower())
 
     def test_defect(self):
         msg = _escalation_customer_message(
-            ["PRODUCT_DEFECT_CLAIMED"], "ABC12345", {},
+            ["PRODUCT_DEFECT_CLAIMED"], "ABC12345", {}, TenantPolicy(),
         )
         self.assertIn("garantía", msg.lower())
         self.assertIn("Art. 11", msg)
 
     def test_missing(self):
         msg = _escalation_customer_message(
-            ["MISSING_PACKAGE"], "ABC12345", {},
+            ["MISSING_PACKAGE"], "ABC12345", {}, TenantPolicy(),
         )
         self.assertIn("courier", msg.lower())
 
     def test_high_value(self):
         msg = _escalation_customer_message(
-            ["HIGH_VALUE"], "ABC12345", {"total_amount": 600000},
+            ["HIGH_VALUE"], "ABC12345", {"total_amount": 600000}, TenantPolicy(),
         )
         self.assertIn("especialista", msg.lower())
 
     def test_dispute(self):
         msg = _escalation_customer_message(
-            ["PAYMENT_DISPUTE"], "ABC12345", {},
+            ["PAYMENT_DISPUTE"], "ABC12345", {}, TenantPolicy(),
         )
         self.assertIn("verificación", msg.lower())
 

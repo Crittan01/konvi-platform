@@ -70,26 +70,79 @@ def test_el_envio_va_discriminado_por_separado():
 
 
 def test_informa_retracto_y_garantia():
+    """El plazo de devolución es de 15 días CALENDARIO en comercio electrónico (art. 47 mod.
+    Ley 2439/2024). La versión anterior de este test afirmaba 30 y congelaba el error."""
     h = _html(politica={"enable_retracto_flow": True, "retracto_window_business_days": 5,
-                        "retracto_return_paid_by": "customer", "manual_refund_legal_days": 30})
-    assert "5 días hábiles" in h and "30 días" in h
+                        "retracto_return_paid_by": "customer", "manual_refund_legal_days": 15})
+    assert "5 días hábiles" in h
+    assert "15 días calendario" in h
     assert "Garantía" in h and "un año" in h
 
 
 def test_las_condiciones_salen_del_tenant_no_hardcodeadas():
     """Son configurables por comerciante: el documento debe decir las SUYAS."""
     h = _html(politica={"enable_retracto_flow": True, "retracto_window_business_days": 10,
-                        "retracto_return_paid_by": "seller", "manual_refund_legal_days": 15})
+                        "retracto_return_paid_by": "tenant", "manual_refund_legal_days": 7})
     assert "10 días hábiles" in h
     assert "lo asume el vendedor" in h
-    assert "15 días" in h
+    assert "7 días calendario" in h
 
 
 def test_pero_nunca_por_debajo_del_minimo_legal():
-    """Ley 1480 art. 47 da 5 días hábiles. Ningún tenant puede ofrecer menos, ni por error
-    de configuración ni a propósito."""
+    """El retracto es un PISO: 5 días hábiles mínimo, se puede ofrecer más."""
     h = _html(politica={"enable_retracto_flow": True, "retracto_window_business_days": 2})
     assert "5 días hábiles" in h and "2 días" not in h
+
+
+def test_ni_por_encima_del_maximo_legal():
+    """El reembolso es un TECHO: 15 días calendario máximo. Operan en direcciones OPUESTAS,
+    y confundirlo fue exactamente el bug del CHECK de la base."""
+    h = _html(politica={"enable_retracto_flow": True, "manual_refund_legal_days": 30})
+    assert "15 días calendario" in h
+    assert "30 días" not in h
+
+
+def test_la_garantia_de_perecederos_es_su_vencimiento():
+    """Art. 8: en perecederos el término es la fecha de vencimiento — puede ser MENOR que un
+    año. La versión anterior decía "un año, salvo plazo mayor", que excluía justo el caso de
+    cosmética."""
+    snap = {**SNAP, "items": [{"titulo": "Serum", "cantidad": 1, "precio_unitario": 1,
+                               "total_linea": 1, "vence_el": "2027-01-31"}]}
+    h = _html(snapshot=snap)
+    assert "fecha de vencimiento" in h
+    assert "salvo que se informe un plazo mayor" not in h
+
+
+def test_no_declara_excluido_un_pedido_que_si_admite_retracto():
+    """El error más caro de la versión anterior: decía "no aplica a productos de uso personal
+    ni hechos a tu medida" en TODOS los comprobantes, sin mirar los ítems — declarando en
+    abstracto la inaplicabilidad de un derecho que el comprador sí tenía."""
+    h = _html()
+    assert "días hábiles" in h, "debe enunciar el derecho"
+    assert "no admite retracto" not in h
+
+
+def test_si_TODO_el_pedido_esta_excluido_lo_dice_y_por_que():
+    snap = {**SNAP, "items": [{"titulo": "Kit personalizado", "cantidad": 1,
+                               "precio_unitario": 1, "total_linea": 1,
+                               "retracto_excluido": True,
+                               "retracto_excluido_motivo": "hecho a tu medida"}]}
+    h = _html(snapshot=snap)
+    assert "no admite retracto" in h and "hecho a tu medida" in h
+
+
+def test_si_solo_UNA_parte_esta_excluida_no_se_pierde_el_derecho_sobre_el_resto():
+    """Decir "no aplica" a secas cuando la mitad del pedido sí admite retracto le quita al
+    comprador un derecho real."""
+    snap = {**SNAP, "items": [
+        {"titulo": "Serum facial", "cantidad": 1, "precio_unitario": 1, "total_linea": 1},
+        {"titulo": "Kit personalizado", "cantidad": 1, "precio_unitario": 1, "total_linea": 1,
+         "retracto_excluido": True, "retracto_excluido_motivo": "hecho a tu medida"},
+    ]}
+    h = _html(snapshot=snap)
+    assert "días hábiles" in h, "el derecho sigue enunciado para el resto"
+    assert "Kit personalizado" in h, "y se nombra lo que queda fuera"
+    assert "Serum facial" not in h.split("Retracto")[1][:400], "no debe excluir lo que sí aplica"
 
 
 def test_distingue_contra_entrega():
