@@ -104,6 +104,38 @@ def _normalize_name(name: str) -> str:
     return " ".join((name or "").upper().split())
 
 
+def _clave_de_match(name: str) -> str:
+    """Forma comparable entre el nombre canónico y el `carrier_code` del tenant.
+
+    Los dos lados nombran a la misma empresa distinto y nunca se reconciliaron:
+
+        canónica            tenant_carriers.carrier_code
+        COORDINADORA        coordinadora_mercantil
+        TCC                 tcc_sa
+        SERVIENTREGA        servientrega
+
+    El `ilike` exacto que había casaba solo el tercer caso, así que la decisión del
+    comerciante sobre COORDINADORA y TCC se perdía en silencio — el mismo agujero que
+    tenía ENVIA, por otra razón. Se quitan separadores para comparar la raíz.
+    """
+    return "".join(ch for ch in (name or "").upper() if ch.isalnum())
+
+
+def _mismo_carrier(canonico: str, carrier_code: str) -> bool:
+    """¿El `carrier_code` del tenant nombra a este carrier canónico?
+
+    Se compara por PREFIJO y en un solo sentido: el nombre canónico es el genérico
+    ("TCC") y el del tenant trae la razón social ("tcc_sa"). Al revés no — un canónico
+    no puede absorber a un tenant más específico de otra empresa.
+
+    `GO ENVIOS` vs `ENVIA` no colisiona: "GOENVIOS" no empieza por "ENVIA".
+    """
+    a, b = _clave_de_match(canonico), _clave_de_match(carrier_code)
+    if not a or not b:
+        return False
+    return b.startswith(a)
+
+
 def _resolve_cod(
     canonical_supports_cod: bool,
     cod_override: Optional[str],
@@ -261,14 +293,18 @@ def get_effective_carrier_capability(
     try:
         tc_q = (
             supabase.table("tenant_carriers")
-            .select("enabled, display_label, cod_override, supports_cod")
+            .select("carrier_code, enabled, display_label, cod_override, supports_cod")
             .eq("tenant_id", tenant_id)
             .eq("provider", "aveonline")
-            .ilike("carrier_code", name_normalized.lower())
-            .maybe_single()
             .execute()
         )
-        tenant_row = tc_q.data if tc_q else None
+        # Se traen las filas del tenant y se casa acá: un `ilike` exacto se pierde
+        # `coordinadora_mercantil` para el canónico `COORDINADORA`.
+        tenant_row = next(
+            (r for r in (tc_q.data or [])
+             if _mismo_carrier(name_normalized, r.get("carrier_code") or "")),
+            None,
+        )
     except Exception:
         tenant_row = None
 
@@ -320,8 +356,9 @@ def get_all_capabilities_for_tenant(
     except Exception:
         canonical_rows = []
 
-    # 2. TODOS los overrides del tenant en 1 query, indexados por nombre normalizado
-    #    (replica el match case-insensitive `ilike(carrier_code)` del single path).
+    # 2. TODOS los overrides del tenant en 1 query. Se guardan como LISTA y se casan
+    #    por raíz (`_mismo_carrier`), igual que el lookup single: indexar por nombre
+    #    exacto perdía `coordinadora_mercantil` frente al canónico `COORDINADORA`.
     try:
         tc_q = (
             supabase.table("tenant_carriers")
@@ -330,12 +367,9 @@ def get_all_capabilities_for_tenant(
             .eq("provider", "aveonline")
             .execute()
         )
-        overrides = {
-            _normalize_name(r.get("carrier_code") or ""): r
-            for r in (tc_q.data or [])
-        }
+        overrides_rows = tc_q.data or []
     except Exception:
-        overrides = {}
+        overrides_rows = []
 
     # 3. Gate COD tenant-level: 1 sola vez (antes: 1 por carrier; cacheado igual).
     try:
@@ -353,7 +387,8 @@ def get_all_capabilities_for_tenant(
         cap = _compose_capability(
             name_normalized,
             canonical,
-            overrides.get(name_normalized),
+            next((r for r in overrides_rows
+                  if _mismo_carrier(name_normalized, r.get("carrier_code") or "")), None),
             tenant_cod_globally_enabled,
         )
         _CACHE[(tenant_id, name_normalized)] = (now, cap)

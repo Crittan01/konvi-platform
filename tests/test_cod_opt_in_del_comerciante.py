@@ -95,3 +95,46 @@ def test_las_dos_copias_del_modulo_no_divergen():
     a = (REPO_ROOT / "services/api/lib/carrier_capabilities.py").read_text()
     b = (REPO_ROOT / "services/ai-orchestrator/lib/carrier_capabilities.py").read_text()
     assert a == b, "las dos copias de carrier_capabilities divergieron"
+
+
+# ─── Los dos lados nombran a la misma empresa distinto ──────────────────────
+
+from lib.carrier_capabilities import _mismo_carrier  # noqa: E402
+
+
+@pytest.mark.parametrize("canonico,carrier_code", [
+    # El caso que dejaba fuera la decisión del comerciante.
+    ("COORDINADORA", "coordinadora_mercantil"),
+    ("TCC", "tcc_sa"),
+    # Los que ya casaban con el ilike exacto y deben seguir casando.
+    ("SERVIENTREGA", "servientrega"),
+    ("ENVIA", "envia"),
+    ("INTERRAPIDISIMO", "interrapidisimo"),
+    ("99MINUTOS", "99minutos"),
+    ("GO ENVIOS", "go_envios"),
+])
+def test_el_codigo_del_tenant_se_reconoce_pese_a_la_razon_social(canonico, carrier_code):
+    """La canónica usa el nombre genérico ("TCC") y el tenant guarda la razón social
+    ("tcc_sa"). El `ilike` exacto casaba solo cuando coincidían letra por letra, así que
+    la decisión del comerciante sobre COORDINADORA y TCC se perdía en silencio."""
+    assert _mismo_carrier(canonico, carrier_code)
+
+
+@pytest.mark.parametrize("canonico,carrier_code", [
+    ("ENVIA", "go_envios"),      # el prefijo va en un solo sentido, no al revés
+    ("TCC", "servientrega"),
+    ("SERVIENTREGA", "envia"),
+    ("COORDINADORA", ""),
+    ("", "servientrega"),
+])
+def test_no_casa_lo_que_no_es(canonico, carrier_code):
+    """Un falso positivo acá le da recaudo a una transportadora que no lo tiene pactado:
+    el paquete sale y nadie cobra."""
+    assert not _mismo_carrier(canonico, carrier_code)
+
+
+def test_el_match_es_direccional():
+    """El canónico es el genérico y el del tenant el específico. Al revés, un canónico
+    podría absorber al carrier de otra empresa que empiece igual."""
+    assert _mismo_carrier("TCC", "tcc_sa")
+    assert not _mismo_carrier("TCC SA ESP", "tcc")
