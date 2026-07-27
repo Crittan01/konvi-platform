@@ -217,3 +217,45 @@ def test_la_decision_se_puede_usar_como_booleano():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ─── Quien nunca dijo que sí ────────────────────────────────────────────────
+
+def test_nunca_haber_autorizado_no_es_lo_mismo_que_no_haber_revocado():
+    """`consent_revoked_at` cubre a quien dijo que no DESPUÉS. Esto cubre a quien nunca
+    dijo que sí, que hasta el 2026-07-27 pasaba el gate.
+
+    Lo destapó un test del carrito abandonado cuyo nombre decía "sin consent" y que solo
+    fallaba DENTRO del horario de contacto de la Ley 2300 — o sea que el reloj tapaba el
+    hueco media jornada.
+    """
+    sb = _FakeSB(_contacto(consent_given=False,
+                           consent_comercial_at="2026-01-01T00:00:00Z"))
+    d = _gate(sb, Categoria.COMERCIAL)
+    assert not d
+    assert d.motivo == "sin_consentimiento_de_datos"
+
+
+def test_lo_transaccional_sigue_saliendo_sin_ese_consentimiento():
+    """Un mensaje transaccional ejecuta el contrato que el cliente inició al escribirnos.
+    Bloquear la confirmación de su propio pedido por una casilla que aún no marcó lo
+    dejaría sin saber qué compró."""
+    sb = _FakeSB(_contacto(consent_given=False))
+    assert _gate(sb, Categoria.TRANSACCIONAL)
+
+
+def test_un_consentimiento_que_no_se_pudo_leer_no_bloquea_por_si_solo():
+    """Fail-closed no puede volverse fail-siempre: si el SELECT no trajo la columna, el
+    valor es None —"no lo sé"— y tratarlo como "no autorizó" cortaría envíos legítimos.
+    La ausencia de la FILA sí bloquea, y eso ya tiene su propio test."""
+    sb = _FakeSB(_contacto(consent_comercial_at="2026-01-01T00:00:00Z"))
+    assert _gate(sb, Categoria.COMERCIAL)
+
+
+def test_el_gate_pide_la_columna_que_evalua():
+    """Si el SELECT deja de traer `consent_given`, la guarda se vuelve muerta en silencio:
+    siempre vería None."""
+    import inspect
+
+    import lib.outbound_gate as gate
+    assert "consent_given" in inspect.getsource(gate._cargar_contacto)

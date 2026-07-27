@@ -116,6 +116,20 @@ def puede_enviar_proactivo(
         return PERMITIDO
 
     # ── De acá para abajo, solo lo COMERCIAL ────────────────────────────────
+    # Quien NUNCA autorizó el tratamiento de sus datos no puede recibir publicidad, tenga
+    # lo que tenga en la columna comercial. `consent_revoked_at` cubre a quien dijo que no
+    # DESPUÉS; esto cubre a quien nunca dijo que sí — que no es lo mismo y hasta ahora
+    # pasaba. Lo destapó un test cuyo nombre decía "sin consent" y que solo fallaba dentro
+    # del horario de contacto de la Ley 2300, así que el reloj lo tapaba media jornada.
+    #
+    # `is False` y no un falsy: un contacto sin la columna cargada devuelve None, y tratar
+    # "no lo sé" como "no autorizó" bloquearía envíos legítimos por un SELECT incompleto.
+    if contacto.get("consent_given") is False:
+        return Decision(
+            False, "sin_consentimiento_de_datos",
+            "el titular nunca autorizó el tratamiento de sus datos (Ley 1581)",
+        )
+
     if not contacto.get("consent_comercial_at") or contacto.get("consent_comercial_revoked_at"):
         return Decision(
             False, "sin_consentimiento_comercial",
@@ -140,7 +154,8 @@ def _cargar_contacto(
 ) -> Optional[dict]:
     """Estado de consentimiento del destinatario. `None` = no se pudo verificar, que el
     caller debe tratar como negativa y no como ausencia de restricciones."""
-    campos = "consent_revoked_at, consent_comercial_at, consent_comercial_revoked_at"
+    campos = ("consent_given, consent_revoked_at, "
+              "consent_comercial_at, consent_comercial_revoked_at")
     try:
         if contact_id:
             res = (

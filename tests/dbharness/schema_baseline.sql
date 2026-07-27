@@ -1032,7 +1032,7 @@ $$;
 ALTER FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) IS 'Rev. 100 — Aplica retention policy de la entity por-tenant. Lee override per-tenant si existe enabled, sino default global. Cada DELETE/UPDATE filtra por tenant_id explícito (multi-tenant safe).';
+COMMENT ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) IS 'Barrido de retención. SOLO service_role: recorre todos los tenants y borra sin validar pertenencia, así que un GRANT a authenticated es borrado cross-tenant. Lo tenía hasta el 2026-07-27 por privilegios por defecto del esquema.';
 
 
 
@@ -10729,7 +10729,6 @@ GRANT ALL ON FUNCTION "public"."cleanup_expired_bot_source_log"("retention_days"
 
 
 REVOKE ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cleanup_expired_idempotency_keys"("p_limit" integer) TO "service_role";
 
 
@@ -10740,7 +10739,6 @@ GRANT ALL ON FUNCTION "public"."cleanup_expired_meli_webhook_dedup"() TO "servic
 
 
 REVOKE ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer) TO "service_role";
 
 
@@ -10804,7 +10802,6 @@ GRANT ALL ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uu
 
 
 REVOKE ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "service_role";
 
 
@@ -10878,7 +10875,6 @@ GRANT ALL ON FUNCTION "public"."fn_log_tenant_offboarding_event"("p_tenant_id" "
 
 
 REVOKE ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_purge_orphan_shipment_quotes"("p_retention_days" integer) TO "service_role";
 
 
@@ -10968,7 +10964,6 @@ GRANT ALL ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp wi
 
 
 REVOKE ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "service_role";
 
 

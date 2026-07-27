@@ -17,6 +17,7 @@ Uso:
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import sys
 import urllib.request
@@ -45,8 +46,26 @@ REPLAY = "--replay" in sys.argv
 AMOUNT_OVERRIDE = next(
     (int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--amount=")), None
 )
-API_URL = creds.get("API_URL", "http://localhost:8001")
-EVENTS_KEY = creds["WOMPI_EVENTS_KEY_SANDBOX"]
+API_URL = os.environ.get("API_URL") or creds.get("API_URL", "http://localhost:8001")
+# La `events_key` es POR TENANT y vive en Vault: es la que usa el API para verificar
+# (wompi_webhook.py -> get_tenant_wompi_creds). Firmar con la del .env producía un
+# `firma_invalida` que el API —correctamente— responde con 200 sin aplicar nada, y desde
+# afuera parecía que el webhook se había perdido. Se lee de la MISMA fuente que el API.
+def _events_key_del_tenant(tenant_id: str) -> str:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "wompi_client", f"{REPO}/services/api/integrations/wompi_client.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, f"{REPO}/services/api")
+    spec.loader.exec_module(mod)
+    from supabase import create_client as _cc
+    _sb = _cc(creds["NEXT_PUBLIC_SUPABASE_URL"],
+              creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"])
+    _, ek, _env = mod.get_tenant_wompi_creds(_sb, tenant_id, raise_on_error=True)
+    if not ek:
+        sys.exit("ERROR: el tenant no tiene events_key configurada en Vault")
+    return ek
+
 
 from supabase import create_client  # noqa: E402
 
@@ -54,7 +73,13 @@ sb = create_client(
     creds["NEXT_PUBLIC_SUPABASE_URL"],
     creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"],
 )
-TENANT = "d0000000-0000-0000-0000-000000000001"
+# El tenant de DEV quedó hardcodeado aquí y ese proyecto ya no existe: hoy el único
+# entorno es konvi-prod. Se parametriza en vez de cambiar la constante, para que el script
+# sirva igual el día que vuelva a haber más de un tenant.
+TENANT = next(
+    (a.split("=", 1)[1] for a in sys.argv if a.startswith("--tenant-id=")),
+    "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9",
+)
 
 pay = (
     sb.table("payments")
@@ -96,6 +121,7 @@ def _traverse(root, dotted: str) -> str:
     return "" if cur is None else str(cur)
 
 
+EVENTS_KEY = _events_key_del_tenant(TENANT)
 concat = "".join(_traverse(data, p) for p in properties) + str(timestamp) + EVENTS_KEY
 checksum = hashlib.sha256(concat.encode()).hexdigest().upper()
 if BAD_SIG:
