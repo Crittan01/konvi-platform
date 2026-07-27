@@ -430,6 +430,10 @@ class OrchestratorWorker:
             "wa_outbound_events_seen": 0,
             "wa_outbound_sent": 0,
             "wa_outbound_failed": 0,
+            # Rechazos de Meta por ventana de servicio cerrada. Separada de
+            # `wa_outbound_failed` porque no es un fallo del sistema: es el cliente que
+            # lleva más de 24h sin escribir, y la notificación va por correo.
+            "wa_outbound_out_of_window": 0,
             "idempotency_cleanup_runs": 0,
             "idempotency_cleanup_deleted": 0,
             "last_cleanup_deleted": 0,
@@ -1181,6 +1185,33 @@ class OrchestratorWorker:
                     self._metrics["wa_outbound_sent"] += 1
                 else:
                     self._metrics["wa_outbound_ack_pending"] = self._metrics.get("wa_outbound_ack_pending", 0) + 1
+                continue
+
+            # Meta rechazó por ventana de servicio cerrada (131047). Ese error NO se
+            # reintenta: la ventana no se reabre sola, así que cada vuelta es una llamada
+            # a la Graph API que ya sabemos que va a fallar, y al agotar intentos el
+            # mensaje quedaba marcado con un motivo genérico que no le dice nada al
+            # operador — no distinguía "Meta cerró la ventana" de "se cayó la red".
+            #
+            # El comprador NO se queda sin enterarse: las notificaciones post-despacho
+            # (guía, en ruta, entregado, novedad, reembolso) salen TAMBIÉN por correo desde
+            # el webhook de Aveonline, y el correo es obligatorio para crear un pedido.
+            # Esto arregla la mitad de WhatsApp, que hoy quema reintentos y miente en el
+            # motivo — no un apagón de la notificación.
+            from whatsapp_sender import fuera_de_ventana as _fuera_de_ventana
+            if _fuera_de_ventana(tenant_id, to_phone):
+                logger.warning(
+                    "[OUTBOUND] msg_id=%s fuera de la ventana de 24h de Meta — no se "
+                    "reintenta. Va por correo si es una notificación de envío.",
+                    msg_id,
+                )
+                self._mark_outbound_failed(
+                    tenant_id, message_id, "fuera_de_ventana_csw",
+                )
+                self._ack_whatsapp_outbound_message(msg_id)
+                self._metrics["wa_outbound_out_of_window"] = (
+                    self._metrics.get("wa_outbound_out_of_window", 0) + 1
+                )
                 continue
 
             if read_ct >= max(1, WHATSAPP_OUTBOUND_MAX_ATTEMPTS):

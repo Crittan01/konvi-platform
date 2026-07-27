@@ -70,6 +70,52 @@ def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, s
         return "", ""
 
 
+#: Código con el que Meta rechaza un mensaje libre fuera de la ventana de servicio de 24h
+#: ("Re-engagement message"). Es el ÚNICO error que no tiene sentido reintentar: la ventana
+#: no se reabre sola, y cada reintento es una llamada que ya sabemos que va a fallar.
+META_ERROR_FUERA_DE_VENTANA = 131047
+
+#: Último código de error por (tenant, teléfono). `send_whatsapp_message` devuelve None
+#: para TODO —timeout, token malo, ventana cerrada— y el consumidor de la cola no podía
+#: distinguirlos: reintentaba hasta agotar intentos y marcaba el mensaje con un motivo
+#: genérico. Se guarda acá en vez de cambiar el tipo de retorno porque hay ~10 llamadores
+#: que solo quieren el id; los que necesitan el detalle preguntan con `ultimo_error`.
+_ULTIMO_ERROR: dict[str, Optional[int]] = {}
+
+
+def _telefono_normalizado(p: str) -> str:
+    """La misma forma que usa el envío. Si la clave del registro de errores se calculara
+    distinto, `fuera_de_ventana` consultaría una entrada que nunca se escribió."""
+    return (p or "").lstrip("+").replace(" ", "").replace("-", "")
+
+
+def _clave_error(tenant_id: str, telefono: str) -> str:
+    return f"{tenant_id}:{_telefono_normalizado(telefono)}"
+
+
+def _codigo_de_error(response) -> Optional[int]:
+    """El `error.code` que devuelve la Graph API, o None si no vino."""
+    try:
+        return int((response.json().get("error") or {}).get("code"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def ultimo_error(tenant_id: str, telefono: str) -> Optional[int]:
+    """Código del último rechazo de Meta para ese destinatario, o None."""
+    return _ULTIMO_ERROR.get(_clave_error(tenant_id, telefono))
+
+
+def fuera_de_ventana(tenant_id: str, telefono: str) -> bool:
+    """¿El último intento falló porque la ventana de 24h está cerrada?
+
+    Distinguirlo importa: un timeout se reintenta, una ventana cerrada NO — no se reabre
+    sola. Reintentarla quema llamadas a la Graph API y termina marcando el mensaje con un
+    motivo genérico que no le dice nada al operador.
+    """
+    return ultimo_error(tenant_id, telefono) == META_ERROR_FUERA_DE_VENTANA
+
+
 async def send_whatsapp_message(
     tenant_id: str,
     supabase: Client,
@@ -149,19 +195,24 @@ async def send_whatsapp_message(
                 "[META API] Mensaje enviado | type=%s | to=%s | meta_message_id=%s",
                 msg_kind, _mask_phone(clean_phone), message_id,
             )
+            _ULTIMO_ERROR.pop(_clave_error(tenant_id, clean_phone), None)
             return message_id
         else:
+            codigo = _codigo_de_error(response)
             logger.error(
-                "[META API] Error type=%s | status=%s | body=%s",
-                msg_kind, response.status_code, response.text,
+                "[META API] Error type=%s | status=%s | code=%s | body=%s",
+                msg_kind, response.status_code, codigo, response.text,
             )
+            _ULTIMO_ERROR[_clave_error(tenant_id, clean_phone)] = codigo
             return None
 
     except httpx.TimeoutException:
         logger.error("[META API] Timeout al enviar a %s", _mask_phone(clean_phone))
+        _ULTIMO_ERROR[_clave_error(tenant_id, clean_phone)] = None
         return None
     except Exception as e:
         logger.error("[META API] Error inesperado: %s", e, exc_info=True)
+        _ULTIMO_ERROR[_clave_error(tenant_id, clean_phone)] = None
         return None
 
 
