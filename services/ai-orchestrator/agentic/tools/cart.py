@@ -678,6 +678,66 @@ class RemoveCartItemTool:
 # ─── SetShippingRecipient — Rev. 109 BUG 37 fix Habeas Data ─────────────────
 
 
+#: Palabras con las que la gente nombra a una PERSONA sin decir su nombre.
+#:
+#: El tool de destinatario está bien pensado —detectar "es para mi mamá" y no pisar los
+#: datos del titular de WhatsApp— pero guardaba la palabra de parentesco COMO nombre. En el
+#: recorrido del 2026-07-27, "busco un regalo para mi mama" quedó a los 8 segundos como
+#: `recipient = {"name": "mi mama", phone: null, address: null, documento: null}`.
+#:
+#: Un courier no puede entregarle a "mi mama". Y la frase que lo dispara es de las más
+#: comunes que hay en una tienda de regalos, así que no es un caso de borde: es el caso.
+#:
+#: La lista es CERRADA y determinística a propósito. Un clasificador acá decidiría sobre el
+#: nombre que va impreso en una guía de envío.
+_PARENTESCOS = frozenset({
+    "mama", "mami", "mamita", "madre", "papa", "papi", "padre",
+    "hermano", "hermana", "hermanito", "hermanita",
+    "hijo", "hija", "hijito", "hijita",
+    "abuelo", "abuela", "abuelito", "abuelita",
+    "tio", "tia", "primo", "prima", "sobrino", "sobrina",
+    "esposo", "esposa", "novio", "novia", "marido", "mujer", "pareja",
+    "suegro", "suegra", "cunado", "cunada", "yerno", "nuera",
+    "amigo", "amiga", "vecino", "vecina", "companero", "companera",
+    "jefe", "jefa", "socio", "socia", "cliente", "profe", "profesor", "profesora",
+    "oficina", "casa", "trabajo", "empresa", "negocio",
+})
+
+#: Determinantes que anteceden a un parentesco: "mi mamá", "la mamá", "su hermana".
+_DETERMINANTES = (
+    "para mi ", "para la ", "para el ", "para mis ", "para los ", "para las ",
+    "mi ", "mis ", "la ", "las ", "el ", "los ", "su ", "sus ",
+)
+
+
+def _es_un_nombre_de_verdad(valor: str | None) -> bool:
+    """¿`valor` es el nombre de una persona, o una palabra de parentesco?
+
+    Se compara sin tildes y en minúsculas para que "mamá" y "mama" sean lo mismo. Solo se
+    rechaza lo que es EXACTAMENTE un parentesco (con o sin determinante): "María Tobón",
+    "Ana la de mi mamá" o "Mamá Inés" pasan, porque ahí sí hay un nombre.
+    """
+    import unicodedata
+
+    if not valor or not valor.strip():
+        return False
+    plano = "".join(
+        c for c in unicodedata.normalize("NFD", valor.strip().lower())
+        if unicodedata.category(c) != "Mn"
+    )
+    plano = " ".join(plano.split())
+    for det in _DETERMINANTES:
+        if plano.startswith(det):
+            plano = plano[len(det):].strip()
+            break
+    if plano in _PARENTESCOS:
+        return False
+    # "mis papas", "mis hermanas": el plural es tan poco un nombre como el singular.
+    if plano.endswith("es") and plano[:-2] in _PARENTESCOS:
+        return False
+    return not (plano.endswith("s") and plano[:-1] in _PARENTESCOS)
+
+
 class SetShippingRecipientArgs(BaseModel):
     """Args para set_shipping_recipient. Campos planos (mismo patrón que
     SaveAddressArgs) — evita schema nested que rompe Gemini FunctionDeclaration
@@ -776,6 +836,20 @@ class SetShippingRecipientTool:
             _addr["apartment"] = args.address_apartment
         if args.address_building_type:
             _addr["building_type"] = args.address_building_type
+        # Un parentesco NO es un nombre. Se rechaza antes de escribir, con instrucción
+        # explícita: el LLM tiene que PREGUNTAR cómo se llama, no inventarlo ni insistir.
+        # `None` y vacío significan LIMPIAR el destinatario ("mejor para mí"), no un
+        # nombre malo: pasan derecho.
+        if (args.name or "").strip() and not _es_un_nombre_de_verdad(args.name):
+            return tool_failure(
+                f"'{args.name}' es un parentesco, no un nombre. En la guía de envío va el "
+                "nombre con el que el courier va a preguntar por la persona. Pregúntale al "
+                "cliente cómo se llama quien recibe, y su celular y dirección, antes de "
+                "volver a llamar este tool.",
+                code="RECIPIENT_NAME_NOT_A_NAME",
+                extra={"campo": "name", "valor_rechazado": args.name},
+            )
+
         try:
             result = set_shipping_recipient(
                 ctx.supabase,

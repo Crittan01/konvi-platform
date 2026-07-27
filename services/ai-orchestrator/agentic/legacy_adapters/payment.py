@@ -89,6 +89,30 @@ async def generate_payment_link_for_cart(
             "missing_fields": missing,
         }
 
+    # Y si el envío va a un TERCERO, sus datos también tienen que estar completos: en la
+    # guía va SU nombre, SU celular y SU dirección, no los del titular de WhatsApp.
+    #
+    # Sin esto el pedido se creaba igual y la guía salía con lo que hubiera. En el
+    # recorrido del 2026-07-27 el destinatario era {"name": "mi mama"} con todo lo demás
+    # en null — un paquete que el courier no puede entregar.
+    recipient = (cart.get("shipping_meta") or {}).get("recipient") or {}
+    if any(recipient.get(k) for k in ("name", "phone", "address")):
+        faltan_receptor = [
+            f for f in ("name", "phone", "address") if not recipient.get(f)
+        ]
+        if faltan_receptor:
+            return {
+                "ok": False,
+                "error": (
+                    f"El envío va a un tercero y faltan sus datos: {faltan_receptor}. "
+                    "Pídeselos al cliente y guárdalos con `set_shipping_recipient` "
+                    "(NUNCA con save_contact_field, que pisaría al titular). En la guía "
+                    "va el nombre de quien RECIBE."
+                ),
+                "code": "INCOMPLETE_RECIPIENT",
+                "missing_fields": faltan_receptor,
+            }
+
     # Rev. 107: refactor — invocar in-process la función canónica
     # `handle_payment_link_if_applicable` del legacy (mismo runtime
     # ai-orchestrator). Evita el round-trip HTTP a la API y reusa toda
