@@ -118,3 +118,89 @@ export async function updateClaimStatus(
     return { error: msg }
   }
 }
+
+// ─── Reversión del pago (Ley 1480 art. 51 + Decreto 1074 cap. 2.2.2.51) ──────
+//
+// Figura DISTINTA del reembolso de arriba. Acá el dinero lo devuelve el emisor del medio
+// de pago, no nosotros; nuestra obligación es emitir la constancia de la queja con fecha y
+// causal (art. 2.2.2.51.4). El comprador la necesita para notificar a su banco
+// (art. 2.2.2.51.7 num. 6): sin ella no puede ejercer el derecho.
+
+export type ConstanciaReversion = {
+  id: string
+  radicado: string
+  causal: string
+  valor: number
+  es_parcial: boolean
+  instrumento: string | null
+  bien_a_disposicion: boolean
+  presentada_at: string
+  constancia_emitida_at: string | null
+  constancia_entregada_at: string | null
+  constancia_entrega_fallida: string | null
+  reembolso_directo_at: string | null
+  reversion_confirmada_at: string | null
+  doble_pago_detectado_at: string | null
+  estado: string
+  constancia: Record<string, unknown> | null
+}
+
+export async function registrarReversion(claimId: string, data: {
+  causal: string
+  razones: string
+  valor: number
+  instrumento?: string
+  es_parcial?: boolean
+  bien_a_disposicion?: boolean
+}) {
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}/reversion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ ...data, canal: 'inbox' }),
+    })
+    if (!res.ok) return { error: await readApiError(res, 'No se pudo radicar la reversión') }
+    revalidatePath('/dashboard/claims')
+    return { success: true, data: (await res.json()) as ConstanciaReversion }
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : 'Error radicando la reversión' }
+  }
+}
+
+export async function obtenerReversion(claimId: string) {
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}/reversion`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    // 404 no es un error a mostrar: la mayoría de los reclamos no son de reversión.
+    if (res.status === 404) return { success: true, data: null }
+    if (!res.ok) return { error: await readApiError(res, 'No se pudo leer la reversión') }
+    return { success: true, data: (await res.json()) as ConstanciaReversion }
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : 'Error leyendo la reversión' }
+  }
+}
+
+export async function registrarMovimientoReversion(
+  claimId: string, via: 'reembolso_directo' | 'reversion_emisor', valor: number,
+) {
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
+  try {
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}/reversion/movimiento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ via, valor }),
+    })
+    if (!res.ok) return { error: await readApiError(res, 'No se pudo registrar el movimiento') }
+    revalidatePath('/dashboard/claims')
+    return { success: true, data: (await res.json()) as ConstanciaReversion }
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : 'Error registrando el movimiento' }
+  }
+}
