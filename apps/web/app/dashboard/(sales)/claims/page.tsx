@@ -33,7 +33,7 @@ export default async function ClaimsPage() {
     .from('claims')
     .select(`
       id, ticket_number, status, reason, requested_amount, refunded_amount, refunded_at, resolution_notes, created_at,
-      orders ( id, total_amount ),
+      orders ( id, total_amount, payment_method ),
       contacts ( id, name, phone )
     `)
     .eq('tenant_id', tenantId)
