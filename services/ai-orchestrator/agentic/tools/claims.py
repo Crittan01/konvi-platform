@@ -280,7 +280,13 @@ class CreateClaimTool:
                     f"cliente su número de ticket explícitamente y que el "
                     f"equipo lo revisará en las próximas horas. NO escales "
                     f"a especialista a menos que sea un caso muy complejo "
-                    f"(refund manual >100k COP, cliente hostil, retracto Art. 47)."
+                    f"(refund manual >100k COP, cliente hostil, retracto Art. 47). "
+                    # En el recorrido E2E del 2026-07-27 el bot cerró un reclamo por
+                    # producto derramado con "¿Te muestro algún producto o categoría en
+                    # particular?". A alguien que acaba de recibir algo dañado no se le
+                    f"vende. NO cierres ofreciendo productos ni preguntando qué más "
+                    f"quiere comprar: acá el turno termina con el reclamo. Si el cliente "
+                    f"quiere seguir comprando, lo dirá él."
                 ),
             },
             audit={

@@ -1427,6 +1427,7 @@ async def _run_agentic_full(
         from safety import (
             detect_medical_query as _detect_medical_query,
             detect_drug_purchase_request as _detect_drug_purchase_request,
+            hay_algo_mas_en_el_turno as _hay_algo_mas,
         )
         _medical_hit = _detect_medical_query(content)
         _drug_hit = _detect_drug_purchase_request(content) if not _medical_hit else False
@@ -1448,6 +1449,14 @@ async def _run_agentic_full(
                     "profesional médico o tu EPS.\n\n"
                     "Te puedo ayudar con algún producto de la tienda?"
                 )
+                # La guarda corta antes del LLM y marca el mensaje procesado, así que se
+                # lleva por delante lo demás que el cliente haya escrito en el mismo turno.
+                # No se baja el filtro: se le dice que repita esa parte.
+                if _hay_algo_mas(content):
+                    _redirect += (
+                        "\n\nSi en ese mismo mensaje me preguntaste algo más, "
+                        "escríbemelo aparte y te respondo."
+                    )
                 _log_reason = "medical_query"
             else:
                 _redirect = (

@@ -21,6 +21,7 @@ aquí, no de sus propios shims internos.
 from .domain_filter import (
     detect_medical_query,
     detect_drug_purchase_request,
+    hay_algo_mas_en_el_turno,
     MEDICAL_QUERY_PHRASES,
     DRUG_PURCHASE_PHRASES,
 )
@@ -47,6 +48,7 @@ from .consent_gates import (
 __all__ = [
     # domain_filter
     "detect_medical_query", "detect_drug_purchase_request",
+    "hay_algo_mas_en_el_turno",
     "MEDICAL_QUERY_PHRASES", "DRUG_PURCHASE_PHRASES",
     # content_safety
     "detect_mental_health_crisis", "detect_sensitive_payment_data",
