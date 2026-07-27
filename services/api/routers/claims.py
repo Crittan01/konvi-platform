@@ -440,3 +440,200 @@ def resolve_claim(
         enabled=(prev.get("status") != "resolved"),
     )
     return res.data[0]
+
+
+# ─── Reversión del pago (Ley 1480 art. 51 + Decreto 1074 cap. 2.2.2.51) ──────
+#
+# Es una figura DISTINTA del reembolso que ya vive en este router. Acá el dinero no lo
+# devolvemos nosotros: el consumidor le pide al EMISOR de su medio de pago que deshaga el
+# cargo. Nuestra única obligación —y es dura— es emitir la constancia de la queja con
+# fecha y causal (art. 2.2.2.51.4), porque el art. 2.2.2.51.7 num. 6 se la exige al
+# consumidor como contenido de la notificación a su banco. Sin ella no puede ejercer el
+# derecho.
+#
+# La causal la DECLARA el consumidor y el operador la transcribe: la norma pide
+# "indicación de la causal que sustenta la petición", y clasificarla con un LLM sería
+# ponerlo a decidir verdad legal.
+
+#: Las cinco del art. 2.2.2.51.2. Lista cerrada, espejo del CHECK en DB. Duplicarla acá
+#: es a propósito: el 422 explica cuáles son, en vez de devolver un error de constraint.
+CAUSALES_REVERSION = {
+    "fraude",
+    "operacion_no_solicitada",
+    "producto_no_recibido",
+    "producto_no_corresponde",
+    "producto_defectuoso",
+}
+
+#: Por dónde puede haber vuelto la plata. Tenerlos separados es lo que permite ver el
+#: doble pago del art. 2.2.2.51.10.
+VIAS_REVERSION = {"reembolso_directo", "reversion_emisor"}
+
+#: Motivos por los que la radicación no procede, traducidos a HTTP. Un 404 para "el
+#: reclamo no existe" y un 409 para "existe pero esta figura no aplica": son cosas
+#: distintas y el operador necesita distinguirlas.
+_MOTIVO_HTTP = {
+    "reclamo_inexistente": (404, "Reclamo no encontrado"),
+    "reclamo_sin_pedido": (409, "El reclamo no está asociado a un pedido"),
+    "pago_no_electronico": (
+        409,
+        "La reversión del pago no procede sobre pagos presenciales (contra entrega en "
+        "efectivo): Decreto 1074 art. 2.2.2.51.1. El camino acá es el reembolso.",
+    ),
+    "forma_de_pago_desconocida": (
+        409,
+        "El pedido no tiene forma de pago registrada; no se puede afirmar que fue "
+        "electrónico y la constancia afirma hechos.",
+    ),
+    "valor_excede_el_pedido": (
+        422,
+        "El valor solicitado excede el total del pedido. Al emisor le es oponible la "
+        "inexistencia de la operación (art. 2.2.2.51.8).",
+    ),
+}
+
+
+class ReversionCreate(BaseModel):
+    causal: str = Field(..., description="Una de las cinco del art. 2.2.2.51.2.")
+    razones: str = Field(..., min_length=3, max_length=2000,
+                         description="En las palabras del consumidor; no se resume.")
+    valor: float = Field(..., gt=0, description="Valor sobre el que se pide la reversión.")
+    instrumento: Optional[str] = Field(
+        default=None, max_length=120,
+        description="Descriptor del medio de pago (p. ej. 'Visa terminada en 4242'). "
+                    "NUNCA el número completo.",
+    )
+    es_parcial: bool = Field(default=False)
+    items: Optional[list] = Field(default=None)
+    bien_a_disposicion: bool = Field(
+        default=False,
+        description="El consumidor manifestó que el bien queda a disposición para "
+                    "recogerlo (art. 2.2.2.51.4 inc. 3).",
+    )
+    canal: str = Field(default="inbox", max_length=40)
+    conversation_id: Optional[str] = None
+    message_id: Optional[str] = None
+    meta_message_id: Optional[str] = None
+
+
+class MovimientoReversion(BaseModel):
+    via: str = Field(..., description="reembolso_directo | reversion_emisor")
+    valor: float = Field(..., gt=0)
+
+
+@router.post("/{claim_id}/reversion", response_model=dict,
+             dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="payment_reversal", action="created")
+def registrar_reversion(
+    claim_id: str,
+    body: ReversionCreate,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Radica la queja de reversión y emite su constancia, en el mismo acto.
+
+    No son dos pasos: el art. 2.2.2.51.4 no condiciona la constancia a nada, así que el
+    estado "radicada sin constancia" sería justamente el incumplimiento.
+
+    Idempotente por reclamo. Un reintento devuelve la constancia que ya existe y NO emite
+    una segunda con otra fecha: la fecha es lo que prueba que la queja llegó dentro de los
+    cinco días hábiles del art. 2.2.2.51.4.
+    """
+    if body.causal not in CAUSALES_REVERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Causal inválida '{body.causal}'. La ley enumera cinco: "
+                   f"{sorted(CAUSALES_REVERSION)} (Decreto 1074 art. 2.2.2.51.2).",
+        )
+
+    res = supabase.rpc("rpc_registrar_reversion", {
+        "p_claim_id": claim_id,
+        "p_tenant_id": tenant_id,
+        "p_causal": body.causal,
+        "p_razones": body.razones.strip(),
+        "p_valor": body.valor,
+        "p_instrumento": body.instrumento,
+        "p_es_parcial": body.es_parcial,
+        "p_items": body.items,
+        "p_bien_a_disposicion": body.bien_a_disposicion,
+        "p_canal": body.canal,
+        "p_conversation_id": body.conversation_id,
+        "p_message_id": body.message_id,
+        "p_meta_message_id": body.meta_message_id,
+    }).execute()
+    fila = (res.data or [{}])[0] if isinstance(res.data, list) else (res.data or {})
+
+    motivo = fila.get("motivo")
+    if motivo:
+        code, detalle = _MOTIVO_HTTP.get(motivo, (422, f"No se pudo radicar: {motivo}"))
+        raise HTTPException(status_code=code, detail=detalle)
+
+    return _leer_reversion(supabase, tenant_id, claim_id)
+
+
+@router.get("/{claim_id}/reversion", response_model=dict)
+def obtener_reversion(
+    claim_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """La constancia radicada de un reclamo, o 404 si no hay ninguna."""
+    return _leer_reversion(supabase, tenant_id, claim_id)
+
+
+@router.post("/{claim_id}/reversion/movimiento", response_model=dict,
+             dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="payment_reversal", action="updated")
+def registrar_movimiento(
+    claim_id: str,
+    body: MovimientoReversion,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Registra por cuál de los dos caminos volvió el dinero.
+
+    Y si volvió por LOS DOS, lo marca. El art. 2.2.2.51.10 contempla expresamente ese
+    escenario —el comerciante reembolsa mientras el emisor reversa en paralelo— y dice que
+    el consumidor debe devolver esos recursos. Sin registrarlo sería invisible: no se puede
+    reclamar lo que no se sabe que se pagó.
+    """
+    if body.via not in VIAS_REVERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Vía inválida '{body.via}'. Válidas: {sorted(VIAS_REVERSION)}",
+        )
+    actual = _leer_reversion(supabase, tenant_id, claim_id)
+
+    res = supabase.rpc("rpc_registrar_movimiento_reversion", {
+        "p_reversal_id": actual["id"],
+        "p_tenant_id": tenant_id,
+        "p_via": body.via,
+        "p_valor": body.valor,
+    }).execute()
+    fila = (res.data or [{}])[0] if isinstance(res.data, list) else (res.data or {})
+    if fila.get("motivo"):
+        raise HTTPException(status_code=422, detail=fila["motivo"])
+
+    return _leer_reversion(supabase, tenant_id, claim_id)
+
+
+def _leer_reversion(supabase: Client, tenant_id: str, claim_id: str) -> dict:
+    res = (
+        supabase.table("payment_reversal_requests")
+        .select("*")
+        .eq("claim_id", claim_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    filas = res.data or []
+    if not filas:
+        raise HTTPException(
+            status_code=404,
+            detail="Este reclamo no tiene una solicitud de reversión radicada",
+        )
+    return filas[0]

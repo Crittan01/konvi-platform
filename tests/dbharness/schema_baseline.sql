@@ -2549,6 +2549,50 @@ COMMENT ON FUNCTION "public"."reject_audit_log_mutation"() IS 'BLOQUE 0 — audi
 
 
 
+CREATE OR REPLACE FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") RETURNS "text"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_metodo TEXT;
+BEGIN
+    SELECT o.payment_method INTO v_metodo
+      FROM public.orders o
+     WHERE o.id = p_order_id AND o.tenant_id = p_tenant_id;
+
+    IF NOT FOUND THEN
+        RETURN 'pedido_inexistente';
+    END IF;
+
+    -- Art. 2.2.2.51.1: "no procede cuando hayan sido realizados por medio de canales
+    -- presenciales". Contra entrega en efectivo es presencial — no hay instrumento de
+    -- pago electrónico que reversar. El camino ahí es el reembolso comercial, y decirle
+    -- otra cosa al comprador sería prometerle un derecho que no tiene.
+    -- El CHECK de `orders` hoy solo admite 'credit' y 'cod'. Los sinónimos se dejan
+    -- porque un canal nuevo (Nequi, transferencia) entrará por acá antes de que nadie se
+    -- acuerde de esta función, y el modo seguro de fallar es NO radicar.
+    IF COALESCE(v_metodo, '') IN ('cod', 'cash', 'efectivo') THEN
+        RETURN 'pago_no_electronico';
+    END IF;
+
+    -- Sin forma de pago registrada no se puede afirmar que fue electrónico. Se prefiere
+    -- no radicar a radicar sobre un supuesto: la constancia afirma hechos.
+    IF COALESCE(btrim(v_metodo), '') = '' THEN
+        RETURN 'forma_de_pago_desconocida';
+    END IF;
+
+    RETURN 'procede';
+END;
+$$;
+
+
+ALTER FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Devuelve "procede" o el motivo por el que no. Decreto 1074 art. 2.2.2.51.1: la reversión no aplica a pagos por canales presenciales (contra entrega en efectivo).';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_dashboard_revenue"() RETURNS TABLE("revenue_today" numeric, "revenue_month" numeric)
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public'
@@ -2602,6 +2646,40 @@ $$;
 
 
 ALTER FUNCTION "public"."rpc_dashboard_revenue"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer DEFAULT 50) RETURNS TABLE("reversal_id" "uuid", "tenant_id" "uuid", "conversation_id" "uuid", "radicado" "text", "constancia" "jsonb")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT r.id, r.tenant_id, r.conversation_id, r.radicado, r.constancia
+      FROM public.payment_reversal_requests r
+     WHERE r.constancia_emitida_at IS NOT NULL
+       AND r.constancia_entregada_at IS NULL
+       AND r.constancia_entrega_fallida IS NULL
+       AND r.conversation_id IS NOT NULL
+     ORDER BY r.constancia_emitida_at
+     LIMIT GREATEST(p_limit, 1);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_find_dobles_pagos_sin_avisar"("p_limit" integer DEFAULT 50) RETURNS TABLE("reversal_id" "uuid", "tenant_id" "uuid", "radicado" "text", "reembolso" numeric, "reversion" numeric)
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT r.id, r.tenant_id, r.radicado, r.reembolso_directo_valor, r.reversion_valor
+      FROM public.payment_reversal_requests r
+     WHERE r.doble_pago_detectado_at IS NOT NULL
+       AND r.doble_pago_avisado_at IS NULL
+     ORDER BY r.doble_pago_detectado_at
+     LIMIT GREATEST(p_limit, 1);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_dobles_pagos_sin_avisar"("p_limit" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integer DEFAULT 48, "p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "status" "text", "total_registrado" numeric, "total_calculado" numeric, "diferencia" numeric)
@@ -2953,6 +3031,50 @@ COMMENT ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenant_
 
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_mark_constancia_entregada"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_fallida" "text" DEFAULT NULL::"text") RETURNS boolean
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_n INTEGER;
+BEGIN
+    UPDATE public.payment_reversal_requests
+       SET constancia_entregada_at = CASE WHEN p_fallida IS NULL THEN NOW() END,
+           constancia_entrega_fallida = p_fallida
+     WHERE id = p_reversal_id
+       AND tenant_id = p_tenant_id
+       AND constancia_entregada_at IS NULL
+       AND constancia_entrega_fallida IS NULL;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n > 0;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_mark_constancia_entregada"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_fallida" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_mark_doble_pago_avisado"("p_reversal_id" "uuid", "p_tenant_id" "uuid") RETURNS boolean
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_n INTEGER;
+BEGIN
+    UPDATE public.payment_reversal_requests
+       SET doble_pago_avisado_at = NOW()
+     WHERE id = p_reversal_id AND tenant_id = p_tenant_id
+       AND doble_pago_detectado_at IS NOT NULL
+       AND doble_pago_avisado_at IS NULL;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n > 0;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_mark_doble_pago_avisado"("p_reversal_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text" DEFAULT NULL::"text") RETURNS boolean
     LANGUAGE "sql" SECURITY DEFINER
     SET "search_path" TO 'public', 'pg_temp'
@@ -3131,6 +3253,180 @@ ALTER FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uu
 
 
 COMMENT ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Cifras de un pedido calculadas desde la fuente de verdad (order_items) y si cuadran con orders.total_amount. `descuento_aplicado` es el efectivo (tope subtotal+envío); imprimir ése y no el nominal es lo que evita un documento que se contradice. Guarda previa a emitir cualquier comprobante (Ley 1480 art. 26).';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_registrar_movimiento_reversion"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_via" "text", "p_valor" numeric) RETURNS TABLE("doble_pago" boolean, "motivo" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_fila RECORD;
+    v_doble BOOLEAN := false;
+BEGIN
+    SELECT * INTO v_fila
+      FROM public.payment_reversal_requests
+     WHERE id = p_reversal_id AND tenant_id = p_tenant_id
+     FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, 'reversion_inexistente'::TEXT;
+        RETURN;
+    END IF;
+    IF p_via NOT IN ('reembolso_directo', 'reversion_emisor') THEN
+        RETURN QUERY SELECT false, 'via_desconocida'::TEXT;
+        RETURN;
+    END IF;
+
+    IF p_via = 'reembolso_directo' THEN
+        UPDATE public.payment_reversal_requests
+           SET reembolso_directo_at = COALESCE(reembolso_directo_at, NOW()),
+               reembolso_directo_valor = COALESCE(reembolso_directo_valor, p_valor)
+         WHERE id = p_reversal_id;
+    ELSE
+        UPDATE public.payment_reversal_requests
+           SET reversion_confirmada_at = COALESCE(reversion_confirmada_at, NOW()),
+               reversion_valor = COALESCE(reversion_valor, p_valor)
+         WHERE id = p_reversal_id;
+    END IF;
+
+    -- Art. 2.2.2.51.10: la norma contempla expresamente que el dinero salga por los
+    -- dos caminos. Es real —el operador reembolsa mientras el banco reversa en
+    -- paralelo— y hoy sería invisible porque nadie mira las dos cosas al tiempo.
+    SELECT (reembolso_directo_at IS NOT NULL AND reversion_confirmada_at IS NOT NULL)
+      INTO v_doble
+      FROM public.payment_reversal_requests WHERE id = p_reversal_id;
+
+    UPDATE public.payment_reversal_requests
+       SET doble_pago_detectado_at = CASE
+               WHEN v_doble THEN COALESCE(doble_pago_detectado_at, NOW())
+               ELSE doble_pago_detectado_at END,
+           estado = CASE WHEN estado IN ('presentada','notificada') THEN 'resuelta'
+                         ELSE estado END
+     WHERE id = p_reversal_id;
+
+    RETURN QUERY SELECT v_doble, NULL::TEXT;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_registrar_movimiento_reversion"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_via" "text", "p_valor" numeric) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_registrar_movimiento_reversion"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_via" "text", "p_valor" numeric) IS 'Registra por cuál de los dos caminos volvió el dinero y marca la colisión cuando volvió por los dos (Decreto 1074 art. 2.2.2.51.10). No se puede reclamar lo que no se sabe que se pagó.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_registrar_reversion"("p_claim_id" "uuid", "p_tenant_id" "uuid", "p_causal" "text", "p_razones" "text", "p_valor" numeric, "p_instrumento" "text" DEFAULT NULL::"text", "p_es_parcial" boolean DEFAULT false, "p_items" "jsonb" DEFAULT NULL::"jsonb", "p_bien_a_disposicion" boolean DEFAULT false, "p_canal" "text" DEFAULT 'whatsapp'::"text", "p_conversation_id" "uuid" DEFAULT NULL::"uuid", "p_message_id" "uuid" DEFAULT NULL::"uuid", "p_meta_message_id" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "radicado" "text", "ya_existia" boolean, "motivo" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_claim      RECORD;
+    v_existente  RECORD;
+    v_procede    TEXT;
+    v_radicado   TEXT;
+    v_constancia JSONB;
+    v_id         UUID;
+    v_total      NUMERIC;
+BEGIN
+    SELECT c.id, c.order_id, c.ticket_number, c.customer_id
+      INTO v_claim
+      FROM public.claims c
+     WHERE c.id = p_claim_id AND c.tenant_id = p_tenant_id;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, 'reclamo_inexistente'::TEXT;
+        RETURN;
+    END IF;
+    IF v_claim.order_id IS NULL THEN
+        -- La reversión se predica de una compra concreta: sin pedido no hay operación
+        -- que reversar ni valor que reclamar.
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, 'reclamo_sin_pedido'::TEXT;
+        RETURN;
+    END IF;
+
+    -- Idempotente ANTES de validar nada más: un reintento no puede producir una
+    -- segunda constancia con otra fecha. La fecha es lo que prueba que la queja llegó
+    -- dentro de los 5 días hábiles del art. 2.2.2.51.4.
+    SELECT r.id, r.radicado INTO v_existente
+      FROM public.payment_reversal_requests r
+     WHERE r.claim_id = p_claim_id AND r.tenant_id = p_tenant_id;
+    IF FOUND THEN
+        RETURN QUERY SELECT v_existente.id, v_existente.radicado, true, NULL::TEXT;
+        RETURN;
+    END IF;
+
+    v_procede := public.reversion_procede(v_claim.order_id, p_tenant_id);
+    IF v_procede <> 'procede' THEN
+        -- El reclamo sigue vivo como reclamo; lo que no procede es ESTA figura.
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, v_procede;
+        RETURN;
+    END IF;
+
+    -- El valor reclamado no puede exceder lo que se pagó. Una constancia que pida
+    -- reversar más que el total le entrega al emisor un motivo para rechazarla entera
+    -- (art. 2.2.2.51.8: es oponible "la inexistencia de la operación").
+    SELECT o.total_amount INTO v_total
+      FROM public.orders o WHERE o.id = v_claim.order_id AND o.tenant_id = p_tenant_id;
+    IF v_total IS NOT NULL AND p_valor > v_total THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, 'valor_excede_el_pedido'::TEXT;
+        RETURN;
+    END IF;
+
+    -- Un solo número para el mismo reclamo, en otra presentación.
+    v_radicado := 'RV-' || LPAD(COALESCE(v_claim.ticket_number, 0)::text, 6, '0');
+
+    INSERT INTO public.payment_reversal_requests (
+        tenant_id, claim_id, order_id, radicado, causal, razones, valor,
+        es_parcial, items_json, instrumento, canal, bien_a_disposicion,
+        conversation_id, message_id, meta_message_id
+    ) VALUES (
+        p_tenant_id, p_claim_id, v_claim.order_id, v_radicado, p_causal, p_razones,
+        p_valor, p_es_parcial, p_items, p_instrumento, p_canal, p_bien_a_disposicion,
+        p_conversation_id, p_message_id, p_meta_message_id
+    ) RETURNING payment_reversal_requests.id INTO v_id;
+
+    -- LA CONSTANCIA. Contenido mínimo del art. 2.2.2.51.4: fecha y causal. Se agrega
+    -- lo que el consumidor necesita para armar su notificación al emisor (art.
+    -- 2.2.2.51.7): valor, identificación de la operación y del instrumento.
+    v_constancia := jsonb_build_object(
+        'version', 1,
+        'radicado', v_radicado,
+        -- Hora COLOMBIA explícita. El servidor corre en UTC y una queja presentada un
+        -- viernes a las 8 de la noche quedaría fechada el sábado, corriendo el conteo
+        -- de días hábiles en contra del consumidor.
+        'presentada_at', NOW(),
+        'presentada_co', to_char(NOW() AT TIME ZONE 'America/Bogota',
+                                 'DD/MM/YYYY HH24:MI') || ' (hora Colombia)',
+        'causal', p_causal,
+        'razones', p_razones,
+        'valor', p_valor,
+        'es_parcial', p_es_parcial,
+        'moneda', 'COP',
+        'canal', p_canal,
+        'instrumento', p_instrumento,
+        'bien_a_disposicion', p_bien_a_disposicion,
+        'pedido', jsonb_build_object('id', v_claim.order_id, 'reclamo', v_claim.ticket_number),
+        'vendedor', public.tenant_seller_identity(p_tenant_id),
+        'fundamento', 'Ley 1480 de 2011 art. 51; Decreto 1074 de 2015 art. 2.2.2.51.4'
+    );
+
+    UPDATE public.payment_reversal_requests
+       SET constancia = v_constancia,
+           constancia_hash = encode(sha256(v_constancia::text::bytea), 'hex'),
+           constancia_emitida_at = NOW()
+     WHERE payment_reversal_requests.id = v_id;
+
+    RETURN QUERY SELECT v_id, v_radicado, false, NULL::TEXT;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_registrar_reversion"("p_claim_id" "uuid", "p_tenant_id" "uuid", "p_causal" "text", "p_razones" "text", "p_valor" numeric, "p_instrumento" "text", "p_es_parcial" boolean, "p_items" "jsonb", "p_bien_a_disposicion" boolean, "p_canal" "text", "p_conversation_id" "uuid", "p_message_id" "uuid", "p_meta_message_id" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_registrar_reversion"("p_claim_id" "uuid", "p_tenant_id" "uuid", "p_causal" "text", "p_razones" "text", "p_valor" numeric, "p_instrumento" "text", "p_es_parcial" boolean, "p_items" "jsonb", "p_bien_a_disposicion" boolean, "p_canal" "text", "p_conversation_id" "uuid", "p_message_id" "uuid", "p_meta_message_id" "text") IS 'Radica la queja de reversión y emite su constancia en el MISMO acto: el art. 2.2.2.51.4 no condiciona la constancia a nada, y "radicada sin constancia" es justamente el incumplimiento. Idempotente por reclamo.';
 
 
 
@@ -5395,6 +5691,60 @@ ALTER SEQUENCE "public"."outbound_idempotency_cache_id_seq" OWNED BY "public"."o
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."payment_reversal_requests" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "order_id" "uuid" NOT NULL,
+    "radicado" "text" NOT NULL,
+    "causal" "text" NOT NULL,
+    "razones" "text" NOT NULL,
+    "valor" numeric(14,2) NOT NULL,
+    "es_parcial" boolean DEFAULT false NOT NULL,
+    "items_json" "jsonb",
+    "instrumento" "text",
+    "presentada_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "canal" "text" DEFAULT 'whatsapp'::"text" NOT NULL,
+    "conversation_id" "uuid",
+    "message_id" "uuid",
+    "meta_message_id" "text",
+    "constancia" "jsonb",
+    "constancia_hash" "text",
+    "constancia_emitida_at" timestamp with time zone,
+    "constancia_entregada_at" timestamp with time zone,
+    "constancia_entrega_fallida" "text",
+    "bien_a_disposicion" boolean DEFAULT false NOT NULL,
+    "reembolso_directo_at" timestamp with time zone,
+    "reembolso_directo_valor" numeric(14,2),
+    "reversion_confirmada_at" timestamp with time zone,
+    "reversion_valor" numeric(14,2),
+    "doble_pago_detectado_at" timestamp with time zone,
+    "doble_pago_avisado_at" timestamp with time zone,
+    "estado" "text" DEFAULT 'presentada'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "payment_reversal_requests_causal_check" CHECK (("causal" = ANY (ARRAY['fraude'::"text", 'operacion_no_solicitada'::"text", 'producto_no_recibido'::"text", 'producto_no_corresponde'::"text", 'producto_defectuoso'::"text"]))),
+    CONSTRAINT "payment_reversal_requests_estado_check" CHECK (("estado" = ANY (ARRAY['presentada'::"text", 'notificada'::"text", 'resuelta'::"text", 'controvertida'::"text", 'desistida'::"text"]))),
+    CONSTRAINT "payment_reversal_requests_razones_check" CHECK (("length"("btrim"("razones")) >= 3)),
+    CONSTRAINT "payment_reversal_requests_valor_check" CHECK (("valor" > (0)::numeric))
+);
+
+
+ALTER TABLE "public"."payment_reversal_requests" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."payment_reversal_requests" IS 'Solicitudes de reversión del pago (Ley 1480 art. 51 + Decreto 1074 cap. 2.2.2.51). Figura DISTINTA del reembolso comercial: acá el dinero lo devuelve el emisor del instrumento de pago, no el comerciante. Nuestra obligación es emitir la constancia.';
+
+
+
+COMMENT ON COLUMN "public"."payment_reversal_requests"."instrumento" IS 'Descriptor del medio de pago (p. ej. "Visa terminada en 4242"), NUNCA el número completo: guardar un PAN crearía una obligación PCI que este sistema no asume.';
+
+
+
+COMMENT ON COLUMN "public"."payment_reversal_requests"."doble_pago_detectado_at" IS 'Cuándo se detectó que el dinero salió por los DOS caminos a la vez (art. 2.2.2.51.10). No se puede reclamar lo que no se sabe que se pagó.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."payments" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -6993,6 +7343,16 @@ ALTER TABLE ONLY "public"."outbound_idempotency_cache"
 
 
 
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_claim_unico" UNIQUE ("claim_id");
+
+
+
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."payments"
     ADD CONSTRAINT "payments_pkey" PRIMARY KEY ("id");
 
@@ -7759,6 +8119,22 @@ CREATE INDEX "idx_retention_policies_tenant" ON "public"."retention_policies" US
 
 
 
+CREATE INDEX "idx_reversal_constancia_sin_entregar" ON "public"."payment_reversal_requests" USING "btree" ("tenant_id", "constancia_emitida_at") WHERE (("constancia_emitida_at" IS NOT NULL) AND ("constancia_entregada_at" IS NULL));
+
+
+
+CREATE INDEX "idx_reversal_doble_pago" ON "public"."payment_reversal_requests" USING "btree" ("tenant_id") WHERE ("doble_pago_detectado_at" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_reversal_order" ON "public"."payment_reversal_requests" USING "btree" ("order_id");
+
+
+
+CREATE INDEX "idx_reversal_tenant_estado" ON "public"."payment_reversal_requests" USING "btree" ("tenant_id", "estado", "presentada_at" DESC);
+
+
+
 CREATE INDEX "idx_rma_requests_deadline" ON "public"."rma_requests" USING "btree" ("refund_legal_deadline") WHERE ("status" <> ALL (ARRAY['refund_completed'::"public"."rma_status_enum", 'rejected_product_damaged'::"public"."rma_status_enum", 'rejected_out_of_window'::"public"."rma_status_enum", 'rejected_excluded_product'::"public"."rma_status_enum", 'cancelled_by_customer'::"public"."rma_status_enum"]));
 
 
@@ -8195,6 +8571,10 @@ CREATE OR REPLACE TRIGGER "trg_plan_capabilities_updated_at" BEFORE UPDATE ON "p
 
 
 
+CREATE OR REPLACE TRIGGER "trg_reversal_updated_at" BEFORE UPDATE ON "public"."payment_reversal_requests" FOR EACH ROW EXECUTE FUNCTION "public"."touch_updated_at"();
+
+
+
 CREATE OR REPLACE TRIGGER "trg_rma_requests_updated_at" BEFORE UPDATE ON "public"."rma_requests" FOR EACH ROW EXECUTE FUNCTION "public"."touch_updated_at"();
 
 
@@ -8571,6 +8951,26 @@ ALTER TABLE ONLY "public"."orders"
 
 ALTER TABLE ONLY "public"."outbound_idempotency_cache"
     ADD CONSTRAINT "outbound_idempotency_cache_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_conversation_id_fkey" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."payment_reversal_requests"
+    ADD CONSTRAINT "payment_reversal_requests_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -8997,6 +9397,10 @@ CREATE POLICY "Tenant Isolation" ON "public"."orders" USING (("tenant_id" = "pub
 
 
 
+CREATE POLICY "Tenant Isolation" ON "public"."payment_reversal_requests" FOR SELECT USING (("tenant_id" = "public"."app_current_tenant"()));
+
+
+
 CREATE POLICY "Tenant Isolation" ON "public"."product_attribute_definitions" USING (("tenant_id" = "public"."app_current_tenant"())) WITH CHECK (("tenant_id" = "public"."app_current_tenant"()));
 
 
@@ -9249,6 +9653,9 @@ CREATE POLICY "outbound_idempotency_cache_tenant_select" ON "public"."outbound_i
 
 
 
+ALTER TABLE "public"."payment_reversal_requests" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."payments" ENABLE ROW LEVEL SECURITY;
 
 
@@ -9303,6 +9710,10 @@ CREATE POLICY "retention_policies_tenant_modify" ON "public"."retention_policies
 CREATE POLICY "retention_policies_tenant_select" ON "public"."retention_policies" FOR SELECT TO "authenticated" USING ((("tenant_id" IS NULL) OR ("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
   WHERE ("tu"."user_id" = "auth"."uid"())))));
+
+
+
+CREATE POLICY "reversal_no_escritura_directa" ON "public"."payment_reversal_requests" AS RESTRICTIVE TO "authenticated" USING (true) WITH CHECK (false);
 
 
 
@@ -10629,10 +11040,26 @@ GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_dashboard_revenue"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_find_dobles_pagos_sin_avisar"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_dobles_pagos_sin_avisar"("p_limit" integer) TO "service_role";
 
 
 
@@ -10676,6 +11103,16 @@ GRANT ALL ON FUNCTION "public"."rpc_issue_receipt"("p_order_id" "uuid", "p_tenan
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_mark_constancia_entregada"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_fallida" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_mark_constancia_entregada"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_fallida" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_mark_doble_pago_avisado"("p_reversal_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_mark_doble_pago_avisado"("p_reversal_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_mark_receipt_ack"("p_receipt_id" "uuid", "p_tenant_id" "uuid", "p_channel" "text", "p_skipped" "text") TO "service_role";
 
@@ -10707,6 +11144,16 @@ GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid"
 REVOKE ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_registrar_movimiento_reversion"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_via" "text", "p_valor" numeric) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_registrar_movimiento_reversion"("p_reversal_id" "uuid", "p_tenant_id" "uuid", "p_via" "text", "p_valor" numeric) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_registrar_reversion"("p_claim_id" "uuid", "p_tenant_id" "uuid", "p_causal" "text", "p_razones" "text", "p_valor" numeric, "p_instrumento" "text", "p_es_parcial" boolean, "p_items" "jsonb", "p_bien_a_disposicion" boolean, "p_canal" "text", "p_conversation_id" "uuid", "p_message_id" "uuid", "p_meta_message_id" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_registrar_reversion"("p_claim_id" "uuid", "p_tenant_id" "uuid", "p_causal" "text", "p_razones" "text", "p_valor" numeric, "p_instrumento" "text", "p_es_parcial" boolean, "p_items" "jsonb", "p_bien_a_disposicion" boolean, "p_canal" "text", "p_conversation_id" "uuid", "p_message_id" "uuid", "p_meta_message_id" "text") TO "service_role";
 
 
 
@@ -11173,6 +11620,11 @@ GRANT ALL ON TABLE "public"."outbound_idempotency_cache" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."outbound_idempotency_cache_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."outbound_idempotency_cache_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."outbound_idempotency_cache_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."payment_reversal_requests" TO "service_role";
+GRANT SELECT ON TABLE "public"."payment_reversal_requests" TO "authenticated";
 
 
 
