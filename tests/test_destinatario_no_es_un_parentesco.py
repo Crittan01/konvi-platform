@@ -139,3 +139,77 @@ def test_no_se_crea_pedido_con_destinatario_incompleto():
     assert "if any(recipient.get(k)" in bloque
     # Y que no lo mande a pisar al titular.
     assert "NUNCA con save_contact_field" in bloque
+
+
+# ─── El camino que de verdad escribía: el resolver pre-LLM ──────────────────
+
+from agentic.shipping_recipient_intent_resolver import (  # noqa: E402
+    detect_recipient_intent,
+)
+
+
+def test_el_caso_exacto_ya_no_guarda_un_parentesco():
+    """LA VERIFICACIÓN QUE FALTABA. La guarda del tool no bastaba: hay un resolver
+    determinístico que corre ANTES del LLM y escribe el destinatario directo, saltándose
+    el tool por completo. Con la guarda solo en el tool, "un regalo para mi mama" seguía
+    guardando `name="mi mama"` en producción."""
+    m = detect_recipient_intent("hola, busco un regalo para mi mama")
+    assert m is None or m.name is None
+
+
+@pytest.mark.parametrize("frase", [
+    "envialo a mi hermana",
+    "regalo para mi novia",
+    "para mi oficina",
+    "es un regalo para mi jefe",
+])
+def test_una_intencion_sin_nombre_no_inventa_uno(frase):
+    """Detectar que hay un tercero está bien; ponerle nombre sin que lo dieran, no. Sin
+    nombre el dispatcher no escribe nada y el bot lo pregunta."""
+    m = detect_recipient_intent(frase)
+    assert m is None or m.name is None
+
+
+@pytest.mark.parametrize("frase,esperado", [
+    ("es para mi mama: Maria Tobon, CC 51234567, Cel 3009876543", "Maria Tobon"),
+    # En WhatsApp se escribe sin mayúsculas: no se pueden exigir.
+    ("es para mi mama: maria tobon, cel 3009876543", "maria tobon"),
+    ("envialo a mi hermana Ana Lucia", "Ana Lucia"),
+    ("lo recibe Juan Perez", "Juan Perez"),
+    ("es para mi tia, se llama Rosa Elena Diaz", "Rosa Elena Diaz"),
+])
+def test_cuando_SI_dan_el_nombre_se_captura(frase, esperado):
+    """El nombre real suele venir DESPUÉS del parentesco. Como el patrón engancha primero
+    con el parentesco, hay que seguir buscando en vez de quedarse con la primera captura."""
+    m = detect_recipient_intent(frase)
+    assert m is not None and m.name == esperado
+
+
+def test_el_telefono_se_sigue_capturando_aunque_el_nombre_se_rechace():
+    """Rechazar el nombre no puede tirar el resto de lo que el cliente dio."""
+    m = detect_recipient_intent("es para mi mama, cel 3009876543")
+    assert m is not None and m.name is None
+    assert m.phone and "3009876543" in m.phone
+
+
+def test_por_que_no_basta_con_quitar_el_IGNORECASE():
+    """`_NAME_PATTERN` exige mayúscula inicial (`[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+`) pero lleva
+    `re.IGNORECASE`, que anula esa distinción — de ahí el falso positivo.
+
+    Quitar la flag "arreglaría" el caso a costa de perder todos los nombres escritos en
+    minúscula, que en WhatsApp son la mayoría. La flag se queda y se valida el capturado.
+    """
+    from agentic.shipping_recipient_intent_resolver import _NAME_PATTERN
+    import re
+
+    assert _NAME_PATTERN.flags & re.IGNORECASE
+    m = detect_recipient_intent("es para mi mama: maria tobon, cel 3009876543")
+    assert m is not None and m.name == "maria tobon"
+
+
+def test_los_dos_caminos_usan_la_misma_definicion_de_nombre():
+    """El tool y el resolver deciden sobre lo mismo. Dos definiciones divergirían."""
+    from agentic.shipping_recipient_intent_resolver import es_un_nombre_de_verdad
+    from agentic.tools.cart import _es_un_nombre_de_verdad as del_tool
+
+    assert del_tool is es_un_nombre_de_verdad
