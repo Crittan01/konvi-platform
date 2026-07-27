@@ -1,15 +1,15 @@
-google-genai==2.11.0
+google-genai==2.13.0
 httpx==0.28.1
 PyJWT==2.13.0
 pydantic==2.13.4
 supabase==2.31.0
 python-dotenv==1.2.2
-fastapi==0.139.0
+fastapi==0.139.2
 uvicorn[standard]==0.51.0
-sentry-sdk[fastapi]==2.65.0
+sentry-sdk[fastapi]==2.66.1
 # Rev. 109 P1 #2 — OpenTelemetry mínimo viable. Exporter desactivado por
 # defecto (no emite spans en producción a menos que se active explícito).
 # Activar con OTEL_EXPORTER_ENABLED=true para debug local.
 # Stack libre para Grafana Tempo / Jaeger exporters futuros.
-opentelemetry-api==1.43.0
-opentelemetry-sdk==1.43.0
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
