@@ -444,6 +444,19 @@ services:
         value: "1800"                            # 30 min
       - key: ORDER_COHERENCE_WINDOW_HOURS
         value: "48"
+      # Registro de la aceptación del pedido. Ley 1480 art. 50 lit. d) exige que la
+      # manifestación de voluntad del comprador sea "verificable por la autoridad
+      # competente"; hasta ahora solo existía como texto suelto en una conversación que
+      # la retención borraba a los 180 días. Va SEPARADO del flag de comprobantes a
+      # propósito: son dos obligaciones distintas y apagar una no puede apagar la otra.
+      - key: ACCEPTANCE_STAMP_ENABLED
+        value: "true"
+      - key: ACCEPTANCE_STAMP_INTERVAL_SECONDS
+        value: "600"                             # 10 min
+      - key: ACCEPTANCE_MIN_AGE_MINUTES
+        value: "5"                               # antes que el comprobante (10)
+      - key: ACCEPTANCE_WINDOW_DAYS
+        value: "30"
       # Comprobante de compra (ADR-0040). Ley 1480 art. 50 lit. d) obliga a remitir
       # acuse de recibo a más tardar el día calendario siguiente.
       - key: RECEIPT_ISSUE_ENABLED

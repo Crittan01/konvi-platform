@@ -4,6 +4,7 @@ import {
   estadoEntrega,
   fechaCO,
   formaPago,
+  lineaAceptacion,
   lineasComprador,
   lineasVendedor,
   totalLineas,
@@ -188,5 +189,50 @@ describe('coherencia del documento', () => {
 
   it('sin ítems no revienta', () => {
     expect(totalLineas({})).toBe(0)
+  })
+})
+
+describe('lineaAceptacion', () => {
+  // Ley 1480 art. 50 lit. d): la aceptación debe ser "verificable por la autoridad
+  // competente". Antes solo existía como texto suelto en una conversación que se borraba.
+  it('muestra la fecha y prefiere el id de Meta como referencia', () => {
+    const a = lineaAceptacion({
+      aceptacion: {
+        fecha: '2026-07-26T15:30:00Z',
+        mensaje_id: 'interno-1',
+        meta_message_id: 'wamid.ABC',
+      },
+    })
+    expect(a?.referencia).toBe('wamid.ABC')
+    expect(a?.fecha).not.toBe('—')
+  })
+
+  it('cae al id interno si Meta no dio uno', () => {
+    expect(
+      lineaAceptacion({ aceptacion: { fecha: '2026-07-26T15:30:00Z', mensaje_id: 'interno-1' } })
+        ?.referencia,
+    ).toBe('interno-1')
+  })
+
+  it('sin aceptación registrada no dice nada, en vez de decir "—"', () => {
+    // Un comprobante que dijera "aceptación: —" afirmaría algo sobre la prueba que no le
+    // consta. Los pedidos creados por un operador no tienen aceptación del comprador.
+    expect(lineaAceptacion({})).toBeNull()
+    expect(lineaAceptacion({ aceptacion: {} })).toBeNull()
+  })
+
+  it('la fecha va en hora Colombia, no en la del servidor', () => {
+    // El 2026-07-25 se corrigieron 31 formateos sin zona: Render corre en UTC y mostraba
+    // los pedidos de la noche como del día siguiente. En una aceptación la fecha es la que
+    // cuenta para el retracto.
+    const previa = process.env.TZ
+    process.env.TZ = 'UTC'
+    try {
+      // 2026-07-26 02:00Z = 2026-07-25 21:00 en Bogotá.
+      expect(lineaAceptacion({ aceptacion: { fecha: '2026-07-26T02:00:00Z' } })?.fecha)
+        .toMatch(/\b25\b/)
+    } finally {
+      process.env.TZ = previa
+    }
   })
 })

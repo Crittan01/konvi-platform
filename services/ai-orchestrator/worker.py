@@ -238,6 +238,25 @@ RECEIPT_ISSUE_INTERVAL_SECONDS = int(os.getenv("RECEIPT_ISSUE_INTERVAL_SECONDS",
 RECEIPT_MIN_AGE_MINUTES = int(os.getenv("RECEIPT_MIN_AGE_MINUTES", "10"))
 RECEIPT_WINDOW_HOURS = int(os.getenv("RECEIPT_WINDOW_HOURS", "72"))
 RECEIPT_BATCH = int(os.getenv("RECEIPT_BATCH", "50"))
+
+# Registro de la aceptación (Ley 1480 art. 50 lit. d): la manifestación de voluntad del
+# consumidor debe ser "verificable por la autoridad competente", y hasta ahora solo existía
+# como texto suelto dentro de una conversación que se borraba a los 180 días.
+#
+# NO cuelga del barrido de comprobantes aunque visite los mismos pedidos: ese solo mira los
+# que aún no tienen comprobante y vive detrás de su propio flag. La prueba de la aceptación
+# no puede depender de si la emisión de comprobantes está encendida — son dos obligaciones
+# distintas del mismo artículo.
+ACCEPTANCE_STAMP_ENABLED = os.getenv(
+    "ACCEPTANCE_STAMP_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+ACCEPTANCE_STAMP_INTERVAL_SECONDS = int(os.getenv("ACCEPTANCE_STAMP_INTERVAL_SECONDS", "600"))
+# Diferido unos minutos: en contra entrega el pedido nace confirmado y el mensaje del
+# cliente puede estar llegando en la misma transacción. Esperar hace determinístico
+# "el último mensaje antes del pedido".
+ACCEPTANCE_MIN_AGE_MINUTES = int(os.getenv("ACCEPTANCE_MIN_AGE_MINUTES", "5"))
+ACCEPTANCE_WINDOW_DAYS = int(os.getenv("ACCEPTANCE_WINDOW_DAYS", "30"))
+ACCEPTANCE_BATCH = int(os.getenv("ACCEPTANCE_BATCH", "100"))
 RECEIPT_ACK_ENABLED = os.getenv(
     "RECEIPT_ACK_ENABLED", "true"
 ).lower() in {"1", "true", "yes", "on"}
@@ -368,6 +387,8 @@ class OrchestratorWorker:
         self._receipt_ack_enabled = RECEIPT_ACK_ENABLED
         self._receipt_email_enabled = RECEIPT_EMAIL_ENABLED
         self._last_receipt_at = 0.0
+        self._acceptance_enabled = ACCEPTANCE_STAMP_ENABLED
+        self._last_acceptance_at = 0.0
         self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
@@ -413,6 +434,8 @@ class OrchestratorWorker:
             "receipts_issued": 0,
             "receipts_blocked_incoherent": 0,
             "receipts_voided": 0,
+            "acceptances_stamped": 0,
+            "acceptances_unstampable": 0,
             "receipt_acks_sent": 0,
             "receipt_acks_out_of_window": 0,
             "receipt_emails_sent": 0,
@@ -494,6 +517,7 @@ class OrchestratorWorker:
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
         await self._run_job("order_coherence", self._check_order_coherence_if_due())
+        await self._run_job("acceptance_stamp", self._stamp_acceptances_if_due())
         await self._run_job("receipts", self._issue_receipts_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
         await self._run_job("health_metrics", self._collect_health_metrics_if_due())
@@ -1467,6 +1491,77 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
                 continue
+
+    async def _stamp_acceptances_if_due(self) -> None:
+        """Deja registrado cuál mensaje del cliente constituye su aceptación del pedido.
+
+        Ley 1480 art. 50 lit. d): la aceptación "deberá ser expresa, inequívoca y
+        verificable por la autoridad competente". Acá "verificable" no puede significar
+        "búsquenlo en el historial de WhatsApp": el historial se borraba a los 180 días y
+        la relación comercial hay que poder probarla por diez años (lit. e + Cód. Comercio
+        art. 60). Estampar el mensaje deja un puntero estable y guarda además el id que le
+        asignó Meta, que es atestación de un tercero.
+
+        La regla es determinística —el último mensaje entrante en o antes de crearse el
+        pedido— y vive en SQL. No se interpreta el contenido: poner un LLM a decidir si una
+        frase constituye aceptación sería exactamente lo que la norma no admite como
+        verificable, además de violar el principio de que el LLM no decide verdad
+        transaccional.
+        """
+        if not self._acceptance_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if now - self._last_acceptance_at < max(60, ACCEPTANCE_STAMP_INTERVAL_SECONDS):
+            return
+        self._last_acceptance_at = now
+
+        try:
+            res = self.supabase.rpc(
+                "rpc_find_orders_pending_acceptance",
+                {
+                    "p_min_age_minutes": ACCEPTANCE_MIN_AGE_MINUTES,
+                    "p_window_days": ACCEPTANCE_WINDOW_DAYS,
+                    "p_limit": ACCEPTANCE_BATCH,
+                },
+            ).execute()
+            pendientes = res.data or []
+        except Exception as exc:
+            logger.warning("[ACEPTACION] no pude buscar pedidos sin aceptación: %s", exc)
+            return
+
+        for p in pendientes:
+            order_id, tenant_id = p.get("order_id"), p.get("tenant_id")
+            if not (order_id and tenant_id):
+                continue
+            try:
+                r = self.supabase.rpc(
+                    "rpc_stamp_order_acceptance",
+                    {"p_order_id": order_id, "p_tenant_id": tenant_id},
+                ).execute()
+                fila = (r.data or [{}])[0] if isinstance(r.data, list) else (r.data or {})
+            except Exception as exc:
+                logger.error("[ACEPTACION] fallo estampando order=%s: %s",
+                             str(order_id)[:8], exc)
+                continue
+
+            if fila.get("estampado"):
+                self._metrics["acceptances_stamped"] += 1
+                continue
+
+            motivo = fila.get("motivo")
+            if motivo == "sin_mensaje_del_cliente":
+                # Un pedido con conversación pero sin ningún turno del comprador antes de
+                # crearse. Se registra en vez de silenciarse: si pasa seguido, algo está
+                # creando pedidos sin que medie manifestación del consumidor.
+                self._metrics["acceptances_unstampable"] += 1
+                logger.warning(
+                    "[ACEPTACION] order=%s tenant=%s sin mensaje del cliente previo: "
+                    "no hay aceptación que registrar (Ley 1480 art. 50 lit. d)",
+                    str(order_id)[:8], str(tenant_id)[:8],
+                )
 
     async def _issue_receipts_if_due(self) -> None:
         """Emite el comprobante de los pedidos confirmados que aún no lo tienen.

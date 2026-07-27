@@ -6,6 +6,7 @@ import {
   fechaCO,
   formaPago,
   lineasComprador,
+  lineaAceptacion,
   lineasVendedor,
   type Receipt,
 } from '../_lib/receipt'
@@ -49,6 +50,7 @@ export default async function ReceiptPage(props: { params: Promise<{ id: string 
   const s = r.snapshot ?? {}
   const t = s.totales ?? {}
   const items = s.items ?? []
+  const aceptacion = lineaAceptacion(s)
   const anulado = Boolean(r.voided_at)
   const descuento = Number(t.descuento ?? 0)
 
@@ -135,6 +137,17 @@ export default async function ReceiptPage(props: { params: Promise<{ id: string 
                 <span className="text-muted-foreground">Forma de pago: </span>
                 <span className="text-foreground">{formaPago(s)}</span>
               </p>
+              {aceptacion && (
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Aceptado el: </span>
+                  <span className="text-foreground">{aceptacion.fecha}</span>
+                  {aceptacion.referencia && (
+                    <span className="block text-xs text-muted-foreground break-all">
+                      Mensaje {aceptacion.referencia}
+                    </span>
+                  )}
+                </p>
+              )}
             </section>
           </div>
 
