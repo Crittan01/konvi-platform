@@ -1,22 +1,63 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-07-25 (readiness pre-lanzamiento · 7 de 8 bloqueantes de código cerrados)
-**Branch activo**: `develop` == `origin/production` == `0dfa15d3` — **sin brecha**.
+**Última actualización**: 2026-07-26 (revalidación legal colombiana · G-1..G-3 en prod, G-7/G-8 en PR)
+**Branch activo**: `develop` == `origin/production` == `1bb76040` — sin brecha.
 **Deploy**: `production` autodespliega en Render (los 4 servicios live). NO hay freeze.
-**Ledger**: 237 migraciones en repo = 237 en prod. **Cero drift** (normalizado 2026-07-25).
+**Ledger**: 246 migraciones en repo = 246 en prod. **Cero drift**.
 
-> ✅ **Todo desplegado y verificado en vivo el 2026-07-25.** `konvi-api` reporta
-> `version: 0dfa15d3`, idéntico al HEAD de `production`; el connector expone las métricas
-> `inbox_*` que solo existen en este código; el worker del orchestrator reinició y late.
-> Certificación visual con Chromium contra prod: 4/4 rutas públicas limpias, cero errores de
-> consola, Tailwind 4 aplicado (236 reglas, fondo `rgb(247,245,242)`), y `/dashboard` sin sesión
-> redirige a login.
->
 > **Lección que costó casi un arreglo entero: mergeado ≠ aplicado ≠ vivo.** Se encontraron 3
 > migraciones mergeadas y sin aplicar — prod seguía vendiendo de más mientras el fix vivía solo en
 > el repo y el reporte lo daba por cerrado. **Cerrar siempre con verificación FUNCIONAL contra prod**
 > (`pg_get_functiondef`, un marcador de código que solo exista en la versión nueva), nunca con el
 > ledger ni con "el PR está mergeado".
+
+---
+
+## 2026-07-26 — Revalidación legal contra normativa colombiana vigente
+
+Reporte: `docs/reports/revalidacion_legal_2026_07_26.md`. Toda norma citada fue verificada en
+texto oficial (alcaldiabogota.gov.co/sisjur, funcionpublica.gov.co/eva/gestornormativo,
+lector.ramajudicial.gov.co); nada se dio por sabido.
+
+**Cerrado y desplegado**
+
+| | qué era | PR |
+|---|---|---|
+| G-1 | Le declarábamos al comprador derechos que no son los suyos, en el 100% de los pedidos. Fuente única `lib/legal_texts.py` | #192 |
+| G-2 | El CHECK del plazo de reembolso estaba INVERTIDO: `>= 30` etiquetado como techo. Ley 2439/2024 bajó el máximo a 15 días calendario en comercio electrónico → ningún tenant podía configurar un plazo legal | #193 |
+| G-3 | Una sola puerta para los mensajes que el cliente no pidió: opt-out respetado en todos los caminos, consentimiento COMERCIAL separado del transaccional (Ley 2300 art. 5 par. 2), y la ventana horaria del art. 3 en hora Colombia real | #194 |
+
+De G-3 salió `lib/festivos_colombia.py`: festivos calculados desde la Ley 51/1983 (regla
+Emiliani + Pascua aritmética), `TZ_COLOMBIA`, y aritmética de días hábiles. Desbloqueó dos
+plazos que hasta entonces eran incalculables (retracto y reversión). Se retiró un
+`COLOMBIA_UTC_OFFSET_HOURS` hardcodeado: un offset no es una zona horaria.
+
+**En PR, verde, pendiente de merge**
+
+| | qué es | PR |
+|---|---|---|
+| G-8 | La conversación de WhatsApp **es** el contrato y se borraba entera cada domingo a los 180 días, mientras se preservaban `orders`/`payments`/`shipments`. Dos plazos: sin pedido 180 días (minimización, Ley 1581), con pedido 10 años (Ley 1480 art. 50 lit. e + Cód. Comercio art. 60 + Ley 962/2005 art. 28, que lo extiende a NO comerciantes). Además `orders.accepted_at` con regla determinística en SQL y el comprobante v2 que dice a qué aceptación corresponde | #195 |
+| G-7 | La **reversión del pago** como figura distinta del reembolso (Ley 1480 art. 51 + Decreto 1074 cap. 2.2.2.51). Nuestra obligación no es pagar: es emitir la **constancia** con fecha y causal (art. 2.2.2.51.4), sin la cual el comprador no puede notificar a su banco y por tanto no puede ejercer el derecho. Incluye detección del doble pago del art. 2.2.2.51.10 | #196 |
+
+`#196` se apila sobre `#195`; al mergear el primero, GitHub retarget-ea el segundo a
+`develop` y ahí sí corre el CI (el workflow solo dispara en PRs contra `develop`).
+
+**Hallazgos de seguridad de paso**
+
+- La política RLS de una tabla nueva se escribió PERMISSIVE. Las permisivas se combinan con
+  OR: una segunda `USING (true)` **anula** el aislamiento por tenant en vez de sumarle una
+  restricción. Lo cazó el test de RLS. Va `AS RESTRICTIVE`, como la de `order_receipts`.
+- El `REVOKE` a `authenticated` en tablas nuevas no es redundante: sin `ALTER DEFAULT
+  PRIVILEGES`, toda tabla nace con los GRANTs que reparte el esquema. Misma causa raíz que
+  #162/#164.
+- `retention_policies` admite `audit_log` pero `fn_apply_retention` no tiene rama para esa
+  entidad. Hoy la política está deshabilitada, así que no promete nada que incumpla — pero si
+  alguien la habilita, la retención de auditoría no se aplicaría y nadie se enteraría.
+
+**Pendiente explícito de G-7**: el flujo self-service del bot (que el comprador radique desde
+WhatsApp escogiendo su causal) requiere tool nuevo + registro en `tools_subset` por estado FSM.
+Hoy lo radica el operador desde el reclamo — human-in-the-loop, y legalmente más sólido que
+dejar que un LLM elija la casilla legal.
 
 ---
 
