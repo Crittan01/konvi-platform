@@ -3827,6 +3827,29 @@ $$;
 ALTER FUNCTION "public"."tg_whatsapp_templates_updated_at"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT COALESCE((
+        SELECT c.consent_comercial_at IS NOT NULL
+           AND c.consent_comercial_revoked_at IS NULL
+           -- Revocar el consentimiento de Habeas Data revoca TODO: no tendría sentido
+           -- seguir mandándole publicidad a quien pidió que no lo contactemos más.
+           AND c.consent_revoked_at IS NULL
+        FROM public.contacts c
+        WHERE c.id = p_contact_id AND c.tenant_id = p_tenant_id
+    ), false);
+$$;
+
+
+ALTER FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") IS 'Fail-closed: sin fila, sin consentimiento explícito, o con Habeas Data revocado, devuelve false. Ley 2300 art. 5 par. 2.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."touch_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -4395,6 +4418,9 @@ CREATE TABLE IF NOT EXISTS "public"."contacts" (
     "document_number_hash" "text",
     "document_number_last4" "text",
     "shipping_phone" "text",
+    "consent_comercial_at" timestamp with time zone,
+    "consent_comercial_revoked_at" timestamp with time zone,
+    "consent_comercial_fuente" "text",
     CONSTRAINT "contacts_consent_source_check" CHECK ((("consent_source" IS NULL) OR ("consent_source" = ANY (ARRAY['manual_console'::"text", 'whatsapp'::"text", 'web_form'::"text", 'phone_call'::"text", 'in_person'::"text", 'import'::"text", 'other'::"text", 'marketplace_meli'::"text"])))),
     CONSTRAINT "contacts_document_number_last4_check" CHECK ((("document_number_last4" IS NULL) OR ("length"("document_number_last4") <= 4))),
     CONSTRAINT "contacts_document_type_check" CHECK ((("document_type" IS NULL) OR ("document_type" = ANY (ARRAY['CC'::"text", 'CE'::"text", 'NIT'::"text", 'PP'::"text", 'TI'::"text", 'OTHER'::"text"]))))
@@ -4442,6 +4468,14 @@ COMMENT ON COLUMN "public"."contacts"."document_number_last4" IS 'Rev. 96 — ú
 
 
 COMMENT ON COLUMN "public"."contacts"."shipping_phone" IS 'Rev. 103: Phone alternativo para envío (transportadora). Si null, usar contacts.phone. NO cambia el handle WhatsApp ni el titular pago.';
+
+
+
+COMMENT ON COLUMN "public"."contacts"."consent_comercial_at" IS 'Cuándo el titular aceptó EXPLÍCITAMENTE recibir comunicaciones comerciales. Distinto de consent_given (Habeas Data transaccional): Ley 2300 art. 5 par. 2 prohíbe que el mensaje comercial sea obligatorio al momento de la transacción. NULL = no hay consentimiento comercial y no se le puede escribir con ese fin.';
+
+
+
+COMMENT ON COLUMN "public"."contacts"."consent_comercial_fuente" IS 'Cómo se obtuvo: la norma exige que sea explícito, así que hay que poder demostrar de dónde salió (p. ej. "respondio_SI_a_opt_in", "formulario_web").';
 
 
 
@@ -7291,6 +7325,10 @@ CREATE INDEX "idx_consent_audit_log_phone_hash" ON "public"."consent_audit_log" 
 
 
 CREATE INDEX "idx_consent_audit_log_tenant" ON "public"."consent_audit_log" USING "btree" ("tenant_id", "occurred_at" DESC);
+
+
+
+CREATE INDEX "idx_contacts_consent_comercial" ON "public"."contacts" USING "btree" ("tenant_id") WHERE (("consent_comercial_at" IS NOT NULL) AND ("consent_comercial_revoked_at" IS NULL));
 
 
 
@@ -10636,6 +10674,12 @@ GRANT ALL ON FUNCTION "public"."tg_tenant_payment_methods_updated_at"() TO "serv
 
 REVOKE ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."tg_whatsapp_templates_updated_at"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."tiene_consentimiento_comercial"("p_contact_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 

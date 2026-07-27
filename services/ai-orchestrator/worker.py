@@ -16,6 +16,9 @@ from whatsapp_sender import (
     TEMPLATE_ERR_TEMPLATE_NOT_FOUND,
 )
 
+# Única puerta de los mensajes proactivos: qué se le puede mandar a quién y cuándo.
+from lib.outbound_gate import Categoria, puede_enviar_proactivo, registrar_bloqueo
+
 logger = logging.getLogger("orchestrator.worker")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
@@ -166,13 +169,10 @@ CART_ABANDONED_DISCOUNT_LABEL = os.getenv("CART_ABANDONED_DISCOUNT_LABEL", "10%"
 # transaccional) NO se silencian. DESACTIVADO por default: (a) es decisión de
 # producto qué ventana usar, (b) mantiene deterministas los tests que corren el
 # cron sin mockear el reloj. Founder habilita en render.yaml tras confirmar franja.
-CART_ABANDONED_QUIET_HOURS_ENABLED = os.getenv(
-    "CART_ABANDONED_QUIET_HOURS_ENABLED", "false"
-).lower() in {"1", "true", "yes", "on"}
-CART_ABANDONED_QUIET_START_HOUR = int(os.getenv("CART_ABANDONED_QUIET_START_HOUR", "21"))
-CART_ABANDONED_QUIET_END_HOUR = int(os.getenv("CART_ABANDONED_QUIET_END_HOUR", "8"))
 # UTC-5 fijo (America/Bogota no observa DST). Configurable por si cambia el país.
-COLOMBIA_UTC_OFFSET_HOURS = int(os.getenv("COLOMBIA_UTC_OFFSET_HOURS", "-5"))
+# Retirado COLOMBIA_UTC_OFFSET_HOURS: un offset hardcodeado no es una zona horaria. La
+# única fuente de la hora colombiana es `lib.festivos_colombia.TZ_COLOMBIA`
+# (ZoneInfo("America/Bogota")), que además conoce los festivos.
 # Gap F7-26 (2026-07-04) — cap per-tenant de HSM MARKETING por ciclo: evita
 # ráfagas que disparen META_RATE_LIMIT en un solo WABA (limit(50) es global).
 # 0 = sin cap.
@@ -417,6 +417,9 @@ class OrchestratorWorker:
             "receipt_acks_out_of_window": 0,
             "receipt_emails_sent": 0,
             "receipt_emails_failed": 0,
+            # Mensajes proactivos que el gate no dejó salir. Cada unidad es una persona a
+            # la que NO se le escribió sin derecho.
+            "proactivos_bloqueados": 0,
             "cart_abandoned_reminders_sent": 0,
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
@@ -568,23 +571,6 @@ class OrchestratorWorker:
             oldest = max(oldest, age)
             newest = min(newest, age)
         return oldest, newest
-
-    @staticmethod
-    def _is_quiet_hour_colombia(now_dt: datetime) -> bool:
-        """Gap F7-25 — True si `now_dt` (UTC) cae en la franja silenciosa de
-        Colombia para HSM MARKETING. Ventana [start, end) en hora local; soporta
-        cruce de medianoche (ej. 21→8). start==end o flag off ⇒ nunca silencia."""
-        if not CART_ABANDONED_QUIET_HOURS_ENABLED:
-            return False
-        start = CART_ABANDONED_QUIET_START_HOUR % 24
-        end = CART_ABANDONED_QUIET_END_HOUR % 24
-        if start == end:
-            return False
-        local_hour = (now_dt.hour + COLOMBIA_UTC_OFFSET_HOURS) % 24
-        if start < end:
-            return start <= local_hour < end
-        # Ventana que cruza medianoche (ej. 21:00–08:00).
-        return local_hour >= start or local_hour < end
 
     @staticmethod
     def _cap_per_tenant(rows: list[dict], cap: int) -> list[dict]:
@@ -2191,6 +2177,23 @@ class OrchestratorWorker:
             # quema la idempotencia: si el takeover termina dentro de la ventana
             # (~5 min) el recordatorio podría salir en el próximo ciclo, y si no,
             # la orden sale de la ventana de forma natural.
+            # Única puerta de salida de los mensajes proactivos. Antes este camino solo
+            # miraba `human_takeover`: un cliente que escribió STOP recibía "ya no
+            # recibirás mensajes nuestros" y el recordatorio le seguía llegando. El camino
+            # HSM sí lo filtraba, así que dos caminos aplicaban reglas distintas a la
+            # misma persona.
+            _decision = puede_enviar_proactivo(
+                self.supabase, tenant_id=tenant_id,
+                categoria=Categoria.TRANSACCIONAL,
+                conversation_id=conversation_id,
+            )
+            if not _decision:
+                registrar_bloqueo(_decision, canal="recordatorio_pago", referencia=order_id[:8])
+                self._metrics["proactivos_bloqueados"] = (
+                    self._metrics.get("proactivos_bloqueados", 0) + 1
+                )
+                continue
+
             conv_status = (conv.get("status") if isinstance(conv, dict) else None) or ""
             if conv_status == "human_takeover":
                 self._metrics["payment_reminders_skipped_human_takeover"] += 1
@@ -2521,16 +2524,13 @@ class OrchestratorWorker:
         self._last_cart_abandoned_at = now
 
         now_dt = datetime.now(timezone.utc)
-        # Gap F7-25 — quiet hours Colombia para el HSM MARKETING. No se quema
-        # idempotencia: se difiere el ciclo; los carritos siguen elegibles y el
-        # próximo ciclo (ya fuera de la franja) los procesa. Solo MARKETING.
-        if self._is_quiet_hour_colombia(now_dt):
-            self._metrics["cart_abandoned_skipped_quiet_hours"] += 1
-            logger.debug(
-                "[CART_ABANDONED] quiet hours Colombia (%02d:00–%02d:00) — difiero ciclo",
-                CART_ABANDONED_QUIET_START_HOUR % 24, CART_ABANDONED_QUIET_END_HOUR % 24,
-            )
-            return
+        # El horario lo aplica el GATE (lib/outbound_gate.py), por contacto y con la zona
+        # real America/Bogota. Se retiró el control propio de este cron:
+        #   · estaba APAGADO por defecto en render.yaml;
+        #   · su ventana (21:00-08:00) no era la legal (L-V 7-19, sáb 8-15);
+        #   · no miraba día de semana ni festivos — un domingo a las 20:00 pasaba;
+        #   · calculaba la hora local con un OFFSET hardcodeado en vez de una zona horaria.
+        # Dos mecanismos de horario es exactamente la divergencia que causó el problema.
         upper_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_THRESHOLD_HOURS)).isoformat()
         lower_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_MAX_AGE_HOURS)).isoformat()
 
@@ -2601,10 +2601,31 @@ class OrchestratorWorker:
                     )
                     contact_rows = contact_res.data or []
                     if contact_rows:
-                        consent_ok = (
-                            bool(contact_rows[0].get("consent_given"))
-                            and not contact_rows[0].get("consent_revoked_at")
+                        # El consentimiento sale del GATE, no de `consent_given`.
+                        #
+                        # `consent_given` es el consentimiento TRANSACCIONAL de Habeas
+                        # Data: el cliente acepta que traten sus datos para procesar SU
+                        # pedido. Usarlo para autorizar publicidad es exactamente lo que
+                        # la Ley 2300 art. 5 par. 2 prohíbe — "los mensajes comerciales no
+                        # pueden ser obligatorios al momento de la transacción" y el
+                        # consentimiento comercial debe ser EXPLÍCITO y separado.
+                        #
+                        # El gate exige `consent_comercial_at` (columna nueva, hoy NULL
+                        # para todos) y además la ventana horaria del art. 3. Mientras no
+                        # exista un flujo real de opt-in comercial, esto no sale — que es
+                        # el comportamiento correcto, no una limitación.
+                        _dec = puede_enviar_proactivo(
+                            self.supabase, tenant_id=tenant_id,
+                            categoria=Categoria.COMERCIAL,
+                            contact_id=contact_id,
                         )
+                        consent_ok = bool(_dec)
+                        if not consent_ok:
+                            registrar_bloqueo(
+                                _dec, canal="carrito_abandonado",
+                                referencia=str(cart_id)[:8],
+                            )
+                            self._metrics["proactivos_bloqueados"] += 1
                         full = (contact_rows[0].get("name") or "").strip()
                         customer_name = full.split(" ")[0] if full else "cliente"
                 except Exception as exc:
@@ -2630,8 +2651,8 @@ class OrchestratorWorker:
                 except Exception:
                     pass
                 logger.info(
-                    "[CART_ABANDONED] cart=%s skipped (sin consent_given marketing — "
-                    "Habeas Data Ley 1581)",
+                    "[CART_ABANDONED] cart=%s no enviado — el gate no lo autorizó "
+                    "(consentimiento comercial u horario de la Ley 2300)",
                     str(cart_id)[:8],
                 )
                 continue
