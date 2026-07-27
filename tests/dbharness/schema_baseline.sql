@@ -5694,7 +5694,7 @@ CREATE TABLE IF NOT EXISTS "public"."tenant_cancellation_policy" (
     "tenant_id" "uuid" NOT NULL,
     "allow_cancel_after_picked_up" boolean DEFAULT false NOT NULL,
     "auto_void_card_window_hours" integer DEFAULT 23 NOT NULL,
-    "manual_refund_legal_days" integer DEFAULT 30 NOT NULL,
+    "manual_refund_legal_days" integer DEFAULT 15 NOT NULL,
     "allow_partial_cancellation" boolean DEFAULT true NOT NULL,
     "enable_retracto_flow" boolean DEFAULT true NOT NULL,
     "retracto_window_business_days" integer DEFAULT 5 NOT NULL,
@@ -5705,7 +5705,7 @@ CREATE TABLE IF NOT EXISTS "public"."tenant_cancellation_policy" (
     "escalate_card_voids" boolean DEFAULT false NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "tenant_cancellation_policy_manual_refund_legal_days_check" CHECK (("manual_refund_legal_days" >= 30)),
+    CONSTRAINT "tenant_cancellation_policy_manual_refund_legal_days_check" CHECK ((("manual_refund_legal_days" >= 1) AND ("manual_refund_legal_days" <= 15))),
     CONSTRAINT "tenant_cancellation_policy_retracto_return_paid_by_check" CHECK (("retracto_return_paid_by" = ANY (ARRAY['customer'::"text", 'tenant'::"text"]))),
     CONSTRAINT "tenant_cancellation_policy_retracto_window_business_days_check" CHECK (("retracto_window_business_days" >= 5))
 );
@@ -5715,6 +5715,10 @@ ALTER TABLE "public"."tenant_cancellation_policy" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."tenant_cancellation_policy" IS 'Política de cancelación + retracto configurable por tenant. Defaults cumplen Ley 1480. CHECK constraints garantizan que tenant NO puede ser más estricto que la ley (5 días hábiles retracto mín, 30 días refund máx).';
+
+
+
+COMMENT ON COLUMN "public"."tenant_cancellation_policy"."manual_refund_legal_days" IS 'TECHO en días CALENDARIO para devolver el dinero. Ley 1480 art. 47 inc. final (mod. art. 3 Ley 2439 de 2024): en comercio electrónico no puede exceder 15. Se puede prometer menos, nunca más — al revés que retracto_window_business_days, que es un PISO.';
 
 
 

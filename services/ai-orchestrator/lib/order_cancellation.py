@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+# Única fuente de los plazos legales — antes estaban escritos a mano acá y en tres
+# sitios más, y habían divergido.
+from lib.legal_texts import REEMBOLSO_DIAS_CALENDARIO_MAX, dias_reembolso
+
 logger = logging.getLogger("orchestrator.order_cancellation")
 
 
@@ -95,7 +99,10 @@ class CancellationResult:
 class TenantPolicy:
     allow_cancel_after_picked_up: bool = False
     auto_void_card_window_hours: int = 23
-    manual_refund_legal_days: int = 30
+    # Techo legal en comercio electrónico: 15 días CALENDARIO (Ley 1480 art. 47, mod.
+    # art. 3 Ley 2439 de 2024). El default era 30 —el plazo del comercio presencial— y de
+    # ahí salía el mensaje que se le mostraba al operador y al cliente.
+    manual_refund_legal_days: int = REEMBOLSO_DIAS_CALENDARIO_MAX
     allow_partial_cancellation: bool = True
     enable_retracto_flow: bool = True
     retracto_window_business_days: int = 5
@@ -104,6 +111,19 @@ class TenantPolicy:
     retracto_excluded_categories: list = field(default_factory=list)
     high_value_escalation_threshold_cents: int = 50000000  # $500K
     escalate_card_voids: bool = False
+
+    def __post_init__(self) -> None:
+        """El techo legal se aplica ACÁ y no solo al leer de la base.
+
+        `from_row` ya lo pasa por `dias_reembolso`, pero construir el dataclass a mano
+        —como hacen los tests y cualquier caller futuro— se saltaba el techo y podía
+        prometerle al comprador un plazo que la ley no permite. La defensa tiene que estar
+        en el tipo, no en un camino.
+        """
+        if self.manual_refund_legal_days > REEMBOLSO_DIAS_CALENDARIO_MAX:
+            self.manual_refund_legal_days = REEMBOLSO_DIAS_CALENDARIO_MAX
+        if self.manual_refund_legal_days < 1:
+            self.manual_refund_legal_days = REEMBOLSO_DIAS_CALENDARIO_MAX
 
 
 def _load_policy(supabase: Any, tenant_id: str) -> TenantPolicy:
@@ -120,7 +140,10 @@ def _load_policy(supabase: Any, tenant_id: str) -> TenantPolicy:
     return TenantPolicy(
         allow_cancel_after_picked_up=bool(row.get("allow_cancel_after_picked_up", False)),
         auto_void_card_window_hours=int(row.get("auto_void_card_window_hours") or 23),
-        manual_refund_legal_days=int(row.get("manual_refund_legal_days") or 30),
+        # Se pasa por `dias_reembolso`, que aplica el techo legal. El CHECK de la base ya
+        # lo garantiza, pero una fila vieja o un default olvidado no pueden volver a
+        # prometerle al comprador un plazo que la ley no permite.
+        manual_refund_legal_days=dias_reembolso(row),
         allow_partial_cancellation=bool(row.get("allow_partial_cancellation", True)),
         enable_retracto_flow=bool(row.get("enable_retracto_flow", True)),
         retracto_window_business_days=int(row.get("retracto_window_business_days") or 5),
@@ -322,6 +345,7 @@ async def cancel_order(
             reasons=escalation_reasons,
             order=order,
             request=request,
+            policy=policy,
         )
 
     # 4. Insert cancellation row (status='pending')
@@ -479,10 +503,10 @@ def _insert_cancellation_row(
 
 def _build_escalation_result(
     *, cancellation_id: str, reasons: list[str],
-    order: dict, request: CancellationRequest,
+    order: dict, request: CancellationRequest, policy: TenantPolicy,
 ) -> CancellationResult:
     short_id = request.order_id[:8].upper()
-    customer_msg = _escalation_customer_message(reasons, short_id, order)
+    customer_msg = _escalation_customer_message(reasons, short_id, order, policy)
     operator_msg = (
         f"🚨 Cancelación escalada — Pedido #{short_id}\n"
         f"Razones: {', '.join(reasons)}\n"
@@ -496,8 +520,15 @@ def _build_escalation_result(
     )
 
 
-def _escalation_customer_message(reasons: list[str], short_id: str, order: dict) -> str:
-    """Mensaje natural al cliente según razón principal de escalación."""
+def _escalation_customer_message(
+    reasons: list[str], short_id: str, order: dict, policy: TenantPolicy,
+) -> str:
+    """Mensaje natural al cliente según razón principal de escalación.
+
+    Recibe la política porque el plazo de retracto es del TENANT (la ley da 5 días hábiles
+    como piso y un comerciante puede ofrecer más). Estaba escrito "5 días hábiles" a mano:
+    a un tenant que ofrece 10, el mensaje le recortaba el derecho a su propio cliente.
+    """
     primary = reasons[0]
     if primary == "ORDER_IN_TRANSIT":
         return (
@@ -510,7 +541,8 @@ def _escalation_customer_message(reasons: list[str], short_id: str, order: dict)
     if primary == "ORDER_DELIVERED":
         return (
             f"Tu pedido *#{short_id}* ya fue entregado. Si quieres devolverlo, "
-            f"tienes *derecho de retracto* por *5 días hábiles* desde que lo "
+            f"tienes *derecho de retracto* por "
+            f"*{policy.retracto_window_business_days} días hábiles* desde que lo "
             f"recibiste (Ley 1480).\n\nTe conecto con un especialista para "
             f"procesar tu retracto."
         )

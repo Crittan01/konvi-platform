@@ -68,6 +68,15 @@ def _fila(rotulo: str, valor: Optional[str]) -> str:
     )
 
 
+def _marcar_titulo(texto: str) -> str:
+    """Pone en negrita la primera palabra hasta el punto ("Retracto.", "Garantía.").
+    El texto legal vive en `lib.legal_texts` sin HTML — el formato es de la vista."""
+    if "." not in texto:
+        return texto
+    titulo, resto = texto.split(".", 1)
+    return f"<strong>{titulo}.</strong>{resto}"
+
+
 def compose_receipt_subject(*, numero: str, vendedor: str) -> str:
     return f"Comprobante {numero} — {vendedor}" if vendedor else f"Comprobante {numero}"
 
@@ -106,22 +115,17 @@ def compose_receipt_html(*, snapshot: dict, numero: str, politica: Optional[dict
 
     pago = "Contra entrega" if (pedido.get("forma_pago") or "") == "cod" else "Pago en línea"
 
-    p = politica or {}
-    dias_retracto = max(5, int(p.get("retracto_window_business_days") or 5))
-    dias_reembolso = max(1, int(p.get("manual_refund_legal_days") or 30))
-    quien_paga = (p.get("retracto_return_paid_by") or "customer")
-    texto_devolucion = (
-        "El costo de la devolución corre por tu cuenta."
-        if quien_paga == "customer" else
-        "El costo de la devolución lo asume el vendedor."
-    )
+    # Todo texto legal sale de `lib.legal_texts`, que es la única fuente. Antes estaba
+    # escrito a mano acá y en tres sitios más, y habían divergido — con plazos y
+    # excepciones equivocados que, bajo el art. 29, obligaban al vendedor en los términos
+    # en que se los anunció.
+    from lib.legal_texts import texto_garantia, texto_retracto  # noqa: PLC0415
+
+    _retracto = texto_retracto(politica, items)
     bloque_retracto = (
-        f'<p style="margin:4px 0"><strong>Retracto.</strong> Tienes {dias_retracto} días hábiles '
-        f'desde que recibes el producto para retractarte de la compra. {_esc(texto_devolucion)} '
-        f'La devolución del dinero se hace dentro de los {dias_reembolso} días siguientes. '
-        f'No aplica a productos de uso personal ni hechos a tu medida.</p>'
-        if p.get("enable_retracto_flow", True) else ""
+        f'<p style="margin:4px 0">{_marcar_titulo(_esc(_retracto))}</p>' if _retracto else ""
     )
+    bloque_garantia = f'<p style="margin:4px 0">{_marcar_titulo(_esc(texto_garantia(items)))}</p>' 
 
     aviso_incompleto = (
         '<p style="margin:8px 0 0;color:#b9770e;font-size:12px">'
@@ -172,8 +176,7 @@ def compose_receipt_html(*, snapshot: dict, numero: str, politica: Optional[dict
 
   <div style="margin-top:20px;padding-top:12px;border-top:1px solid #ecf0f1;font-size:12px;color:#7f8c8d">
     {bloque_retracto}
-    <p style="margin:4px 0"><strong>Garantía.</strong> Los productos nuevos tienen garantía
-    legal de un año desde la entrega, salvo que se informe un plazo mayor.</p>
+    {bloque_garantia}
     <p style="margin:12px 0 0">Recibiste este correo porque hiciste una compra.
     Guárdalo como comprobante.</p>
   </div>

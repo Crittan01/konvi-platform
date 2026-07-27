@@ -2037,7 +2037,7 @@ async def _run_agentic_full(
                         _retracto_msg = (
                             f"Entiendo que quieres retractarte del pedido "
                             f"*#{short_id}*.\n\n"
-                            f"La *Ley 1480 Art. 47* otorga 5 días hábiles desde "
+                            f"La *Ley 1480 art. 47* otorga {_dias_retracto_legal()} días hábiles desde "
                             f"la entrega para retractarse. Sin embargo, su "
                             f"*parágrafo* excluye algunas categorías "
                             f"(productos abiertos de uso íntimo, perecederos, "
@@ -2045,7 +2045,9 @@ async def _run_agentic_full(
                             f"Te conecto con un especialista para validar si tu "
                             f"caso aplica según la política del tenant + estado "
                             f"del producto. Si aplica, procesamos devolución y "
-                            f"reembolso en *máximo 30 días calendario* (Art. 49)."
+                            f"reembolso dentro de los "
+                            f"*{_dias_reembolso_legal()} días calendario* "
+                            f"(Ley 1480, art. 47)."
                         )
                     # Rev. 109 fix UAT live BUG 39 — persistir audit row
                     # order_cancellations para trazabilidad SIC + visibilidad
@@ -2113,7 +2115,8 @@ async def _run_agentic_full(
                                 f"Cliente: \"{_cancel_match.reason_text[:200]}\"\n"
                                 f"Acción: validar ventana 5d hábiles, generar "
                                 f"etiqueta retorno, coordinar refund "
-                                f"(30 días calendario máx Ley 1480)."
+                                f"({_dias_reembolso_legal()} días calendario máx, "
+                                f"Ley 1480 art. 47)."
                             ),
                         )
                     except Exception:
@@ -3805,6 +3808,31 @@ def _optout_failclosed_should_skip(content: Any) -> bool:
         return bool(is_optout_keyword(content))
     except Exception:
         return False
+
+
+
+def _dias_retracto_legal() -> int:
+    """Días hábiles del retracto, desde la única fuente. Es el PISO legal: el tenant puede
+    ofrecer más, y ahí el número sale de su política (ver order_cancellation)."""
+    try:
+        from lib.legal_texts import RETRACTO_DIAS_HABILES_MIN  # noqa: PLC0415
+        return RETRACTO_DIAS_HABILES_MIN
+    except Exception:
+        return 5
+
+
+def _dias_reembolso_legal() -> int:
+    """Plazo de devolución del dinero, desde la única fuente (`lib.legal_texts`).
+
+    Estaba escrito a mano como "30 días calendario (Art. 49)": el plazo era el del comercio
+    presencial —en e-commerce la Ley 2439/2024 lo bajó a 15— y el artículo citado es la
+    DEFINICIÓN de comercio electrónico, no un plazo. El correcto es el art. 47.
+    """
+    try:
+        from lib.legal_texts import REEMBOLSO_DIAS_CALENDARIO_MAX  # noqa: PLC0415
+        return REEMBOLSO_DIAS_CALENDARIO_MAX
+    except Exception:
+        return 15
 
 
 async def _handle_optout_if_keyword(
