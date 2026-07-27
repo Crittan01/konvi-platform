@@ -872,6 +872,13 @@ CREATE OR REPLACE FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id
         SELECT 1 FROM public.orders o
          WHERE o.conversation_id = p_conversation_id
            AND o.tenant_id = p_tenant_id
+           AND (
+                o.status IN ('confirmed', 'processing', 'shipped', 'delivered')
+             OR EXISTS (SELECT 1 FROM public.payments p
+                         WHERE p.order_id = o.id AND p.status = 'approved')
+             OR EXISTS (SELECT 1 FROM public.order_receipts r
+                         WHERE r.order_id = o.id)
+           )
     );
 $$;
 
@@ -879,7 +886,7 @@ $$;
 ALTER FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") IS 'True si la conversación tiene al menos un pedido: entonces sus mensajes son prueba de la relación comercial (Ley 1480 art. 50 lit. e) y se conservan 10 años.';
+COMMENT ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") IS 'True si la conversación sostiene una relación comercial REAL: un pedido que llegó a ejecutarse, que se pagó, o que produjo comprobante. Un carrito abandonado en pending_payment y luego cancelado NO cuenta — retenerlo 10 años sería sobre-retención contra Ley 1581 art. 4 lit. d).';
 
 
 
@@ -908,13 +915,13 @@ BEGIN
         RETURN 0;
     END IF;
 
-    -- Plazo de conservación de la PRUEBA de la relación comercial. Si la política no
-    -- está, se usa el legal: nunca se borra evidencia por falta de configuración.
+    -- Plazo de conservación de la PRUEBA. Si la política no está, se usa el legal: nunca
+    -- se borra evidencia por falta de configuración.
     SELECT COALESCE((
         SELECT ttl_days FROM public.retention_policies
          WHERE tenant_id IS NULL AND entity = 'messages_evidencia' AND enabled = TRUE
          LIMIT 1
-    ), 3650) INTO v_ttl_evidencia;
+    ), 3653) INTO v_ttl_evidencia;
 
     FOR r_tenant IN
         SELECT id AS tenant_id FROM public.tenants
@@ -934,27 +941,57 @@ BEGIN
 
         v_count := 0;
 
-        -- ── messages: DOS plazos ────────────────────────────────────────────
-        -- Sin pedido → el TTL corto (minimización, Ley 1581).
-        -- Con pedido → 10 años (prueba, Ley 1480 art. 50 lit. e + Cód. Comercio art. 60).
+        -- ── messages: DOS pasadas SARGABLES, no un CASE por fila ────────────
         IF p_entity = 'messages' AND v_eff_act = 'hard_delete' THEN
             IF p_dry_run THEN
                 SELECT COUNT(*) INTO v_count
                   FROM public.messages m
                  WHERE m.tenant_id = r_tenant.tenant_id
-                   AND m.created_at < NOW() - (
-                        CASE WHEN public.es_mensaje_de_evidencia(m.conversation_id, m.tenant_id)
-                             THEN v_ttl_evidencia ELSE v_eff_ttl END || ' days')::INTERVAL;
+                   AND (
+                        m.created_at < NOW() - make_interval(days => v_ttl_evidencia)
+                     OR (m.created_at < NOW() - make_interval(days => v_eff_ttl)
+                         AND NOT EXISTS (
+                             SELECT 1 FROM public.orders o
+                              WHERE o.conversation_id = m.conversation_id
+                                AND o.tenant_id = m.tenant_id
+                                AND (o.status IN ('confirmed','processing','shipped','delivered')
+                                  OR EXISTS (SELECT 1 FROM public.payments p
+                                              WHERE p.order_id = o.id AND p.status = 'approved')
+                                  OR EXISTS (SELECT 1 FROM public.order_receipts r
+                                              WHERE r.order_id = o.id))))
+                   );
             ELSE
+                -- Pasada A: lo vencido a TTL corto que NO sostiene relación comercial.
+                -- El EXISTS va inline para que el planner pueda hacer anti-join en vez de
+                -- llamar a una función no inlineable una vez por fila.
                 WITH del AS (
                     DELETE FROM public.messages m
                      WHERE m.tenant_id = r_tenant.tenant_id
-                       AND m.created_at < NOW() - (
-                            CASE WHEN public.es_mensaje_de_evidencia(m.conversation_id, m.tenant_id)
-                                 THEN v_ttl_evidencia ELSE v_eff_ttl END || ' days')::INTERVAL
+                       AND m.created_at < NOW() - make_interval(days => v_eff_ttl)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM public.orders o
+                            WHERE o.conversation_id = m.conversation_id
+                              AND o.tenant_id = m.tenant_id
+                              AND (o.status IN ('confirmed','processing','shipped','delivered')
+                                OR EXISTS (SELECT 1 FROM public.payments p
+                                            WHERE p.order_id = o.id AND p.status = 'approved')
+                                OR EXISTS (SELECT 1 FROM public.order_receipts r
+                                            WHERE r.order_id = o.id)))
                      RETURNING 1
                 )
                 SELECT COUNT(*) INTO v_count FROM del;
+
+                -- Pasada B: lo vencido al plazo legal de conservación, sea lo que sea.
+                -- Un mensaje sin conversación (`conversation_id IS NULL`) cae acá y no en
+                -- la pasada A: el NOT EXISTS con NULL no lo alcanzaría, así que sin esta
+                -- pasada viviría para siempre.
+                WITH del2 AS (
+                    DELETE FROM public.messages m
+                     WHERE m.tenant_id = r_tenant.tenant_id
+                       AND m.created_at < NOW() - make_interval(days => v_ttl_evidencia)
+                     RETURNING 1
+                )
+                SELECT v_count + COUNT(*) INTO v_count FROM del2;
             END IF;
 
         -- ── conversations: soft_delete (set archived_at) ────────────────────
@@ -1017,7 +1054,6 @@ BEGIN
             END IF;
 
         ELSE
-            -- Combinación entity+action no implementada — saltar tenant.
             CONTINUE;
         END IF;
 
@@ -2648,11 +2684,18 @@ $$;
 ALTER FUNCTION "public"."rpc_dashboard_revenue"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer DEFAULT 50) RETURNS TABLE("reversal_id" "uuid", "tenant_id" "uuid", "conversation_id" "uuid", "radicado" "text", "constancia" "jsonb")
+CREATE OR REPLACE FUNCTION "public"."rpc_find_constancias_por_entregar"("p_csw_hours" integer DEFAULT 24, "p_limit" integer DEFAULT 50) RETURNS TABLE("reversal_id" "uuid", "tenant_id" "uuid", "conversation_id" "uuid", "radicado" "text", "constancia" "jsonb", "dentro_de_csw" boolean)
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public', 'pg_temp'
     AS $$
-    SELECT r.id, r.tenant_id, r.conversation_id, r.radicado, r.constancia
+    SELECT r.id, r.tenant_id, r.conversation_id, r.radicado, r.constancia,
+           EXISTS (
+               SELECT 1 FROM public.messages m
+                WHERE m.conversation_id = r.conversation_id
+                  AND m.tenant_id = r.tenant_id
+                  AND m.direction = 'inbound'
+                  AND m.created_at >= NOW() - make_interval(hours => p_csw_hours)
+           )
       FROM public.payment_reversal_requests r
      WHERE r.constancia_emitida_at IS NOT NULL
        AND r.constancia_entregada_at IS NULL
@@ -2663,7 +2706,7 @@ CREATE OR REPLACE FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit
 $$;
 
 
-ALTER FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) OWNER TO "postgres";
+ALTER FUNCTION "public"."rpc_find_constancias_por_entregar"("p_csw_hours" integer, "p_limit" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."rpc_find_dobles_pagos_sin_avisar"("p_limit" integer DEFAULT 50) RETURNS TABLE("reversal_id" "uuid", "tenant_id" "uuid", "radicado" "text", "reembolso" numeric, "reversion" numeric)
@@ -3329,6 +3372,7 @@ DECLARE
     v_constancia JSONB;
     v_id         UUID;
     v_total      NUMERIC;
+    v_ya_radicado NUMERIC;
 BEGIN
     SELECT c.id, c.order_id, c.ticket_number, c.customer_id
       INTO v_claim
@@ -3340,15 +3384,10 @@ BEGIN
         RETURN;
     END IF;
     IF v_claim.order_id IS NULL THEN
-        -- La reversión se predica de una compra concreta: sin pedido no hay operación
-        -- que reversar ni valor que reclamar.
         RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, 'reclamo_sin_pedido'::TEXT;
         RETURN;
     END IF;
 
-    -- Idempotente ANTES de validar nada más: un reintento no puede producir una
-    -- segunda constancia con otra fecha. La fecha es lo que prueba que la queja llegó
-    -- dentro de los 5 días hábiles del art. 2.2.2.51.4.
     SELECT r.id, r.radicado INTO v_existente
       FROM public.payment_reversal_requests r
      WHERE r.claim_id = p_claim_id AND r.tenant_id = p_tenant_id;
@@ -3359,22 +3398,29 @@ BEGIN
 
     v_procede := public.reversion_procede(v_claim.order_id, p_tenant_id);
     IF v_procede <> 'procede' THEN
-        -- El reclamo sigue vivo como reclamo; lo que no procede es ESTA figura.
         RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, v_procede;
         RETURN;
     END IF;
 
-    -- El valor reclamado no puede exceder lo que se pagó. Una constancia que pida
-    -- reversar más que el total le entrega al emisor un motivo para rechazarla entera
-    -- (art. 2.2.2.51.8: es oponible "la inexistencia de la operación").
     SELECT o.total_amount INTO v_total
       FROM public.orders o WHERE o.id = v_claim.order_id AND o.tenant_id = p_tenant_id;
-    IF v_total IS NOT NULL AND p_valor > v_total THEN
+
+    -- Lo ya radicado sobre ESTE pedido, por cualquier otro reclamo. `FOR UPDATE` no sirve
+    -- sobre un agregado: se serializa por el pedido para que dos radicaciones simultáneas
+    -- no lean ambas el mismo total previo.
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_claim.order_id::text, 0));
+
+    SELECT COALESCE(SUM(r.valor), 0) INTO v_ya_radicado
+      FROM public.payment_reversal_requests r
+     WHERE r.order_id = v_claim.order_id
+       AND r.tenant_id = p_tenant_id
+       AND r.estado <> 'desistida';
+
+    IF v_total IS NOT NULL AND (v_ya_radicado + p_valor) > v_total THEN
         RETURN QUERY SELECT NULL::UUID, NULL::TEXT, false, 'valor_excede_el_pedido'::TEXT;
         RETURN;
     END IF;
 
-    -- Un solo número para el mismo reclamo, en otra presentación.
     v_radicado := 'RV-' || LPAD(COALESCE(v_claim.ticket_number, 0)::text, 6, '0');
 
     INSERT INTO public.payment_reversal_requests (
@@ -3387,15 +3433,9 @@ BEGIN
         p_conversation_id, p_message_id, p_meta_message_id
     ) RETURNING payment_reversal_requests.id INTO v_id;
 
-    -- LA CONSTANCIA. Contenido mínimo del art. 2.2.2.51.4: fecha y causal. Se agrega
-    -- lo que el consumidor necesita para armar su notificación al emisor (art.
-    -- 2.2.2.51.7): valor, identificación de la operación y del instrumento.
     v_constancia := jsonb_build_object(
         'version', 1,
         'radicado', v_radicado,
-        -- Hora COLOMBIA explícita. El servidor corre en UTC y una queja presentada un
-        -- viernes a las 8 de la noche quedaría fechada el sábado, corriendo el conteo
-        -- de días hábiles en contra del consumidor.
         'presentada_at', NOW(),
         'presentada_co', to_char(NOW() AT TIME ZONE 'America/Bogota',
                                  'DD/MM/YYYY HH24:MI') || ' (hora Colombia)',
@@ -3407,6 +3447,20 @@ BEGIN
         'canal', p_canal,
         'instrumento', p_instrumento,
         'bien_a_disposicion', p_bien_a_disposicion,
+        -- La identificación de la operación la exige el art. 2.2.2.51.7 num. 4 como
+        -- contenido de la notificación al emisor: número, fecha y hora. El comprador no
+        -- puede armarla si nosotros no se la damos.
+        'operacion', (
+            SELECT jsonb_strip_nulls(jsonb_build_object(
+                'pedido', o.id,
+                'fecha', o.created_at,
+                'fecha_co', to_char(o.created_at AT TIME ZONE 'America/Bogota',
+                                    'DD/MM/YYYY HH24:MI') || ' (hora Colombia)',
+                'total', o.total_amount,
+                'referencia_pago', (SELECT pm.wompi_link_id FROM public.payments pm
+                                     WHERE pm.order_id = o.id ORDER BY pm.created_at DESC LIMIT 1)
+            )) FROM public.orders o WHERE o.id = v_claim.order_id
+        ),
         'pedido', jsonb_build_object('id', v_claim.order_id, 'reclamo', v_claim.ticket_number),
         'vendedor', public.tenant_seller_identity(p_tenant_id),
         'fundamento', 'Ley 1480 de 2011 art. 51; Decreto 1074 de 2015 art. 2.2.2.51.4'
@@ -3435,8 +3489,9 @@ CREATE OR REPLACE FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "u
     SET "search_path" TO 'public', 'pg_temp'
     AS $$
 DECLARE
-    v_orden RECORD;
-    v_msg   RECORD;
+    v_orden      RECORD;
+    v_msg        RECORD;
+    v_ultimo_bot TIMESTAMPTZ;
 BEGIN
     SELECT o.id, o.conversation_id, o.created_at, o.accepted_at
       INTO v_orden
@@ -3448,22 +3503,23 @@ BEGIN
         RETURN;
     END IF;
     IF v_orden.accepted_at IS NOT NULL THEN
-        -- Idempotente: la aceptación es un hecho histórico y no se re-escribe.
         RETURN QUERY SELECT false, 'ya_estampada'::TEXT;
         RETURN;
     END IF;
     IF v_orden.conversation_id IS NULL THEN
-        -- Pedido creado por un operador para alguien que nunca escribió: no hay
-        -- manifestación del consumidor que señalar. Se dice, no se inventa una.
         RETURN QUERY SELECT false, 'sin_conversacion'::TEXT;
         RETURN;
     END IF;
 
-    -- El último mensaje del CLIENTE en o antes de crearse el pedido. Es lo más cercano
-    -- a "su voluntad expresa de contratar" que existe de forma determinística: el turno
-    -- con el que cerró. No se interpreta el contenido — interpretar lenguaje natural
-    -- para decidir si alguien aceptó sería justo lo que la norma no admite como
-    -- verificable, y además pondría a un LLM a decidir verdad transaccional.
+    -- La última respuesta del bot anterior al pedido abre el turno vigente. Lo que el
+    -- cliente escribió DESPUÉS de esa respuesta y ANTES del pedido es ese turno.
+    SELECT MAX(m.created_at) INTO v_ultimo_bot
+      FROM public.messages m
+     WHERE m.conversation_id = v_orden.conversation_id
+       AND m.tenant_id = p_tenant_id
+       AND m.direction = 'outbound'
+       AND m.created_at < v_orden.created_at;
+
     SELECT m.id, m.created_at, m.meta_message_id
       INTO v_msg
       FROM public.messages m
@@ -3471,7 +3527,20 @@ BEGIN
        AND m.tenant_id = p_tenant_id
        AND m.direction = 'inbound'
        AND m.created_at <= v_orden.created_at
-     ORDER BY m.created_at DESC
+       -- Del turno vigente. Sin respuesta previa del bot (el cliente abrió y compró de
+       -- una), no hay turno anterior que excluir.
+       AND (v_ultimo_bot IS NULL OR m.created_at > v_ultimo_bot)
+       -- Proximidad: una aceptación y su pedido están a segundos, no a horas.
+       AND m.created_at >= v_orden.created_at - INTERVAL '30 minutes'
+       -- Un mensaje prueba UN pedido.
+       AND NOT EXISTS (
+           SELECT 1 FROM public.orders o2
+            WHERE o2.tenant_id = p_tenant_id
+              AND o2.accepted_message_id = m.id
+              AND o2.id <> p_order_id
+       )
+     -- ASCENDENTE: el PRIMERO del turno, que es donde está la manifestación.
+     ORDER BY m.created_at ASC
      LIMIT 1;
 
     IF NOT FOUND THEN
@@ -3482,7 +3551,8 @@ BEGIN
     UPDATE public.orders
        SET accepted_at = v_msg.created_at,
            accepted_message_id = v_msg.id,
-           accepted_meta_message_id = v_msg.meta_message_id
+           accepted_meta_message_id = v_msg.meta_message_id,
+           accepted_source = 'inferida'
      WHERE id = p_order_id AND tenant_id = p_tenant_id
        AND accepted_at IS NULL;
 
@@ -3494,7 +3564,7 @@ $$;
 ALTER FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Deja registrado cuál mensaje del cliente constituye su aceptación (Ley 1480 art. 50 lit. d). Idempotente: un hecho histórico no se re-escribe.';
+COMMENT ON FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Registra el PRIMER mensaje del cliente en el turno sobre el que el bot actuó — no el último, que puede ser algo que llegó mientras se armaba el pedido. Nunca reutiliza un mensaje que ya prueba otro pedido.';
 
 
 
@@ -5613,6 +5683,7 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "accepted_at" timestamp with time zone,
     "accepted_message_id" "uuid",
     "accepted_meta_message_id" "text",
+    "accepted_source" "text",
     CONSTRAINT "orders_payment_method_check" CHECK (("payment_method" = ANY (ARRAY['credit'::"text", 'cod'::"text"])))
 );
 
@@ -5653,6 +5724,10 @@ COMMENT ON COLUMN "public"."orders"."accepted_at" IS 'Cuándo el consumidor mani
 
 
 COMMENT ON COLUMN "public"."orders"."accepted_meta_message_id" IS 'El id que le asignó META a ese mensaje. Es atestación de un TERCERO: la fecha y el contenido no dependen solo de nuestra base, que es lo que la norma pide al exigir que la aceptación sea "verificable por la autoridad competente".';
+
+
+
+COMMENT ON COLUMN "public"."orders"."accepted_source" IS '"inferida" = la dedujo el barrido de respaldo por posición en el turno. Se registra para que nadie lea el campo como si fuera una manifestación capturada en vivo.';
 
 
 
@@ -6016,7 +6091,7 @@ CREATE TABLE IF NOT EXISTS "public"."retention_policies" (
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     CONSTRAINT "retention_policies_action_check" CHECK (("action" = ANY (ARRAY['archive'::"text", 'soft_delete'::"text", 'hard_delete'::"text", 'anonymize'::"text"]))),
     CONSTRAINT "retention_policies_entity_check" CHECK (("entity" = ANY (ARRAY['conversations'::"text", 'messages'::"text", 'contacts_inactive'::"text", 'pii_access_log'::"text", 'audit_log'::"text", 'messages_evidencia'::"text"]))),
-    CONSTRAINT "retention_policies_ttl_days_check" CHECK ((("ttl_days" >= 1) AND ("ttl_days" <= 3650)))
+    CONSTRAINT "retention_policies_ttl_days_check" CHECK ((("ttl_days" >= 1) AND ("ttl_days" <= 3660)))
 );
 
 
@@ -8043,6 +8118,10 @@ CREATE INDEX "idx_orders_conversation_tenant" ON "public"."orders" USING "btree"
 
 
 
+CREATE INDEX "idx_orders_evidencia" ON "public"."orders" USING "btree" ("conversation_id", "tenant_id") WHERE (("conversation_id" IS NOT NULL) AND ("status" = ANY (ARRAY['confirmed'::"text", 'processing'::"text", 'shipped'::"text", 'delivered'::"text"])));
+
+
+
 CREATE INDEX "idx_orders_paid_created" ON "public"."orders" USING "btree" ("tenant_id", "created_at") WHERE ("status" = ANY (ARRAY['confirmed'::"text", 'processing'::"text", 'shipped'::"text", 'delivered'::"text"]));
 
 
@@ -8404,6 +8483,10 @@ CREATE UNIQUE INDEX "uniq_coupons_tenant_code" ON "public"."coupons" USING "btre
 
 
 CREATE UNIQUE INDEX "uniq_tenants_meta_waba_id" ON "public"."tenants" USING "btree" ("meta_waba_id") WHERE (("meta_waba_id" IS NOT NULL) AND ("meta_waba_id" <> ''::"text"));
+
+
+
+CREATE UNIQUE INDEX "uq_orders_accepted_message" ON "public"."orders" USING "btree" ("tenant_id", "accepted_message_id") WHERE ("accepted_message_id" IS NOT NULL);
 
 
 
@@ -11048,8 +11131,8 @@ GRANT ALL ON FUNCTION "public"."rpc_dashboard_revenue"() TO "service_role";
 
 
 
-REVOKE ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_limit" integer) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_csw_hours" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_constancias_por_entregar"("p_csw_hours" integer, "p_limit" integer) TO "service_role";
 
 
 
