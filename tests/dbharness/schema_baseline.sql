@@ -864,6 +864,25 @@ $$;
 ALTER FUNCTION "public"."enqueue_whatsapp_outbound_message"("p_message" "jsonb", "p_delay" integer) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.orders o
+         WHERE o.conversation_id = p_conversation_id
+           AND o.tenant_id = p_tenant_id
+    );
+$$;
+
+
+ALTER FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") IS 'True si la conversación tiene al menos un pedido: entonces sus mensajes son prueba de la relación comercial (Ley 1480 art. 50 lit. e) y se conservan 10 años.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean DEFAULT true) RETURNS integer
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -875,9 +894,9 @@ DECLARE
     v_default_act   TEXT;
     v_eff_ttl       INTEGER;
     v_eff_act       TEXT;
+    v_ttl_evidencia INTEGER;
     r_tenant        RECORD;
 BEGIN
-    -- Default global (tenant_id IS NULL).
     SELECT ttl_days, action
       INTO v_default_ttl, v_default_act
       FROM public.retention_policies
@@ -889,8 +908,14 @@ BEGIN
         RETURN 0;
     END IF;
 
-    -- Iterar tenants. Para cada uno, resolver política efectiva:
-    --   override per-tenant (si existe + enabled) > default global.
+    -- Plazo de conservación de la PRUEBA de la relación comercial. Si la política no
+    -- está, se usa el legal: nunca se borra evidencia por falta de configuración.
+    SELECT COALESCE((
+        SELECT ttl_days FROM public.retention_policies
+         WHERE tenant_id IS NULL AND entity = 'messages_evidencia' AND enabled = TRUE
+         LIMIT 1
+    ), 3650) INTO v_ttl_evidencia;
+
     FOR r_tenant IN
         SELECT id AS tenant_id FROM public.tenants
     LOOP
@@ -909,18 +934,24 @@ BEGIN
 
         v_count := 0;
 
-        -- ── messages: hard_delete por created_at ────────────────────────────
+        -- ── messages: DOS plazos ────────────────────────────────────────────
+        -- Sin pedido → el TTL corto (minimización, Ley 1581).
+        -- Con pedido → 10 años (prueba, Ley 1480 art. 50 lit. e + Cód. Comercio art. 60).
         IF p_entity = 'messages' AND v_eff_act = 'hard_delete' THEN
             IF p_dry_run THEN
                 SELECT COUNT(*) INTO v_count
-                  FROM public.messages
-                 WHERE tenant_id = r_tenant.tenant_id
-                   AND created_at < NOW() - (v_eff_ttl || ' days')::INTERVAL;
+                  FROM public.messages m
+                 WHERE m.tenant_id = r_tenant.tenant_id
+                   AND m.created_at < NOW() - (
+                        CASE WHEN public.es_mensaje_de_evidencia(m.conversation_id, m.tenant_id)
+                             THEN v_ttl_evidencia ELSE v_eff_ttl END || ' days')::INTERVAL;
             ELSE
                 WITH del AS (
-                    DELETE FROM public.messages
-                     WHERE tenant_id = r_tenant.tenant_id
-                       AND created_at < NOW() - (v_eff_ttl || ' days')::INTERVAL
+                    DELETE FROM public.messages m
+                     WHERE m.tenant_id = r_tenant.tenant_id
+                       AND m.created_at < NOW() - (
+                            CASE WHEN public.es_mensaje_de_evidencia(m.conversation_id, m.tenant_id)
+                                 THEN v_ttl_evidencia ELSE v_eff_ttl END || ' days')::INTERVAL
                      RETURNING 1
                 )
                 SELECT COUNT(*) INTO v_count FROM del;
@@ -2595,6 +2626,30 @@ COMMENT ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" integ
 
 
 
+CREATE OR REPLACE FUNCTION "public"."rpc_find_orders_pending_acceptance"("p_min_age_minutes" integer DEFAULT 5, "p_window_days" integer DEFAULT 30, "p_limit" integer DEFAULT 100) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+    SELECT o.id, o.tenant_id
+      FROM public.orders o
+     WHERE o.accepted_at IS NULL
+       AND o.conversation_id IS NOT NULL
+       AND o.created_at <= NOW() - make_interval(mins => GREATEST(p_min_age_minutes, 0))
+       -- La ventana evita reintentar por siempre los que nunca se van a poder estampar
+       -- (un pedido viejo cuya conversación ya se borró bajo el régimen anterior).
+       AND o.created_at >= NOW() - make_interval(days => GREATEST(p_window_days, 1))
+     ORDER BY o.created_at
+     LIMIT GREATEST(p_limit, 1);
+$$;
+
+
+ALTER FUNCTION "public"."rpc_find_orders_pending_acceptance"("p_min_age_minutes" integer, "p_window_days" integer, "p_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_find_orders_pending_acceptance"("p_min_age_minutes" integer, "p_window_days" integer, "p_limit" integer) IS 'Pedidos cuya aceptación aún no quedó registrada. Lo consume el worker.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer DEFAULT 10, "p_window_hours" integer DEFAULT 72, "p_limit" integer DEFAULT 50) RETURNS TABLE("order_id" "uuid", "tenant_id" "uuid", "confirmado_hace_min" integer)
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public', 'pg_temp'
@@ -2795,7 +2850,8 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT o.id, o.status, o.created_at, o.payment_method, o.contact_id, o.conversation_id
+    SELECT o.id, o.status, o.created_at, o.payment_method, o.contact_id, o.conversation_id,
+           o.accepted_at, o.accepted_message_id, o.accepted_meta_message_id
       INTO v_orden
       FROM public.orders o
      WHERE o.id = p_order_id AND o.tenant_id = p_tenant_id;
@@ -2821,7 +2877,8 @@ BEGIN
     v_numero := 'CP-' || LPAD(v_seq::text, 6, '0');
 
     v_snapshot := jsonb_build_object(
-        'version', 1,
+        -- v2: el documento ahora dice CUÁL manifestación del comprador lo originó.
+        'version', 2,
         'emitido_at', NOW(),
         'pedido', jsonb_build_object(
             'id', v_orden.id,
@@ -2857,6 +2914,25 @@ BEGIN
             'moneda', 'COP'
         )
     );
+
+    -- La aceptación, dentro del propio documento. Ley 1480 art. 50 lit. d) exige que sea
+    -- "verificable por la autoridad competente", y un comprobante que no dice a qué
+    -- manifestación del comprador corresponde obliga a ir a buscarla aparte — al historial
+    -- de WhatsApp, que es justo lo que se estaba borrando. El id de Meta se incluye porque
+    -- es atestación de un TERCERO: no depende de esta base.
+    --
+    -- Se CONCATENA en vez de armarse dentro del objeto: una clave presente con valor null
+    -- insinúa que falta algo. Si el pedido no tiene aceptación registrada —creado por un
+    -- operador, o anterior a este registro— la clave simplemente no existe.
+    IF v_orden.accepted_at IS NOT NULL THEN
+        v_snapshot := v_snapshot || jsonb_build_object(
+            'aceptacion', jsonb_strip_nulls(jsonb_build_object(
+                'fecha', v_orden.accepted_at,
+                'mensaje_id', v_orden.accepted_message_id,
+                'meta_message_id', v_orden.accepted_meta_message_id
+            ))
+        );
+    END IF;
 
     INSERT INTO public.order_receipts
         (tenant_id, order_id, numero_seq, numero, snapshot, content_hash)
@@ -3055,6 +3131,74 @@ ALTER FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uu
 
 
 COMMENT ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Cifras de un pedido calculadas desde la fuente de verdad (order_items) y si cuadran con orders.total_amount. `descuento_aplicado` es el efectivo (tope subtotal+envío); imprimir ése y no el nominal es lo que evita un documento que se contradice. Guarda previa a emitir cualquier comprobante (Ley 1480 art. 26).';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") RETURNS TABLE("estampado" boolean, "motivo" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_orden RECORD;
+    v_msg   RECORD;
+BEGIN
+    SELECT o.id, o.conversation_id, o.created_at, o.accepted_at
+      INTO v_orden
+      FROM public.orders o
+     WHERE o.id = p_order_id AND o.tenant_id = p_tenant_id;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, 'pedido_inexistente'::TEXT;
+        RETURN;
+    END IF;
+    IF v_orden.accepted_at IS NOT NULL THEN
+        -- Idempotente: la aceptación es un hecho histórico y no se re-escribe.
+        RETURN QUERY SELECT false, 'ya_estampada'::TEXT;
+        RETURN;
+    END IF;
+    IF v_orden.conversation_id IS NULL THEN
+        -- Pedido creado por un operador para alguien que nunca escribió: no hay
+        -- manifestación del consumidor que señalar. Se dice, no se inventa una.
+        RETURN QUERY SELECT false, 'sin_conversacion'::TEXT;
+        RETURN;
+    END IF;
+
+    -- El último mensaje del CLIENTE en o antes de crearse el pedido. Es lo más cercano
+    -- a "su voluntad expresa de contratar" que existe de forma determinística: el turno
+    -- con el que cerró. No se interpreta el contenido — interpretar lenguaje natural
+    -- para decidir si alguien aceptó sería justo lo que la norma no admite como
+    -- verificable, y además pondría a un LLM a decidir verdad transaccional.
+    SELECT m.id, m.created_at, m.meta_message_id
+      INTO v_msg
+      FROM public.messages m
+     WHERE m.conversation_id = v_orden.conversation_id
+       AND m.tenant_id = p_tenant_id
+       AND m.direction = 'inbound'
+       AND m.created_at <= v_orden.created_at
+     ORDER BY m.created_at DESC
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, 'sin_mensaje_del_cliente'::TEXT;
+        RETURN;
+    END IF;
+
+    UPDATE public.orders
+       SET accepted_at = v_msg.created_at,
+           accepted_message_id = v_msg.id,
+           accepted_meta_message_id = v_msg.meta_message_id
+     WHERE id = p_order_id AND tenant_id = p_tenant_id
+       AND accepted_at IS NULL;
+
+    RETURN QUERY SELECT true, NULL::TEXT;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") IS 'Deja registrado cuál mensaje del cliente constituye su aceptación (Ley 1480 art. 50 lit. d). Idempotente: un hecho histórico no se re-escribe.';
 
 
 
@@ -5170,6 +5314,9 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "discount_amount" numeric(10,2) DEFAULT 0 NOT NULL,
     "source" "text",
     "external_order_id" "text",
+    "accepted_at" timestamp with time zone,
+    "accepted_message_id" "uuid",
+    "accepted_meta_message_id" "text",
     CONSTRAINT "orders_payment_method_check" CHECK (("payment_method" = ANY (ARRAY['credit'::"text", 'cod'::"text"])))
 );
 
@@ -5202,6 +5349,14 @@ COMMENT ON COLUMN "public"."orders"."source" IS 'Canal de origen del pedido: NUL
 
 
 COMMENT ON COLUMN "public"."orders"."external_order_id" IS 'ID del pedido en el sistema externo (ej. order_id de Mercado Libre). Identidad estable del canal.';
+
+
+
+COMMENT ON COLUMN "public"."orders"."accepted_at" IS 'Cuándo el consumidor manifestó su voluntad de contratar (Ley 1480 art. 50 lit. d). Antes solo existía como texto libre dentro de la conversación — y la conversación se borraba a los 180 días.';
+
+
+
+COMMENT ON COLUMN "public"."orders"."accepted_meta_message_id" IS 'El id que le asignó META a ese mensaje. Es atestación de un TERCERO: la fecha y el contenido no dependen solo de nuestra base, que es lo que la norma pide al exigir que la aceptación sea "verificable por la autoridad competente".';
 
 
 
@@ -5510,7 +5665,7 @@ CREATE TABLE IF NOT EXISTS "public"."retention_policies" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     CONSTRAINT "retention_policies_action_check" CHECK (("action" = ANY (ARRAY['archive'::"text", 'soft_delete'::"text", 'hard_delete'::"text", 'anonymize'::"text"]))),
-    CONSTRAINT "retention_policies_entity_check" CHECK (("entity" = ANY (ARRAY['conversations'::"text", 'messages'::"text", 'contacts_inactive'::"text", 'pii_access_log'::"text", 'audit_log'::"text"]))),
+    CONSTRAINT "retention_policies_entity_check" CHECK (("entity" = ANY (ARRAY['conversations'::"text", 'messages'::"text", 'contacts_inactive'::"text", 'pii_access_log'::"text", 'audit_log'::"text", 'messages_evidencia'::"text"]))),
     CONSTRAINT "retention_policies_ttl_days_check" CHECK ((("ttl_days" >= 1) AND ("ttl_days" <= 3650)))
 );
 
@@ -5519,10 +5674,6 @@ ALTER TABLE "public"."retention_policies" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."retention_policies" IS 'Rev. 95 — Políticas de retención por entidad (Habeas Data Art. 4d/Art. 16). tenant_id NULL = default global; tenant_id no nulo = override per-tenant.';
-
-
-
-COMMENT ON CONSTRAINT "retention_policies_entity_check" ON "public"."retention_policies" IS 'F4 — incluye audit_log (retención 24m, pendiente worker de archivado a Storage).';
 
 
 
@@ -7528,11 +7679,19 @@ CREATE INDEX "idx_orders_contact" ON "public"."orders" USING "btree" ("contact_i
 
 
 
+CREATE INDEX "idx_orders_conversation_tenant" ON "public"."orders" USING "btree" ("conversation_id", "tenant_id") WHERE ("conversation_id" IS NOT NULL);
+
+
+
 CREATE INDEX "idx_orders_paid_created" ON "public"."orders" USING "btree" ("tenant_id", "created_at") WHERE ("status" = ANY (ARRAY['confirmed'::"text", 'processing'::"text", 'shipped'::"text", 'delivered'::"text"]));
 
 
 
 CREATE INDEX "idx_orders_pending_payment_created" ON "public"."orders" USING "btree" ("created_at") WHERE ("status" = 'pending_payment'::"text");
+
+
+
+CREATE INDEX "idx_orders_sin_aceptacion" ON "public"."orders" USING "btree" ("tenant_id", "created_at") WHERE ("accepted_at" IS NULL);
 
 
 
@@ -10228,6 +10387,11 @@ GRANT ALL ON FUNCTION "public"."enqueue_whatsapp_outbound_message"("p_message" "
 
 
 
+GRANT ALL ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."es_mensaje_de_evidencia"("p_conversation_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_apply_retention"("p_entity" "text", "p_dry_run" boolean) TO "service_role";
@@ -10477,6 +10641,11 @@ GRANT ALL ON FUNCTION "public"."rpc_find_incoherent_orders"("p_window_hours" int
 
 
 
+REVOKE ALL ON FUNCTION "public"."rpc_find_orders_pending_acceptance"("p_min_age_minutes" integer, "p_window_days" integer, "p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_find_orders_pending_acceptance"("p_min_age_minutes" integer, "p_window_days" integer, "p_limit" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_find_orders_pending_receipt"("p_min_age_minutes" integer, "p_window_hours" integer, "p_limit" integer) TO "service_role";
 
@@ -10538,6 +10707,11 @@ GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid"
 REVOKE ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_order_money"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rpc_stamp_order_acceptance"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 

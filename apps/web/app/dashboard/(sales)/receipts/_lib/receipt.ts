@@ -31,6 +31,7 @@ export type ReceiptSnapshot = {
     usa_nombre_comercial?: boolean
   }
   comprador?: { nombre?: string; telefono?: string; email?: string }
+  aceptacion?: { fecha?: string; mensaje_id?: string; meta_message_id?: string }
   items?: ReceiptItem[]
   totales?: {
     subtotal?: number
@@ -102,6 +103,30 @@ export function lineasComprador(s: ReceiptSnapshot): Array<[string, string]> {
     ['Correo', c.email],
   ]
   return pares.filter((p): p is [string, string] => Boolean(p[1]))
+}
+
+/**
+ * Cómo se dice, en el documento, cuál manifestación del comprador lo originó.
+ *
+ * Ley 1480 art. 50 lit. d): la aceptación debe ser "expresa, inequívoca y verificable por
+ * la autoridad competente". Un comprobante que no dice a qué aceptación corresponde obliga
+ * a ir a buscarla al historial de WhatsApp — que hasta ahora se borraba a los 180 días.
+ *
+ * Devuelve `null` cuando el pedido no tiene aceptación registrada (lo creó un operador, o
+ * es anterior a este registro). En ese caso NO se muestra nada: un comprobante que dijera
+ * "aceptación: —" afirmaría algo sobre la prueba que no le consta.
+ */
+export function lineaAceptacion(
+  s: ReceiptSnapshot,
+): { fecha: string; referencia: string | null } | null {
+  const a = s?.aceptacion
+  if (!a?.fecha) return null
+  return {
+    fecha: fechaCO(a.fecha),
+    // El id de Meta es atestación de un TERCERO: la fecha y el contenido de ese mensaje no
+    // dependen solo de nuestra base. Por eso se prefiere al id interno cuando existe.
+    referencia: a.meta_message_id ?? a.mensaje_id ?? null,
+  }
 }
 
 export function formaPago(s: ReceiptSnapshot): string {
