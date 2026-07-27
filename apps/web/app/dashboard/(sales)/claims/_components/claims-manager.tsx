@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, Search, HelpCircle, FileText, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import ReversionPanel from './reversion-panel'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -15,7 +16,7 @@ import { createClaim, updateClaimStatus, correctRefundAmount } from '../actions'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ClaimOrder    = { id: string; total_amount: number | null } | null
+type ClaimOrder    = { id: string; total_amount: number | null; payment_method: string | null } | null
 type ClaimCustomer = { id: string; name: string | null; phone: string | null } | null
 
 type Claim = {
@@ -397,6 +398,16 @@ export default function ClaimsManager({
               </p>
             </div>
           </div>
+
+          {selectedClaim.order?.id && (
+            <ReversionPanel
+              key={selectedClaim.id}
+              claimId={selectedClaim.id}
+              formaPago={selectedClaim.order.payment_method}
+              totalPedido={selectedClaim.order.total_amount}
+              canWrite={canWrite}
+            />
+          )}
 
           {/* BLOQUE G-2: monto REAL reembolsado (lo que resta el KPI net-revenue). */}
           {selectedClaim.status === 'refunded' && (

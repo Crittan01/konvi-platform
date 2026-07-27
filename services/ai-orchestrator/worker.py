@@ -257,6 +257,19 @@ ACCEPTANCE_STAMP_INTERVAL_SECONDS = int(os.getenv("ACCEPTANCE_STAMP_INTERVAL_SEC
 ACCEPTANCE_MIN_AGE_MINUTES = int(os.getenv("ACCEPTANCE_MIN_AGE_MINUTES", "5"))
 ACCEPTANCE_WINDOW_DAYS = int(os.getenv("ACCEPTANCE_WINDOW_DAYS", "30"))
 ACCEPTANCE_BATCH = int(os.getenv("ACCEPTANCE_BATCH", "100"))
+
+# Constancia de la queja de reversión del pago. Decreto 1074 art. 2.2.2.51.4: "cualquiera
+# fuere el medio utilizado para interponer la queja, el proveedor deberá emitir constancia
+# de la presentación de la misma, con indicación de la fecha y causal que la sustentan".
+#
+# No es un trámite interno: el art. 2.2.2.51.7 num. 6 se la exige al consumidor como
+# contenido de la notificación a su banco. Sin nuestra constancia NO PUEDE ejercer el
+# derecho — por eso se entrega, no se deja disponible.
+REVERSAL_CONSTANCIA_ENABLED = os.getenv(
+    "REVERSAL_CONSTANCIA_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+REVERSAL_SWEEP_INTERVAL_SECONDS = int(os.getenv("REVERSAL_SWEEP_INTERVAL_SECONDS", "300"))
+REVERSAL_BATCH = int(os.getenv("REVERSAL_BATCH", "50"))
 RECEIPT_ACK_ENABLED = os.getenv(
     "RECEIPT_ACK_ENABLED", "true"
 ).lower() in {"1", "true", "yes", "on"}
@@ -389,6 +402,8 @@ class OrchestratorWorker:
         self._last_receipt_at = 0.0
         self._acceptance_enabled = ACCEPTANCE_STAMP_ENABLED
         self._last_acceptance_at = 0.0
+        self._reversal_enabled = REVERSAL_CONSTANCIA_ENABLED
+        self._last_reversal_at = 0.0
         self._last_order_coherence_at = 0.0
         self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
@@ -436,6 +451,9 @@ class OrchestratorWorker:
             "receipts_voided": 0,
             "acceptances_stamped": 0,
             "acceptances_unstampable": 0,
+            "reversal_constancias_sent": 0,
+            "reversal_constancias_failed": 0,
+            "reversal_double_payments": 0,
             "receipt_acks_sent": 0,
             "receipt_acks_out_of_window": 0,
             "receipt_emails_sent": 0,
@@ -519,6 +537,7 @@ class OrchestratorWorker:
         await self._run_job("order_coherence", self._check_order_coherence_if_due())
         await self._run_job("acceptance_stamp", self._stamp_acceptances_if_due())
         await self._run_job("receipts", self._issue_receipts_if_due())
+        await self._run_job("reversal_constancias", self._sweep_reversals_if_due())
         await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
         await self._run_job("health_metrics", self._collect_health_metrics_if_due())
 
@@ -1562,6 +1581,156 @@ class OrchestratorWorker:
                     "no hay aceptación que registrar (Ley 1480 art. 50 lit. d)",
                     str(order_id)[:8], str(tenant_id)[:8],
                 )
+
+    async def _sweep_reversals_if_due(self) -> None:
+        """Entrega las constancias de reversión y avisa cuando el dinero salió dos veces.
+
+        LA CONSTANCIA. Decreto 1074 art. 2.2.2.51.4: el proveedor "deberá emitir
+        constancia" de la queja, con fecha y causal. Emitirla y dejarla en una tabla no
+        cumple nada: el art. 2.2.2.51.7 num. 6 se la exige al consumidor como contenido de
+        la notificación a SU banco, así que si no la tiene en la mano no puede ejercer el
+        derecho. Por eso se remite, igual que el acuse del comprobante.
+
+        EL DOBLE PAGO. Art. 2.2.2.51.10 contempla expresamente que el dinero salga por los
+        dos caminos —el operador reembolsa mientras el emisor reversa en paralelo— y que el
+        consumidor deba devolverlo. Sin esta alerta sería invisible: nadie está mirando las
+        dos cosas al tiempo, y no se puede reclamar lo que no se sabe que se pagó.
+        """
+        if not self._reversal_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if now - self._last_reversal_at < max(60, REVERSAL_SWEEP_INTERVAL_SECONDS):
+            return
+        self._last_reversal_at = now
+
+        await self._deliver_reversal_constancias()
+        await self._alert_reversal_double_payments()
+
+    async def _deliver_reversal_constancias(self) -> None:
+        try:
+            pendientes = self.supabase.rpc(
+                "rpc_find_constancias_por_entregar", {"p_limit": REVERSAL_BATCH},
+            ).execute().data or []
+        except Exception as exc:
+            logger.warning("[REVERSION] no pude buscar constancias por entregar: %s", exc)
+            return
+
+        from lib.reversion_pago import texto_constancia
+
+        for r in pendientes:
+            rid, tenant_id = r.get("reversal_id"), r.get("tenant_id")
+            conv_id, radicado = r.get("conversation_id"), r.get("radicado")
+            if not (rid and tenant_id and conv_id):
+                continue
+
+            texto = texto_constancia(r.get("constancia") or {})
+            try:
+                conv = (
+                    self.supabase.table("conversations")
+                    .select("customer_phone")
+                    .eq("id", conv_id).eq("tenant_id", tenant_id)
+                    .limit(1).execute()
+                )
+                telefono = (conv.data or [{}])[0].get("customer_phone")
+                if not telefono:
+                    # Se marca como fallida y NO se reintenta: sin teléfono el barrido
+                    # giraría para siempre. La constancia sigue existiendo y el operador la
+                    # ve en el reclamo, que es donde puede hacer algo al respecto.
+                    self._marcar_constancia(rid, tenant_id, "sin_telefono")
+                    continue
+                meta_id = await send_whatsapp_message(
+                    tenant_id=tenant_id, supabase=self.supabase,
+                    to_phone=telefono, text=texto,
+                )
+            except Exception as exc:
+                logger.error("[REVERSION] fallo entregando %s: %s", radicado, exc)
+                continue
+
+            if not meta_id:
+                # No se marca: el próximo barrido reintenta. Sin esta constancia el
+                # consumidor no puede notificar a su banco — darla por perdida al primer
+                # fallo le cerraría el trámite.
+                logger.error("[REVERSION] %s no salió — se reintenta", radicado)
+                continue
+
+            if not self._marcar_constancia(rid, tenant_id, None):
+                continue  # otro tick ganó la carrera
+
+            self._metrics["reversal_constancias_sent"] += 1
+            logger.info("[REVERSION] constancia %s entregada", radicado)
+            try:
+                self.supabase.table("messages").insert({
+                    "conversation_id": conv_id,
+                    "tenant_id": tenant_id,
+                    "direction": "outbound",
+                    "content_type": "text",
+                    "content": texto,
+                    "meta_message_id": meta_id,
+                    "processed": True,
+                    "processing_status": "processed",
+                }).execute()
+            except Exception as exc:
+                logger.warning("[REVERSION] constancia entregada pero no persistida: %s", exc)
+
+    async def _alert_reversal_double_payments(self) -> None:
+        try:
+            dobles = self.supabase.rpc(
+                "rpc_find_dobles_pagos_sin_avisar", {"p_limit": REVERSAL_BATCH},
+            ).execute().data or []
+        except Exception as exc:
+            logger.warning("[REVERSION] no pude buscar dobles pagos: %s", exc)
+            return
+
+        for d in dobles:
+            rid, tenant_id, radicado = d.get("reversal_id"), d.get("tenant_id"), d.get("radicado")
+            if not (rid and tenant_id):
+                continue
+            detalle = (
+                f"Reversión {radicado}: el dinero salió por los DOS caminos "
+                f"(reembolso directo ${d.get('reembolso') or 0} y reversión del emisor "
+                f"${d.get('reversion') or 0}). Decreto 1074 art. 2.2.2.51.10: el consumidor "
+                f"debe devolver esos recursos. Hay que contactarlo."
+            )
+            try:
+                from telegram_notifications import notify_escalation_async
+                await notify_escalation_async(
+                    self.supabase, tenant_id=tenant_id,
+                    conversation_id=None, reason=detalle,
+                )
+            except Exception as exc:
+                logger.warning("[REVERSION] no pude avisar el doble pago de %s: %s",
+                               radicado, exc)
+                # Sin marcar: se reintenta. Un doble pago que nadie ve es plata perdida.
+                continue
+
+            if self._marcar_doble_pago_avisado(rid, tenant_id):
+                self._metrics["reversal_double_payments"] += 1
+                logger.error("[REVERSION] DOBLE PAGO en %s — %s", radicado, detalle)
+
+    def _marcar_constancia(self, reversal_id, tenant_id, fallida) -> bool:
+        """True si esta corrida fue la que marcó. False si otra ya lo había hecho."""
+        try:
+            res = self.supabase.rpc("rpc_mark_constancia_entregada", {
+                "p_reversal_id": reversal_id, "p_tenant_id": tenant_id,
+                "p_fallida": fallida,
+            }).execute()
+            return bool(res.data)
+        except Exception as exc:
+            logger.error("[REVERSION] no pude marcar la constancia %s: %s", reversal_id, exc)
+            return False
+
+    def _marcar_doble_pago_avisado(self, reversal_id, tenant_id) -> bool:
+        try:
+            res = self.supabase.rpc("rpc_mark_doble_pago_avisado", {
+                "p_reversal_id": reversal_id, "p_tenant_id": tenant_id,
+            }).execute()
+            return bool(res.data)
+        except Exception as exc:
+            logger.error("[REVERSION] no pude marcar el aviso de %s: %s", reversal_id, exc)
+            return False
 
     async def _issue_receipts_if_due(self) -> None:
         """Emite el comprobante de los pedidos confirmados que aún no lo tienen.
