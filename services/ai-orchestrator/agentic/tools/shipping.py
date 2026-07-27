@@ -19,6 +19,19 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
+
+#: Qué decirle al cliente cuando algo externo falla y no hay quién reintente por su cuenta.
+#:
+#: El bot no tiene forma de "volver" solo: cada respuesta suya nace de un mensaje del
+#: cliente. Prometer un seguimiento que ningún componente ejecuta deja a la persona
+#: esperando algo que no va a llegar — y en mitad de una compra.
+NO_PROMETAS_VOLVER = (
+    "NO le prometas al cliente que vas a volver, ni le digas que espere, ni uses frases "
+    "como 'dame un segundo', 'ya te aviso' o 'en cuanto conecte': no hay ningún proceso "
+    "que retome esta conversación por su cuenta. Dile que en este momento no se pudo "
+    "cotizar y pídele que te escriba de nuevo para reintentarlo, o que te diga si prefiere "
+    "que un asesor lo contacte."
+)
 from agentic.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)
@@ -259,9 +272,19 @@ class QuoteShippingTool:
             city_query=args.city,
         )
         if not result.get("ok"):
+            # El texto del error lo lee el LLM para componer la respuesta al cliente, así
+            # que acá se le dice explícitamente qué NO puede prometer.
+            #
+            # En el recorrido E2E del 2026-07-27 la cotización falló y el bot escribió
+            # "estoy intentando cotizar... dame un segundo y te presento las opciones en
+            # cuanto conecte". Nadie cumple esa promesa: no hay reintento en segundo plano
+            # ni detector que la vigile —el de cliente mudo mira el silencio del CLIENTE,
+            # no las promesas del bot—. La clienta esperó 90 segundos y tuvo que escribir
+            # "¿hola? ¿sigues ahí?".
             return tool_failure(
                 result.get("error", "Error cotizando envío."),
                 code=result.get("code", "QUOTE_ERROR"),
+                extra={"instruccion_al_componer": NO_PROMETAS_VOLVER},
             )
 
         options_out = []

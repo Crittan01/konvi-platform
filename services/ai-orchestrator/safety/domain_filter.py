@@ -104,6 +104,34 @@ def detect_medical_query(text: str) -> bool:
     return any(phrase in normalized for phrase in MEDICAL_QUERY_PHRASES)
 
 
+def hay_algo_mas_en_el_turno(text: str) -> bool:
+    """True si, además de lo que disparó la guarda, el cliente preguntó otra cosa.
+
+    POR QUÉ EXISTE
+    La guarda de consultas médicas corta ANTES del LLM y marca el mensaje como procesado.
+    Eso es correcto —el bot no puede opinar de salud— pero se lleva por delante el resto
+    del turno. En el recorrido E2E del 2026-07-27 la clienta escribió:
+
+        "y sirve para el melasma? mi dermatologa me dijo que tengo eso.
+         tambien buscaba shampoo solido, manejan?"
+
+    Recibió el redirect médico y **nadie le respondió lo del shampoo**. Preguntado aparte,
+    el bot lo contesta perfecto: no es que no sepa, es que no lo vio.
+
+    La señal es deliberadamente tonta y determinística —dos preguntas, o una frase nueva
+    después de un punto— porque la alternativa sería un clasificador, y meter interpretación
+    en una guarda de seguridad es cómo se debilita la guarda. Un falso positivo solo agrega
+    una línea invitando a repetir la pregunta; no baja el filtro ni deja pasar nada al LLM.
+    """
+    if not text:
+        return False
+    if text.count("?") >= 2:
+        return True
+    # Una oración más, con contenido real, después de un cierre de frase.
+    cola = text.split(".")[-1].strip() if "." in text else ""
+    return len(cola) >= 20
+
+
 def detect_drug_purchase_request(text: str) -> bool:
     """True si el cliente intenta comprar/conseguir un medicamento.
 
