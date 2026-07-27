@@ -471,6 +471,16 @@ services:
         value: "true"                            # acuse corto por WhatsApp
       - key: RECEIPT_EMAIL_ENABLED
         value: "true"                            # detalle completo por correo
+      # Constancia de la queja de reversión del pago. Decreto 1074 art. 2.2.2.51.4: el
+      # proveedor DEBE emitir constancia con fecha y causal, y el consumidor la necesita
+      # para notificar a su banco (art. 2.2.2.51.7 num. 6). Sin ella no puede ejercer el
+      # derecho, así que se ENTREGA, no se deja disponible.
+      - key: REVERSAL_CONSTANCIA_ENABLED
+        value: "true"
+      - key: REVERSAL_SWEEP_INTERVAL_SECONDS
+        value: "300"                             # 5 min
+      - key: REVERSAL_BATCH
+        value: "50"
       # Poll de anulaciones Wompi (voids) tras cancelación/expiry (R-01 sibling).
       - key: WOMPI_VOID_POLL_ENABLED
         value: "true"
