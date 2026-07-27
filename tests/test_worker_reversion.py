@@ -42,10 +42,13 @@ CONSTANCIA = {
 
 class _FakeSB:
     def __init__(self, *, pendientes=None, dobles=None, telefono="+573001112233",
-                 marca=True, revienta=None):
+                 marca=True, revienta=None, dentro_de_csw=True):
         self.pendientes = pendientes if pendientes is not None else [{
             "reversal_id": REV, "tenant_id": TENANT, "conversation_id": CONV,
             "radicado": "RV-000042", "constancia": CONSTANCIA,
+            # La ventana de servicio de 24h de Meta. La calcula el buscador, igual que
+            # para el acuse del comprobante.
+            "dentro_de_csw": dentro_de_csw,
         }]
         self.dobles = dobles if dobles is not None else []
         self.telefono = telefono
@@ -107,7 +110,7 @@ def _worker(sb):
             sys.modules["worker"] = saved
 
 
-def _correr(w, inst, *, meta_id="wamid.OK", telegram=None):
+def _correr(w, inst, *, meta_id="wamid.OK", telegram=None, notify_ok=True):
     async def _send(**kw):
         _send.enviados.append(kw)
         return meta_id
@@ -116,6 +119,7 @@ def _correr(w, inst, *, meta_id="wamid.OK", telegram=None):
 
     async def _notify(sb, **kw):
         telegram.append(kw)
+        return notify_ok
 
     mod = type(sys)("telegram_notifications")
     mod.notify_escalation_async = _notify
@@ -250,3 +254,79 @@ def test_si_falla_el_buscador_de_constancias_igual_revisa_los_dobles_pagos():
 def test_esta_registrado_en_el_ciclo_del_worker():
     fuente = (REPO_ROOT / "services" / "ai-orchestrator" / "worker.py").read_text()
     assert '_run_job("reversal_constancias", self._sweep_reversals_if_due())' in fuente
+
+
+# ─── La ventana de 24h de Meta ──────────────────────────────────────────────
+
+def test_fuera_de_la_ventana_no_se_manda_a_ciegas():
+    """Escenario previsto por la norma: la queja entra por teléfono (art. 2.2.2.51.4 —
+    "cualquiera fuere el medio"), el operador la radica desde la consola, y el último
+    mensaje del comprador fue hace tres días.
+
+    Antes: Meta rechazaba el free-form con 131047, `send_whatsapp_message` devolvía None
+    sin lanzar, el worker no marcaba nada y reintentaba cada 300 s **para siempre** — 288
+    POST fallidos por día, sin métrica ni alerta.
+    """
+    sb = _FakeSB(dentro_de_csw=False)
+    w, inst = _worker(sb)
+    enviados, _ = _correr(w, inst)
+    assert enviados == [], "se intentó mandar free-form fuera de la ventana"
+    marcas = [p for n, p in sb.llamadas if n == "rpc_mark_constancia_entregada"]
+    assert marcas and marcas[0]["p_fallida"] == "fuera_de_ventana_csw"
+    assert inst._metrics["reversal_constancias_failed"] == 1
+
+
+def test_la_cola_no_queda_tapada_por_las_que_no_se_pueden_entregar():
+    """El buscador ordena por fecha de emisión: si las no entregables no salen de la cola,
+    acumuladas 50 tapan a las nuevas que sí eran entregables."""
+    sb = _FakeSB(pendientes=[
+        {"reversal_id": "vieja", "tenant_id": TENANT, "conversation_id": CONV,
+         "radicado": "RV-000001", "constancia": CONSTANCIA, "dentro_de_csw": False},
+        {"reversal_id": REV, "tenant_id": TENANT, "conversation_id": CONV,
+         "radicado": "RV-000042", "constancia": CONSTANCIA, "dentro_de_csw": True},
+    ])
+    w, inst = _worker(sb)
+    enviados, _ = _correr(w, inst)
+    assert len(enviados) == 1                      # la entregable sí salió
+    assert inst._metrics["reversal_constancias_sent"] == 1
+    assert inst._metrics["reversal_constancias_failed"] == 1
+
+
+# ─── El aviso que no se avisó ───────────────────────────────────────────────
+
+def test_si_telegram_no_esta_configurado_NO_se_marca_como_avisado():
+    """`notify_escalation_async` no lanza: devuelve False cuando el tenant no tiene el
+    canal habilitado — el estado por defecto de un tenant nuevo. Marcarlo igual sacaba la
+    fila de la cola PARA SIEMPRE y nadie se enteraba de que se pagó dos veces."""
+    sb = _FakeSB(pendientes=[], dobles=_doble())
+    w, inst = _worker(sb)
+    _, telegram = _correr(w, inst, notify_ok=False)
+    assert len(telegram) == 1                       # se intentó
+    assert "rpc_mark_doble_pago_avisado" not in sb.nombres()
+    assert inst._metrics["reversal_double_payments"] == 0
+
+
+def test_el_latido_va_dentro_de_los_dos_loops_nuevos():
+    """`run()` late una vez por ciclo y /health corta a los 120 s. Un lote de 50 envíos a
+    Meta con timeout de 10 s pasa ese umbral y Render reinicia el worker a mitad del
+    barrido; al reiniciar arranca por las mismas filas. Los demás loops con I/O de red ya
+    laten por ítem."""
+    import ast
+    fuente = (REPO_ROOT / "services" / "ai-orchestrator" / "worker.py").read_text()
+    arbol = ast.parse(fuente)
+
+    def late_dentro_del_for(nombre):
+        for n in ast.walk(arbol):
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == nombre:
+                for f in ast.walk(n):
+                    if not isinstance(f, ast.For):
+                        continue
+                    for st in f.body:
+                        if (isinstance(st, ast.Assign)
+                                and any(isinstance(t, ast.Attribute)
+                                        and t.attr == "last_heartbeat_ts" for t in st.targets)):
+                            return True
+        return False
+
+    for barrido in ("_deliver_reversal_constancias", "_stamp_acceptances_if_due"):
+        assert late_dentro_del_for(barrido), f"{barrido} no late por ítem"

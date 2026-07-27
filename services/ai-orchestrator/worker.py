@@ -1552,6 +1552,9 @@ class OrchestratorWorker:
             return
 
         for p in pendientes:
+            # Latido por ítem: el lote llega a ACCEPTANCE_BATCH=100 RPC encadenadas sin
+            # ningún await intermedio — el más grande del archivo.
+            self.last_heartbeat_ts = time.time()
             order_id, tenant_id = p.get("order_id"), p.get("tenant_id")
             if not (order_id and tenant_id):
                 continue
@@ -1612,7 +1615,8 @@ class OrchestratorWorker:
     async def _deliver_reversal_constancias(self) -> None:
         try:
             pendientes = self.supabase.rpc(
-                "rpc_find_constancias_por_entregar", {"p_limit": REVERSAL_BATCH},
+                "rpc_find_constancias_por_entregar",
+                {"p_csw_hours": META_CSW_HOURS, "p_limit": REVERSAL_BATCH},
             ).execute().data or []
         except Exception as exc:
             logger.warning("[REVERSION] no pude buscar constancias por entregar: %s", exc)
@@ -1621,9 +1625,33 @@ class OrchestratorWorker:
         from lib.reversion_pago import texto_constancia
 
         for r in pendientes:
+            # Latido por ÍTEM, igual que los demás loops con I/O de red (inbound, guías,
+            # voids de Wompi). `run()` late UNA vez por ciclo y `/health` corta a los 120 s:
+            # con Meta degradado, 13 envíos de 10 s de timeout pasan de ese umbral, Render
+            # reinicia el worker a mitad del barrido y —como `_last_reversal_at` vuelve a
+            # 0.0— arranca por las mismas filas. Eso es un crash loop.
+            self.last_heartbeat_ts = time.time()
             rid, tenant_id = r.get("reversal_id"), r.get("tenant_id")
             conv_id, radicado = r.get("conversation_id"), r.get("radicado")
             if not (rid and tenant_id and conv_id):
+                continue
+
+            # La ventana de servicio de 24 h de Meta. El acuse del comprobante ya la
+            # respeta; la constancia —que es la obligación más dura de las dos— no lo hacía
+            # y mandaba free-form a ciegas. Cuando Meta la rechaza (131047),
+            # `send_whatsapp_message` devuelve None sin lanzar, así que el barrido no
+            # marcaba nada y reintentaba cada 300 s para siempre; y como la cola va por
+            # `constancia_emitida_at ASC LIMIT 50`, esas filas envenenadas tapaban a las
+            # constancias nuevas que sí eran entregables.
+            if not r.get("dentro_de_csw"):
+                self._metrics["reversal_constancias_failed"] += 1
+                logger.warning(
+                    "[REVERSION] %s sin entregar: fuera de la ventana de 24h de Meta. "
+                    "Hay que hacérsela llegar por otro medio — sin ella el comprador no "
+                    "puede notificar a su emisor (Decreto 1074 art. 2.2.2.51.7 num. 6).",
+                    radicado,
+                )
+                self._marcar_constancia(rid, tenant_id, "fuera_de_ventana_csw")
                 continue
 
             texto = texto_constancia(r.get("constancia") or {})
@@ -1694,16 +1722,29 @@ class OrchestratorWorker:
                 f"${d.get('reversion') or 0}). Decreto 1074 art. 2.2.2.51.10: el consumidor "
                 f"debe devolver esos recursos. Hay que contactarlo."
             )
+            # `notify_escalation_async` NO lanza: devuelve False cuando el tenant no
+            # tiene Telegram habilitado, cuando falta el chat_id, cuando Vault no resuelve
+            # el token o cuando Telegram responde error. Ignorar el retorno hacía que se
+            # marcara como avisado un aviso que nunca salió — y la fila desaparecía de la
+            # cola PARA SIEMPRE. En un tenant nuevo, que es el estado por defecto, nadie se
+            # enteraba de que había pagado dos veces la misma compra.
+            avisado = False
             try:
                 from telegram_notifications import notify_escalation_async
-                await notify_escalation_async(
+                avisado = bool(await notify_escalation_async(
                     self.supabase, tenant_id=tenant_id,
                     conversation_id=None, reason=detalle,
-                )
+                ))
             except Exception as exc:
                 logger.warning("[REVERSION] no pude avisar el doble pago de %s: %s",
                                radicado, exc)
-                # Sin marcar: se reintenta. Un doble pago que nadie ve es plata perdida.
+
+            if not avisado:
+                # Sin marcar: se reintenta. Un doble pago que nadie ve es plata perdida, y
+                # el art. 2.2.2.51.10 pone en cabeza del vendedor reclamarla.
+                logger.error(
+                    "[REVERSION] DOBLE PAGO en %s y el aviso NO salió — %s", radicado, detalle,
+                )
                 continue
 
             if self._marcar_doble_pago_avisado(rid, tenant_id):

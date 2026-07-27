@@ -26,8 +26,16 @@ def ctx():
             ids["conv"] = cur.fetchone()[0]
         yield ids, conn
         with conn.cursor() as cur:
-            for t in ("payment_reversal_requests", "claims", "orders", "conversations"):
+            for t in ("payment_reversal_requests", "claims", "messages", "orders", "conversations"):
                 cur.execute(f"DELETE FROM public.{t} WHERE tenant_id = %s", (ids["tenant_a"],))
+
+
+def _msg(cur, ids, conv, *, dias_atras=0):
+    cur.execute(
+        "INSERT INTO public.messages (tenant_id, conversation_id, direction, content_type, "
+        "content, created_at) VALUES (%s,%s,'inbound','text','hola', "
+        "NOW() - make_interval(days => %s)) RETURNING id", (ids["tenant_a"], conv, dias_atras))
+    return cur.fetchone()[0]
 
 
 def _pedido(cur, ids, *, metodo="credit", total=68000):
@@ -294,11 +302,11 @@ def test_el_buscador_trae_las_constancias_sin_entregar(ctx):
         o = _pedido(cur, ids)
         claim_id, _ = _reclamo(cur, ids, o)
         rid, *_ = _radicar(cur, ids, claim_id)
-        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(50)")
+        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(24,50)")
         assert rid in {r[0] for r in cur.fetchall()}
         cur.execute("UPDATE public.payment_reversal_requests SET constancia_entregada_at=NOW() "
                     "WHERE id=%s", (rid,))
-        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(50)")
+        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(24,50)")
         assert rid not in {r[0] for r in cur.fetchall()}
 
 
@@ -312,7 +320,7 @@ def test_una_entrega_fallida_no_se_reintenta_para_siempre(ctx):
         rid, *_ = _radicar(cur, ids, claim_id)
         cur.execute("UPDATE public.payment_reversal_requests "
                     "SET constancia_entrega_fallida='numero_invalido' WHERE id=%s", (rid,))
-        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(50)")
+        cur.execute("SELECT reversal_id FROM public.rpc_find_constancias_por_entregar(24,50)")
         assert rid not in {r[0] for r in cur.fetchall()}
 
 
@@ -354,7 +362,7 @@ def test_las_rpc_de_escritura_son_solo_del_backend(ctx):
         "public.rpc_registrar_reversion(uuid,uuid,text,text,numeric,text,boolean,jsonb,"
         "boolean,text,uuid,uuid,text)",
         "public.rpc_registrar_movimiento_reversion(uuid,uuid,text,numeric)",
-        "public.rpc_find_constancias_por_entregar(integer)",
+        "public.rpc_find_constancias_por_entregar(integer,integer)",
         "public.rpc_find_dobles_pagos_sin_avisar(integer)",
     ]
     with conn.cursor() as cur:
@@ -374,3 +382,67 @@ def test_la_rls_no_deja_ver_la_constancia_de_otro_tenant(ctx):
     with as_user("00000000-0000-0000-0000-0000000000b2", ids["tenant_b"], "owner") as cur_b:
         cur_b.execute("SELECT count(*) FROM public.payment_reversal_requests")
         assert cur_b.fetchone()[0] == 0
+
+
+# ─── Dos reclamos sobre el mismo pedido (corrección 2026-07-27) ─────────────
+
+def test_dos_reclamos_no_pueden_reversar_el_doble_del_pedido(ctx):
+    """El UNIQUE era por reclamo, no por pedido, y la guarda de valor comparaba contra el
+    total de forma individual. Un pedido de $68.000 con dos reclamos producía dos
+    constancias válidas por $68.000 cada una — justo el material que el art. 2.2.2.51.8 le
+    da al emisor para oponer "la inexistencia de la operación" y tumbar el trámite."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        o = _pedido(cur, ids, total=68000)
+        c1, _ = _reclamo(cur, ids, o)
+        c2, _ = _reclamo(cur, ids, o)
+        assert _radicar(cur, ids, c1, valor=68000)[3] is None
+        assert _radicar(cur, ids, c2, valor=68000)[3] == "valor_excede_el_pedido"
+
+
+def test_pero_dos_parciales_que_suman_el_total_sí_pasan(ctx):
+    """La reversión parcial existe (art. 2.2.2.51.3). Lo que no puede es exceder."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        o = _pedido(cur, ids, total=68000)
+        c1, _ = _reclamo(cur, ids, o)
+        c2, _ = _reclamo(cur, ids, o)
+        assert _radicar(cur, ids, c1, valor=40000, es_parcial=True)[3] is None
+        assert _radicar(cur, ids, c2, valor=28000, es_parcial=True)[3] is None
+        assert _radicar(cur, ids, _reclamo(cur, ids, o)[0], valor=1)[3] == "valor_excede_el_pedido"
+
+
+def test_la_constancia_identifica_la_operacion(ctx):
+    """Art. 2.2.2.51.7 num. 4: la notificación al emisor debe identificar la transacción
+    con número y fecha. El comprador no puede armarla si no se la damos."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        o = _pedido(cur, ids)
+        claim_id, _ = _reclamo(cur, ids, o)
+        rid, *_ = _radicar(cur, ids, claim_id)
+        cur.execute("SELECT constancia->'operacion' FROM public.payment_reversal_requests "
+                    "WHERE id=%s", (rid,))
+        op = cur.fetchone()[0]
+    assert op and op.get("pedido") == str(o)
+    assert "hora Colombia" in (op.get("fecha_co") or "")
+    assert op.get("total") is not None
+
+
+def test_el_buscador_dice_si_está_dentro_de_la_ventana_de_meta(ctx):
+    """Sin esto el barrido mandaba free-form a ciegas: Meta lo rechazaba con 131047, el
+    worker no marcaba nada y reintentaba cada 300 s para siempre."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        o = _pedido(cur, ids)
+        claim_id, _ = _reclamo(cur, ids, o)
+        rid, *_ = _radicar(cur, ids, claim_id)
+
+        # Sin mensajes entrantes recientes → fuera de la ventana.
+        cur.execute("SELECT dentro_de_csw FROM public.rpc_find_constancias_por_entregar(24,50) "
+                    "WHERE reversal_id=%s", (rid,))
+        assert cur.fetchone()[0] is False
+
+        _msg(cur, ids, ids["conv"], dias_atras=0)
+        cur.execute("SELECT dentro_de_csw FROM public.rpc_find_constancias_por_entregar(24,50) "
+                    "WHERE reversal_id=%s", (rid,))
+        assert cur.fetchone()[0] is True

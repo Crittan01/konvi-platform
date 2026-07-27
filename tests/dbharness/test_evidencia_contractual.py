@@ -394,3 +394,168 @@ def test_sin_aceptacion_el_campo_se_omite_no_se_finge(ctx):
         finally:
             cur.execute("DELETE FROM public.order_receipts WHERE tenant_id=%s", (ids["tenant_a"],))
             cur.execute("DELETE FROM public.order_items WHERE tenant_id=%s", (ids["tenant_a"],))
+
+
+# ─── La regla del turno (corrección 2026-07-27) ─────────────────────────────
+
+def _outbound(cur, ids, conv, *, dias_atras=0, segundos=0):
+    cur.execute(
+        "INSERT INTO public.messages (tenant_id, conversation_id, direction, content_type, "
+        "content, created_at) VALUES (%s,%s,'outbound','text','¿confirmas?', "
+        "NOW() - make_interval(days => %s, secs => %s)) RETURNING id",
+        (ids["tenant_a"], conv, dias_atras, segundos))
+    return cur.fetchone()[0]
+
+
+def _msg_seg(cur, ids, conv, *, segundos, direccion="inbound", meta_id=None, texto="ok"):
+    cur.execute(
+        "INSERT INTO public.messages (tenant_id, conversation_id, direction, content_type, "
+        "content, meta_message_id, created_at) VALUES (%s,%s,%s,'text',%s,%s, "
+        "NOW() - make_interval(secs => %s)) RETURNING id",
+        (ids["tenant_a"], conv, direccion, texto, meta_id, segundos))
+    return cur.fetchone()[0]
+
+
+def _pedido_seg(cur, ids, conv, *, segundos):
+    cur.execute(
+        "INSERT INTO public.orders (tenant_id, conversation_id, status, total_amount, created_at) "
+        "VALUES (%s,%s,'confirmed',50000, NOW() - make_interval(secs => %s)) RETURNING id",
+        (ids["tenant_a"], conv, segundos))
+    return cur.fetchone()[0]
+
+
+def test_lo_que_el_cliente_escribe_MIENTRAS_se_arma_el_pedido_no_es_la_aceptacion(ctx):
+    """EL BUG QUE ESTO CIERRA. Entre el "sí" y el INSERT del pedido pasan segundos reales
+    —coalescencia, poll, turno del LLM, varias llamadas HTTP—. Con la regla vieja (último
+    mensaje antes del pedido), cualquier cosa escrita en ese hueco ganaba y quedaba
+    congelada en el comprobante como manifestación de voluntad."""
+    ids, conn = ctx
+    conv = ids["conv_con_pedido"]
+    with conn.cursor() as cur:
+        _outbound(cur, ids, conv, segundos=50)                       # "¿confirmas?"
+        acepta = _msg_seg(cur, ids, conv, segundos=40, texto="sí confirmo")
+        _msg_seg(cur, ids, conv, segundos=28, texto="¿y llega mañana?")   # ruido
+        o = _pedido_seg(cur, ids, conv, segundos=20)
+        cur.execute("SELECT * FROM public.rpc_stamp_order_acceptance(%s,%s)", (o, ids["tenant_a"]))
+        cur.execute("SELECT accepted_message_id, accepted_source FROM public.orders WHERE id=%s", (o,))
+        msg, fuente = cur.fetchone()
+    assert msg == acepta, "se estampó la pregunta de logística, no la aceptación"
+    assert fuente == "inferida"
+
+
+def test_en_un_turno_coalescido_gana_el_primer_fragmento(ctx):
+    """El worker combina los fragmentos SOLO en memoria y despacha el último, así que con
+    la regla vieja la 'manifestación expresa e inequívoca' registrada era un mensaje cuyo
+    contenido almacenado es 'gracias!!'."""
+    ids, conn = ctx
+    conv = ids["conv_con_pedido"]
+    with conn.cursor() as cur:
+        _outbound(cur, ids, conv, segundos=60)
+        confirma = _msg_seg(cur, ids, conv, segundos=50, texto="Confirmo la compra")
+        _msg_seg(cur, ids, conv, segundos=47, texto="gracias!!")
+        o = _pedido_seg(cur, ids, conv, segundos=25)
+        cur.execute("SELECT * FROM public.rpc_stamp_order_acceptance(%s,%s)", (o, ids["tenant_a"]))
+        cur.execute("SELECT accepted_message_id FROM public.orders WHERE id=%s", (o,))
+        assert cur.fetchone()[0] == confirma
+
+
+def test_no_se_toma_un_mensaje_de_un_turno_anterior(ctx):
+    """Lo que el cliente dijo antes de la última respuesta del bot pertenece a otro turno:
+    el bot ya respondió a eso."""
+    ids, conn = ctx
+    conv = ids["conv_con_pedido"]
+    with conn.cursor() as cur:
+        viejo = _msg_seg(cur, ids, conv, segundos=300, texto="hola")
+        _outbound(cur, ids, conv, segundos=280)
+        nuevo = _msg_seg(cur, ids, conv, segundos=60, texto="sí, lo quiero")
+        o = _pedido_seg(cur, ids, conv, segundos=40)
+        cur.execute("SELECT * FROM public.rpc_stamp_order_acceptance(%s,%s)", (o, ids["tenant_a"]))
+        cur.execute("SELECT accepted_message_id FROM public.orders WHERE id=%s", (o,))
+        estampado = cur.fetchone()[0]
+    assert estampado == nuevo and estampado != viejo
+
+
+def test_un_mensaje_no_puede_probar_DOS_pedidos(ctx):
+    """Dos pedidos en la misma conversación sin mensaje nuevo en medio heredaban el mismo
+    `accepted_message_id`: dos contratos distintos probados con la misma frase."""
+    ids, conn = ctx
+    conv = ids["conv_con_pedido"]
+    with conn.cursor() as cur:
+        _outbound(cur, ids, conv, segundos=120)
+        _msg_seg(cur, ids, conv, segundos=100, texto="sí confirmo")
+        o1 = _pedido_seg(cur, ids, conv, segundos=90)
+        o2 = _pedido_seg(cur, ids, conv, segundos=60)
+        cur.execute("SELECT * FROM public.rpc_stamp_order_acceptance(%s,%s)", (o1, ids["tenant_a"]))
+        cur.execute("SELECT motivo FROM public.rpc_stamp_order_acceptance(%s,%s)", (o2, ids["tenant_a"]))
+        assert cur.fetchone()[0] == "sin_mensaje_del_cliente"
+        cur.execute("SELECT count(*) FROM public.orders WHERE accepted_message_id IS NOT NULL "
+                    "AND conversation_id=%s", (conv,))
+        assert cur.fetchone()[0] == 1
+
+
+def test_un_mensaje_muy_anterior_no_originó_esa_compra(ctx):
+    """Proximidad: una aceptación y su pedido están a segundos. A horas de distancia es
+    otra cosa — típicamente un pedido que creó el operador."""
+    ids, conn = ctx
+    conv = ids["conv_con_pedido"]
+    with conn.cursor() as cur:
+        _outbound(cur, ids, conv, segundos=7200)
+        _msg_seg(cur, ids, conv, segundos=7000, texto="¿ya llegó mi pedido?")
+        o = _pedido_seg(cur, ids, conv, segundos=10)
+        cur.execute("SELECT motivo FROM public.rpc_stamp_order_acceptance(%s,%s)", (o, ids["tenant_a"]))
+        assert cur.fetchone()[0] == "sin_mensaje_del_cliente"
+
+
+# ─── Un carrito abandonado no es una relación comercial ─────────────────────
+
+def test_un_pedido_abandonado_y_cancelado_NO_congela_la_conversacion(ctx):
+    """El flujo normal inserta la orden en `pending_payment` al pedir el link; si no
+    pagan, el worker la cancela a los 35 min y la fila queda para siempre. Con el criterio
+    viejo, TODA la conversación de esa persona pasaba de 180 a 3650 días — sobre-retención
+    20x contra la minimización de Ley 1581 art. 4 lit. d)."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        _msg(cur, ids, ids["conv_con_pedido"], dias_atras=200)
+        cur.execute(
+            "INSERT INTO public.orders (tenant_id, conversation_id, status, total_amount, "
+            "created_at) VALUES (%s,%s,'cancelled',50000, NOW() - INTERVAL '200 days')",
+            (ids["tenant_a"], ids["conv_con_pedido"]))
+        _barrer(cur)
+        cur.execute("SELECT count(*) FROM public.messages WHERE conversation_id=%s",
+                    (ids["conv_con_pedido"],))
+        assert cur.fetchone()[0] == 0, "se retuvo 10 años una compra que nunca ocurrió"
+
+
+def test_pero_un_pedido_CONFIRMADO_y_luego_cancelado_SI_es_evidencia(ctx):
+    """Ahí sí hubo contrato, y es exactamente el caso que termina en disputa."""
+    ids, conn = ctx
+    with conn.cursor() as cur:
+        try:
+            _msg(cur, ids, ids["conv_con_pedido"], dias_atras=200)
+            cur.execute(
+                "INSERT INTO public.orders (tenant_id, conversation_id, status, total_amount, "
+                "created_at) VALUES (%s,%s,'cancelled',50000, NOW() - INTERVAL '200 days') "
+                "RETURNING id", (ids["tenant_a"], ids["conv_con_pedido"]))
+            o = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.payments (tenant_id, order_id, provider, status, "
+                "amount_in_cents, currency) VALUES (%s,%s,'wompi','approved',5000000,'COP')",
+                (ids["tenant_a"], o))
+            _barrer(cur)
+            cur.execute("SELECT count(*) FROM public.messages WHERE conversation_id=%s",
+                        (ids["conv_con_pedido"],))
+            assert cur.fetchone()[0] == 1
+        finally:
+            cur.execute("DELETE FROM public.payments WHERE tenant_id=%s", (ids["tenant_a"],))
+
+
+def test_diez_anios_son_3653_dias(ctx):
+    """3650 son tres días de menos, y el CHECK topaba justo ahí: el valor correcto no se
+    podía ni configurar. La prueba se borraba antes de que venciera el término del art. 60
+    del Código de Comercio."""
+    _, conn = ctx
+    with conn.cursor() as cur:
+        cur.execute("SELECT ttl_days FROM public.retention_policies WHERE entity='messages_evidencia'")
+        assert cur.fetchone()[0] == 3653
+        cur.execute("SELECT (DATE '2036-07-27' - DATE '2026-07-27')")
+        assert cur.fetchone()[0] == 3653
