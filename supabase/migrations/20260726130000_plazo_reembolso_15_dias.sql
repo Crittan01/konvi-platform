@@ -28,15 +28,19 @@
 -- más). Los dos plazos operan en direcciones OPUESTAS, y confundirlo fue el bug.
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Primero los datos: el constraint nuevo rechazaría las filas existentes en 30.
--- Se baja a 15 (el máximo legal) en vez de a un número menor: no le cambiamos al
+-- EL ORDEN IMPORTA, y no es el intuitivo. Primero se QUITA el constraint viejo:
+-- mientras `>= 30` siga puesto, bajar una fila a 15 lo viola y la migración aborta.
+-- Escribir el UPDATE antes parece natural y solo falla cuando ya hay datos — es decir,
+-- únicamente en producción. Lo detectó el isolated-test contra la base real; sobre un
+-- harness vacío pasaba en verde.
+ALTER TABLE public.tenant_cancellation_policy
+  DROP CONSTRAINT IF EXISTS tenant_cancellation_policy_manual_refund_legal_days_check;
+
+-- Ahora sí los datos. Se baja a 15 (el máximo legal) y no a menos: no le cambiamos al
 -- comerciante una promesa más exigente sin que lo decida.
 UPDATE public.tenant_cancellation_policy
    SET manual_refund_legal_days = 15
  WHERE manual_refund_legal_days > 15;
-
-ALTER TABLE public.tenant_cancellation_policy
-  DROP CONSTRAINT IF EXISTS tenant_cancellation_policy_manual_refund_legal_days_check;
 
 ALTER TABLE public.tenant_cancellation_policy
   ADD CONSTRAINT tenant_cancellation_policy_manual_refund_legal_days_check
