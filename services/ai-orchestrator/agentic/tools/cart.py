@@ -307,6 +307,41 @@ class AddToCartTool:
             mentioned_any = mentioned_this or any(
                 lbl and lbl in haystack for lbl in other_labels
             )
+            # "El más grande" NO es una adivinanza: es una referencia DETERMINADA
+            # sobre un conjunto que el propio bot acaba de listar. El guardián la
+            # rechazaba igual y le pedía al cliente repetir TODO —incluido el producto
+            # que sí había nombrado—, que es lo que pasó en el recorrido del 2026-07-27.
+            #
+            # El resolver es determinístico y devuelve None ante la menor ambigüedad
+            # (unidades que no comparan, empate en el extremo, "el mediano" sin tres
+            # opciones). Cuando devuelve None, manda el guardián como siempre.
+            if not mentioned_any:
+                from lib.variante_relativa import resolver_variante_relativa
+                _relativa = resolver_variante_relativa(
+                    " ".join(str(t or "") for t in recent_inbounds), variants,
+                )
+                if _relativa is not None:
+                    if str(_relativa.get("id")) == args.variation_id:
+                        # El cliente la señaló y el LLM eligió esa: no hay adivinanza.
+                        mentioned_any = True
+                    else:
+                        # Señaló una y el LLM eligió otra. Esto el guardián viejo NO lo
+                        # veía: rechazaba por "no especificó" cuando en realidad SÍ
+                        # especificó y se estaba agregando la equivocada.
+                        return tool_failure(
+                            f"El cliente pidió '{_relativa.get('label')}' de "
+                            f"'{product.get('title')}' y estás agregando otra "
+                            f"presentación. Agrega la que pidió.",
+                            code="VARIANT_MISMATCH_RELATIVE",
+                            extra={
+                                "product_id": args.product_id,
+                                "variante_pedida": {
+                                    "id": str(_relativa.get("id")),
+                                    "label": str(_relativa.get("label") or ""),
+                                },
+                            },
+                        )
+
             if not mentioned_any:
                 labels_pretty = ", ".join(
                     str(v.get("label") or "?") for v in variants
