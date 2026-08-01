@@ -143,13 +143,31 @@ async def run_agentic_turn(
     # actual + los 2 últimos inbounds previos del history para que el
     # AddToCartTool pueda verificar que la variante que el LLM intenta
     # agregar fue realmente mencionada por el cliente (anti-asunción).
+    # OJO: `_get_conversation_history` devuelve filas con `direction`/`content`, NO con
+    # `role`. El código de abajo preguntaba por `h.get("role") == "user"`, condición que
+    # NUNCA se cumplía: esta lista llevaba solo el inbound actual desde que se escribió,
+    # aunque el comentario prometiera los tres últimos.
+    #
+    # Consecuencia: el guardián anti-adivinanza de `add_to_cart` juzgaba con UN mensaje. Si
+    # el cliente decía "el de avena y miel, el más grande" y en el turno siguiente "sí,
+    # agrégalo", el guardián solo veía "sí, agrégalo", no encontraba variante mencionada y
+    # rechazaba — obligando a repetir algo que el cliente ya había dicho.
+    #
+    # Se aceptan las dos formas: la del history real (`direction`) y la de tipo chat
+    # (`role`), que es la que usan los tests y algún caller.
     _recent_inbounds = [inbound_text]
     for h in reversed(history or []):
         if len(_recent_inbounds) >= 3:
             break
-        role = (h.get("role") if isinstance(h, dict) else None)
-        content = (h.get("content") if isinstance(h, dict) else None)
-        if role == "user" and isinstance(content, str):
+        if not isinstance(h, dict):
+            continue
+        content = h.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        es_del_cliente = (
+            h.get("direction") == "inbound" or h.get("role") == "user"
+        )
+        if es_del_cliente:
             _recent_inbounds.append(content)
     ctx = ToolContext(
         tenant_id=tenant_id,
