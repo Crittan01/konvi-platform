@@ -140,3 +140,41 @@ def test_si_el_LLM_agrega_OTRA_variante_ahora_se_caza():
     assert "VARIANT_MISMATCH_RELATIVE" in fuente
     i = fuente.index("VARIANT_MISMATCH_RELATIVE")
     assert "Agrega la que pidió" in fuente[i - 600:i]
+
+
+# ─── El LLM tiene que saber que puede resolverla ────────────────────────────
+
+def _bloque_de_variantes() -> str:
+    """La regla de variantes del prompt, con los espacios colapsados."""
+    prompt = (REPO_ROOT / "services" / "ai-orchestrator" / "agentic" / "prompt"
+              / "states.py").read_text()
+    i = prompt.index("Variante explícita obligatoria")
+    return " ".join(prompt[i:i + 1400].split())
+
+
+def test_el_prompt_autoriza_la_referencia_relativa():
+    """Sin esto el resolver no sirve de nada: el LLM ni siquiera llama al tool.
+
+    En la verificación en vivo del 2026-07-28 se vio: no hubo carrito ni evento alguno.
+    El LLM no intentó agregar — afirmó en texto que lo había hecho y el invariante de
+    coherencia reescribió la respuesta con "cuéntame de nuevo qué producto y presentación
+    quieres". El guardián del tool nunca llegó a ejecutarse.
+    """
+    # El prompt envuelve las líneas, así que una frase puede quedar partida a la mitad.
+    # Se compara con los espacios colapsados: lo que importa es lo que lee el modelo, que
+    # ve el texto corrido, no dónde cae el salto de línea.
+    bloque = _bloque_de_variantes()
+    assert "referencia RELATIVA sí es explícita" in bloque
+    assert "el más grande" in bloque
+    assert "NO le pidas que repita" in bloque
+
+
+def test_el_prompt_conserva_la_regla_de_no_adivinar():
+    """La excepción es acotada: sin variante y sin referencia relativa, sigue preguntando."""
+    assert "NO invoques `add_to_cart`" in _bloque_de_variantes()
+
+
+def test_el_prompt_le_dice_que_el_mediano_necesita_tres():
+    """Mismo criterio que el resolver. Si el prompt y el código discrepan, el LLM intenta
+    algo que el guardián le va a rechazar."""
+    assert "exactamente tres opciones" in _bloque_de_variantes()
