@@ -37,6 +37,12 @@ _CART_AFFIRM_PATTERNS = (
     re.compile(r"\bsum(?:o|as|a|amos|an|[eé]|[oó]|ando|ar[eé])\b", re.IGNORECASE),
     re.compile(r"\blisto[,.\s]\s*(?:\d+\s*x?\s*)", re.IGNORECASE),
     re.compile(r"\bagregado\s+a\s+tu\s+(?:carrito|pedido|orden)\b", re.IGNORECASE),
+    # "He agregado el sérum a tu carrito" no lo cazaba NINGÚN patrón: el de arriba exige
+    # "agregado" pegado a "a tu carrito", y el de conjugaciones no incluye el participio.
+    # Era un falso NEGATIVO preexistente — dejaba pasar la afirmación falsa que este
+    # invariante existe para atrapar. Se puede cerrar ahora porque la guarda de
+    # ofrecimiento evita que "¿quieres que lo haya agregado?" cuente como afirmación.
+    re.compile(r"\bhe\s+(?:agregad|a[nñ]adid|sumad)[oa]s?\b", re.IGNORECASE),
     re.compile(r"\bte\s+vend[oa]\b", re.IGNORECASE),
     re.compile(r"\bqued(?:o|a|an|[oó]|aron)\s+(?:agregad|sumad|a[nñ]adid)[oa]s?\b", re.IGNORECASE),
 )
@@ -103,10 +109,71 @@ _CATEGORY_LIST_ANCHORS = (
 from text_utils import format_pesos as _format_cop  # noqa: E402
 
 
+#: Marcas de que la frase OFRECE hacer algo en vez de afirmar haberlo hecho.
+#:
+#: El patrón de afirmación cubre `agreg(o|as|a|amos|an|ue|ué|ando|aré|aste)`, o sea
+#: presente, futuro, gerundio y subjuntivo. Ninguno de esos afirma una escritura hecha:
+#:
+#:     "¿Te gustaría que lo AGREGUE a tu carrito?"   → ofrecimiento
+#:     "Ya te lo AGREGO"                             → presente
+#:     "Te lo AGREGARÉ apenas confirmes"             → futuro
+#:
+#: El 2026-08-01, contra producción, el bot resolvió bien "el de avena y miel, el más
+#: grande" —identificó los 100g y su precio— y preguntó si lo agregaba. El invariante leyó
+#: ese "agregue" como una afirmación de escritura, no encontró tool ejecutado, y REESCRIBIÓ
+#: una respuesta correcta con "cuéntame de nuevo qué producto y presentación quieres".
+#:
+#: El costo de los dos errores no es simétrico. Un falso positivo destruye una respuesta
+#: buena y deja al cliente repitiendo lo que ya dijo; un falso negativo deja pasar una
+#: afirmación que el cliente puede contrastar pidiendo su carrito. Por eso ante la duda se
+#: prefiere NO reescribir.
+_MARCAS_DE_OFRECIMIENTO = (
+    re.compile(r"\bque\s+(?:te\s+|se\s+|me\s+)?(?:l[oa]s?\s+)?(?:agregu|a[nñ]ad|sum)", re.IGNORECASE),
+    re.compile(r"\b(?:quieres|deseas|gustar[ií]a|prefieres|confirmas|autorizas)\b", re.IGNORECASE),
+    # El pronombre va PEGADO en infinitivo ("agregarlo", "añadírtelo"), así que el \b
+    # después del verbo no casaba nunca.
+    re.compile(r"\bpued[oe]\s+(?:te\s+)?(?:l[oa]s?\s+)?(?:agregar|a[nñ]adir|sumar)(?:[mts]e)?(?:l[oa]s?)?\b", re.IGNORECASE),
+    re.compile(r"\b(?:te\s+)?(?:l[oa]s?\s+)?(?:agregar[eé]|a[nñ]adir[eé]|sumar[eé])(?:l[oa]s?)?\b", re.IGNORECASE),
+)
+
+
+def _es_ofrecimiento(frase: str) -> bool:
+    """¿La frase OFRECE agregar, en vez de afirmar que ya agregó?
+
+    Se mira la frase donde cayó la coincidencia, no el mensaje entero: un mensaje puede
+    afirmar en un renglón y ofrecer en otro, y colapsarlos perdería el que sí miente.
+    """
+    if not frase:
+        return False
+    if "?" in frase or "¿" in frase:
+        return True
+    return any(p.search(frase) for p in _MARCAS_DE_OFRECIMIENTO)
+
+
+def _frases(texto: str) -> list[str]:
+    """Trocea por signos de cierre Y por renglón: el bot escribe en viñetas y una lista
+    sin puntos finales quedaría como una sola frase gigante."""
+    partes: list[str] = []
+    for linea in (texto or "").split("\n"):
+        partes.extend(re.split(r"(?<=[.!?\u2026])\s+", linea))
+    return [p for p in partes if p.strip()]
+
+
 def _llm_affirms_cart_change(text: str) -> bool:
+    """True solo si alguna frase AFIRMA una escritura al carrito.
+
+    Antes bastaba con que el patrón casara en cualquier parte del mensaje, así que un
+    ofrecimiento contaba como afirmación.
+    """
     if not text:
         return False
-    return any(p.search(text) for p in _CART_AFFIRM_PATTERNS)
+    for frase in _frases(text):
+        if not any(p.search(frase) for p in _CART_AFFIRM_PATTERNS):
+            continue
+        if _es_ofrecimiento(frase):
+            continue
+        return True
+    return False
 
 
 def _cart_write_succeeded(tool_call_log: list[dict]) -> Optional[dict]:
