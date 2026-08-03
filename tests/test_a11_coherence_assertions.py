@@ -13,6 +13,7 @@ from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
     check_mentions_all, check_not_mentions, check_cart_items, shows_total,
     check_no_payment_link_when_requote, check_escalates, check_no_medical_claims,
+    check_asks_payment_method,
 )
 
 _SUMMARY_NO_SHIP = "📋 *Resumen*\n* Subtotal: $214.000\n* *Total: $214.000 COP*"
@@ -112,6 +113,27 @@ class CoherenceAssertionTests(unittest.TestCase):
         ok3, _ = check_no_medical_claims(
             "El Aceite de Árbol de Té es un esencial de aromaterapia, de aroma fresco.")
         self.assertTrue(ok3)
+
+    def test_asks_payment_method(self):
+        # Rewrite canónico del invariant payment_coherence (CASE A): pasa.
+        canonical = (
+            "Antes de continuar con tu pedido, cuéntame cómo prefieres pagar:\n\n"
+            "🏦 *Pago online* (tarjeta, PSE, Nequi o transferencia Bancolombia).\n\n"
+            "💵 *Contra entrega* — pagas en efectivo cuando el courier te entregue."
+        )
+        ok, _ = check_asks_payment_method(canonical)
+        self.assertTrue(ok)
+        # Pregunta compuesta por el LLM con ambas opciones: pasa.
+        ok2, _ = check_asks_payment_method(
+            "¿Prefieres pagar online o contra entrega al recibir el paquete?")
+        self.assertTrue(ok2)
+        # Entregar el link SIN preguntar el modo: NO pasa (esa es la deuda K/L).
+        ok3, _ = check_asks_payment_method(
+            "Aquí está tu link: https://checkout.wompi.co/l/abc123")
+        self.assertFalse(ok3)
+        # Conversación ajena a pago: NO pasa.
+        ok4, _ = check_asks_payment_method("Claro, ¿qué presentación prefieres?")
+        self.assertFalse(ok4)
 
 
 if __name__ == "__main__":

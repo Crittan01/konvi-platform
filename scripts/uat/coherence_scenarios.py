@@ -12,6 +12,11 @@ REQUIERE el stack local vivo (connector :8000 + orchestrator + DB). Uso:
     python3.11 scripts/uat/coherence_scenarios.py --scenario add_in_checkout
     python3.11 scripts/uat/coherence_scenarios.py            # todos
 
+Target tenant/phone: default = KAIU cloud (e2e_chat). Para el sandbox DEV
+local (Supabase podman) override por env vars, sin tocar el default live:
+    UAT_TENANT_ID=d0000000-0000-0000-0000-000000000001 \
+        python3.11 scripts/uat/coherence_scenarios.py
+
 Diagnóstico: cuando un turno falla, grep el trace del orchestrator:
     grep "AGENTIC_TRACE" <orchestrator.log> | grep conv=<id8>
 muestra estado FSM, tools, invariant que disparó — la causa al instante.
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -34,11 +40,11 @@ import e2e_chat as E  # noqa: E402
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
     check_mentions_all, check_not_mentions, check_no_payment_link_when_requote,
-    check_escalates, check_no_medical_claims,
+    check_escalates, check_no_medical_claims, check_asks_payment_method,
 )
 
-TENANT_ID = E.DEFAULT_TENANT_ID
-PHONE = E.DEFAULT_PHONE
+TENANT_ID = os.environ.get("UAT_TENANT_ID", E.DEFAULT_TENANT_ID)
+PHONE = os.environ.get("UAT_PHONE", E.DEFAULT_PHONE)
 
 
 # Adaptadores: toda assertion del runner se invoca como a(bot_text, cart). Estos
@@ -55,9 +61,27 @@ META_WABA_ID = getattr(E, "DEFAULT_META_WABA_ID", None)
 DEST_PHONE_ID = getattr(E, "DEFAULT_DEST_PHONE_ID", None)
 
 
+# Acciones de harness (turnos "!...") — estado, no diálogo:
+#
+# "!ensure_shipping": escribe en el carrito activo el MISMO estado que dejaría
+#   una cotización+selección real de carrier (destino Medellín, quoted_options,
+#   shipping_cents>0, requires_requote limpio) usando los escritores canónicos
+#   de tools.cart_tool (set_shipping_destination / set_quoted_options /
+#   set_shipping_meta — el patrón de scripts/uat/_stub_shipping_selection.py).
+#   Stubbea SOLO la llamada HTTP a Aveonline, que el sandbox local no tiene
+#   (credenciales founder-gated); todo lo aguas abajo (requires_requote, gate
+#   de pago, invariant payment_coherence) se ejerce de verdad. IDEMPOTENTE: si
+#   el carrito ya tiene envío vigente es no-op → en un run LIVE con Aveonline
+#   real el turno no pisa la cotización del courier.
+# "!reset": wipe de la conversación + purge del contact UAT (como reset() de
+#   cada escenario) — separa fases de un escenario que necesita una
+#   conversación limpia a mitad de camino.
+ACTION_ENSURE_SHIPPING = "!ensure_shipping"
+ACTION_RESET = "!reset"
+
+
 class BotDriver:
     """Conduce el bot live: reset / send (espera respuesta real) / cart."""
-
     def __init__(self, tenant_id: str, phone: str):
         self.tenant_id = tenant_id
         self.phone = phone
@@ -67,11 +91,26 @@ class BotDriver:
             raise SystemExit(f"No se resolvió app_secret per-tenant para {tenant_id}")
 
     def reset(self) -> None:
-        subprocess.run(
-            ["python3.11", "scripts/wipe_conversation.py", "--phone", self.phone, "--yes"],
-            cwd="/home/ansible/workspaces/konvi-platform", check=False,
-            capture_output=True,
-        )
+        # Aislamiento determinista entre escenarios. DOS pasadas (el script las
+        # hace mutuamente excluyentes):
+        #   1. --purge-contact: borra el contact del teléfono UAT (+ sus
+        #      conversations/orders/carts linkeados). Sin esto el contact
+        #      sobrevive entre runs con la PII vieja (nombre, ciudad) y el bot
+        #      cotiza envío "a Medellín" antes de que el escenario entregue la
+        #      dirección — contaminación cruzada (la 1ra corrida ≠ la 2da).
+        #   2. full_delete clásico por teléfono: SIN contact linkeado el paso 1
+        #      NO borra nada (el lookup por phone falla) — p.ej. una conv que
+        #      escaló a human_takeover desde un DSR sin PII. Sin este paso esa
+        #      conv sobrevive y se traga (skipped) los inbounds de TODOS los
+        #      escenarios siguientes (observado 2026-08-03: habeas_data_dsr →
+        #      human_takeover → variant_truth/s10/s11 muertos).
+        for extra in (["--purge-contact"], []):
+            subprocess.run(
+                ["python3.11", "scripts/wipe_conversation.py", "--phone", self.phone,
+                 "--tenant-id", self.tenant_id, *extra, "--yes"],
+                cwd="/home/ansible/workspaces/konvi-platform", check=False,
+                capture_output=True,
+            )
 
     def _outbound_count(self) -> int:
         conv = E._find_conversation(self.sb, self.tenant_id, self.phone)
@@ -127,25 +166,96 @@ class BotDriver:
                 .limit(1).execute().data or [])
         return rows[0] if rows else None
 
+    def action(self, name: str) -> str:
+        """Ejecuta una acción de harness (turno "!..."). Devuelve un detalle
+        corto para el log. No envía mensaje al bot."""
+        if name == ACTION_ENSURE_SHIPPING:
+            return self._ensure_shipping()
+        if name == ACTION_RESET:
+            self.reset()
+            return "conversación + contact UAT reseteados"
+        raise ValueError(f"acción de harness desconocida: {name}")
+
+    def _ensure_shipping(self) -> str:
+        """Escribe el estado post-cotización/selección de carrier si el carrito
+        no tiene envío vigente (ver ACTION_ENSURE_SHIPPING). No-op idempotente."""
+        cart = self.cart()
+        if not cart:
+            return "SKIP — sin carrito activo"
+        if int(cart.get("shipping_cents") or 0) > 0 and not cart.get("requires_requote"):
+            return (f"SKIP — envío ya vigente "
+                    f"(shipping_cents={cart['shipping_cents']}, requires_requote=False)")
+        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        from tools.cart_tool import (
+            set_quoted_options, set_shipping_destination, set_shipping_meta,
+        )
+        options = [
+            {"rate_id": "uat-stub-rate-eco", "carrier": "UAT-STUB",
+             "service_level": "ECONOMICA", "price_cents": 14_900 * 100,
+             "eta_date": "3-5 días", "currency": "COP"},
+            {"rate_id": "uat-stub-rate-exp", "carrier": "UAT-STUB",
+             "service_level": "EXPRESS", "price_cents": 19_900 * 100,
+             "eta_date": "1-2 días", "currency": "COP"},
+        ]
+        set_quoted_options(self.sb, cart_id=cart["id"], tenant_id=self.tenant_id,
+                           options=options)
+        set_shipping_destination(self.sb, cart_id=cart["id"], tenant_id=self.tenant_id,
+                                 city="Medellín", dane_code="05001")
+        set_shipping_meta(
+            self.sb,
+            cart_id=cart["id"],
+            tenant_id=self.tenant_id,
+            carrier="UAT-STUB",
+            service_level="ECONOMICA",
+            rate_id="uat-stub-rate-eco",
+            city="Medellín",
+            shipping_cents=14_900 * 100,
+        )
+        after = self.cart() or {}
+        return (f"envío fijado shipping_cents={after.get('shipping_cents')} "
+                f"requires_requote={after.get('requires_requote')} "
+                f"total_cents={after.get('total_cents')}")
+
 
 # ── Escenarios NO-LINEALES (la red de regresión; crece con cada bug) ─────────
 # Cada turno: (mensaje_cliente, [assertions]). Cada assertion: fn(bot_text, cart)
 # -> (ok, detail). Turnos de setup llevan [] (sin assertions); los críticos llevan
-# las verdades transaccionales que NO se deben violar.
+# las verdades transaccionales que NO se deben violar. Un turno cuyo "mensaje"
+# empieza con "!" es una ACCIÓN de harness (estado, no diálogo) — ver
+# ACTION_ENSURE_SHIPPING; no lleva assertions.
 
 SCENARIOS: dict[str, dict] = {
     # Bug 2026-06-26: agregar producto en checkout dejaba total sin envío.
+    # Sync "BLOQUE K/L" (2026-08-03) — DOS FASES:
+    #   Fase 1 (T1-T7): la regresión original — add mid-checkout →
+    #     requires_requote → sin total stale → gate de pago bloquea el link.
+    #     SIN turnos de PII/consent: no aportan a las assertions y, sin courier
+    #     local, empujan al bot a SHIPPING_QUOTE → quote_shipping siempre falla
+    #     (sin credenciales Aveonline en el sandbox — founder-gated) y su
+    #     degradación ancla la conversación (flaky). Sin PII el resolver se
+    #     queda en CART_BUILDING/PII_COLLECTION y el bot nunca cotiza.
+    #   Fase 2 (T8-T12): conversación limpia ("!reset") → checkout con envío
+    #     stubbed ANTES de la PII (resolver → PAYMENT directo) → pedir el link
+    #     SIN método explícito hace saltar la pregunta contraentrega/online y
+    #     NO entrega link (gate payment_coherence CASE A / prompt PAYMENT) →
+    #     el escenario la RESPONDE ("prefiero pago online"). La entrega del
+    #     link Wompi tras la respuesta NO se certifica en local: el bot
+    #     reintenta la cotización al courier antes de pagar y sin Aveonline no
+    #     sale de ahí — esa pata queda para el run live (founder-gate).
+    # Los "!ensure_shipping" escriben el estado post-cotización con los
+    # escritores canónicos de tools.cart_tool (stubbea SOLO la HTTP al
+    # courier; no-op si hay envío vigente → en LIVE no pisan nada).
     "add_in_checkout": {
-        "desc": "Agregar un producto a mitad del checkout → recotiza envío, no total stale",
+        "desc": ("Agregar un producto a mitad del checkout → recotiza envío, no "
+                 "total stale + gate método de pago (pregunta → respuesta)"),
         "turns": [
+            # ─── Fase 1: regresión "add mid-checkout" (bug 2026-06-26) ───
             ("Hola, quiero 2 Aceite Esencial de Árbol de Té de 10ml", []),
             ("Sí, agrégalos", []),
             ("También 1 Aceite Esencial de Lavanda de 30ml", []),
-            ("Listo, eso es todo. Mi nombre es Cristian Tovar, CC 1020304050, "
-             "vivo en Calle 50 #20-30, Medellín, correo cris@example.com", []),
-            ("Sí, autorizo el tratamiento de mis datos", []),
-            ("Envía por la más económica", []),
-            # — TURNO CRÍTICO: agregar a mitad del checkout —
+            # Envío "cotizado" (stub local — Aveonline no corre en sandbox).
+            (ACTION_ENSURE_SHIPPING, []),
+            # — TURNO CRÍTICO: agregar a mitad del checkout → requires_requote —
             ("Quiero agregar un Sérum de Vitamina C",
              [mentions("15ml", "30ml")]),
             ("De 30ml por favor",
@@ -153,6 +263,22 @@ SCENARIOS: dict[str, dict] = {
             # — GATE pre-pago: pedir el link con envío pendiente → NO debe entregarlo —
             ("Perfecto, genérame el link de pago",
              [check_no_payment_link_when_requote, check_no_stale_total]),
+            # ─── Fase 2: gate de método de pago ("BLOQUE K/L") ───
+            (ACTION_RESET, []),
+            ("Hola, quiero 1 Jabón Artesanal de Coco de 100g", []),
+            # Envío vigente ANTES de la PII: cuando la PII+consent se completan,
+            # el resolver enruta a PAYMENT (no a SHIPPING_QUOTE).
+            (ACTION_ENSURE_SHIPPING, []),
+            ("Soy Cristian Tovar, CC 1020304050, vivo en Calle 50 #20-30, Medellín, "
+             "correo cris@example.com, celular 3001234567 y sí, autorizo el "
+             "tratamiento de mis datos", []),
+            # — GATE: pedir el link SIN modo de pago explícito → la pregunta de
+            # modo salta y NO se entrega link (la pida el LLM por prompt
+            # PAYMENT o la imponga el invariant payment_coherence) —
+            ("Sí, confirmo el pedido, genérame el link de pago",
+             [check_asks_payment_method, not_mentions("checkout.wompi.co")]),
+            # — RESPUESTA al gate: modo de pago explícito —
+            ("Prefiero pago online", []),
         ],
     },
     # Palanca 3: solicitud Habeas Data NO-keyword → escala + acusa recibo.
@@ -239,9 +365,16 @@ SCENARIOS: dict[str, dict] = {
         ],
     },
     "s19_reclamo": {
-        "desc": "S19 — reclamo (producto dañado) → handover",
+        # Sync 2026-08-03 (stack local): con el módulo de claims (rev. 109) el
+        # bot NO escala de inmediato — triage primero (create_claim exige
+        # order_id): pide el pedido, reintenta localizarlo y SOLO entonces
+        # escala (human_takeover real + lenguaje de equipo, verificado por
+        # sonda manual: la escalación cae cuando la orden no se puede ubicar).
+        "desc": "S19 — reclamo (producto dañado) → triage de pedido → handover",
         "turns": [
-            ("Quiero poner un reclamo: el pedido que me llegó venía con un frasco roto",
+            ("Quiero poner un reclamo: el pedido que me llegó venía con un frasco roto", []),
+            ("No tengo el número, fue hace como una semana, el frasco llegó roto", []),
+            ("Sí, fue desde este número. Necesito que me solucionen lo del frasco roto",
              [check_escalates]),
         ],
     },
@@ -268,6 +401,12 @@ def run_scenario(key: str, drv: BotDriver) -> bool:
     drv.reset()
     all_ok = True
     for i, (msg, asserts) in enumerate(sc["turns"], 1):
+        if msg.startswith("!"):
+            # Turno ACCIÓN de harness (no es mensaje del cliente) — ver
+            # ACTION_ENSURE_SHIPPING. No lleva assertions (estado, no diálogo).
+            detail = drv.action(msg)
+            print(f"\n[T{i}] ⚙️  ACCIÓN harness {msg} → {detail}")
+            continue
         bot = drv.send(msg)
         cart = drv.cart()
         print(f"\n[T{i}] 👤 {msg}")

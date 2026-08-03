@@ -106,6 +106,39 @@ def check_no_payment_link_when_requote(bot_text: str, cart: dict | None) -> tupl
     return (True, "ok — no entregó link con envío inválido")
 
 
+# Gate "BLOQUE K/L" (payment_coherence CASE A): antes de una acción de pago el
+# cliente DEBE haber elegido modo explícito; si no, el bot pregunta
+# (contraentrega vs online) — por el rewrite canónico del invariant o por
+# iniciativa propia del LLM. La assertion verifica el CONTRATO OBSERVABLE
+# (la pregunta de modo de pago salta), no quién la impuso.
+_ASK_PM_EXPLICIT_RE = re.compile(
+    r"c[oó]mo\s+(?:prefieres|deseas|quieres)\s+pagar|prefier\w+\s+pagar|"
+    r"m[ée]todo\s+de\s+pago|forma\s+de\s+pago|medios?\s+de\s+pago",
+    re.IGNORECASE,
+)
+_ASK_PM_COD_RE = re.compile(
+    r"contra\s?-?\s?entrega|efectivo\s+al\s+(?:recibir|momento)|al\s+recibir\s+(?:el|tu|su)\s+"
+    r"(?:pedido|paquete|producto)",
+    re.IGNORECASE,
+)
+_ASK_PM_ONLINE_RE = re.compile(
+    r"online|en\s+l[ií]nea|tarjeta|\bpse\b|nequi|link\s+de\s+pago|wompi|transferencia",
+    re.IGNORECASE,
+)
+
+
+def check_asks_payment_method(bot_text: str, cart: dict | None = None) -> tuple[bool, str]:
+    """El bot pregunta el modo de pago (contraentrega vs online) — gate
+    payment_coherence CASE A. Contrato: pregunta explícita de modo, o oferta
+    de AMBAS opciones (COD + online) en el mismo mensaje."""
+    text = bot_text or ""
+    if _ASK_PM_EXPLICIT_RE.search(text):
+        return (True, "ok — pregunta explícita de modo de pago")
+    if _ASK_PM_COD_RE.search(text) and _ASK_PM_ONLINE_RE.search(text):
+        return (True, "ok — ofrece contraentrega y online")
+    return (False, "NO preguntó el modo de pago (contraentrega/online)")
+
+
 _ESCALATION_RE = re.compile(
     r"especialista|mi equipo|un asesor|del equipo|te contact|se pondr[aá]n? en contacto|"
     r"persona del equipo|humano|atender[aá]\s+tu",
