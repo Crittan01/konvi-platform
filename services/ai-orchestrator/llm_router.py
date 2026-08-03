@@ -4,8 +4,11 @@ Model router — Rev. 81 (model routing tier).
 Clasifica intent del cliente en `simple` vs `transactional` y decide qué
 modelo Gemini usar como primario:
 
-  simple        → flash-lite primario (cheap), flash fallback.
-  transactional → flash primario (precision), flash-lite fallback.
+  simple        → GEMINI_SIMPLE_MODEL / fallback-model primario (cheap).
+  transactional → GEMINI_MODEL primario (precision).
+
+Los defaults de esos env vars viven en llm_invoke (M8: fuente única —
+DEFAULT_PRIMARY_MODEL / DEFAULT_FALLBACK_MODEL).
 
 Heurística determinística (cero costo extra, no llama LLM): regex/keywords
 + FSM state. Si fallamos clasificación, la cascada nos cubre porque
@@ -101,22 +104,28 @@ INTENT_TRANSACTIONAL = "transactional"
 
 import os
 
+# M8 (2026-08-02) — defaults unificados: la fuente única es llm_invoke
+# (DEFAULT_PRIMARY_MODEL / DEFAULT_FALLBACK_MODEL). Antes este router
+# hardcodeaba los mismos literales → riesgo de drift con llm_invoke.
+from llm_invoke import DEFAULT_FALLBACK_MODEL, DEFAULT_PRIMARY_MODEL
+
 
 def _cfg(key: str, default: str) -> str:
     return os.getenv(key, default) or default
 
 
 def _models_simple() -> tuple[str, str]:
-    """Para intent simple: lite primario, flash fallback."""
-    primary = _cfg("GEMINI_SIMPLE_MODEL", _cfg("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite"))
-    fallback = _cfg("GEMINI_MODEL", "gemini-3.5-flash")
+    """Para intent simple: primario barato, fallback fuerte."""
+    primary = _cfg("GEMINI_SIMPLE_MODEL", _cfg("GEMINI_FALLBACK_MODEL", DEFAULT_PRIMARY_MODEL))
+    fallback = _cfg("GEMINI_MODEL", DEFAULT_FALLBACK_MODEL)
     return primary, fallback
 
 
 def _models_transactional() -> tuple[str, str]:
-    """Para intent transactional: flash primario, lite fallback."""
-    primary = _cfg("GEMINI_MODEL", "gemini-3.5-flash")
-    fallback = _cfg("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
+    """Para intent transactional: primario GEMINI_MODEL, fallback
+    GEMINI_FALLBACK_MODEL."""
+    primary = _cfg("GEMINI_MODEL", DEFAULT_PRIMARY_MODEL)
+    fallback = _cfg("GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL)
     return primary, fallback
 
 

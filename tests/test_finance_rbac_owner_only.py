@@ -18,6 +18,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 import routers.purchases as purchases  # noqa: E402
 import routers.expenses as expenses  # noqa: E402
 from dependencies.auth import get_current_role, get_current_tenant, get_service_client  # noqa: E402
+from dependencies.internal_auth import (  # noqa: E402
+    get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
+)
 
 TENANT = "tenant-1"
 
@@ -45,6 +49,11 @@ def _client(router, prefix, role, data):
     app.dependency_overrides[get_current_tenant] = lambda: TENANT
     app.dependency_overrides[get_service_client] = lambda: _FakeSupabase(data)
     app.dependency_overrides[get_current_role] = lambda: role
+    # M15 (2026-08-02): expenses ganó RL_WRITE_DEFAULT; la dep de rate-limit
+    # resuelve tenant/cliente vía dual-auth (A0.2c) → mismo override que las
+    # deps JWT para que el test siga midiendo SOLO el guard RBAC.
+    app.dependency_overrides[get_tenant_id_internal_or_user] = lambda: TENANT
+    app.dependency_overrides[get_service_client_internal_or_user] = lambda: _FakeSupabase(data)
     return TestClient(app, raise_server_exceptions=False)
 
 

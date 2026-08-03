@@ -3,16 +3,21 @@ LLM cascade wrapper — Rev. 80.
 
 Robustece la invocación de Gemini ante 503/UNAVAILABLE/429/RESOURCE_EXHAUSTED:
 
-  Intentos 1-N1: modelo primario (gemini-3.5-flash) con backoff exponencial.
-  Intentos N1-N2: modelo fallback (gemini-3.1-flash-lite) con backoff.
+  Intentos 1-N1: modelo primario (gemini-3.1-flash-lite) con backoff exponencial.
+  Intentos N1-N2: modelo fallback (gemini-3.5-flash) con backoff.
   Si TODO falla: retorna respuesta degradada con requires_human=True para
   que el bot escale a un asesor en vez de quedarse mudo.
 
 Configurable vía .env:
-  GEMINI_MODEL              — modelo primario (default: gemini-3.5-flash)
-  GEMINI_FALLBACK_MODEL     — modelo de respaldo (default: gemini-3.1-flash-lite)
+  GEMINI_MODEL              — modelo primario (default: gemini-3.1-flash-lite)
+  GEMINI_FALLBACK_MODEL     — modelo de respaldo (default: gemini-3.5-flash)
   GEMINI_MAX_RETRIES        — total de intentos (default: 8)
-  GEMINI_FALLBACK_AFTER     — switch a fallback tras N intentos (default: 4)
+  GEMINI_FALLBACK_AFTER     — switch a fallback tras N intentos (default: 2)
+  LLM_CASCADE_DEADLINE_SECONDS — presupuesto total por turno (default: 100;
+    0 = sin deadline). A5 2026-08-02: sin deadline, 8 intentos × timeout 30s
+    + backoff ≈ 5 min peor caso > heartbeat Render 120s (worker.py: restart
+    a mitad de turno → posible outbound duplicado). Agotado el budget, la
+    cascada corta intentos nuevos y cae al path degraded existente.
 
 NO maneja errores no-transitorios (4xx no-429): los re-lanza para que el
 caller decida (típicamente bug de prompt/schema → no reintentar).
@@ -43,6 +48,13 @@ DEFAULT_MAX_RETRIES = 8
 # ~4s, disponible) mucho antes. Override por env GEMINI_FALLBACK_AFTER (1 = aún más
 # agresivo). El primario sano responde en el 1er intento → sin failover.
 DEFAULT_FALLBACK_AFTER = 2
+# A5 (2026-08-02) — presupuesto total de tiempo por turno. Sin deadline, el
+# peor caso (8 intentos × timeout ~30s + backoff hasta 63s) ≈ 5 min, muy por
+# encima del heartbeat Render de 120s (worker.py F45) → restart a mitad de
+# turno y posible outbound duplicado. 100s deja margen bajo los 120s. La
+# cascada NO interrumpe una llamada en vuelo (el timeout por llamada lo hace);
+# corta intentos NUEVOS y cae al path degraded existente.
+DEFAULT_CASCADE_DEADLINE_SECONDS = 100
 
 
 def _cfg_int(key: str, default: int) -> int:
@@ -114,6 +126,8 @@ def generate_with_cascade(
     max_retries: Optional[int] = None,
     fallback_after: Optional[int] = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
+    deadline_seconds: Optional[float] = None,
+    clock: Optional[Callable[[], float]] = None,
 ) -> CascadeResult:
     """Invoca `invoke_fn(model_name)` con cascada y backoff.
 
@@ -125,6 +139,10 @@ def generate_with_cascade(
         max_retries: total de intentos (default 8).
         fallback_after: tras N intentos del primario, switch al fallback.
         sleep_fn: inyectable para tests.
+        deadline_seconds: presupuesto total del turno (default
+            LLM_CASCADE_DEADLINE_SECONDS del env, 100s; 0 = sin deadline).
+            Agotado, no se lanzan intentos nuevos → path degraded existente.
+        clock: inyectable para tests (default time.monotonic).
 
     Returns:
         CascadeResult con .response (SDK obj) o .degraded=True.
@@ -139,13 +157,32 @@ def generate_with_cascade(
     switch_at = fallback_after if fallback_after is not None else _cfg_int(
         "GEMINI_FALLBACK_AFTER", DEFAULT_FALLBACK_AFTER,
     )
+    deadline = deadline_seconds if deadline_seconds is not None else _cfg_int(
+        "LLM_CASCADE_DEADLINE_SECONDS", DEFAULT_CASCADE_DEADLINE_SECONDS,
+    )
     # Resolver sleep_fn en runtime (no en def-time) para que `patch(
     # 'llm_invoke.time.sleep')` funcione en tests sin tener que pasar
     # sleep_fn explícito por cada caller.
     actual_sleep = sleep_fn if sleep_fn is not None else time.sleep
+    monotonic = clock if clock is not None else time.monotonic
+    started = monotonic()
+
+    def _budget_exhausted() -> bool:
+        return deadline > 0 and (monotonic() - started) >= deadline
 
     last_exc: Optional[BaseException] = None
+    attempts_done = 0
     for attempt in range(1, total + 1):
+        if _budget_exhausted():
+            # A5 — deadline agotado: NO lanzar otro intento (cada uno puede
+            # costar hasta el timeout de 30s). Cae al degraded de abajo.
+            logger.error(
+                "[LLM_CASCADE] deadline agotado (%.1fs >= %ss) tras %d "
+                "intentos — degraded sin más retries",
+                monotonic() - started, deadline, attempts_done,
+            )
+            break
+        attempts_done = attempt
         model_name = primary if attempt <= switch_at else fallback
         try:
             resp = invoke_fn(model_name)
@@ -168,15 +205,24 @@ def generate_with_cascade(
                 raise
             if attempt < total:
                 sleep_for = _backoff_seconds(attempt)
+                if deadline > 0:
+                    # No dormir más allá del budget: el próximo chequeo de
+                    # deadline decidirá si aún hay tiempo para otro intento.
+                    remaining = deadline - (monotonic() - started)
+                    if remaining <= 0:
+                        continue  # el chequeo al inicio del loop corta
+                    sleep_for = min(sleep_for, remaining)
                 actual_sleep(sleep_for)
 
-    # Todos los intentos fallaron con errores transitorios → degradar.
+    # Todos los intentos fallaron con errores transitorios (o deadline
+    # agotado) → degradar.
     err_str = str(last_exc) if last_exc else "unknown"
     logger.error(
-        "[LLM_CASCADE] degradado tras %d intentos (last_err=%s)", total, err_str[:240],
+        "[LLM_CASCADE] degradado tras %d intentos (last_err=%s)",
+        attempts_done, err_str[:240],
     )
     return CascadeResult(
-        response=None, model_used=None, attempts=total, degraded=True,
+        response=None, model_used=None, attempts=attempts_done, degraded=True,
         last_error=err_str,
     )
 

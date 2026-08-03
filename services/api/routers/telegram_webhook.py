@@ -34,8 +34,9 @@ INTERVENCION HUMANA REQUERIDA — configurar setWebhook (una vez por bot del ten
   INSUMOS: {TOKEN} = bot_token del tenant; {TELEGRAM_WEBHOOK_SECRET} = env del API.
   CRITERIO DE EXITO: getWebhookInfo devuelve la URL anterior y last_error_date vacío.
   NOTA: la URL correcta incluye el segmento /integrations (prefijo del router en
-  main.py). La UI (telegram-setup.tsx) mostraba la URL sin ese segmento → un
-  setWebhook copiado de ahí daría 404. Corregir esa copy es tarea de la Console.
+  main.py:295). La UI ya muestra la URL completa — fuente única de verdad:
+  apps/web/lib/webhook-urls.ts (WEBHOOK_PATHS.telegram), cubierta por
+  webhook-urls.test.ts.
 
 Referencia Telegram Bot API: https://core.telegram.org/bots/api#setwebhook
 """

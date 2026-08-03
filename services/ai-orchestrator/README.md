@@ -35,6 +35,7 @@ sobreescribir sin redeploy desde el Render Dashboard.
 | `PAYMENT_REMINDER_ENABLED` | `true` | Recordatorio de pago dentro de la CSW (24h Meta) + HSM fuera de CSW |
 | `CART_ABANDONED_REMINDER_ENABLED` | `true` | HSM `cart_abandoned_24h_v1` (MARKETING) |
 | `WOMPI_VOID_POLL_ENABLED` | `true` | Poll de anulaciones (voids) Wompi |
+| `AVEONLINE_STATUS_POLL_ENABLED` | `true` | Poll backup de tracking Aveonline (A10) |
 | `HEALTH_METRICS_ENABLED` | `true` | Collector de salud per-tenant per-provider |
 | `PENDING_PAYMENT_RELEASE_ENABLED` | `true` | Libera stock de órdenes `pending_payment` expiradas |
 | `IDEMPOTENCY_CLEANUP_ENABLED` | `true` | Limpieza de claves de idempotencia |
@@ -63,6 +64,9 @@ sobreescribir sin redeploy desde el Render Dashboard.
 | `COLOMBIA_UTC_OFFSET_HOURS` | `-5` | Offset para calcular hora local CO |
 | `WOMPI_VOID_POLL_INTERVAL_SECONDS` | `1800` | Cada cuánto reconcilia voids Wompi |
 | `WOMPI_VOID_POLL_LOOKBACK_HOURS` | `48` | Ventana hacia atrás del poll de voids |
+| `AVEONLINE_STATUS_POLL_INTERVAL_SECONDS` | `3600` | Cada cuánto consulta estados de guías stale (1 h) |
+| `AVEONLINE_STATUS_POLL_STALE_HOURS` | `6` | Guía real sin update vía webhook >N h → candidata |
+| `AVEONLINE_STATUS_POLL_BATCH` | `25` | Cap de guías consultadas por ciclo |
 | `HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS` | `600` | Cada cuánto evalúa SLA de takeover |
 | `HUMAN_TAKEOVER_SLA_HOURS` | `2` | Umbral sin respuesta humana → alerta |
 | `HEALTH_METRICS_INTERVAL_SECONDS` | `300` | Cadencia del collector de salud |

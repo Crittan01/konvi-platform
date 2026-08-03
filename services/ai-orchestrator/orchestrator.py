@@ -12,6 +12,7 @@ from tools.catalog_tool import get_tenant_catalog
 from tools.payment_link_tool import handle_payment_link_if_applicable
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from guardrails import validate_orchestrator_output
+from llm_invoke import DEFAULT_PRIMARY_MODEL
 from whatsapp_sender import send_whatsapp_message
 from conversation_contract import (
     CONVERSATION_STATUS_BOT_ACTIVE,
@@ -32,7 +33,11 @@ from conversation_contract import (
 logger = logging.getLogger("orchestrator.core")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+# M8 (2026-08-02) — el default del modelo vive UNA sola vez en llm_invoke
+# (DEFAULT_PRIMARY_MODEL = el primario que prod declara en render.yaml).
+# Antes este archivo defaultaba a gemini-3.5-flash y llm_invoke a
+# gemini-3.1-flash-lite → defaults divergentes.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", DEFAULT_PRIMARY_MODEL)
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "25"))
 CONVERSATION_WINDOW_HOURS = int(os.getenv("CONVERSATION_WINDOW_HOURS", "24"))
 
@@ -1038,9 +1043,13 @@ async def _send_outbound_text(
                             f"{_summary_text}\n\n"
                             f"{_greeting}Tu pedido *#{_short_id}* está listo.\n\n"
                             f"*Paga aquí:*\n{_link_url}\n\n"
-                            f"> El link es válido por 30 minutos. Una vez "
-                            f"confirmado el pago recibirás la confirmación por "
-                            f"este chat."
+                            # M10 (2026-08-02): no prometer "por este chat" —
+                            # fuera de la ventana 24h Meta mata el outbound
+                            # (131047). El comprobante SIEMPRE va por correo
+                            # (receipt_email.py; email obligatorio en checkout,
+                            # FSM NEEDS_EMAIL) y por aquí si la ventana sigue abierta.
+                            f"> El link es válido por 30 minutos. Una vez confirmado "
+                            f"el pago recibirás la confirmación por aquí y por correo."
                         )
                         logger.info(
                             "[OUTPUT_VALIDATOR] fix Opción B REPLACE aplicado "

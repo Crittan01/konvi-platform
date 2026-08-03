@@ -106,8 +106,11 @@ def _distributed_hit(
 #      EMPÍRICAMENTE (endpoint /internal/ip-echo o XFF_CANARY=1). NO fijar a ciegas: con
 #      N equivocado, xff[-N] es una IP interna → 403 en el allowlist MeLi + colapso de
 #      rate-limit. Default 0 = leftmost (histórico, sin cambio de conducta).
-# INTERVENCION HUMANA (T4-01): medir en prod y fijar el header o el N. Hasta entonces
-# NO se activa nada (default 0). Ref audit: docs/research/audit-2026-07-16-plan-90plus.md T4-01.
+# INTERVENCION HUMANA (T4-01): ACTIVO en Render — render.yaml fija
+# TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip en konvi-connector y konvi-api, así que la
+# resolución usa el header de Cloudflare (IP real, inmune al hop-count). Pendiente: la
+# verificación empírica del canario en prod (endpoint /internal/ip-echo o XFF_CANARY=1).
+# Ref audit: docs/_archive/research/audit-2026-07-16-plan-90plus.md T4-01 (histórico).
 _TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "").strip().lower()
 _XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
 _XFF_CANARY = os.getenv("XFF_CANARY", "") == "1"

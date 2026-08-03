@@ -19,6 +19,10 @@ import routers.expenses as expenses  # noqa: E402
 from dependencies.auth import (  # noqa: E402
     get_current_role, get_current_tenant, get_current_user_id, get_service_client,
 )
+from dependencies.internal_auth import (  # noqa: E402
+    get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
+)
 
 TENANT = "tenant-1"
 USER = "user-9"
@@ -85,6 +89,11 @@ def _client(role, rows):
     app.dependency_overrides[get_service_client] = lambda: fake
     app.dependency_overrides[get_current_role] = lambda: role
     app.dependency_overrides[get_current_user_id] = lambda: USER
+    # M15 (2026-08-02): reverse ganó RL_WRITE_DEFAULT; la dep de rate-limit
+    # resuelve tenant/cliente vía dual-auth (A0.2c) → mismo override que las
+    # deps JWT para que el test siga midiendo SOLO la lógica del endpoint.
+    app.dependency_overrides[get_tenant_id_internal_or_user] = lambda: TENANT
+    app.dependency_overrides[get_service_client_internal_or_user] = lambda: fake
     return TestClient(app, raise_server_exceptions=False), fake
 
 

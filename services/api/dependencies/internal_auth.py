@@ -21,6 +21,7 @@ env vars de api + orchestrator (MISMO valor en ambos).
 import hmac
 import logging
 import os
+import uuid
 
 from fastapi import Depends, HTTPException, Request
 from supabase import Client
@@ -48,6 +49,45 @@ def _verify_internal_secret(req: Request) -> bool:
     return hmac.compare_digest(sent, INTERNAL_SERVICE_SECRET)
 
 
+def _audit_internal_call(
+    request: Request, *, tenant_id: str, outcome: str, status_code: int,
+) -> None:
+    """A12 (auditoría 2026-08-02) — trail del path dual-auth internal-secret.
+
+    Antes: una llamada con X-Internal-Service-Secret válido + X-Tenant-Id
+    AUTODECLARADO actuaba como cualquier tenant con rol owner SIN dejar rastro
+    (única barrera = el secret). Ahora cada llamada internal autenticada deja
+    fila en `api_security_events` (misma tabla que rate-limit/idempotency, vía
+    dependencies.observability.record_api_security_event): tenant declarado,
+    path, método, resultado y user-agent (no hay header de service-name; el UA
+    es la mejor señal disponible del llamante).
+
+    Best-effort / fail-open (paridad con el resto de security logging del
+    repo): un fallo de auditoría NUNCA rompe la request. La fila exige
+    tenant_id UUID válido (FK a tenants) — si el header trae basura, el
+    intento queda solo en logs (el insert fallaría la FK de todas formas).
+    """
+    try:
+        uuid.UUID(str(tenant_id))  # guard FK: api_security_events.tenant_id → tenants
+    except (ValueError, TypeError, AttributeError):
+        return
+    try:
+        from dependencies.observability import record_api_security_event
+        record_api_security_event(
+            supabase=_get_service_client(),
+            tenant_id=tenant_id,
+            event_type=f"internal_auth.{outcome}",
+            status_code=status_code,
+            request=request,
+            metadata={
+                "auth": "internal_secret",
+                "user_agent": (request.headers.get("user-agent") or "")[:200],
+            },
+        )
+    except Exception as exc:
+        logger.warning("[INTERNAL_AUTH] audit event falló (%s): %s", outcome, exc)
+
+
 async def get_tenant_id_internal_or_user(request: Request) -> str:
     """Dependencia FastAPI dual-auth: internal-secret O JWT user.
 
@@ -62,6 +102,15 @@ async def get_tenant_id_internal_or_user(request: Request) -> str:
     if _verify_internal_secret(request):
         tenant_id = request.headers.get("X-Tenant-Id", "")
         if not tenant_id:
+            # Denegado: secret válido pero sin tenant declarado. No hay fila
+            # posible en api_security_events (tenant_id NOT NULL FK) → el
+            # trail de este 400 queda en logs.
+            logger.warning(
+                "[INTERNAL_AUTH] secret válido SIN X-Tenant-Id — 400 "
+                "path=%s method=%s ua=%s",
+                request.url.path, request.method,
+                (request.headers.get("user-agent") or "")[:100],
+            )
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -69,6 +118,7 @@ async def get_tenant_id_internal_or_user(request: Request) -> str:
                     "msg": "X-Tenant-Id header requerido para auth internal-service",
                 },
             )
+        _audit_internal_call(request, tenant_id=tenant_id, outcome="ok", status_code=200)
         return tenant_id
 
     # Fallback: flujo JWT user normal

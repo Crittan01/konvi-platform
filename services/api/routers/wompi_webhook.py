@@ -27,6 +27,7 @@ from integrations.wompi_client import (
     create_payment_link_sync,
     get_tenant_wompi_creds,
     is_void_eligible,
+    payment_link_ttl_minutes,
     verify_event_signature,
     void_transaction_sync,
 )
@@ -37,7 +38,9 @@ router = APIRouter(tags=["Wompi Webhook"])
 
 WOMPI_TXN_APPROVED = "APPROVED"
 WOMPI_RETRY_STATUSES = {"DECLINED", "ERROR", "VOIDED"}
-WOMPI_PAYMENT_LINK_TTL_MINUTES = int(os.getenv("WOMPI_PAYMENT_LINK_TTL_MINUTES", "30"))
+# TTL del link regenerado: ÚNICA fuente payment_link_ttl_minutes() (env
+# WOMPI_PAYMENT_LINK_TTL_MINUTES, default 30) — compartida con la creación en
+# orders.py. Se resuelve por llamada, no al importar.
 
 
 @router.post("/wompi")
@@ -756,8 +759,9 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
         contact_name = contact.get("name") or "Cliente"
 
         short_id = order_id[:8].upper()
+        ttl_minutes = payment_link_ttl_minutes()
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(minutes=WOMPI_PAYMENT_LINK_TTL_MINUTES)
+            datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         link_data = create_payment_link_sync(
@@ -787,7 +791,7 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
             f"⚠️ Hubo un inconveniente con tu pago del pedido *#{short_id}*.\n\n"
             f"No te preocupes, aquí tienes un nuevo enlace:\n"
             f"💳 {link_data['checkout_url']}\n\n"
-            f"⏰ Válido por {WOMPI_PAYMENT_LINK_TTL_MINUTES} minutos."
+            f"⏰ Válido por {ttl_minutes} minutos."
         )
         _enqueue_outbound_text(supabase, conversation_id=conversation_id, tenant_id=tenant_id, text=text)
         logger.info("[WOMPI] retry_link_enviado order=%s link_id=%s", order_id, link_data["link_id"])

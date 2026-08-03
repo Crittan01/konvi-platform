@@ -454,10 +454,13 @@ async def handle_payment_link_if_applicable(
         # (a) Link vigente → reutilizar
         if pending_order["active_link"]:
             link = pending_order["active_link"]
+            # M10 (2026-08-02): "por aquí y por correo" en vez de "por este
+            # chat" — fuera de la ventana 24h Meta rechaza el outbound
+            # (131047); el comprobante siempre llega por correo.
             response_text = (
                 f"Tu pedido *#{short_id}* ya tiene link de pago activo{name_part}.\n\n"
                 f"*Paga aquí:*\n{link['checkout_url']}\n\n"
-                f"> Si ya pagaste, recibirás la confirmación por este chat. "
+                f"> Si ya pagaste, recibirás la confirmación por aquí y por correo. "
                 f"El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos desde su generación."
             )
             logger.info(
@@ -487,7 +490,7 @@ async def handle_payment_link_if_applicable(
                 f"Tu link anterior expiró. Aquí va el nuevo para *#{short_id}*{name_part}.\n\n"
                 f"*Paga aquí:*\n{new_url}\n\n"
                 f"> El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos. "
-                f"Una vez confirmado el pago recibirás la confirmación por este chat."
+                f"Una vez confirmado el pago recibirás la confirmación por aquí y por correo."
             )
             return PaymentLinkResult(
                 checkout_url=new_url,
@@ -894,7 +897,7 @@ async def handle_payment_link_if_applicable(
         f"¡Perfecto{name_part}! Tu pedido *#{short_id}* está listo.\n\n"
         f"*Paga aquí:*\n{checkout_url}\n\n"
         f"> El link es válido por 30 minutos. "
-        f"Una vez confirmado el pago recibirás la confirmación por este chat."
+        f"Una vez confirmado el pago recibirás la confirmación por aquí y por correo."
     )
 
     return PaymentLinkResult(

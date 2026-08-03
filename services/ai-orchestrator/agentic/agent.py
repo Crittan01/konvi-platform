@@ -368,67 +368,12 @@ async def run_agentic_turn(
                         "[AGENTIC] text-only fallback falló: %s", fb_exc,
                     )
 
-            # ── Rev. 109 Día 3 — Claude rescue ──
-            # Si llegamos aquí, Gemini Flash + text-only retry fallaron.
-            # Antes de degraded, intentamos Claude Sonnet como cross-vendor
-            # rescue (text-only, sin tools). Designed only para evitar que
-            # el cliente vea mensaje degraded — el flow agentic siguiente
-            # turn vuelve a Gemini.
-            try:
-                from llm_claude_rescue import (
-                    is_available as claude_available,
-                    invoke_claude_text_only,
-                )
-                if claude_available():
-                    # Convertir history Gemini → formato simple para Claude.
-                    claude_history = []
-                    for m in messages[:-1]:  # excluye el último user (lo pasamos aparte)
-                        parts = m.get("parts", [])
-                        text_acc = "\n".join(
-                            (p.get("text") or "") for p in parts
-                            if isinstance(p, dict) and p.get("text")
-                        ).strip()
-                        if text_acc:
-                            claude_history.append({
-                                "role": m.get("role", "user"),
-                                "content": text_acc,
-                            })
-                    last_user = messages[-1] if messages else None
-                    last_text = ""
-                    if last_user:
-                        last_text = "\n".join(
-                            (p.get("text") or "") for p in last_user.get("parts", [])
-                            if isinstance(p, dict) and p.get("text")
-                        ).strip()
-                    if last_text:
-                        rescue = invoke_claude_text_only(
-                            system_prompt=system_prompt,
-                            user_text=last_text,
-                            history=claude_history,
-                        )
-                        if rescue.text.strip():
-                            logger.info(
-                                "[AGENTIC_CLAUDE_RESCUE] conv=%s recuperado "
-                                "(model=%s len=%d)",
-                                conversation_id, rescue.model, len(rescue.text),
-                            )
-                            return AgenticTurnResult(
-                                outbound_text=rescue.text,
-                                tool_calls_executed=total_tool_calls,
-                                tool_call_log=tool_call_log,
-                                truncated=True,
-                                truncated_reason=(
-                                    f"claude_rescue_from:{finish_reason or 'STOP'}"
-                                ),
-                                finish_reason=last_finish_reason,
-                                total_tokens=total_tokens,
-                            )
-            except Exception as claude_exc:
-                logger.warning(
-                    "[AGENTIC_CLAUDE_RESCUE] falló conv=%s: %s",
-                    conversation_id, claude_exc,
-                )
-
+            # ── Recoveries reales agotados ──
+            # (A6 2026-08-02: el tier Claude rescue se eliminó — el paquete
+            # `anthropic` nunca estuvo en requirements, así que is_available()
+            # era siempre False y el tier era código muerto. Los recoveries
+            # reales que quedan: retry con history reducido y retry text-only,
+            # ambos arriba.)
             # No retry — usar degraded text como outbound.
             # Marcar requires_silent_escalation si agotamos recoveries STOP.
             # El dispatcher debe escalar conv a human_takeover para que un
@@ -647,13 +592,15 @@ async def _gemini_generate_async(
 
     Rev. 106 — envuelve la invocación en `generate_with_cascade` de
     `llm_invoke.py` (Rev. 80, ADR-0001). Garantiza:
-      • 4 intentos en `model` (primary) con backoff exponencial 1-16s.
-      • 4 intentos en `GEMINI_FALLBACK_MODEL` (default gemini-3.1-flash-lite)
+      • Intentos en `model` (primary) con backoff exponencial 1-16s
+        (GEMINI_FALLBACK_AFTER, default 2) y presupuesto total por turno
+        (LLM_CASCADE_DEADLINE_SECONDS, default 100s — A5 2026-08-02).
+      • Resto de intentos en `GEMINI_FALLBACK_MODEL` (default gemini-3.5-flash)
         si el primary mantiene 503/429.
       • Errores no-transitorios (bug schema/prompt) se re-lanzan inmediato.
       • Si TODOS los intentos transitorios fallan → raise
-        `gemini_cascade_exhausted` para que el dispatcher caiga a legacy
-        (que tiene su propia cascada como segunda red de seguridad).
+        `gemini_cascade_exhausted` para que el dispatcher responda degraded
+        + escale (V1 legacy retirado, BLOQUE K-2).
 
     Previo a rev. 106: 1 intento, sin retry, 503 colapsaba directamente.
     """
@@ -698,9 +645,9 @@ async def _gemini_generate_async(
     )
 
     if cascade_result.degraded:
-        # Cascada agotada (flash + flash-lite ambos 503 sostenido).
-        # Raise para que el caller del loop convierta en error → dispatcher
-        # cae a legacy (defensa en profundidad: legacy tiene cascada propia).
+        # Cascada agotada (primary + fallback 503 sostenido o deadline
+        # agotado). Raise para que el caller del loop convierta en error →
+        # dispatcher responde degraded + escala (V1 legacy retirado, K-2).
         raise RuntimeError(
             f"gemini_cascade_exhausted after {cascade_result.attempts} attempts: "
             f"{cascade_result.last_error or 'unknown'}"

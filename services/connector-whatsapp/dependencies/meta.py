@@ -109,7 +109,7 @@ def _rate_limit_hit(ip: str) -> tuple[bool, int]:
 # Ver security.resolve_client_ip (api) para el rationale completo (W5/T4-01). La topología
 # XFF de Render NO está documentada; NO fijar el hop a ciegas (rompería el rate-limit).
 # Orden: TRUSTED_CLIENT_IP_HEADER (inmune al hop-count) → XFF_TRUSTED_HOPS_FROM_RIGHT (N
-# verificado empíricamente) → leftmost (default 0). Ref: docs/research/audit-2026-07-16-plan-90plus.md T4-01.
+# verificado empíricamente) → leftmost (default 0). Ref: docs/_archive/research/audit-2026-07-16-plan-90plus.md T4-01 (histórico).
 _TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "").strip().lower()
 _XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
 _XFF_CANARY = os.getenv("XFF_CANARY", "") == "1"

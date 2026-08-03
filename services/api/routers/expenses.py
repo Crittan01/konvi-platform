@@ -19,6 +19,7 @@ from dependencies.auth import (
     get_service_client,
     require_owner_role,
 )
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Expenses"])
@@ -35,7 +36,7 @@ class ExpenseReverse(BaseModel):
     reason: str = Field(..., min_length=3, max_length=300)
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="expense", action="created")
 def create_expense(
     expense: ExpenseCreate,
@@ -65,7 +66,7 @@ def create_expense(
         raise HTTPException(status_code=500, detail="Error al registrar el gasto") from e
 
 
-@router.post("/{expense_id}/reverse", response_model=dict)
+@router.post("/{expense_id}/reverse", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="expense", action="reversed")
 def reverse_expense(
     expense_id: str,

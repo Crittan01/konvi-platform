@@ -104,8 +104,10 @@ class TemplateInfo(BaseModel):
 
 @router.get("/templates", response_model=list[TemplateInfo])
 def list_agent_templates() -> list[TemplateInfo]:
-    """Lista los templates disponibles. Endpoint público (no requiere
-    tenant — los templates son globales)."""
+    """Lista los templates disponibles. NO es público: el router se monta con
+    _OFFBOARDING_GATE (main.py:304), que exige JWT de usuario o secreto interno
+    service-to-service (dependencies/auth.py:reject_if_tenant_deleting). Los
+    templates son globales (no dependen del tenant)."""
     from lib.agent_templates import AGENT_TEMPLATES
     return [
         TemplateInfo(

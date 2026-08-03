@@ -427,7 +427,7 @@ def get_plan_capabilities(
         raise HTTPException(status_code=500, detail="Error al obtener plan capabilities")
 
 
-@router.post("/maintenance/idempotency-cleanup", response_model=dict)
+@router.post("/maintenance/idempotency-cleanup", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 def cleanup_idempotency(
     body: IdempotencyCleanupRequest,
     tenant_id: str = Depends(get_current_tenant),

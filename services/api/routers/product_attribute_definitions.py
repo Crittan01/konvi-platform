@@ -20,6 +20,7 @@ from supabase import Client
 
 from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Product Attribute Definitions"])
@@ -98,7 +99,7 @@ def list_attribute_definitions(
         raise HTTPException(status_code=500, detail="Error al obtener el contrato de atributos") from e
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="attribute_definition", action="created")
 def create_attribute_definition(
     definition: AttributeDefCreate,
@@ -141,7 +142,7 @@ def create_attribute_definition(
         raise HTTPException(status_code=500, detail="Error al crear la definición") from e
 
 
-@router.patch("/{definition_id}", response_model=dict)
+@router.patch("/{definition_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="attribute_definition", action="updated")
 def patch_attribute_definition(
     definition_id: str,
@@ -177,7 +178,7 @@ def patch_attribute_definition(
         raise HTTPException(status_code=500, detail="Error al editar la definición") from e
 
 
-@router.delete("/{definition_id}", status_code=204)
+@router.delete("/{definition_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="attribute_definition", action="deleted")
 def delete_attribute_definition(
     definition_id: str,

@@ -74,6 +74,9 @@ def _ack(outcome: str, **extra: Any) -> JSONResponse:
 # ── Mapping de estados Aveonline → canónico interno ──────────────────────────
 # Dossier §6.4: estados reportados por carrier (variable por proveedor).
 # Mapping conservador — los unknown caen a 'pending' (no asumir entrega).
+# ESPEJO: services/ai-orchestrator/shipment_status_notifications.py (poll backup
+# A10 del worker) usa una copia de este mapping + TERMINAL_STATUSES +
+# _ORDER_STATUS_RANK — si editas aquí, actualiza allá (y viceversa).
 
 # `estado_id` numéricos vistos en muestras (plugin oficial WooCommerce
 # `action-update-guia.php`): 12=ENTREGADA. El resto se mapea por nombre.

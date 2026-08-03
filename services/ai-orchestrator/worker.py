@@ -9,6 +9,15 @@ from agentic.dispatcher import dispatch_message as _agentic_dispatch_message
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
 from refund_notifications import notify_client_refund_completed
+from shipment_status_notifications import (
+    TERMINAL_STATUSES as _SHIPMENT_TERMINAL_STATUSES,
+    advance_order_to_delivered as _advance_order_to_delivered,
+    is_status_regression as _is_status_regression,
+    map_raw_status as _map_raw_shipment_status,
+    notify_client_shipment_status as _notify_client_shipment_status,
+    record_shipment_tracking_event as _record_shipment_tracking_event,
+)
+from integrations.aveonline_client import AveonlineAuthError, AveonlineClient
 from whatsapp_sender import (
     send_whatsapp_message,
     send_whatsapp_template,
@@ -143,6 +152,28 @@ WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS = int(
 WOMPI_INBOX_MIN_AGE_SECONDS = int(os.getenv("WOMPI_INBOX_MIN_AGE_SECONDS", "120"))  # 2 min grace
 WOMPI_INBOX_MAX_ATTEMPTS = int(os.getenv("WOMPI_INBOX_MAX_ATTEMPTS", "5"))
 WORKER_API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
+
+# A10 (auditoría 2026-08-02) — Polling backup de tracking Aveonline. El estado
+# de un envío dependía 100% del webhook `webhookEstadosGuias`: si el tenant no
+# lo registró o un evento se pierde, el shipment se congela en un no-terminal.
+# Este job consulta `get_estado` (obtenerEstadoAuth, dossier §6.1) para guías
+# reales cuya última actualización supere STALE_HOURS y aplica la MISMA
+# semántica del webhook (dedup + guard monotónico vía RPC + avance de orden +
+# notificación) — ver shipment_status_notifications.py.
+AVEONLINE_STATUS_POLL_ENABLED = os.getenv("AVEONLINE_STATUS_POLL_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+AVEONLINE_STATUS_POLL_INTERVAL_SECONDS = int(
+    os.getenv("AVEONLINE_STATUS_POLL_INTERVAL_SECONDS", "3600"),  # 1h default
+)
+AVEONLINE_STATUS_POLL_STALE_HOURS = int(
+    os.getenv("AVEONLINE_STATUS_POLL_STALE_HOURS", "6"),
+)
+AVEONLINE_STATUS_POLL_BATCH = int(
+    os.getenv("AVEONLINE_STATUS_POLL_BATCH", "25"),
+)
+# Pausa fija entre llamadas al proveedor (rate suave — no martillear Aveonline).
+_AVEONLINE_STATUS_POLL_DELAY_SECONDS = 0.25
 
 CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
@@ -393,6 +424,9 @@ class OrchestratorWorker:
         self._wompi_inbox_reconcile_enabled = WOMPI_INBOX_RECONCILE_ENABLED
         self._last_wompi_inbox_reconcile_at = 0.0
         self._last_wompi_inbox_cleanup_at = 0.0
+        # A10 — polling backup de tracking Aveonline.
+        self._aveonline_status_poll_enabled = AVEONLINE_STATUS_POLL_ENABLED
+        self._last_aveonline_status_poll_at = 0.0
         self._last_sla_check_at = 0.0
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
@@ -475,6 +509,10 @@ class OrchestratorWorker:
             "wompi_void_notify_failed": 0,                  # gap F7-14
             "wompi_inbox_depth": 0,                         # W3 T3-01 — backlog sin procesar (gauge)
             "wompi_inbox_dead_lettered": 0,                 # W3 T3-01 — eventos de dinero en dead-letter (alertable)
+            "aveonline_status_poll_checked": 0,             # A10 — guías consultadas al proveedor
+            "aveonline_status_poll_updated": 0,             # A10 — shipments cuyo status cambió vía poll
+            "aveonline_status_poll_notified": 0,            # A10 — cambios notificados al cliente/operador
+            "aveonline_status_poll_errors": 0,              # A10 — errores de proveedor/DB (loop sigue)
             "poll_job_errors": 0,                           # Ola 0 — jobs aislados que fallaron
             "sla_notify_failed": 0,                         # gap F7-15
             # F5 bot_engine — rate-limit inbound→LLM (protección costo Gemini).
@@ -535,6 +573,7 @@ class OrchestratorWorker:
         await self._run_job("release_pending_payment", self._release_expired_pending_payment_orders())
         await self._run_job("wompi_void_poll", self._poll_wompi_pending_voids_if_due())
         await self._run_job("wompi_inbox_reconcile", self._reconcile_wompi_inbox_if_due())
+        await self._run_job("aveonline_status_poll", self._poll_aveonline_shipment_status_if_due())
         await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
@@ -3270,6 +3309,234 @@ class OrchestratorWorker:
                 logger.warning(
                     "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
                 )
+
+    async def _poll_aveonline_shipment_status_if_due(self) -> None:
+        """A10 (auditoría 2026-08-02) — Polling backup de tracking Aveonline.
+
+        Si el tenant no registró el webhook `webhookEstadosGuias` (o un evento
+        se pierde), el shipment queda congelado en un estado no-terminal para
+        siempre. Este job selecciona guías REALES con `updated_at` stale
+        (>STALE_HOURS sin tocar vía webhook), consulta `get_estado`
+        (obtenerEstadoAuth, dossier §6.1) y aplica la MISMA semántica del
+        webhook: dedup + guard monotónico (RPC fn_record_shipment_tracking_event,
+        migración 20260712040000), avance de la orden a 'delivered' (rank F-6) y
+        notificación al cliente/operador. La lógica compartida vive en
+        shipment_status_notifications.py (réplica local documentada — el API no
+        es importable desde este proceso).
+
+        Degradación silenciosa: tenant sin credenciales Aveonline → log debug y
+        skip de todos sus shipments del ciclo. Error del proveedor en una guía
+        → métrica + siguiente (el loop nunca se rompe).
+        """
+        if not self._aveonline_status_poll_enabled:
+            return
+        now = time.time()
+        interval = max(300, AVEONLINE_STATUS_POLL_INTERVAL_SECONDS)
+        if now - self._last_aveonline_status_poll_at < interval:
+            return
+        self._last_aveonline_status_poll_at = now
+
+        cutoff_iso = (
+            datetime.now(timezone.utc)
+            - timedelta(hours=AVEONLINE_STATUS_POLL_STALE_HOURS)
+        ).isoformat()
+        try:
+            res = (
+                self.supabase.table("shipments")  # tenant_filter:exempt:cron_cross_tenant_aveonline_status_polling
+                .select(
+                    "id, tenant_id, order_id, status, carrier, tracking_number, "
+                    "tracking_url",
+                )
+                .not_.is_("tracking_number", "null")
+                # Terminales (delivered/returned/cancelled) fuera; 'simulated'
+                # fuera: la guía dry-run (bloquegenerarguia=0) nunca se despacha
+                # → nunca cambiará de estado; pollarla solo gastaría API calls.
+                .not_.in_("status", ["delivered", "returned", "cancelled", "simulated"])
+                .lt("updated_at", cutoff_iso)
+                .order("updated_at")  # la más stale primero
+                .limit(max(1, AVEONLINE_STATUS_POLL_BATCH))
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("[AVEONLINE_POLL] query candidatos falló: %s", exc)
+            return
+
+        candidates = res.data or []
+        if not candidates:
+            return
+
+        logger.info(
+            "[AVEONLINE_POLL] %d guías stale a consultar (stale>%dh, batch=%d)",
+            len(candidates), AVEONLINE_STATUS_POLL_STALE_HOURS,
+            AVEONLINE_STATUS_POLL_BATCH,
+        )
+
+        clients: dict = {}
+        tenants_sin_credenciales: set = set()
+        for sh in candidates:
+            # Latido por candidato (paridad Gap F7-18): el HTTP al proveedor es
+            # I/O lento; sin heartbeat un batch largo tumba /health.
+            self.last_heartbeat_ts = time.time()
+            tenant_id = sh.get("tenant_id")
+            tracking = str(sh.get("tracking_number") or "").strip()
+            if not tenant_id or not tracking:
+                continue
+            if tenant_id in tenants_sin_credenciales:
+                continue
+            try:
+                client = clients.get(tenant_id)
+                if client is None:
+                    client = AveonlineClient(tenant_id=tenant_id, supabase=self.supabase)
+                    clients[tenant_id] = client
+                self._metrics["aveonline_status_poll_checked"] += 1
+                result = await client.get_estado(tracking_number=tracking)
+            except AveonlineAuthError as exc:
+                # Tenant sin Aveonline configurado (o status != 'connected'):
+                # degradación silenciosa exigida por A10 — log debug y skip de
+                # TODOS sus shipments restantes del ciclo.
+                logger.debug(
+                    "[AVEONLINE_POLL] tenant=%s sin credenciales Aveonline — skip: %s",
+                    str(tenant_id)[:8], exc,
+                )
+                tenants_sin_credenciales.add(tenant_id)
+                continue
+            except Exception as exc:
+                self._metrics["aveonline_status_poll_errors"] += 1
+                logger.warning(
+                    "[AVEONLINE_POLL] get_estado guia=%s tenant=%s falló: %s",
+                    tracking, str(tenant_id)[:8], exc,
+                )
+                continue
+            if not result.get("ok"):
+                # Respuesta NOT-ok del proveedor (transitorio o guía desconocida
+                # en Aveonline) — se reintenta el próximo ciclo.
+                continue
+            try:
+                await self._apply_aveonline_poll_result(sh, result)
+            except Exception as exc:
+                self._metrics["aveonline_status_poll_errors"] += 1
+                logger.warning(
+                    "[AVEONLINE_POLL] apply guia=%s falló: %s", tracking, exc,
+                )
+            # Rate suave entre llamadas al proveedor.
+            await asyncio.sleep(_AVEONLINE_STATUS_POLL_DELAY_SECONDS)
+
+    async def _apply_aveonline_poll_result(self, shipment: dict, result: dict) -> None:
+        """Aplica la respuesta de `get_estado` con la semántica del webhook.
+
+        Eventos: `historicos[]` ({estado, fechamostrar}) + el `estado` actual si
+        no está en el historial (registrado SIN fecha → external_event_id
+        estable cross-ciclo → dedup). Se procesan en orden cronológico asc
+        (paridad Rev. 113: la RPC hace last-write-wins entre no-terminales; el
+        más reciente debe procesarse último). La notificación sigue la misma
+        regla del webhook (evento nuevo + cambio de estado + previo no-terminal)
+        más un gate anti-retroceso (nunca avisar un salto hacia atrás, p.ej. un
+        historico viejo 'RECOGIDA' cuando ya va 'EN REPARTO').
+        """
+        guias = result.get("guias") or []
+        if not guias or not isinstance(guias[0], dict):
+            return
+        guia_data = guias[0]
+        guia = str(shipment.get("tracking_number") or "")
+        tenant_id = shipment["tenant_id"]
+        prev_status = (shipment.get("status") or "").strip()
+
+        events: list[dict] = []
+        for h in (guia_data.get("historicos") or []):
+            if not isinstance(h, dict):
+                continue
+            raw = str(h.get("estado") or "").strip()
+            if raw:
+                events.append({"raw": raw, "fecha": str(h.get("fechamostrar") or "").strip()})
+        current = str(guia_data.get("estado") or "").strip()
+        if current and all(e["raw"].upper() != current.upper() for e in events):
+            events.append({"raw": current, "fecha": ""})
+        if not events:
+            return
+        # Cronológico asc; el estado actual (fecha "") se fuerza al final (es el más nuevo).
+        events.sort(key=lambda e: e["fecha"] or "9999")
+
+        inserted_by_key: dict[str, bool] = {}
+        for e in events:
+            inserted = _record_shipment_tracking_event(
+                self.supabase,
+                tenant_id=tenant_id,
+                shipment_id=shipment.get("id"),
+                order_id=shipment.get("order_id"),
+                guia=guia,
+                nombre_estado=e["raw"],
+                fecha=e["fecha"],
+                raw_payload={"source": "status_poll", "guia": guia_data},
+            )
+            inserted_by_key[f"{e['raw']}|{e['fecha']}"] = inserted
+
+        latest = events[-1]
+        latest_internal = _map_raw_shipment_status(latest["raw"])
+        if not inserted_by_key.get(f"{latest['raw']}|{latest['fecha']}", False):
+            return  # nada nuevo (dedup cross-ciclo) — ni status ni notificación
+
+        # Re-fetch: la RPC aplicó el guard monotónico → refreshed.status es la
+        # AUTORIDAD del estado real (paridad con el webhook, que re-lee tras el RPC).
+        refreshed = self._lookup_shipment_by_id(tenant_id, str(shipment.get("id"))) or shipment
+        new_status = (refreshed.get("status") or "").strip()
+        if new_status != prev_status:
+            self._metrics["aveonline_status_poll_updated"] += 1
+            logger.info(
+                "[AVEONLINE_POLL] shipment=%s %s → %s (raw=%s, tenant=%s)",
+                str(shipment.get("id"))[:8], prev_status, new_status,
+                latest["raw"], str(tenant_id)[:8],
+            )
+
+        # BLOQUE F-6 (paridad webhook): si el shipment QUEDÓ delivered, avanzar
+        # la orden (rank monotónico, race-safe, idempotente). Gateado por el
+        # status REAL persistido — si el guard bloqueó el 'delivered', la orden
+        # TAMPOCO avanza → order y shipment no divergen.
+        if new_status == "delivered" and refreshed.get("order_id"):
+            _advance_order_to_delivered(
+                self.supabase, tenant_id, refreshed["order_id"], None,
+            )
+
+        # Notificación: misma regla del webhook (evento nuevo + cambio de estado
+        # + previo no-terminal) + gate anti-retroceso del poll.
+        if (
+            latest_internal != prev_status
+            and prev_status not in _SHIPMENT_TERMINAL_STATUSES
+            and not _is_status_regression(prev_status, latest_internal)
+        ):
+            try:
+                await _notify_client_shipment_status(
+                    self.supabase,
+                    tenant_id=tenant_id,
+                    shipment=refreshed,
+                    internal_status=latest_internal,
+                    raw_status=latest["raw"],
+                )
+                self._metrics["aveonline_status_poll_notified"] += 1
+            except Exception as exc:
+                # Best-effort (paridad webhook): el status YA quedó persistido;
+                # un fallo de notificación no lo revierte.
+                logger.warning(
+                    "[AVEONLINE_POLL] notify guia=%s falló: %s", guia, exc,
+                )
+
+    def _lookup_shipment_by_id(self, tenant_id: str, shipment_id: str) -> dict | None:
+        """Re-lectura tenant-scoped del shipment tras el RPC (autoridad del guard)."""
+        try:
+            res = (
+                self.supabase.table("shipments")
+                .select("id, status, order_id, tenant_id, carrier, tracking_number, tracking_url")
+                .eq("tenant_id", tenant_id)
+                .eq("id", shipment_id)
+                .limit(1).execute()
+            )
+            rows = res.data or []
+            return rows[0] if rows else None
+        except Exception as exc:
+            logger.warning(
+                "[AVEONLINE_POLL] shipment re-fetch err tenant=%s id=%s: %s",
+                str(tenant_id)[:8], str(shipment_id)[:8], exc,
+            )
+            return None
 
     async def _reconcile_wompi_inbox_if_due(self) -> None:
         """W2 — Reconciliación del inbox durable Wompi (re-drive de webhooks perdidos).

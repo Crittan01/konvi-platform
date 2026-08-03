@@ -344,8 +344,16 @@ def readiness_check(response: Response):
         _get_service_client().table("tenants").select("id").limit(1).execute()
         db_ok = True
     except Exception as exc:  # pragma: no cover — depende de infra
-        detail = str(exc)[:200]
-        logger.warning("[READINESS] DB no disponible: %s", detail)
+        # M14 (auditoría 2026-08-02): el endpoint es PÚBLICO (sin auth) — el
+        # mensaje interno de PostgREST/DB (host, schema, hint) NO se expone al
+        # cliente. Detalle genérico hacia afuera; error completo a logs+Sentry.
+        detail = "dependencia no disponible"
+        logger.warning("[READINESS] DB no disponible: %s", str(exc)[:500])
+        try:
+            from observability import capture_exception
+            capture_exception(exc, check="readiness_db")
+        except Exception:
+            pass  # Sentry no inicializado (tests/dev) — el log ya quedó
 
     if not db_ok:
         response.status_code = 503

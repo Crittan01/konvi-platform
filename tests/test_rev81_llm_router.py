@@ -106,10 +106,15 @@ class ModelPairTests(unittest.TestCase):
 
     def test_transactional_pair(self):
         primary, fallback = model_pair_for(INTENT_TRANSACTIONAL)
-        # Flash primario (no lite)
-        self.assertNotIn("lite", primary)
-        # Lite fallback
-        self.assertIn("lite", fallback)
+        # M8 (2026-08-02): el primario transaccional es GEMINI_MODEL (env) o
+        # el default unificado de llm_invoke.DEFAULT_PRIMARY_MODEL — antes
+        # había un literal divergente (gemini-3.5-flash) vs llm_invoke.
+        import os
+        import llm_invoke
+        self.assertEqual(
+            primary, os.getenv("GEMINI_MODEL", llm_invoke.DEFAULT_PRIMARY_MODEL),
+        )
+        self.assertEqual(fallback, llm_invoke.DEFAULT_FALLBACK_MODEL)
 
     def test_unknown_defaults_to_simple_pair(self):
         # Cualquier intent no transaccional cae en simple.

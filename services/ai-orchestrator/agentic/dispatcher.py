@@ -71,31 +71,64 @@ except Exception:  # pragma: no cover - import defensivo
 # consistente con carrier_capabilities/tenant_payment_methods).
 _AGENTIC_META_CACHE: dict[str, tuple[float, dict]] = {}
 _AGENTIC_META_TTL_SECONDS = 30
+# M11 (2026-08-02) — ante error de lectura del flag, reintento único tras
+# backoff corto (transitorios de red/pooler se resuelven solos). Solo corre
+# en el path de error; es un sleep bloqueante deliberado y acotado.
+_AGENTIC_META_RETRY_BACKOFF_SECONDS = 0.3
 
 
 def _get_agentic_meta(supabase: Any, tenant_id: str) -> dict:
     """Meta JSONB (cacheado 30s) del row tenant_integrations provider='agentic'.
-    Degrada a {} ante ausencia/error (comportamiento previo)."""
+
+    Comportamiento ante error de lectura (M11, fail-closed del flag
+    `agentic_enabled`): un error transitorio NO puede tratarse como "tenant
+    no migrado" — eso derivaba en escalación masiva de conversaciones sanas.
+      1. Reintenta UNA vez tras `_AGENTIC_META_RETRY_BACKOFF_SECONDS`.
+      2. Si persiste, sirve el ÚLTIMO valor cacheado aunque esté vencido
+         (stale-ok): config del tenant, no verdad transaccional.
+      3. Solo degrada a {} (flag ausente → gate fail-closed) si NUNCA se
+         leyó un valor para este tenant. Flag explícitamente false o row
+         ausente (lectura OK) → {} normal, como antes.
+    """
     now = time.time()
     cached = _AGENTIC_META_CACHE.get(tenant_id)
     if cached and (now - cached[0]) < _AGENTIC_META_TTL_SECONDS:
         return cached[1]
-    try:
-        res = (
-            supabase.table("tenant_integrations")
-            .select("meta")
-            .eq("tenant_id", tenant_id)
-            .eq("provider", "agentic")
-            .limit(1)
-            .execute()
+    meta: Optional[dict] = None
+    for attempt in (1, 2):
+        try:
+            res = (
+                supabase.table("tenant_integrations")
+                .select("meta")
+                .eq("tenant_id", tenant_id)
+                .eq("provider", "agentic")
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+            meta = (rows[0].get("meta") or {}) if rows else {}
+            break
+        except Exception as exc:
+            logger.warning(
+                "[AGENTIC_META] error leyendo meta tenant=%s (intento %d/2): %s",
+                tenant_id, attempt, exc,
+            )
+            if attempt == 1:
+                time.sleep(_AGENTIC_META_RETRY_BACKOFF_SECONDS)
+    if meta is None:
+        if cached:
+            logger.error(
+                "[AGENTIC_META] lectura falló x2 tenant=%s — usando cache "
+                "vencido (age=%.1fs) en vez de asumir flag ausente",
+                tenant_id, now - cached[0],
+            )
+            return cached[1]
+        logger.error(
+            "[AGENTIC_META] lectura falló x2 tenant=%s y sin cache previo — "
+            "degradando a {} (gate fail-closed, comportamiento previo)",
+            tenant_id,
         )
-        rows = res.data or []
-        meta = (rows[0].get("meta") or {}) if rows else {}
-    except Exception as exc:
-        logger.warning(
-            "[AGENTIC_META] error leyendo meta tenant=%s: %s — {}", tenant_id, exc,
-        )
-        meta = {}
+        return {}
     _AGENTIC_META_CACHE[tenant_id] = (now, meta)
     return meta
 
@@ -317,10 +350,11 @@ async def dispatch_message(
     # el path de crash de arriba y con fsm_states_denied (J-4 #3). En producción
     # 0 tenants llegan aquí (KAIU es agentic); esto es defensa ante
     # misconfiguración de provisioning del tenant.
-    # Nota: is_tenant_agentic_enabled devuelve False tanto si el row
-    # provider='agentic' NO existe (tenant no migrado) como si la lectura del
-    # flag falló transitoriamente (ver WARNING previo). No misdiagnosticar como
-    # solo-provisioning: ambas causas caen aquí y ambas escalan seguro.
+    # Nota: is_tenant_agentic_enabled devuelve False si el row
+    # provider='agentic' NO existe o el flag es explícitamente false (tenant
+    # no migrado). Ante fallo transitorio de lectura, _get_agentic_meta
+    # reintenta y sirve el cache vencido (M11) — solo llega aquí por error de
+    # lectura si NUNCA hubo un valor cacheado para este tenant.
     logger.error(
         "[AGENTIC_DISPATCH] tenant=%s conv=%s sin agentic_enabled y V1 retirado "
         "— degraded + escalación a humano. Causa: row provider='agentic' ausente "

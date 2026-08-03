@@ -58,6 +58,14 @@ CORE_TABLES = [
     "product_attribute_definitions",  # ADR-0029 F1 — contrato de atributos per-tenant (capa VIVA)
     "audit_log",
     "bot_source_log",
+    "order_receipts",              # Comprobantes de compra (ADR-0040, Ley 1480 art. 50)
+    "payment_reversal_requests",   # Reversión de pago (Decreto 1074)
+    "tenant_users",                # Membresía usuario↔tenant
+    "tenant_subscriptions",        # Suscripción/plan por tenant
+    "agentic_shadow_log",          # Shadow log agentic cutover
+    "rma_requests",                # Devoluciones (RMA)
+    "conversation_notes",          # Notas internas del inbox
+    "conversation_reads",          # Read-state del inbox por usuario
 ]
 
 DUMP_SQL_TEMPLATE = """
@@ -103,19 +111,28 @@ def _run_sql(sql: str) -> dict:
         sql_path = f.name
     try:
         result = subprocess.run(
-            ["supabase", "db", "query", "--linked", "-f", sql_path],
+            # -o json explícito: Supabase CLI ≥2.90 emite `table` por default
+            # cuando no detecta un agente (rompía el parse con "Output no
+            # parseable"). El formato JSON no debe depender del autodetect.
+            ["supabase", "db", "query", "--linked", "-o", "json", "-f", sql_path],
             capture_output=True,
             text=True,
             check=False,
         )
         if result.returncode != 0:
             raise RuntimeError(f"supabase CLI falló: {result.stderr}")
-        # supabase CLI envuelve en boundary JSON; extraemos la fila única.
+        # Tolerante a ambas formas del CLI: `-o json` emite un array plano de
+        # filas; el modo --agent=yes envuelve en {"rows": [...], "warning": ...}.
         try:
-            envelope = json.loads(result.stdout)
+            payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             raise RuntimeError(f"Output no parseable: {result.stdout[:500]}")
-        rows = envelope.get("rows") or []
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("rows") or []
+        else:
+            rows = []
         if not rows:
             return {"tables": []}
         return rows[0].get("dump") or {"tables": []}

@@ -157,7 +157,8 @@ def list_integrations(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Lista el estado de todas las integraciones del tenant (Envia, MeLi)."""
+    """Lista el estado de todas las integraciones del tenant (MeLi, Aveonline, Wompi,
+    WhatsApp; Envia eliminado del runtime — ADR-0019)."""
     try:
         result = (
             supabase.table("tenant_integrations")
@@ -893,7 +894,7 @@ def aveonline_webhook_status(
     }
 
 
-@router.post("/aveonline/webhook/configure")
+@router.post("/aveonline/webhook/configure", dependencies=[Depends(RL_WRITE_DEFAULT)])
 async def aveonline_webhook_configure(
     tenant_id: str = Depends(get_current_tenant),
     role: str = Depends(get_current_role),
@@ -988,7 +989,7 @@ async def aveonline_webhook_configure(
     }
 
 
-@router.post("/aveonline/webhook/rotate")
+@router.post("/aveonline/webhook/rotate", dependencies=[Depends(RL_WRITE_DEFAULT)])
 async def aveonline_webhook_rotate(
     tenant_id: str = Depends(get_current_tenant),
     role: str = Depends(get_current_role),
@@ -1009,7 +1010,7 @@ async def aveonline_webhook_rotate(
     )
 
 
-@router.delete("/aveonline/webhook", status_code=204)
+@router.delete("/aveonline/webhook", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 async def aveonline_webhook_delete(
     tenant_id: str = Depends(get_current_tenant),
     role: str = Depends(get_current_role),
@@ -1090,7 +1091,7 @@ def list_aveonline_carriers(
     ]
 
 
-@router.put("/aveonline/carriers", response_model=dict)
+@router.put("/aveonline/carriers", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 def bulk_upsert_aveonline_carriers(
     body: AveonlineCarriersBulk,
     tenant_id: str = Depends(get_current_tenant),
@@ -1147,7 +1148,7 @@ def bulk_upsert_aveonline_carriers(
     return {"updated": updated, "errors": errors}
 
 
-@router.delete("/aveonline/carriers/{carrier_code}", status_code=204)
+@router.delete("/aveonline/carriers/{carrier_code}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 def delete_aveonline_carrier(
     carrier_code: str,
     tenant_id: str = Depends(get_current_tenant),
@@ -1168,7 +1169,7 @@ def delete_aveonline_carrier(
     ).eq("provider", "aveonline").eq("carrier_code", code).execute()
 
 
-@router.post("/aveonline/carriers/seed", response_model=dict)
+@router.post("/aveonline/carriers/seed", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 async def seed_aveonline_carriers(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),

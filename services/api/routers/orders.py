@@ -43,6 +43,7 @@ from dependencies.internal_auth import (
 )
 from dependencies.plans import PLAN_ORDERS_CREATE
 from dependencies.security import RL_WRITE_DEFAULT
+from integrations.wompi_client import payment_link_ttl_minutes
 from routers.marketplace import sync_meli_stock
 
 logger = logging.getLogger(__name__)
@@ -73,17 +74,12 @@ def _is_allowed_order_transition(current: str, new: str) -> bool:
     return _ORDER_STATUS_RANK.get(new, 99) >= _ORDER_STATUS_RANK.get(current, -1)
 
 
-WOMPI_PAYMENT_LINK_TTL_MINUTES = 30
-# TTL de validez del link Wompi (expires_at enviado al crear el link). Tiene
-# DOS espejos en el código que deben mantenerse alineados:
-#   • services/ai-orchestrator/tools/payment_link_tool.py:WOMPI_LINK_TTL_MINUTES
-#     (boundary entre bucket a/b del idempotency guard).
-#   • services/ai-orchestrator/worker.py:PAYMENT_REMINDER_DELAY_MINUTES
-#     (cron de recordatorio dispara 5 min antes de este TTL).
-# El cron de cancelación de orden (PENDING_PAYMENT_TTL_MINUTES) se diseña 5
-# min POR ENCIMA de este valor para permitir regeneración del link sobre la
-# misma orden (Plan A.0.1: una conv = una orden activa).
-# Detalles: docs/adr/0011-payment-link-lifecycle.md.
+# TTL de validez del link Wompi (expires_at enviado al crear el link): ÚNICA
+# fuente `integrations.wompi_client.payment_link_ttl_minutes()` (env
+# WOMPI_PAYMENT_LINK_TTL_MINUTES, default 30) — compartida con la regeneración
+# de wompi_webhook.py. Antes aquí había un 30 hardcodeado que divergía del env.
+# Detalles + espejos (payment_link_tool, PAYMENT_REMINDER_DELAY_MINUTES):
+# ver el comentario junto a DEFAULT_PAYMENT_LINK_TTL_MINUTES en wompi_client.py.
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -476,7 +472,7 @@ async def create_payment_link(
     """
     Genera un link de pago Wompi para un pedido en estado pending o pending_payment.
     Persiste el link en la tabla payments y retorna la checkout_url.
-    Válido por WOMPI_PAYMENT_LINK_TTL_MINUTES minutos (default 30).
+    Válido por payment_link_ttl_minutes() minutos (env WOMPI_PAYMENT_LINK_TTL_MINUTES, default 30).
     """
     try:
         # F105: usar el wrapper resiliente (retry exponencial + circuit breaker) — cierra el riesgo P0
@@ -529,7 +525,7 @@ async def create_payment_link(
         contact_name = contact.get("name") or "Cliente"
         short_id = order_id[:8].upper()
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(minutes=WOMPI_PAYMENT_LINK_TTL_MINUTES)
+            datetime.now(timezone.utc) + timedelta(minutes=payment_link_ttl_minutes())
         ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         link_data = await wompi_create_link(

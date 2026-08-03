@@ -20,13 +20,14 @@ H.3.1 — Estado de exposición HTTP (cierre 2026-05-29):
     Python (cron de reconciliation, scripts admin, background jobs).
     NO existe endpoint HTTP público GET /api/v1/wompi/transactions/{id} —
     decisión arquitectónica Sem 4 (2026-05-06) + cierre 2026-05-29 documentado
-    en docs/reports/h31_wompi_get_transaction_closure.md. NO eliminar estas
+    en docs/_archive/reports/h31_wompi_get_transaction_closure.md (histórico). NO eliminar estas
     funciones: son contract estable para cuando se diseñe la UI
     "Reconciliar pago" o el cron de reconciliación background.
 """
 import hashlib
 import hmac
 import logging
+import os
 from typing import Any, Optional, Tuple
 
 import httpx
@@ -40,6 +41,49 @@ WOMPI_SANDBOX_URL = "https://sandbox.wompi.co/v1"
 WOMPI_PROD_URL = "https://production.wompi.co/v1"
 
 REQUEST_TIMEOUT_SECONDS = 15
+
+# TTL default del link de pago Wompi (minutos). ÚNICA fuente: el env
+# WOMPI_PAYMENT_LINK_TTL_MINUTES lo overridea vía payment_link_ttl_minutes().
+# Antes del cierre 2026-08-02 había DOS lecturas divergentes: orders.py
+# hardcodeaba 30 (creación del link) y wompi_webhook.py leía el env
+# (regeneración post-pago fallido) → un override del env solo aplicaba a la
+# mitad de los links. Espejos que asumen este valor (mantener alineados):
+#   • services/ai-orchestrator/tools/payment_link_tool.py:WOMPI_LINK_TTL_MINUTES
+#     (boundary entre bucket a/b del idempotency guard).
+#   • services/ai-orchestrator/worker.py:PAYMENT_REMINDER_DELAY_MINUTES
+#     (cron de recordatorio dispara 5 min antes de este TTL).
+# El cron de cancelación de orden (PENDING_PAYMENT_TTL_MINUTES) se diseña 5
+# min POR ENCIMA de este valor para permitir regeneración del link sobre la
+# misma orden. Detalles: docs/adr/0011-payment-link-lifecycle.md.
+DEFAULT_PAYMENT_LINK_TTL_MINUTES = 30
+
+
+def payment_link_ttl_minutes() -> int:
+    """TTL (minutos) del link de pago Wompi (`expires_at` al crear/regenerar).
+
+    Lee `WOMPI_PAYMENT_LINK_TTL_MINUTES` del env en CADA llamada (testeable y
+    coherente entre creación — orders.py — y regeneración — wompi_webhook.py).
+    Default 30; valor inválido o <1 cae al default con warning (fail-safe: un
+    TTL malformado nunca rompe la generación del link de pago).
+    """
+    raw = os.getenv("WOMPI_PAYMENT_LINK_TTL_MINUTES", "").strip()
+    if not raw:
+        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "[WOMPI] WOMPI_PAYMENT_LINK_TTL_MINUTES inválido (%r) — usando default %d",
+            raw, DEFAULT_PAYMENT_LINK_TTL_MINUTES,
+        )
+        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
+    if value < 1:
+        logger.warning(
+            "[WOMPI] WOMPI_PAYMENT_LINK_TTL_MINUTES=%d <1 — usando default %d",
+            value, DEFAULT_PAYMENT_LINK_TTL_MINUTES,
+        )
+        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
+    return value
 
 
 def wompi_base_url(environment: str) -> str:
