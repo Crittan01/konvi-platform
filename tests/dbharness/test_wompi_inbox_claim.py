@@ -151,10 +151,19 @@ def test_cleanup_purga_solo_lo_que_debe(db, inbox):
 
 
 def test_solo_service_role_accede_inbox(db, inbox):
-    """RLS deny-all: un authenticated user NO puede leer el inbox (infra sin tenant)."""
+    """Un authenticated user NO puede leer el inbox (infra sin tenant).
+
+    Defensa en dos capas, cualquiera de las dos es postura válida:
+    - RLS deny-all (sin policies): la query corre y devuelve 0 filas.
+    - REVOKE de grants de tabla (20260802120000): la query falla con
+      InsufficientPrivilege — barrera anterior a RLS, aún más estricta.
+    """
     from _harness import as_user, OWNER_A
     with db.cursor() as cur:
         _insert(cur, "harness-rls", age_seconds=600)
     with as_user(OWNER_A, "aaaaaaaa-0000-0000-0000-000000000a01", "owner") as cur:
-        cur.execute("SELECT count(*) FROM public.wompi_webhook_inbox WHERE checksum='harness-rls'")
-        assert cur.fetchone()[0] == 0, "authenticated user leyó el inbox (RLS deny-all roto)"
+        try:
+            cur.execute("SELECT count(*) FROM public.wompi_webhook_inbox WHERE checksum='harness-rls'")
+            assert cur.fetchone()[0] == 0, "authenticated user leyó el inbox (RLS deny-all roto)"
+        except psycopg.errors.InsufficientPrivilege:
+            pass  # REVOKE de grants: barrera anterior a RLS, postura más estricta
