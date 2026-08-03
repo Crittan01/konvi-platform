@@ -6,4 +6,4 @@
 
 **Prerequisito**: Fases 10-11 completadas (ya están). Decisión de producto de que un tenant necesita Shopify.
 
-Ver `docs/roadmap/implementation-phases.md` Fase 13.
+Ver `docs/PLAN.md` §C (Roadmap post-go-live) — Shopify / tienda custom (Fase 13).

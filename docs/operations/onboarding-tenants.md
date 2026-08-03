@@ -1,6 +1,7 @@
 # Runbook — Onboarding de un tenant nuevo (provisión → operando)
 
-**Última actualización**: 2026-07-04
+> Estado: VIGENTE · Última verificación: 2026-08-03 @ develop
+
 **Audiencia**: founder/admin de Konvi. Proceso **ADMIN-controlado** (decisión founder: NO signup público).
 **Objetivo**: que integrar un tenant nuevo sea **repetible** y verificable de punta a punta.
 **Modelo Meta**: Direct Provider per-tenant — cada tenant trae SU PROPIA Meta App (ADR-0023).
@@ -14,8 +15,8 @@
 
 - Env con `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SECRET_KEY` (o `SUPABASE_SERVICE_ROLE_KEY`).
 - Migración `20260702190000_f3_provision_tenant.sql` aplicada (RPC `public.provision_tenant`).
-- Opcional (audit trail atómico): `20260704120000_f3_provision_tenant_audit.sql` — **pendiente aplicar**
-  (ver §7). Sin ella, el audit lo escribe el script best-effort.
+- Migración `20260704120000_f3_provision_tenant_audit.sql` aplicada — el RPC escribe el audit
+  trail (`tenant.provisioned`) en la misma transacción.
 
 ---
 
@@ -115,7 +116,7 @@ insuficiente — falta `app_secret` + `verify_token`).
 - [ ] `private_key` · [ ] `events_key` → panel Wompi.
 - [ ] Webhook Wompi apuntando a `<API>/api/v1/webhooks/wompi` (ruta real; NO `/api/v1/wompi/webhook`).
 
-### Aveonline (despacho — provider activo, ADR-0019; Envia fue retirado en rev. 109)
+### Aveonline (despacho — único provider de shipping, ADR-0019)
 
 - [ ] Credenciales del carrier + **origen de despacho** (sin origen el bot no cotiza envíos).
 - [ ] Webhook de estados de guía (lo configura el panel Aveonline).
@@ -166,15 +167,13 @@ Aislamiento (spot-check): con el JWT del owner, cualquier query devuelve sólo f
 | Bot no recibe mensajes | app_secret equivocado / no suscrito a `messages` | Revisar app_secret de la App del tenant + fields |
 | Confirmaciones de pago 404 | URL Wompi mal (`/api/v1/wompi/webhook`) | Usar `/api/v1/webhooks/wompi` |
 
-Para deshacer una provisión de prueba, ver `docs/operations/` (offboarding) y `tests/test_tenant_offboarding.py`.
+Para deshacer una provisión de prueba: el flujo de offboarding (soft-delete + grace 30 días + hard-delete)
+vive en `services/api/routers/tenant_offboarding.py`; cobertura en `tests/test_tenant_offboarding.py`.
 
 ---
 
 ## 7 · Acciones founder pendientes (bloqueantes de producción)
 
-- **Aplicar** `supabase/migrations/20260704120000_f3_provision_tenant_audit.sql` (audit trail atómico en el
-  RPC). Requiere protocolo seguro de migración al remote (ledger con drift). Hasta entonces, el audit lo hace
-  el script best-effort con `--actor-email`.
 - **DNS / `WHATSAPP_CONNECTOR_URL`** (ADR-0023 OQ-4): definir el host del connector y setear el env en
   `render.yaml` para que la URL de webhook que muestra el panel sea servible. `api.konvi.co` sin DNS no puede
   servir a la vez API (wompi/telegram) y connector (whatsapp).
@@ -195,4 +194,4 @@ Para deshacer una provisión de prueba, ver `docs/operations/` (offboarding) y `
 - `docs/onboarding/H1-H5-checklist.md` — trámites Meta humanos.
 - `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md` — Direct Provider per-tenant.
 - `docs/adr/0025-multi-tenant-isolation-strategy.md` — aislamiento (lint AST + RLS + Vault).
-- `docs/adr/0019-*` — Aveonline como shipping provider (Envia retirado rev. 109).
+- `docs/adr/0019-*` — Aveonline como shipping provider único.

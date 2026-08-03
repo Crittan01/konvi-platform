@@ -72,8 +72,8 @@ Existen como código funcional y **están enlazadas en el sidebar**, pero el tre
 | `/dashboard/promotions` | Gestión de cupones del tenant (crear/editar/desactivar, nunca hard delete para preservar `coupon_redemptions` por Habeas Data). Tipos: `percent`, `fixed_amount`, `free_shipping`; UI captura pesos, DB/engine/bot usan centavos. ADR-0015. | owner/manager |
 | `/dashboard/receipts` | Lista read-only de comprobantes de compra emitidos (`order_receipts`, ADR-0040). Lee con cliente de sesión (RLS), sin escritura desde consola: el comprobante es prueba de una operación de consumo. Detalle en `/dashboard/receipts/[id]`. | Todos los roles |
 | `/dashboard/categories` | Categorías operativas per-tenant (las que el bot presenta al cliente) + contrato de atributos por categoría (ADR-0027/ADR-0029). Read por RLS, write vía API con RBAC + audit. | owner/manager |
-| `/dashboard/settings/security` | MFA TOTP con 8 recovery codes (descarga una vez), cambio de contraseña. Cualquier usuario autenticado puede activar MFA en su sesión (rev. 109 J.2.4.3). | Todos los roles |
-| `/dashboard/settings/health` | Salud de las integraciones **del propio tenant** (`tenant_provider_health`, 5 proveedores), refresco por cron del orchestrator cada 5 min, alerta Telegram al operador si una métrica degrada (rev. 109 J.2.11). | owner/manager |
+| `/dashboard/settings/security` | MFA TOTP con 8 recovery codes (descarga una vez), cambio de contraseña. Cualquier usuario autenticado puede activar MFA en su sesión. | Todos los roles |
+| `/dashboard/settings/health` | Salud de las integraciones **del propio tenant** (`tenant_provider_health`, 5 proveedores), refresco por cron del orchestrator cada 5 min, alerta Telegram al operador si una métrica degrada. | owner/manager |
 | `/dashboard/settings/legal` | Aceptación click-wrap de DPA + Política de Privacidad + Subprocesadores (versiones `v2026-05-01`) sobre `tenant_legal_acceptance` (append-only por triggers, captura IP/user-agent). Incluye descarga del reporte SIC. | owner/manager |
 | `/dashboard/settings/retention` | Políticas de retención per-tenant (`retention_policies`): TTL por entidad (mensajes 180d, conversaciones 365d, contactos sin consent 730d por default); aplica pg_cron dominical vía `fn_apply_retention`. Base: Ley 1581 arts. 4 y 11. | owner/manager |
 | `/dashboard/settings/account-closure` | Offboarding del tenant, owner-only: exportar datos, solicitar eliminación con grace period, cancelar eliminación. Hard-delete automatizado habilitado (`TENANT_HARD_DELETE_ENABLED=true`, `render.yaml:355-356`). Ley 1581 arts. 16 y 22. | owner |
@@ -103,7 +103,7 @@ Existen como código funcional y **están enlazadas en el sidebar**, pero el tre
 |---|---|---|
 | **Meta / WhatsApp Cloud API** | Mensajería del canal principal | LIVE (Model B per-tenant). |
 | **Wompi (Bancolombia)** | Pasarela de pagos: el bot genera link de pago; webhook confirma y dispara fulfilment | **LIVE** — firma SHA256, inbox durable, dedup por checksum, validación de monto fail-closed, void automático de huérfanos, reconciliación en 3 capas. |
-| **Aveonline** | Shipping: cotización, generación de guías, tracking | **PARCIAL** — cotización live; guías en dry-run (`AVEONLINE_GENERATE_REAL_GUIDES=false`); webhook de estados implementado (`services/api/routers/aveonline_webhook.py`); polling de respaldo ausente (A10). Envia fue **eliminado** del runtime en rev. 109 — cualquier doc que aún lo mencione está stale (ver B3 en `../PLAN.md`). |
+| **Aveonline** | Shipping: cotización, generación de guías, tracking | **PARCIAL** — cotización live; guías en dry-run (`AVEONLINE_GENERATE_REAL_GUIDES=false`, bloqueante B1 en `../PLAN.md`); webhook de estados implementado (`services/api/routers/aveonline_webhook.py`); polling de respaldo implementado (`_aveonline_status_poll` en el worker). Único provider de shipping (ADR-0019). |
 | **Telegram Bot API** | Notificaciones operativas al tenant (escalaciones, alertas de salud) | **LIVE** — secret + RBAC chat→tenant self-heal; `setWebhook` manual por tenant (M17). |
 | **Resend** | Email transaccional (comprobante post-pago, Habeas Data) | Implementado con fallback graceful: sin `RESEND_API_KEY` se loguea en vez de enviar (`render.yaml:218-223`). SMTP propio pendiente (founder-gate, ver PLAN). |
 | **Google Gemini** | IA asistiva del bot (`google-genai` 2.11.0; modelos `gemini-3.5-flash` / `3.1-flash-lite` / `3.1-pro-preview`) | LIVE con 3 capas anti-alucinación; rescate Claude muerto (A6: paquete `anthropic` no instalado). |
@@ -148,7 +148,7 @@ Este PRD no inventa targets de negocio. Las señales de éxito **instrumentadas 
 
 | Fuera de alcance | Razón verificada |
 |---|---|
-| **Platform Console (Fase 12)** | No tiene implementación; bloqueada por OQ-P01 (arquitectura: ¿misma app o app separada?) — [`docs/risks/open-questions.md`](../risks/open-questions.md), [`docs/roadmap/implementation-phases.md`](../roadmap/implementation-phases.md). Las vistas cross-tenant se difieren todas aquí. |
+| **Platform Console (Fase 12)** | No tiene implementación; bloqueada por OQ-P01 (arquitectura: ¿misma app o app separada?) — [`docs/risks/open-questions.md`](../risks/open-questions.md), [`../PLAN.md`](../PLAN.md) §C. Las vistas cross-tenant se difieren todas aquí. |
 | **Shopify / tienda custom (Fase 13)** | Futuro lejano; `services/connector-shopify` es placeholder (solo README). |
 | **ERP completo** | El producto es operación comercial conversacional, no ERP (`.context/00-product.md` §1). |
 | **COD / contraentrega (H.2.4)** | Pausado formalmente 2026-05-07 hasta certificación empírica (KYC Ecart Pay Colombia + formato DANE Servientrega) — ver [`../PLAN.md`](../PLAN.md) §Roadmap. |

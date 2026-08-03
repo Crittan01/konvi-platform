@@ -24,7 +24,7 @@ Defensa en profundidad: si el texto candidato contiene frase de escalación y el
 
 ### 1.3 Degraded path (fallos del agente)
 
-`agentic/dispatcher.py:_emit_degraded_response_and_escalate` (343, rev. 109 BUG 38):
+`agentic/dispatcher.py:_emit_degraded_response_and_escalate` (línea 343):
 
 - **1er fallo** de la conversación en ventana de 10 min → mensaje natural invitando a reintentar, **NO escala** (la mayoría de crashes son transitorios: saturación LLM, edge cases).
 - **2º fallo consecutivo** del mismo cliente en <10 min → `human_takeover` + notificación Telegram (patrón crítico, no transitorio).

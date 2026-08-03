@@ -1,6 +1,6 @@
 # Rollout y Rollback
 
-Última actualización: 2026-07-13
+> Estado: VIGENTE · Última verificación: 2026-08-03 @ develop
 
 ## Topología de deploy (IMPORTANTE)
 
@@ -53,8 +53,9 @@ Opción A es la más rápida en incidente (Render redeploya el `<sha_bueno>`). V
 
 No hay down-migrations automáticas. Si se requiere reversión de esquema, crear una
 migración compensatoria NUEVA en `supabase/migrations/` (nunca editar una aplicada) +
-aplicarla con el protocolo seguro. Nota: dev y prod comparten la misma Supabase hasta que
-exista staging aislado (auditoría 2026-07-13, W3) — extremar el smoke `BEGIN…ROLLBACK`.
+aplicarla con el protocolo seguro. Nota: el desarrollo local corre hoy contra la Supabase
+de prod bajo el guard `prelaunch` (segregación y roadmap en `docs/infra/environments.md`)
+— extremar el smoke `BEGIN…ROLLBACK`.
 
 ## Checklist mínimo post-deploy
 

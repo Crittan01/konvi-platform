@@ -97,7 +97,7 @@ Verificado 2026-08-02: los 4 directorios contienen **únicamente un README.md**.
 | `services/connector-shopify/` | solo README | Fase 13 (futuro lejano), prerequisito: decisión de producto (`services/connector-shopify/README.md`). |
 | `services/connector-mercadolibre/` | solo README | La integración MeLi real vive **dentro de `services/api/`** (routers `marketplace.py`, `meli_webhook.py`, `integrations.py` + `integrations/meli_client.py`). El directorio reserva la extracción a servicio independiente si se justifica (escalado/rate-limit separados) (`services/connector-mercadolibre/README.md`). |
 
-### 2.3 Topología de ramas (verificado con git 2026-08-02)
+### 2.3 Topología de ramas (verificado con git 2026-08-03)
 
 ```
 develop  ── trunk de integración; CI corre aquí (push + PRs)
@@ -106,11 +106,11 @@ develop  ── trunk de integración; CI corre aquí (push + PRs)
 production ── deploy target de los 4 servicios Render (autoDeploy on-push)
 ```
 
-- Verificado: `origin/develop` == `origin/production` == `5fdad396` (`git rev-parse`).
+- Verificado 2026-08-03 (`git ls-remote`): `origin/develop` = `a66d45f7`; `origin/production` =
+  `5fdad396` (8 commits atrás — la promoción es decisión founder, ver `docs/PLAN.md` §E).
 - **`main` NO EXISTE** en el remoto (`git ls-remote --heads origin` → solo `develop`, `production`
-  y ramas dependabot). El HANDOFF rev.112 (2026-07-12) documentaba "`main` está 249 commits atrás,
-  NO es deploy target"; en algún punto posterior `main` fue eliminada. Lo vigente: `main` no es
-  deploy target **porque no existe**; el deploy target es `production`.
+  y ramas de trabajo dependabot/fix): `main` no es deploy target **porque no existe**; el deploy
+  target es `production`.
 - CI **no** corre en push a `production` por diseño: el deploy es autoDeploy de Render observando la
   rama, y el commit es idéntico al ya validado en `develop` (comentario `ci.yml:7-10`).
 
@@ -325,15 +325,16 @@ Triggers: PR a `develop`/`phase-*` y push a `develop`; `concurrency` con cancel-
 
 | Límite | Detalle | Ref auditoría / evidencia |
 |---|---|---|
-| Cascada LLM vs heartbeat | Peor caso cascada 303 s > heartbeat 120 s → restart Render a mitad de turno; posible outbound duplicado (detalle §3.5) | A5; `services/ai-orchestrator/server.py:66`; `llm_invoke.py:37-45,102-104` |
 | Guías Aveonline simuladas | `AVEONLINE_GENERATE_REAL_GUIDES=false` en prod → toda guía es dry-run (`bloquegenerarguia="0"`). Guía real exige **doble compuerta**: env master **y** flag per-tenant `real_guides_enabled` (default false) | B1; `render.yaml:226-227,348-350`; `services/api/routers/wompi_webhook.py:1995-1999`; `services/api/integrations/aveonline_client.py:764` |
 | MFA no obligatorio | `MFA_MANDATORY_ENABLED=false` en prod | A1; `render.yaml:208-209` |
-| Rescate Claude muerto | `anthropic` no está en ningún `requirements.txt` → `is_available()` siempre False y el tier Claude nunca corre (aunque `ANTHROPIC_API_KEY` sí está declarada en render.yaml) | A6; `services/ai-orchestrator/llm_claude_rescue.py:41-52`; `render.yaml:363-364` |
-| Defaults de modelo divergentes | `orchestrator.py:35` default `gemini-3.5-flash` vs `llm_invoke.py:37` default `gemini-3.1-flash-lite`; enmascarado en prod por `GEMINI_MODEL` en render.yaml | M8 |
-| Tracking Aveonline sin polling backup | Si el webhook no llega, el envío se congela (`get_estado` sin callers) | A10 |
-| Reconciliación Wompi | Si el webhook se pierde del todo (reintentos Wompi 30m/3h/24h agotados), la reconciliación es **manual** (limitación del API público Wompi) — runbook `docs/operations/runbooks/wompi-payment-reconciliation.md` | M4; `docs/HANDOFF.md` |
-| `X-Tenant-Id` autodeclarado | La barrera service-to-service es solo `INTERNAL_SERVICE_SECRET`; el tenant declarado no se verifica | A12; `services/api/dependencies/internal_auth.py:62-86` |
+| Reconciliación Wompi | Si el webhook se pierde del todo (reintentos Wompi 30m/3h/24h agotados), la reconciliación es **manual** (limitación del API público Wompi) | M4; runbook `docs/operations/runbooks/wompi-payment-reconciliation.md` |
+| `X-Tenant-Id` autodeclarado | La barrera service-to-service es solo `INTERNAL_SERVICE_SECRET`; el tenant declarado no se verifica criptográficamente (cada llamada sí deja fila de auditoría en `api_security_events`) | A12; `services/api/dependencies/internal_auth.py` |
 | Tests no portables | ~187 archivos de test con path absoluto `/home/ansible/...` → CI usa symlink shim | M9; `ci.yml:127-139` |
+
+> Cerrados el 2026-08-02 (detalle y evidencia en `docs/PLAN.md` §B): A5 (deadline de cascada
+> `LLM_CASCADE_DEADLINE_SECONDS=100` < heartbeat 120 s), A6 (rescate Claude eliminado del repo),
+> M8 (default de modelo unificado vía `DEFAULT_PRIMARY_MODEL`), A10 (polling backup
+> `_aveonline_status_poll` del worker).
 
 ---
 

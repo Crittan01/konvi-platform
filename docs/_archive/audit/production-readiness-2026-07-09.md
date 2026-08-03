@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVADO — 2026-08-03.** Contenido histórico superado, conservado solo como registro. Estado vigente: docs/PLAN.md y .context/01-state.md.
+
+---
+
 # Auditoría de Production-Readiness — Tenant Console de Konvi
 **FASE 0 del Prompt Maestro · 2026-07-09 · gate previo al Platform Console**
 

@@ -2,7 +2,7 @@
 
 > Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop
 
-Estado al 2026-08-02 (auditoría §4): **Aveonline PARCIAL** — cotización live, **guías en dry-run** (`AVEONLINE_GENERATE_REAL_GUIDES=false`, bloqueante B1), webhook de estados implementado. Aveonline es el **único** provider de shipping (Envia eliminado en rev. 109).
+Estado al 2026-08-02 (auditoría §4): **Aveonline PARCIAL** — cotización live, **guías en dry-run** (`AVEONLINE_GENERATE_REAL_GUIDES=false`, bloqueante B1), webhook de estados implementado. Aveonline es el **único** provider de shipping (ADR-0019).
 
 ---
 
@@ -41,7 +41,7 @@ Solo si la guía se generó: email `shipment_label_ready` + WhatsApp con carrier
 5. **Mapping y monotonía**: `_map_raw_status` (129-134, default `pending`); rank de avance de `orders.status` **monotónico** — nunca regresa un estado alcanzado ni pisa uno superior (118-120).
 6. **Notificación cliente por estado** (`_notify_status_change`, 432): WhatsApp + email para `in_transit` (490-513), `delivered` (517-534) y `exception` (544-565); el email muestra el **raw_status** del carrier (p. ej. "EN REPARTO", "CLIENTE AUSENTE") en vez del enum interno (504-506, 557-558). Errores de notificación: log, no rompen el ACK (750).
 
-**Gap conocido (A10)**: no hay polling de respaldo — `get_estado` está implementado en el cliente pero con **0 callers**; si el webhook no llega, el envío se congela en su último estado notificado.
+**Polling de respaldo**: implementado en el worker — `_aveonline_status_poll` (intervalo 1 h; candidatas = guías reales con >6 h sin update vía webhook; batch 25; knobs `AVEONLINE_STATUS_POLL_*` en `render.yaml:503-509`).
 
 ## 4. Cancelación
 

@@ -32,5 +32,5 @@ Definir un patrón consistente para integrar proveedores externos sin romper:
 
 - WhatsApp: inbound en connector; outbound en orchestrator (credenciales por tenant).
 - Mercado Libre: integrado en `services/api` (OAuth + webhook + listings).
-- Aveonline: integrado en `services/api` (cotización, generación de guía y webhook de tracking; único provider de shipping — Envia eliminado del runtime en rev. 109, ADR-0019).
+- Aveonline: integrado en `services/api` (cotización, generación de guía y webhook de tracking; único provider de shipping, ADR-0019).
 - Telegram: notificaciones por tenant en worker.

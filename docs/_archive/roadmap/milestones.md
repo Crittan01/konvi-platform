@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVADO — 2026-08-03.** Contenido histórico superado, conservado solo como registro. Estado vigente: docs/PLAN.md y .context/01-state.md.
+
+---
+
 # Hitos del Producto
 
 Última actualización: 2026-04-21

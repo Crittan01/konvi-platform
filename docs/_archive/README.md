@@ -6,9 +6,9 @@ Esta carpeta contiene documentación **histórica superada**, conservada únicam
 - Backlog vigente: `docs/PLAN.md`
 - Handoff operativo: `docs/HANDOFF.md`
 
-**Fecha de la depuración:** 2026-08-02 (movimientos con `mv` simple; git detecta renames al stagear). Segunda pasada 2026-08-02: +3 a `integrations/` (nueva), +6 a `reports/`, +2 a `research/` (total 75).
+**Fecha de la depuración:** 2026-08-02 (movimientos con `mv` simple; git detecta renames al stagear). Segunda pasada 2026-08-02: +3 a `integrations/` (nueva), +6 a `reports/`, +2 a `research/`. Tercera pasada 2026-08-03: +3 (`audit/`, `roadmap/`, `operations/` nuevas). Total actual verificado: **79 archivos** (76 `.md` + 3 `.json`).
 
-Cada archivo archivado lleva una cabecera `⚠️ ARCHIVADO — 2026-08-02` como primera línea. Los 3 `.json` crudos (salidas de herramientas) no llevan cabecera para no corromper su formato.
+Cada archivo archivado lleva una cabecera `⚠️ ARCHIVADO — <fecha>` como primera línea. Los 3 `.json` crudos (salidas de herramientas) no llevan cabecera para no corromper su formato.
 
 Existe además `docs/research/_archive/` (9 archivos, creado antes de esta depuración) que sigue el mismo patrón y se mantiene en su ubicación original como precedente.
 
@@ -24,7 +24,10 @@ Existe además `docs/research/_archive/` (9 archivos, creado antes de esta depur
 | `quality/` | 1 | `bugs-pending-rev106.md` — pendientes de calidad a rev106 | histórico superado |
 | `deployment/` | 1 | `FASE7_RENDER_DEPLOY.md` — despliegue Fase 7 ya ejecutado | histórico superado |
 | `uat/` | 1 | `sem2-checkpoint-uat-plan.md` — plan UAT semana 2 ya ejecutado | histórico superado |
-| **Total** | **75** | | |
+| `audit/` | 1 | `production-readiness-2026-07-09.md` — auditoría FASE 0 pre-bloques (stack y estado superados; la auditoría vigente es `.audit/findings/` 2026-08-02) | superseded |
+| `roadmap/` | 1 | `implementation-phases.md` — fases 1-11.5 completas descritas en PRD §módulos; roadmap vigente en `docs/PLAN.md` §C | superseded |
+| `operations/` | 1 | `order-flow-conversational.md` — diseño pre-Fase C (FSM legacy); flujo vigente en `docs/flows/venta-conversacional.md` + `pago-wompi.md` | superseded |
+| **Total** | **79** | | |
 
 ## Qué NO está aquí (vigente)
 

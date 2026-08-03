@@ -9,9 +9,9 @@
 - **Cotización**: LIVE. El bot y el operador cotizan envíos reales multi-carrier contra Aveonline (precios reales del tenant).
 - **Generación de guías**: DRY-RUN por flag global `AVEONLINE_GENERATE_REAL_GUIDES=false` (`render.yaml:226-227` api, `348-350` orchestrator). Toda guía se genera con `bloquegenerarguia="0"` → **no factura ni despacha nada** (B1). El flip requiere además `tenant_shipping_provider_config.real_guides_enabled=true` por tenant (doble compuerta, `wompi_webhook.py:1996-1998`).
 - **Webhook de estados**: implementado y activo (secret + dedup + avance monotónico + notificaciones).
-- **Tracking de respaldo (polling)**: AUSENTE (A10) — si el webhook no llega, el envío se congela en su último estado.
+- **Tracking de respaldo (polling)**: implementado — job `_aveonline_status_poll` del worker (intervalo 1 h, guías reales >6 h sin update vía webhook, batch 25; knobs en `render.yaml:503-509`).
 
-Aveonline es el **único provider de shipping** del runtime (ADR-0019, rev. 109 — Envia eliminado).
+Aveonline es el **único provider de shipping** del runtime (ADR-0019).
 
 ## Dónde vive el código
 

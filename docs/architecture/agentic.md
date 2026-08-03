@@ -1,136 +1,90 @@
-# Agentic — estado actual (rev. 107)
+# Agentic — mapa del paquete y guía de extensión
 
-Complemento a [`agentic-orchestrator.md`](agentic-orchestrator.md) (target architecture). Este documento captura **qué está construido hoy** y dónde vive cada pieza, para acelerar onboarding y diagnóstico.
+> Estado: VIGENTE · Última verificación contra código: 2026-08-03 @ develop
 
-Branch activa: `phase-2-agentic-rewrite`. ADR: [`0018-agentic-orchestrator-hybrid.md`](../adr/0018-agentic-orchestrator-hybrid.md).
+El orchestrator **agentic** de `services/ai-orchestrator/` es el único path del bot (el V1
+monolito y el experimento V2 fueron retirados). La arquitectura del turno — gates del
+dispatcher, FSM de 9 estados, loop LLM, invariants, send, crons — está documentada y
+verificada en **`.context/09-bot-flowchart.md`** (canónica); el contexto de servicio en
+`docs/backend/BACKEND.md` §5.1 y §6. Este documento cubre solo lo que esos dos no cubren:
+el mapa del paquete, los tests cross-layer, la observabilidad y las recetas de extensión.
+
+ADR de la decisión: [`0018-agentic-orchestrator-hybrid.md`](../adr/0018-agentic-orchestrator-hybrid.md).
+Target architecture: [`agentic-orchestrator.md`](agentic-orchestrator.md).
 
 ---
 
-## 1. Estructura del paquete
+## 1. Mapa del paquete (`services/ai-orchestrator/agentic/`)
 
 ```
-services/ai-orchestrator/agentic/
+agentic/
+├── dispatcher.py             # Entry point del turno + gates determinísticos pre-LLM
 ├── agent.py                  # Loop principal Gemini function-calling
-├── dispatcher.py             # Entry point shadow/cutover → run_agentic_turn
+├── agent_router.py           # Ruteo de intents a resolvers
 ├── system_prompt.py          # Builder del system prompt + catálogo
-├── degraded_messages.py      # Constantes de mensajes degraded (voz "Sara Camila")
+├── prompt/                   # Prompt V3 per-state (builder.py, blocks.py, states.py, tools_subset.py)
+├── state_machine/            # FSM 9 estados: states.py, resolver.py (determinístico), transitions.py
+├── degraded_messages.py      # Mensajes degraded (voz "Sara Camila")
 ├── observability.py          # compute_agentic_metrics() sobre agentic_shadow_log
-│
+├── multimodal.py / multimodal_whisper.py / nontext_content.py   # Audio/imagen/no-texto
+├── tenant_guardrails.py / emoji_policy.py / cart_render.py / catalog_navigation.py
+├── *_resolver.py             # Resolvers de intent (purchase, consent, cancel, COD, carrier,
+│                             #   shipping, shipping_recipient, payment_method, variant_continuation)
 ├── tools/                    # Tools que el LLM puede invocar (Gemini function calling)
-│   ├── base.py               #   Tool/ToolResult/ToolContext + helpers
-│   ├── registry.py           #   register_tool/get_tool + schemas Gemini
-│   ├── catalog.py            #   get_products, get_variants (read-only)
-│   ├── contact.py            #   get_contact_info, record_consent, save_* (PII)
-│   ├── cart.py               #   add_item, remove_item, set_shipping_meta, etc.
-│   ├── shipping.py           #   quote_shipping, select_carrier (fuzzy match resolver)
-│   ├── payment.py            #   generate_payment_link
-│   └── escalation.py         #   escalate_to_human
-│
-├── invariants/               # Validaciones Python post-LLM (defense in depth)
-│   ├── base.py               #   Invariant protocol
-│   ├── cart_state.py         #   Verifica que outbound match cart real
-│   ├── consent_required.py   #   Bloquea PII sin consent
-│   ├── no_emoji.py           #   Sin emojis (WhatsApp business UX)
-│   └── passive_closing.py    #   Sin frases pasivas/robóticas
-│
-├── legacy_adapters/          # Helpers para invocar legacy desde tools
-│   ├── aveonline.py          #   quote_shipping_for_cart_aveonline
-│   ├── cart.py               #   select_carrier_for_cart (provider-agnostic)
-│   └── payment.py            #   generate_payment_link_for_cart (Wompi)
-│
-└── llm/                      # Reservado (futuro: routers, caches)
+│   ├── base.py / registry.py #   Tool/ToolResult/ToolContext + register_tool/get_tool
+│   ├── catalog.py / cart.py / orders.py / shipping.py / payment.py
+│   └── contact.py / claims.py / knowledge.py / media.py / escalation.py
+├── invariants/               # 15 invariants post-LLM + 1 pre-tool (tool_id_referential_integrity)
+│   └── base.py               #   Invariant protocol + FAIL_CLOSED_INVARIANTS (dinero/verdad)
+└── legacy_adapters/          # Helpers para invocar integraciones desde tools
+    ├── aveonline.py / cart.py / payment.py
 ```
 
----
-
-## 2. Flujo de un turno
-
-```
-inbound WhatsApp message
-    └── orchestrator.py polling loop detecta message_id pendiente
-        └── agentic.dispatcher.run_agentic_for_message_if_enabled()
-            ├── carga contact + catalog + history
-            ├── construye system_prompt (catálogo + reglas Habeas Data)
-            ├── agentic.agent.run_agentic_turn()  ← loop Gemini function-call
-            │   ├── llm.generate(tools=registry.gemini_function_schemas())
-            │   ├── si tool_calls → ejecutar cada uno → append result → re-llamar
-            │   └── si texto → outbound candidato
-            ├── aplica invariants (cart_state, consent_required, no_emoji, passive_closing)
-            ├── persiste agentic_shadow_log (incluye outbound, tool_calls, elapsed)
-            └── devuelve outbound_text al orchestrator (que envía a WhatsApp)
-```
-
-Recovery por `finish_reason` está en `agent.py::_recovery_strategy_for_finish_reason`. Mensajes degraded viven en `degraded_messages.py` para mantener la voz consistente.
-
----
-
-## 3. Decisiones canónicas (no negociables)
+## 2. Decisiones canónicas
 
 | Tema | Decisión | Fuente |
 |---|---|---|
-| LLM | Gemini 2.5 flash (cascada → flash-lite con backoff) | `agent.py` |
+| LLM | Gemini 3.x — primario `gemini-3.1-flash-lite`, fallback `gemini-3.5-flash`; `temperature=0`; deadline de cascada 100 s/turno (< heartbeat 120 s de Render) | `llm_invoke.py`, `agentic/agent.py` |
 | Function calling | Gemini nativo (no JSON-mode) | ADR-0018 |
-| Provider envío | Aveonline único (Envia eliminado del runtime rev. 109) | ADR-0019 / ADR-0023-shipping |
-| Audit log | Habeas Data Ley 1581 — `consent_audit_log` + `pii_access_log` | rev. 99 / commit `43fd0e0` |
-| Cart-as-SoT | `conversation_carts.status='open'` (no `'active'`) | `cart_tool.py` |
-| Shipping cost column | `orders.shipping_cost` (no `shipping_amount`) | commit `515c606` |
-| Determinismo | `temperature=0` en todos los calls Gemini | `agent.py` |
+| FSM | 9 estados persistidos en `conversations.agentic_state` (CHECK `conversations_agentic_state_chk`) | `state_machine/states.py` |
+| Provider envío | Aveonline único, sin fallback cross-provider | ADR-0019 / ADR-0023-shipping |
+| Audit por turno | Tabla append-only `agentic_shadow_log` (nombre histórico conservado; hoy es el audit de cada turno, no un shadow) | `dispatcher.py` |
+| Cart-as-SoT | `conversation_carts.status='open'` (único carrito abierto por conversación, índice parcial) | migración `20260501000000` |
+| Costo de envío en orden | `orders.shipping_cost` | migración `20260418000003` |
+| Cumplimiento | Habeas Data Ley 1581: `consent_audit_log` + `pii_access_log` append-only | migraciones `20260502010000/01` |
 
----
+## 3. Tests cross-layer
 
-## 4. Tests cross-layer
-
-Patrón "los tests más valiosos prueban la frontera entre capas":
+Patrón "los tests más valiosos prueban la frontera entre capas" (todos en `tests/agentic/`):
 
 | Test | Pattern | Detecta |
 |---|---|---|
 | `test_tool_writes_schema_parity.py` | Mock captura `.insert()/.update()` dicts → compara keys vs schema real DB | Tools que escriben columnas inexistentes (PGRST204 runtime) |
 | `test_aveonline_client_parity.py` | MD5 byte-equal entre `services/api` y `services/ai-orchestrator` | Drift entre copias duplicadas del cliente Aveonline |
+| `test_llm_cascade_parity.py` | MD5 byte-equal de `llm_cascade.py` cross-service | Drift de la cascada multi-vendor (path multimodal) |
 | `test_observability.py` | Mock supabase chain → valida agregaciones de `agentic_shadow_log` | Regresiones en `compute_agentic_metrics()` |
 
-**Patrón "byte-equal duplication"** justificado donde no hay packaging Python compartido entre `services/api` y `services/ai-orchestrator` (también aplicado a `llm_embed.py`). Cuando se consolide `packages/python-shared/`, estos tests se reemplazan por import único.
+**Patrón "byte-equal duplication"** justificado donde no hay packaging Python compartido entre
+`services/api` y `services/ai-orchestrator`. Cuando se consolide un paquete compartido
+(backlog M16 en `docs/PLAN.md`), estos tests se reemplazan por import único.
 
----
-
-## 5. Observabilidad
-
-### Endpoint `/agentic/metrics`
+## 4. Observabilidad
 
 ```bash
-GET /agentic/metrics?tenant_id=<uuid>&since_hours=24
+GET /agentic/metrics?tenant_id=<uuid>&since_hours=24     # services/ai-orchestrator/server.py
 ```
 
-Devuelve agregaciones sobre `agentic_shadow_log` (ventana últimas N horas):
+Agregaciones sobre `agentic_shadow_log` en la ventana: `success_rate` / `truncated_rate` /
+`errored_rate`, razones de truncamiento (`max_tool_turns_exceeded`, …), uso de tools
+(total, promedio por turno, por nombre) y latencia p50/p95/max.
 
-```json
-{
-  "window": {"since_hours": 24, "from_iso": "...", "row_count": 412, "tenant_id": "..."},
-  "outcomes": {
-    "success_rate": 0.91,
-    "truncated_rate": 0.06,
-    "errored_rate": 0.03,
-    "counts": {"success": 375, "truncated": 25, "errored": 12}
-  },
-  "truncated_reasons": {
-    "max_tool_turns_exceeded": 18,
-    "max_tool_calls_exceeded": 7
-  },
-  "tool_usage": {
-    "total_calls": 1240,
-    "avg_calls_per_turn": 3.01,
-    "by_name": {"get_contact_info": 412, "cart_add_item": 305, ...}
-  },
-  "latency_seconds": {"p50": 1.2, "p95": 4.8, "max": 14.3}
-}
-```
+La tabla `agentic_shadow_log` (append-only, una fila por turno) persiste `inbound_text`,
+`agentic_outbound`, `tool_calls_executed`, `tool_call_log` (JSON), `truncated`,
+`truncated_reason`, `error`, `elapsed_seconds`, `total_tokens`. Lectura vía
+`agentic.observability.compute_agentic_metrics()` o queries directos. Es la pieza de
+trazabilidad universal: sin ella, los bugs de runtime son invisibles entre rotaciones de log.
 
-### Tabla `agentic_shadow_log`
-
-Append-only por turno. Persiste: `inbound_text`, `agentic_outbound`, `tool_calls_executed`, `tool_call_log` (JSON), `truncated`, `truncated_reason`, `error`, `elapsed_seconds`. Lectura via `agentic.observability.compute_agentic_metrics()` o queries directos.
-
----
-
-## 6. Extender el agentic
+## 5. Extender el agentic
 
 ### Añadir un tool nuevo
 
@@ -139,53 +93,21 @@ Append-only por turno. Persiste: `inbound_text`, `agentic_outbound`, `tool_calls
 3. Definir clase `Tool` con `name`, `description`, `args_schema`, `async execute()`.
 4. Registrar al final del archivo: `register_tool(MyTool())`.
 5. Importar el módulo desde `dispatcher.py` (asegura registro al boot).
-6. Test schema parity: si escribe a DB, añadir caso en `test_tool_writes_schema_parity.py`.
+6. Si escribe a DB: añadir caso en `tests/agentic/test_tool_writes_schema_parity.py`.
 
 ### Añadir un invariant
 
 1. Implementar el protocol `Invariant` en `agentic/invariants/`.
-2. Registrar en la cadena de validación post-LLM (ver `agent.py`).
+2. Registrar en la cadena de validación post-LLM (ver `agent.py`); si protege dinero o
+   verdad transaccional, añadirlo a `FAIL_CLOSED_INVARIANTS` (`invariants/base.py`) — ante
+   excepción, el texto NO sale.
 3. Test unitario que pruebe rechazo del outbound violatorio.
 
 ### Añadir un provider de envío
 
-1. Implementar el cliente HTTP en `integrations/{provider}_client.py` en ambos `services/api` y `services/ai-orchestrator` (byte-equal).
+1. Implementar el cliente HTTP en `integrations/{provider}_client.py` en ambos `services/api`
+   y `services/ai-orchestrator` (byte-equal, con test de paridad MD5).
 2. Crear adapter en `agentic/legacy_adapters/{provider}.py`.
-3. Branchear `agentic/tools/shipping.py::QuoteShippingTool` leyendo `tenant_shipping_provider_config.active_provider`.
+3. Branchear `agentic/tools/shipping.py::QuoteShippingTool` leyendo
+   `tenant_shipping_provider_config.active_provider`.
 4. NO implementar fallback automático cross-provider (ADR-0019).
-
----
-
-## 7. Deudas arquitectónicas cerradas (rev. 107)
-
-### 7.1 — Sesión inicial cierre deudas conocidas
-
-| # | Deuda | Cierre |
-|---|---|---|
-| #1 | Split `legacy_adapters.py` (591 LOC) → package por dominio | commit `2bb7a54` |
-| #2 | Test paridad MD5 `aveonline_client.py` cross-service | `test_aveonline_client_parity.py` |
-| #3 | Test parametrizado tool writes vs schema real | `test_tool_writes_schema_parity.py` (detectó bug `pii_access_log`) |
-| #5 | Métricas observability success/truncated/errored ratio | `agentic/observability.py` + endpoint `/agentic/metrics` |
-| #6 | Mensajes degraded centralizados (voz "Sara Camila") | `degraded_messages.py` |
-| #8 | Doc arquitectónico consolidado | este archivo |
-
-### 7.2 — Sesión validación live KAIU (deudas emergentes)
-
-Conducción real con phone 573125835649 reveló 5 bugs arquitectónicos
-no contemplados — cada uno cerrado con fix + tests, no parches.
-
-| # | Bug runtime | Causa raíz | Cierre |
-|---|---|---|---|
-| LIVE-1 | `agentic_shadow_log` vacío en cutover | `_run_agentic_full` solo loggeaba a stdout; logs rotan. | Helper `_persist_turn_audit()` único + migración ADD columns (mode, finish_reason, invariant_outcome, final_text...). Commit `8e577d3`. |
-| LIVE-2 | DEGRADED_GENERIC ante input claro | `STOP+empty` retornaba degraded inmediato sin retry. | Strategy actualizada: STOP attempt=0 → retry con history=5. Commit `a4b373c`. |
-| LIVE-3 | LLM dice "ya los agrego" sin ejecutar `add_to_cart` | `CartStateInvariant` regex `agregu[eé]` solo cubría pretérito. | Regex ampliado a presente/gerundio/futuro + plural ("quedaron agregados"). Commit `e691786`. |
-| LIVE-4 | Bot inventa resumen con producto/total fantasma | No había invariant que cross-valide outbound vs cart real DB. | Nuevo `SummaryCoherenceInvariant`: parsea Total + carga `get_cart_with_items()` + REWRITE con resumen canónico si mismatch. Commit `41c8a14`. |
-| LIVE-5 | `save_name(value='Cristian GarzónCristian Garzón')` (duplicado) | `_get_conversation_history()` ya incluía el inbound recién persistido; agent.py lo re-añadía → Gemini ve mismo texto 2 veces y concatena. | Helper puro `_build_gemini_messages()` dedupea último-user-del-history vs `inbound_text`. Commit `41c8a14`. |
-
-**Patrón común**: la **trazabilidad universal** (LIVE-1) habilitó detectar los otros 4 bugs en runtime real. Sin esa pieza, los bugs eran invisibles entre rotaciones de log.
-
-### 7.3 — Deudas pendientes (post rev. 107)
-
-- Consolidación `packages/python-shared/` para eliminar duplicación byte-equal cross-service.
-- Polling cycle del orchestrator legacy reintenta procesamiento completo al fallar send (debería reintentar solo send) — pollutea logs + ejecuta agentic múltiples veces.
-- Cola pgmq `whatsapp_outbound` retiene mensajes fallidos a allowlist Meta hasta agotar max_retries internos. Falta dead-letter queue.

@@ -42,10 +42,10 @@ Verificado: 28 llamadas `app.include_router` en `services/api/main.py:250-311` (
 |---|---|---|---|---|
 | 1 | `products` | `/api/v1/products` | OFFBOARDING | CRUD productos y variaciones |
 | 2 | `product_categories` | `/api/v1/product-categories` | OFFBOARDING | CRUD categorías |
-| 3 | `product_attribute_definitions` | `/api/v1/product-attribute-definitions` | OFFBOARDING | Definiciones de atributos (ADR-0029). ⚠ Sin rate-limit (gap conocido M15) |
+| 3 | `product_attribute_definitions` | `/api/v1/product-attribute-definitions` | OFFBOARDING | Definiciones de atributos (ADR-0029) |
 | 4 | `catalog` | `/api/v1/catalog` | OFFBOARDING | Vista de catálogo |
 | 5 | `coupons` | `/api/v1/coupons` | OFFBOARDING | Cupones de descuento |
-| 6 | `expenses` | `/api/v1/expenses` | MFA | Gastos (finanzas). ⚠ POST y reverse sin rate-limit (M15) |
+| 6 | `expenses` | `/api/v1/expenses` | MFA | Gastos (finanzas) |
 | 7 | `conversations` | `/api/v1/conversations` | OFFBOARDING | Inbox + `POST /{id}/send` (guard ventana 24h, ver §5.1) |
 | 8 | `orders` | `/api/v1/orders` | OFFBOARDING | Órdenes. MFA **por-endpoint** en money-movement: `PATCH /{id}` (`orders.py:379`), `POST /{id}/payment-link` (`orders.py:474`), `POST /{id}/generate-shipping-guide` (`orders.py:965`); dual-auth bot en create/payment-link |
 | 9 | `contacts` | `/api/v1/contacts` | OFFBOARDING | CRM de contactos |
@@ -74,9 +74,9 @@ Notas verificadas:
 - Los routers 22-25 (prefix `/api/v1`) son espejos server-side aditivos de endpoints `/api/ai/*` del
   web (drift D3); el web sigue operando hasta el cutover (`main.py:299-307`).
 - Rate limiting: los buckets `RL_WRITE_DEFAULT` / `RL_SEND_MESSAGE` se aplican **por endpoint**, no a
-  nivel router — por eso existen los gaps M15 documentados en la tabla (§3.3).
-- Health: `GET /health` (liveness, no toca DB) y `GET /health/ready` (readiness con check DB, 503 +
-  `detail` truncado a 200 chars si cae — expone detalle sin auth, gap M14) (`main.py:322-357`).
+  nivel router; los 12 endpoints que carecían de bucket fueron cubiertos el 2026-08-02 (M15 cerrado).
+- Health: `GET /health` (liveness, no toca DB) y `GET /health/ready` (readiness con check DB; 503 con
+  detalle genérico — el error completo va a logs/Sentry, M14 cerrado) (`main.py:322-357`).
 
 ---
 
@@ -130,7 +130,6 @@ Notas verificadas:
   (`cf-connecting-ip` en prod, `render.yaml:303-304`) → XFF → `request.client.host`. **Pendiente
   T4-01**: verificación empírica de que Render/CF sobrescribe el header (spoofing potencial, A2).
 - Webhooks: `webhook_rate_limit_check` por IP (`:319-346`), usado en meli/aveonline/wompi.
-- **Gaps conocidos (M15)**: `expenses` POST/reverse y `product_attribute_definitions` sin bucket.
 
 ### 3.4 Idempotency (`services/api/dependencies/idempotency.py`)
 
@@ -179,7 +178,7 @@ Notas verificadas:
 ### 4.1 `conversations.status` — CHECK vigente
 
 `bot_active | human_takeover | closed | opted_out`
-(`supabase/migrations/20260514180000_conversations_status_opted_out.sql:20-27`, rev.105 H.4.1;
+(`supabase/migrations/20260514180000_conversations_status_opted_out.sql:20-27`;
 ninguna migración posterior lo redefine).
 
 - `bot_active`: el bot responde. `human_takeover` / `closed`: bot silenciado (solo humano reabre).
@@ -232,7 +231,7 @@ tightening se omitió con `RAISE NOTICE` (`:56-72`).
 - Wompi: orden `pending_payment` → link; APPROVED → `confirmed` + stock; TTL 35 min (§5.2).
 - Credenciales WhatsApp: `tenant_integrations` per-tenant, Model B, secretos en Vault
   (`.context/06-contracts.md` §7).
-- Shipping: provider único `aveonline` (Envia eliminado rev.109); guía real gateada per-tenant por
+- Shipping: provider único `aveonline` (ADR-0019); guía real gateada per-tenant por
   `real_guides_enabled` (`.context/06-contracts.md` §9).
 - Tiering: RPC `consume_tenant_capability(...)`; snapshot `GET /api/v1/settings/plan-capabilities`
   (`.context/06-contracts.md` §10).
@@ -326,8 +325,9 @@ tightening se omitió con `RAISE NOTICE` (`:56-72`).
 6. **Notificación cliente**: `_notify_status_change` (`:432`) → WhatsApp vía cola pgmq (helpers de
    `wompi_webhook.py:1311-1364`, **no** pasa por el orchestrator) + email Resend (`:481-565`).
    Alerta al operador por Telegram en exception/returned (`:365` → `telegram_webhook.py:315`).
-7. **Gap A10**: no hay polling backup (`get_estado` implementado pero sin callers) — si el webhook no
-   llega, el tracking se congela.
+7. **Polling backup** (A10 cerrado 2026-08-02): job periódico del worker (`AVEONLINE_STATUS_POLL_*`)
+   consulta `get_estado` de shipments stale no-terminales y aplica el mismo avance monotónico vía
+   RPC compartida — el tracking ya no depende al 100% del webhook.
 
 ### 5.4 OAuth Mercado Libre
 
@@ -375,9 +375,9 @@ tenant desde Vault (`:315-358`).
 - **Heartbeat**: NO hay thread separado. Es un timestamp (`last_heartbeat_ts`, `:378`) re-latido por
   ítem dentro de los loops largos (`:848,1588,1664,2498,2906,3204`). `server.py` lo compara con
   `HEALTH_HEARTBEAT_STALE_SECONDS=120` (`server.py:66`): si age >120 s → `/health` devuelve 503 →
-  Render reinicia. **Riesgo A5**: un turno LLM largo (>120 s) no se re-late por dentro — cascada
-  peor caso 303 s (§6.3) puede disparar restart a mitad de procesamiento (`worker.py:846-847` lo
-  acepta explícito).
+  Render reinicia. **Mitigado (A5 cerrado 2026-08-02)**: la cascada LLM tiene deadline de turno
+  (`LLM_CASCADE_DEADLINE_SECONDS`, default 100 s < 120 s) que corta al path degraded antes de
+  superar el heartbeat.
 
 ### 6.2 Los 19 jobs de `_poll_cycle` (`worker.py:518-546`, cada uno aislado con `_run_job`)
 
@@ -435,8 +435,8 @@ Runbook de knobs/kill-switches: `services/ai-orchestrator/README.md` (todas las 
 
 ### 7.1 Estructura (verificado 2026-08-02 con `pytest --collect-only`)
 
-- **346 archivos** `test_*.py` en `tests/` (280 directos); **4.031 items**: 3.830 con
-  `-m 'not dbharness'` + 201 dbharness. Frontend: **30 archivos** Vitest en `apps/web`.
+- **361 archivos** `test_*.py` en `tests/`; **~4.300 items**: ~4.100 con
+  `-m 'not dbharness'` + 201 dbharness. Frontend: **33 archivos** Vitest en `apps/web` (320 tests).
 - **Markers** (`pyproject.toml:64-71`, `--strict-markers`): solo `dbharness` y `connector`.
   `SLOW_TESTS=1` es env var para `unittest.skipUnless` (paths bcrypt MFA), no marker.
 - `tests/conftest.py:23-28`: aplica el marker `connector` a los tests de
@@ -480,7 +480,7 @@ pnpm --filter web exec tsc --noEmit
 
 | Gate | Valor | Evidencia |
 |---|---|---|
-| Coverage | `COVERAGE_MIN=55` (default; real 66.0% medido 2026-08-01) | `scripts/validate.sh:25,128-149` |
+| Coverage | `COVERAGE_MIN=60` (default; real ~69.5% medido 2026-08-02) | `scripts/validate.sh:25,128-149` |
 | Ruff | `BASELINE_RUFF_ERRORS=202` (ratchet anti-regresión; config raíz conservadora, `services/api/pyproject.toml` estricta opt-in) | `scripts/validate.sh:424-458` |
 | Tenant filter AST | 0 gaps nuevos, `--max-gaps 0` (protegido por CODEOWNERS) | `scripts/validate.sh:200-227` |
 | Harness | `HARNESS_REQUIRED=1` en CI | `ci.yml:288-297` |
@@ -517,7 +517,7 @@ Reglas: **nunca** modificar migraciones aplicadas (forward-only); ante drift liv
 `python3.11 scripts/dump_schema_canonical.py --diff` y regenerar con
 `python3.11 scripts/dump_schema_canonical.py` (actualiza `tests/fixtures/db_schema_canonical.json` y
 `.context/07-schema-canonical.md`). Estado: **251 migraciones** en repo = ledger prod (última:
-`20260802120000_drop_ghost_tables_and_revoke_grants.sql`). `docs/HANDOFF.md` dice 218 — stale.
+`20260802120000_drop_ghost_tables_and_revoke_grants.sql`).
 
 ### 8.3 Runbooks disponibles
 
@@ -552,4 +552,4 @@ Reglas: **nunca** modificar migraciones aplicadas (forward-only); ante drift liv
 - `.context/05-doc-policy.md` — política documental (migraciones ≠ fuente de verdad).
 - `.audit/findings/2026-08-02-consolidated-audit.md` — hallazgos referenciados (A1-A12, M1-M20, B1-B6).
 - `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md` — Model B Meta per-tenant.
-- `docs/HANDOFF.md` — contexto operativo y credenciales (ojo: contiene cifras stale marcadas aquí).
+- `docs/HANDOFF.md` — puerta operativa (qué está live, comandos, ramas, migraciones, seguridad).

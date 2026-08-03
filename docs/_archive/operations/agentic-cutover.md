@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVADO — 2026-08-03.** Contenido histórico superado, conservado solo como registro. Estado vigente: docs/PLAN.md y .context/01-state.md.
+
+---
+
 # Agentic Cutover — Runbook Operativo
 
 **ADR**: [ADR-0018 Agentic Orchestrator Hybrid](../adr/0018-agentic-orchestrator-hybrid.md).
