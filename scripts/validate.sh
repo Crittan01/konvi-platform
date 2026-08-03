@@ -5,7 +5,7 @@
 #   bash scripts/validate.sh             # checks rápidos
 #   bash scripts/validate.sh --full      # + pip-audit + env vars
 #   bash scripts/validate.sh --build     # + Next.js build
-#   bash scripts/validate.sh --coverage  # + cobertura tests Python (mínimo COVERAGE_MIN, default 70)
+#   bash scripts/validate.sh --coverage  # + cobertura tests Python (mínimo COVERAGE_MIN, default 60)
 #   bash scripts/validate.sh --ci        # CI strict: --full + --coverage + --build + warns como fails
 #
 # Exit: 0 = OK, 1 = errores (no desplegar)
@@ -19,10 +19,11 @@ FULL=false
 BUILD=false
 COVERAGE=false
 CI_MODE=false
-# Cobertura: baseline rev. 105 = 58.9% (1490 tests, services/). Target J.5 = 70%
-# (Sem 11 audit cleanup). Default 55% deja 4% buffer para evitar falsos negativos
-# por nuevos archivos sin tests; subir a 70% al cerrar Sem 11.
-COVERAGE_MIN="${COVERAGE_MIN:-55}"
+# Cobertura: baseline rev. 105 = 58.9% (1490 tests, services/). Target = 70%
+# (M18). Gate --ci 2026-08-02 midió TOTAL 69.4% → default sube 55 → 60
+# (certificación pre-prod; histórico del 55: buffer de falsos negativos por
+# archivos nuevos sin tests). Subir a 70% al cerrar la deuda de cobertura.
+COVERAGE_MIN="${COVERAGE_MIN:-60}"
 
 DB_HARNESS=false
 for arg in "$@"; do

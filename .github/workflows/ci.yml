@@ -150,8 +150,6 @@ jobs:
 
       - name: Run validate.sh (CI strict)
         if: needs.changes.outputs.backend == 'true'
-        env:
-          CI_STRICT: "true"
         run: bash scripts/validate.sh --ci
 
       # HUECO CERRADO (2026-07-20): el gate de vulnerabilidades JS vive DENTRO de

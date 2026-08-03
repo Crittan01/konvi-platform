@@ -167,7 +167,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅)
   #    URL: https://konvi-api.onrender.com
-  #    Stack: FastAPI + supabase==2.28.3 + PyJWT==2.10.1
+  #    Stack: fastapi==0.139.0 + supabase==2.31.0 + PyJWT==2.13.0
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
     name: konvi-api
@@ -488,6 +488,26 @@ services:
         value: "1800"                            # 30 min
       - key: WOMPI_VOID_POLL_LOOKBACK_HOURS
         value: "48"
+      # W2 — Reconciliación del inbox durable Wompi: re-drive de webhooks de pago
+      # perdidos por crash del API entre el 200 ACK y el fin del procesamiento.
+      # El worker re-POSTea el payload crudo a la API (worker.py:137-144).
+      - key: WOMPI_INBOX_RECONCILE_ENABLED
+        value: "true"
+      - key: WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS
+        value: "180"                             # 3 min
+      # A10 (auditoría 2026-08-02) — Polling backup de tracking Aveonline: si el
+      # tenant no registró el webhook de estados (o un evento se pierde), el envío
+      # se congelaba. El worker consulta get_estado (obtenerEstadoAuth) para guías
+      # reales stale y aplica la misma semántica del webhook (dedup + monotónico +
+      # notificación). Defaults = los del código (worker.py).
+      - key: AVEONLINE_STATUS_POLL_ENABLED
+        value: "true"
+      - key: AVEONLINE_STATUS_POLL_INTERVAL_SECONDS
+        value: "3600"                            # 1 h
+      - key: AVEONLINE_STATUS_POLL_STALE_HOURS
+        value: "6"                               # sin update vía webhook >6h → candidato
+      - key: AVEONLINE_STATUS_POLL_BATCH
+        value: "25"                              # cap de guías por ciclo
       # Recordatorio de carrito abandonado (HSM MARKETING cart_abandoned_24h_v1).
       - key: CART_ABANDONED_REMINDER_ENABLED
         value: "true"

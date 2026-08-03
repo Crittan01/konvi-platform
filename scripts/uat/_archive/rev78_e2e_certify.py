@@ -1,4 +1,14 @@
 #!/usr/bin/env python3.11
+# ═══════════════════════════════════════════════════════════════════════════════
+# ARCHIVADO — SCRIPT INERTE (2026-08-02)
+#
+# Este harness de certificación Rev. 78/79 quedó OBSOLETO: su Dominio 7 importa
+# `from integrations.envia_client import EnviaClient` (línea ~340), pero Envia fue
+# eliminado del runtime con el pivote a Aveonline (ADR-0019) — el módulo
+# `services/ai-orchestrator/integrations/envia_client.py` ya no existe y el script
+# no refleja la plataforma actual. Se conserva solo como referencia histórica de
+# los dominios de certificación; NO ejecutar contra producción.
+# ═══════════════════════════════════════════════════════════════════════════════
 """
 Rev. 78/79 — Harness de certificación E2E del bot conversacional.
 
