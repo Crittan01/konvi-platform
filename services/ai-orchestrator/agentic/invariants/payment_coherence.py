@@ -182,6 +182,46 @@ def _is_malformed_payment_question(text: str) -> bool:
     return False
 
 
+def _is_wellformed_payment_question(text: str) -> bool:
+    """CASE B2 gate — Detecta pregunta de modo de pago BIEN formada.
+
+    Patrón observado UAT local 2026-08-03: el LLM compone correctamente
+      "cómo prefieres pagar: *online* (tarjeta, PSE o Nequi) o
+       *contra entrega* (efectivo al recibir el paquete)?"
+    Ofrecer AMBAS opciones para que el cliente elija es VÁLIDO — NO es
+    contradicción con cart.payment_method ('credit' es el DEFAULT de
+    columna, migración 20260601000000, no evidencia de elección). Sin
+    este gate, CASE B2 sustituía "contra entrega" → "pago online" y
+    emitía la contradicción que CASE C (BUG 38c) debía prevenir.
+
+    Heurística:
+      • Texto pregunta por modo de pago (misma forma que CASE C).
+      • Ofrece opción online Y opción COD a la vez.
+
+    Pure function, sin DB.
+    """
+    if not text or len(text) < 30:
+        return False
+    norm = text.lower()
+    # Debe parecer pregunta de modo de pago.
+    asks_payment = (
+        ("prefier" in norm and "pag" in norm)
+        or ("cómo" in norm and "pag" in norm)
+        or "modo de pago" in norm
+        or ("pagar" in norm and "?" in text)
+    )
+    if not asks_payment:
+        return False
+    # Debe ofrecer ambas opciones: online Y contra entrega.
+    offers_online = bool(
+        re.search(
+            r"\bonline\b|\ben\s+l[ií]nea\b|\btarjeta\b|\bpse\b|\bnequi\b",
+            norm,
+        )
+    )
+    return offers_online and _has_cod_language(text)
+
+
 def _build_explicit_question(enabled: list[str]) -> str:
     """CASE A: cliente no especificó modo → preguntar adaptado a tenant."""
     has_cod = "cod" in enabled
@@ -305,6 +345,9 @@ class PaymentCoherenceInvariant:
     CASE B — Lenguaje contradictorio con cart.payment_method:
       cart=cod + outbound "link de pago" → REWRITE a COD.
       cart=credit + outbound "contraentrega" → REWRITE a credit.
+      Excepción (UAT 2026-08-03): la pregunta de modo de pago bien
+      formada (ofrece online + contra entrega a la vez) pasa intacta —
+      ver _is_wellformed_payment_question.
 
     CASE C (rev. 109 BUG 38c) — Phrasing duplicado "online vs pago online":
       LLM a veces compone la pregunta de modo de pago con "online" duplicado
@@ -444,7 +487,17 @@ class PaymentCoherenceInvariant:
             )
 
         # Caso B2: cart=credit + outbound COD language → reescribir credit.
-        if cart_payment_method == "credit" and has_cod_lang and not has_credit_lang:
+        # Excepción (UAT local 2026-08-03): la pregunta de modo de pago bien
+        # formada (ofrece *online* + *contra entrega* para que el cliente
+        # elija) NO es lenguaje COD contradictorio — 'credit' es el default
+        # de columna, no una elección. Reescribirla producía el
+        # "online vs pago online (efectivo)" del BUG 38c.
+        if (
+            cart_payment_method == "credit"
+            and has_cod_lang
+            and not has_credit_lang
+            and not _is_wellformed_payment_question(candidate_text)
+        ):
             return InvariantResult(
                 outcome=InvariantOutcome.REWRITE,
                 invariant_name=self.name,
