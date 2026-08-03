@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { XAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import ExpensesManager from './expenses-manager'
@@ -130,7 +131,17 @@ export default function FinanceDashboard({
 
         {isGlobalEmpty ? (
           <>
-            <EmptyState canWrite={canWrite} />
+            <EmptyState
+              icon={DollarSign}
+              title="Aún no hay movimiento financiero en este período"
+              description={
+                <>
+                  Cuando recibas pedidos pagados verás aquí tus Ingresos, el Costo de Mercancía (COGS) y tu Beneficio Neto.
+                  {canWrite && ' Puedes empezar registrando tus gastos operativos (pauta, nómina, software) abajo.'}
+                </>
+              }
+              className="p-10"
+            />
             <ExpensesManager expenses={expenses} canWrite={canWrite} />
           </>
         ) : (
@@ -264,15 +275,3 @@ function JargonTip({ text }: { text: string }) {
   )
 }
 
-function EmptyState({ canWrite }: { canWrite: boolean }) {
-  return (
-    <div className="border border-dashed rounded-xl p-10 text-center space-y-3">
-      <DollarSign className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-      <h2 className="text-base font-semibold text-foreground">Aún no hay movimiento financiero en este período</h2>
-      <p className="text-sm text-muted-foreground max-w-md mx-auto">
-        Cuando recibas pedidos pagados verás aquí tus Ingresos, el Costo de Mercancía (COGS) y tu Beneficio Neto.
-        {canWrite && ' Puedes empezar registrando tus gastos operativos (pauta, nómina, software) abajo.'}
-      </p>
-    </div>
-  )
-}

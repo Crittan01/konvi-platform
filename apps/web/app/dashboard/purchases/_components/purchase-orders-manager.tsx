@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -452,26 +453,26 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
           })}
 
           {orders.length === 0 && !showAdd && (
-            <div className="p-8 text-center border border-dashed rounded-xl space-y-3">
-              <PackageSearch className="h-8 w-8 mx-auto text-muted-foreground/60" />
-              <div>
-                <p className="font-medium text-sm text-foreground">Aún no tienes órdenes de compra</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-                  Una orden de compra registra lo que le pides a un proveedor. Al recibirla, el stock entra al inventario y se actualiza tu costo promedio.
-                </p>
-              </div>
-              {canWrite && activeSuppliers.length > 0 && (
-                <Button onClick={() => setShowAdd(true)} size="sm" className="gap-1.5">
-                  <Plus className="h-3.5 w-3.5" /> Crear primera orden
-                </Button>
-              )}
-            </div>
+            <EmptyState
+              icon={PackageSearch}
+              className="p-8"
+              title="Aún no tienes órdenes de compra"
+              description="Una orden de compra registra lo que le pides a un proveedor. Al recibirla, el stock entra al inventario y se actualiza tu costo promedio."
+              action={
+                canWrite && activeSuppliers.length > 0 ? (
+                  <Button onClick={() => setShowAdd(true)} size="sm" className="gap-1.5">
+                    <Plus className="h-3.5 w-3.5" /> Crear primera orden
+                  </Button>
+                ) : undefined
+              }
+            />
           )}
 
           {orders.length > 0 && visibleOrders.length === 0 && (
-            <div className="p-6 text-center text-xs text-muted-foreground border border-dashed rounded-xl">
-              No hay órdenes en este estado.
-            </div>
+            <EmptyState
+              className="p-6 text-xs"
+              description="No hay órdenes en este estado."
+            />
           )}
         </div>
       </div>

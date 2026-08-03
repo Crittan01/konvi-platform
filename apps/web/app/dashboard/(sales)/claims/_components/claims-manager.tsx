@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Plus, Search, HelpCircle, FileText, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -531,18 +532,21 @@ export default function ClaimsManager({
           </p>
 
           {filteredClaims.length === 0 && (
-            <div className="p-8 text-center text-muted-foreground rounded-xl border border-dashed border-border">
-              <HelpCircle className="w-8 h-8 mx-auto mb-3 opacity-20" />
-              {claims.length === 0 ? (
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">Aún no hay reclamos</p>
-                  <p className="text-sm">El bot registra un ticket automáticamente cuando un cliente reporta un problema por WhatsApp.
-                    {canWrite && ' También puedes abrir uno con «Nuevo Reclamo».'}</p>
-                </div>
-              ) : (
-                <p className="text-sm">Ningún reclamo coincide con tu búsqueda o filtro.</p>
-              )}
-            </div>
+            <EmptyState
+              icon={HelpCircle}
+              className="p-8"
+              title={claims.length === 0 ? 'Aún no hay reclamos' : undefined}
+              description={
+                claims.length === 0 ? (
+                  <>
+                    El bot registra un ticket automáticamente cuando un cliente reporta un problema por WhatsApp.
+                    {canWrite && ' También puedes abrir uno con «Nuevo Reclamo».'}
+                  </>
+                ) : (
+                  'Ningún reclamo coincide con tu búsqueda o filtro.'
+                )
+              }
+            />
           )}
 
           {filteredClaims.map(claim => {
@@ -588,10 +592,12 @@ export default function ClaimsManager({
               {renderDetail()}
             </div>
           ) : (
-            <div className="flex-1 rounded-xl border border-dashed border-border flex items-center justify-center flex-col text-muted-foreground gap-2">
-              <FileText className="w-10 h-10 opacity-20" />
-              <p className="text-sm">Selecciona un reclamo para ver el detalle</p>
-            </div>
+            <EmptyState
+              variant="plain"
+              icon={FileText}
+              className="flex-1 rounded-xl border border-dashed border-border text-muted-foreground"
+              description="Selecciona un reclamo para ver el detalle"
+            />
           )}
         </div>
       </div>

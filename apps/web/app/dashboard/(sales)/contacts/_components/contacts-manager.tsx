@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, Paperclip, ExternalLink, RefreshCw, AlertCircle, Plus } from 'lucide-react'
 import { getConsentEvidenceSignedUrl } from './helpers/upload-evidence'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -164,6 +165,13 @@ function ExistingAttachmentCard({
 export default function ContactsManager({ initialContacts, loadError, capReached, fetchCap, canWrite, userRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
   const isOwner = userRole === 'owner'
   const [search, setSearch] = useState('')
+  // Spec WOW §4.3: deep-link de búsqueda desde la command palette
+  // (`/dashboard/contacts?q=...`). Se siembra una vez al montar (patrón
+  // window.location.search — useSearchParams suspendería sin boundary).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('q')
+    if (q) setSearch(q)
+  }, [])
   // Sem 7 F2 cierre 2026-05-20 — P7 founder UAT: botón refresh manual.
   // El bot persiste contacts/updates y el operador necesita ver el cambio
   // sin recargar la página entera. router.refresh() re-fetcha el RSC
@@ -909,39 +917,46 @@ export default function ContactsManager({ initialContacts, loadError, capReached
         {/* Lista */}
         <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
           {paginatedContacts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 rounded-xl border border-dashed border-border text-center">
-              <Users className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              {search || consentFilter !== 'all' ? (
-                <>
-                  <p className="text-sm font-medium text-foreground">Sin resultados</p>
-                  <p className="text-muted-foreground text-xs mt-1 max-w-sm">
+            search || consentFilter !== 'all' ? (
+              <EmptyState
+                icon={Users}
+                className="py-16"
+                title="Sin resultados"
+                description={
+                  <>
                     {search
                       ? <>Ningún contacto coincide con &quot;{search}&quot;.</>
                       : 'Ningún contacto coincide con este filtro.'}
                     {' '}Ajusta la búsqueda o los filtros.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-medium text-foreground">Aún no hay contactos</p>
-                  <p className="text-muted-foreground text-xs mt-1 max-w-sm">
+                  </>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={Users}
+                className="py-16"
+                title="Aún no hay contactos"
+                description={
+                  <>
                     Los contactos se crean <strong>automáticamente</strong> cuando un cliente
                     escribe al WhatsApp del negocio.
                     {canWrite && ' También puedes registrar uno a mano desde el formulario “Agregar Contacto” a la izquierda.'}
-                  </p>
+                  </>
+                }
+                action={
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="mt-3 h-7 text-xs gap-1.5"
+                    className="h-7 text-xs gap-1.5"
                     onClick={handleRefresh}
                     disabled={isRefreshing}
                   >
                     <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} /> Refrescar
                   </Button>
-                </>
-              )}
-            </div>
+                }
+              />
+            )
           ) : (
             <div className="space-y-2">
               {paginatedContacts.map((rawContact) => {

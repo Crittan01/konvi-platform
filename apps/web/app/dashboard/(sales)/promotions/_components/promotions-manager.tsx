@@ -8,6 +8,7 @@ import {
   History, Receipt,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -315,10 +316,10 @@ export default function PromotionsManager({
           </Button>
         </div>
       ) : initialCoupons.length === 0 ? (
-        <div className="rounded-md border border-border bg-muted/20 p-6 text-center text-muted-foreground">
-          <Tag className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-          <p className="text-sm">Aún no tienes cupones. Crea el primero arriba.</p>
-        </div>
+        <EmptyState
+          icon={Tag}
+          description="Aún no tienes cupones. Crea el primero arriba."
+        />
       ) : (
         <div className="rounded-md border border-border bg-card">
           <Table>
@@ -655,10 +656,10 @@ export default function PromotionsManager({
                 )}
               </div>
             ) : redemptions.length === 0 ? (
-              <div className="rounded-md border border-border bg-muted/20 p-6 text-center text-muted-foreground">
-                <Receipt className="mx-auto mb-2 h-8 w-8" />
-                <p className="text-sm">Este cupón aún no tiene redenciones registradas.</p>
-              </div>
+              <EmptyState
+                icon={Receipt}
+                description="Este cupón aún no tiene redenciones registradas."
+              />
             ) : (
               <>
                 {/* Resumen por estado — contexto rápido antes del detalle. */}

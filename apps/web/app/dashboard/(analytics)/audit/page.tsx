@@ -4,6 +4,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Download, ClipboardList, AlertTriangle, Info, RotateCw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { bogotaLocalToUTC } from '@/lib/date-window'
@@ -347,21 +348,16 @@ export default async function AuditPage(
         {/* ── Vista: Accesos a PII ─────────────────────────────────────────── */}
         {view === 'access' ? (
           accessEntries.length === 0 ? (
-            <div className="py-12 px-6 text-center space-y-1.5">
-              {hasFilters ? (
-                <>
-                  <p className="text-sm text-foreground font-medium">Sin accesos para estos filtros</p>
-                  <p className="text-xs text-muted-foreground">Ajusta el rango de fechas o el actor.</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-foreground font-medium">Aún no hay accesos registrados</p>
-                  <p className="text-xs text-muted-foreground">
-                    Cuando tu equipo, el bot o una integración consulten datos personales de tus contactos, el acceso quedará registrado aquí.
-                  </p>
-                </>
-              )}
-            </div>
+            <EmptyState
+              variant="plain"
+              className="py-12 px-6"
+              title={hasFilters ? 'Sin accesos para estos filtros' : 'Aún no hay accesos registrados'}
+              description={
+                hasFilters
+                  ? 'Ajusta el rango de fechas o el actor.'
+                  : 'Cuando tu equipo, el bot o una integración consulten datos personales de tus contactos, el acceso quedará registrado aquí.'
+              }
+            />
           ) : (
             <div className="divide-y divide-border">
               {accessEntries.map(e => {
@@ -408,21 +404,16 @@ export default async function AuditPage(
           )
         ) : /* ── Vista: Cambios (audit_log) ──────────────────────────────── */
         entries.length === 0 ? (
-          <div className="py-12 px-6 text-center space-y-1.5">
-            {hasFilters ? (
-              <>
-                <p className="text-sm text-foreground font-medium">Sin eventos para estos filtros</p>
-                <p className="text-xs text-muted-foreground">Ajusta el rango de fechas, el usuario o el tipo de entidad.</p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-foreground font-medium">Aún no hay actividad registrada</p>
-                <p className="text-xs text-muted-foreground">
-                  Los cambios que tú y tu equipo hagan desde el panel (pedidos, productos, contactos, configuración…) aparecerán aquí automáticamente.
-                </p>
-              </>
-            )}
-          </div>
+          <EmptyState
+            variant="plain"
+            className="py-12 px-6"
+            title={hasFilters ? 'Sin eventos para estos filtros' : 'Aún no hay actividad registrada'}
+            description={
+              hasFilters
+                ? 'Ajusta el rango de fechas, el usuario o el tipo de entidad.'
+                : 'Los cambios que tú y tu equipo hagan desde el panel (pedidos, productos, contactos, configuración…) aparecerán aquí automáticamente.'
+            }
+          />
         ) : (
           <div className="divide-y divide-border">
             {entries.map(entry => {

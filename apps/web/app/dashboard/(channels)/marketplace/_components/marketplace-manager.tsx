@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
@@ -317,28 +318,32 @@ export default function MarketplaceManager({ items, paging, variations, categori
   if (items.length === 0) {
     return (
       <Card className="border-border/50">
-        <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center max-w-md mx-auto">
-          <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
-            <Store className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <div className="space-y-1.5">
-            <p className="font-medium text-foreground">Aún no hay publicaciones para gestionar</p>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              No encontramos publicaciones activas en la cuenta de Mercado Libre conectada.
-              Verifica que conectaste la cuenta vendedor correcta y crea publicaciones en Mercado Libre;
-              aparecerán aquí para vincularlas a tu catálogo.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <a href="https://www.mercadolibre.com.co/publicaciones/listado" target="_blank" rel="noreferrer">
-                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Ir a mis publicaciones en MeLi
-              </a>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard/integrations">Revisar la cuenta conectada</Link>
-            </Button>
-          </div>
+        <CardContent>
+          <EmptyState
+            variant="plain"
+            icon={Store}
+            className="py-16 max-w-md mx-auto"
+            title="Aún no hay publicaciones para gestionar"
+            description={
+              <>
+                No encontramos publicaciones activas en la cuenta de Mercado Libre conectada.
+                Verifica que conectaste la cuenta vendedor correcta y crea publicaciones en Mercado Libre;
+                aparecerán aquí para vincularlas a tu catálogo.
+              </>
+            }
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button variant="outline" size="sm" asChild>
+                  <a href="https://www.mercadolibre.com.co/publicaciones/listado" target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Ir a mis publicaciones en MeLi
+                  </a>
+                </Button>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/dashboard/integrations">Revisar la cuenta conectada</Link>
+                </Button>
+              </div>
+            }
+          />
         </CardContent>
       </Card>
     )
@@ -672,8 +677,12 @@ export default function MarketplaceManager({ items, paging, variations, categori
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={canWrite ? 7 : 6} className="py-12 text-center text-muted-foreground">
-                    No hay publicaciones que coincidan con la búsqueda.
+                  <td colSpan={canWrite ? 7 : 6}>
+                    <EmptyState
+                      variant="plain"
+                      className="py-12"
+                      description="No hay publicaciones que coincidan con la búsqueda."
+                    />
                   </td>
                 </tr>
               )}

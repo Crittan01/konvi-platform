@@ -3,6 +3,7 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { BookOpen, Search, BrainCircuit, PenLine, AlertCircle } from 'lucide-react'
 import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
@@ -446,15 +447,16 @@ export default async function KnowledgeBasePage(
         {/* Lista de documentos */}
         <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
           {documents.length === 0 ? (
-            <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
-              <BookOpen className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm font-medium">
-                {q || cat ? 'Sin resultados para los filtros aplicados.' : 'Sin documentos aún.'}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {!q && !cat && 'Agrega información sobre tu negocio para mejorar las respuestas de la IA.'}
-              </p>
-            </div>
+            <EmptyState
+              icon={BookOpen}
+              className="py-16"
+              title={q || cat ? 'Sin resultados para los filtros aplicados.' : 'Sin documentos aún.'}
+              description={
+                !q && !cat
+                  ? 'Agrega información sobre tu negocio para mejorar las respuestas de la IA.'
+                  : undefined
+              }
+            />
           ) : (
             <div className="space-y-3">
               {documents.map(doc => (

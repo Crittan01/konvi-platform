@@ -5,14 +5,16 @@ import Image from 'next/image'
 import { toast } from 'sonner'
 import ActionResultForm from '@/components/action-result-form'
 import { SubmitButton } from '@/components/ui/submit-button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   Search, LayoutGrid, List as ListIcon,
   ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X, Loader2,
-  ArrowUp, ArrowDown, ChevronsUpDown, AlertTriangle,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronsUpDown, AlertTriangle,
 } from 'lucide-react'
 import { ProductEditDrawer } from './product-edit-drawer'
+import { StockAdjustSheet } from './stock-adjust-sheet'
 import { productHasLowStock } from '../_lib/stock'
 import type { Product, Variation } from '../types'
 import type { ActionResult } from '@/lib/action-result'
@@ -72,12 +74,14 @@ const ExpandedPanel = memo(function ExpandedPanel({
   linkedVariationIds?: string[]
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Spec WOW §4.4: ajuste rápido de stock por variante (bottom-sheet en móvil).
+  const [adjustVar, setAdjustVar] = useState<Variation | null>(null)
   const vars = p.product_variations ?? []
 
   return (
     <div className="px-3 sm:px-5 py-3 border-t border-border/30 space-y-3">
 
-      {/* Tabla compacta de variantes — solo lectura */}
+      {/* Tabla compacta de variantes — solo lectura + ajuste rápido de stock */}
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-xs">
           <thead>
@@ -85,6 +89,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
               <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Variante / SKU</th>
               <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-28">Precio</th>
               <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-20">Stock</th>
+              {canWrite && adjustStockAction && <th className="w-10 px-1" aria-label="Acciones" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-border/20">
@@ -106,6 +111,19 @@ const ExpandedPanel = memo(function ExpandedPanel({
                   <td className={`px-3 py-2 text-right font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= threshold ? 'text-amber-700 font-semibold' : 'text-muted-foreground'}`}>
                     {v.stock_quantity} u.
                   </td>
+                  {canWrite && adjustStockAction && (
+                    <td className="px-1 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setAdjustVar(v)}
+                        aria-label={`Ajustar stock de ${fmtAttrs(v.attributes)}`}
+                        title="Ajuste rápido de stock"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <ArrowUpDown className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -138,6 +156,19 @@ const ExpandedPanel = memo(function ExpandedPanel({
           deleteVariationAction={deleteVariationAction}
           adjustStockAction={adjustStockAction}
           deactivateProductAction={deactivateProductAction}
+        />
+      )}
+
+      {/* Ajuste rápido de stock (Spec WOW §4.4): bottom-sheet en < lg,
+          Dialog del DS en ≥ lg. Misma server action del drawer de edición. */}
+      {adjustVar && adjustStockAction && (
+        <StockAdjustSheet
+          product={p}
+          variation={adjustVar}
+          open={adjustVar !== null}
+          onOpenChange={(o) => { if (!o) setAdjustVar(null) }}
+          adjustStockAction={adjustStockAction}
+          threshold={threshold}
         />
       )}
     </div>
@@ -342,6 +373,10 @@ export default function CatalogTable({
     if (new URLSearchParams(window.location.search).get('filter') === 'low_stock') {
       setLowStockOnly(true)
     }
+    // Spec WOW §4.3: deep-link de búsqueda desde la command palette
+    // (`/dashboard/catalog?q=...`) — misma siembra one-shot.
+    const q = new URLSearchParams(window.location.search).get('q')
+    if (q) setSearch(q)
   }, [])
 
   const handleSort = (col: 'title' | 'category' | 'price' | 'stock') => {
@@ -497,9 +532,11 @@ export default function CatalogTable({
         {/* Mobile: stacked cards */}
         <div className="sm:hidden space-y-2">
           {filtered.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground text-sm">
-              No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;
-            </div>
+            <EmptyState
+              variant="plain"
+              className="py-10 text-sm"
+              description={<>No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;</>}
+            />
           ) : filtered.map(p => (
             <ProductMobileCard
               key={p.id}
@@ -634,9 +671,11 @@ export default function CatalogTable({
             </tbody>
           </table>
           {filtered.length === 0 && (
-            <div className="text-center py-10 text-muted-foreground text-sm">
-              No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;
-            </div>
+            <EmptyState
+              variant="plain"
+              className="py-10 text-sm"
+              description={<>No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;</>}
+            />
           )}
         </div>
         <ArchivedSection
@@ -654,9 +693,11 @@ export default function CatalogTable({
     <div className="space-y-3">
       {toolbar}
       {filtered.length === 0 ? (
-        <div className="text-center py-10 text-muted-foreground text-sm">
-          No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;
-        </div>
+        <EmptyState
+          variant="plain"
+          className="py-10 text-sm"
+          description={<>No hay productos que coincidan con &quot;<span className="font-medium text-foreground">{search}</span>&quot;</>}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map(p => {

@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -151,20 +152,19 @@ export default function SuppliersManager({ suppliers, canWrite }: Props) {
       )}
 
       {suppliers.length === 0 && !showAdd ? (
-        <div className="border border-dashed rounded-xl p-8 text-center space-y-3">
-          <Building2 className="h-8 w-8 mx-auto text-muted-foreground/60" />
-          <div>
-            <p className="font-medium text-sm text-foreground">Aún no tienes proveedores</p>
-            <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-              Registra a quién le compras para poder crear órdenes de compra y reabastecer tu inventario.
-            </p>
-          </div>
-          {canWrite && (
-            <Button onClick={() => setShowAdd(true)} size="sm" className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> Agregar primer proveedor
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Building2}
+          className="p-8"
+          title="Aún no tienes proveedores"
+          description="Registra a quién le compras para poder crear órdenes de compra y reabastecer tu inventario."
+          action={
+            canWrite ? (
+              <Button onClick={() => setShowAdd(true)} size="sm" className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" /> Agregar primer proveedor
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {visible.map((s) =>

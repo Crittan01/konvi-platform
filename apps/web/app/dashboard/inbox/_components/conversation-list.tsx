@@ -35,6 +35,8 @@ import {
 } from '../_lib/format'
 import { FILTER_OPTIONS, SLA_BREACH_HOURS, STATUS_CONFIG } from '../_lib/constants'
 import { stripWhatsAppFormat } from '@/lib/whatsapp-format'
+import { EmptyState } from '@/components/ui/empty-state'
+import { StaggerList, StaggerItem } from '@/components/ui/motion'
 
 interface Props {
   conversations: Conversation[]
@@ -293,29 +295,31 @@ export function ConversationList({
             <p>{error}</p>
           </div>
         ) : filteredConvs.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground text-sm">
-            <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-20" />
-            {search ? (
-              <p>Sin resultados para &ldquo;{search}&rdquo;.</p>
-            ) : (
-              <div className="space-y-1.5">
-                <p className="font-medium text-foreground">Aún no hay conversaciones</p>
-                <p className="text-xs leading-relaxed">
+          <EmptyState
+            variant="plain"
+            icon={MessageSquare}
+            className="p-8 text-sm"
+            title={search ? undefined : 'Aún no hay conversaciones'}
+            description={
+              search ? (
+                <>Sin resultados para &ldquo;{search}&rdquo;.</>
+              ) : (
+                <span className="text-xs leading-relaxed">
                   Cuando un cliente le escriba a tu WhatsApp aparecerá aquí automáticamente.
                   Verifica que tu número esté conectado en{' '}
                   <a href="/dashboard/integrations" className="text-primary hover:underline">
                     Configuración → Integraciones
                   </a>.
-                </p>
-              </div>
-            )}
-          </div>
+                </span>
+              )
+            }
+          />
         ) : (
           (() => {
             const groups = groupConvsByPhone(filteredConvs)
             const listRows = groups.flatMap(group => {
               const isExpanded = expandedPhones.has(group.phone)
-              const rows: React.ReactNode[] = []
+              const rows: React.ReactElement[] = []
 
               rows.push(
                 <div key={`${group.phone}-primary`} className="relative">
@@ -360,7 +364,18 @@ export function ConversationList({
                 </div>,
               )
             }
-            return listRows
+            // Spec WOW §4.2: entrada escalonada sutil (stagger 25ms) SOLO en los
+            // primeros 6 ítems (sin cascada infinita). Las keys estables
+            // (phone / conv.id) hacen que los refetches de realtime/polling NO
+            // re-animen; una conversación nueva entra con la animación una vez.
+            return (
+              <StaggerList stagger={0.025}>
+                {listRows.slice(0, 6).map((row, i) => (
+                  <StaggerItem key={row.key ?? i}>{row}</StaggerItem>
+                ))}
+                {listRows.slice(6)}
+              </StaggerList>
+            )
           })()
         )}
       </div>

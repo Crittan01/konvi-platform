@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/server'
+import { ReceiptText } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
 import { cop, fechaCO, estadoEntrega, type Receipt } from './_lib/receipt'
 
 const POR_PAGINA = 25
@@ -66,10 +68,10 @@ export default async function ReceiptsPage(props: {
       )}
 
       {!loadError && receipts.length === 0 && (
-        <div className="rounded-md border border-border bg-muted/30 p-6 text-sm text-muted-foreground">
-          Todavía no hay comprobantes. Se emiten solos unos minutos después de que un pedido
-          queda confirmado.
-        </div>
+        <EmptyState
+          icon={ReceiptText}
+          description="Todavía no hay comprobantes. Se emiten solos unos minutos después de que un pedido queda confirmado."
+        />
       )}
 
       {receipts.length > 0 && (

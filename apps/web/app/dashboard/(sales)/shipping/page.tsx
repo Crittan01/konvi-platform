@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { Truck, Package, AlertCircle, ExternalLink, Clock, Info, FileDown, MapPin, Lock } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import ShippingQuoteForm from './shipping-quote-form'
 import { StatusBadge } from './status-badge'
 import { ShipmentTimeline, type TrackingEvent } from './shipment-timeline'
@@ -292,14 +293,15 @@ export default async function ShippingPage(
             <p className="text-muted-foreground text-xs mt-1">Recarga la página para reintentar.</p>
           </div>
         ) : shipments.length === 0 ? (
-          <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
-            <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground text-sm">
-              {activeProviderConnected
+          <EmptyState
+            icon={Package}
+            className="py-16"
+            description={
+              activeProviderConnected
                 ? 'No hay envíos aún. Usa el formulario de cotización.'
-                : `Conecta ${activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} para comenzar a crear envíos.`}
-            </p>
-          </div>
+                : `Conecta ${activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} para comenzar a crear envíos.`
+            }
+          />
         ) : (
           <div className="space-y-3">
             {shipments.map((s) => {

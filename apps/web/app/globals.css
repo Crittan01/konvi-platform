@@ -44,26 +44,6 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
-
-  --animate-accordion-down: accordion-down 0.2s ease-out;
-  --animate-accordion-up: accordion-up 0.2s ease-out;
-
-  @keyframes accordion-down {
-    from {
-      height: 0;
-    }
-    to {
-      height: var(--radix-accordion-content-height);
-    }
-  }
-  @keyframes accordion-up {
-    from {
-      height: var(--radix-accordion-content-height);
-    }
-    to {
-      height: 0;
-    }
-  }
 }
 
 /*
@@ -182,6 +162,19 @@
        a dark: el verde beneficio 32% quedaba tenue). Light = valores originales (sin regresión). */
     --chart-opex:      0 74% 42%;
     --chart-beneficio: 152 55% 32%;
+    /* Charts del home (recharts) — Spec WOW: antes hex hardcodeados en
+       dashboard-client.tsx (no adaptaban a dark). Light = los hex originales
+       exactos (cero regresión visual); dark = valores brillantes coherentes
+       con el remap dark de badges (§1.10). */
+    --chart-messages:        153 50% 44%;   /* #38A875 verde actividad */
+    --chart-neutral:         171 11% 53%;   /* #7A9490 ticks/leyendas */
+    --chart-pending:          42 63% 55%;   /* #D4A843 */
+    --chart-pending-payment:  41 74% 53%;   /* #E0A82E */
+    --chart-confirmed:       153 50% 44%;   /* #38A875 */
+    --chart-processing:      221 83% 53%;   /* #2563eb */
+    --chart-shipped:         262 83% 58%;   /* #7c3aed */
+    --chart-delivered:       161 94% 30%;   /* #059669 */
+    --chart-cancelled:         0 72% 51%;   /* #dc2626 */
     /* Superficies oscuras — fuente única (referenciadas por .sidebar-gradient
        y .topbar-bg; antes duplicadas como literales hsl(...)). */
     --sidebar-bg:     168 14%  8%;   /* Sidebar estructurado oscuro */
@@ -227,6 +220,15 @@
     --amber:  43 70% 60%;
     --chart-opex:      0 72% 63%;    /* rojo más brillante en dark */
     --chart-beneficio: 152 48% 55%;  /* verde beneficio brillante en dark (paridad --primary) */
+    /* Charts del home en dark — brillantes, coherentes con el remap de badges. */
+    --chart-messages:        158 64% 52%;   /* #34d399 */
+    --chart-pending:          43 96% 56%;   /* #fbbf24 */
+    --chart-pending-payment:  27 96% 61%;   /* #fb923c (naranja: espera de pago) */
+    --chart-confirmed:       158 64% 52%;   /* #34d399 */
+    --chart-processing:      213 94% 68%;   /* #60a5fa */
+    --chart-shipped:         270 95% 75%;   /* #c084fc */
+    --chart-delivered:       142 69% 58%;   /* #4ade80 */
+    --chart-cancelled:         0 91% 71%;   /* #f87171 */
 
     color-scheme: dark;
   }

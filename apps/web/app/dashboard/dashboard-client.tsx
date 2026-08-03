@@ -16,6 +16,9 @@ import {
   AreaChart, Area,
 } from 'recharts'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { Carousel, CarouselContent, CarouselItem, CarouselDots } from '@/components/ui/carousel'
+import { Pressable } from '@/components/ui/motion'
+import { useCountUp } from '@/lib/use-count-up'
 import { formatCOP, formatCOPNegative } from './finance/lib/format'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -64,15 +67,21 @@ const ROLE_LABELS: Record<string, string> = {
   operator: 'Gestor',
 }
 
+// Colores del pie de pedidos — tokens --chart-* theme-aware (globals.css);
+// antes hex hardcodeados que no adaptaban a dark mode.
 const ORDER_STATUS_COLORS: Record<string, string> = {
-  pending:    '#D4A843',
-  pending_payment: '#E0A82E',  // F62: ámbar distinto de pending para el chart
-  confirmed:  '#38A875',
-  processing: '#2563eb',
-  shipped:    '#7c3aed',
-  delivered:  '#059669',
-  cancelled:  '#dc2626',
+  pending:    'hsl(var(--chart-pending))',
+  pending_payment: 'hsl(var(--chart-pending-payment))',  // F62: ámbar distinto de pending para el chart
+  confirmed:  'hsl(var(--chart-confirmed))',
+  processing: 'hsl(var(--chart-processing))',
+  shipped:    'hsl(var(--chart-shipped))',
+  delivered:  'hsl(var(--chart-delivered))',
+  cancelled:  'hsl(var(--chart-cancelled))',
 }
+
+// Verde de actividad (mensajes) y gris de ticks/leyendas — mismos tokens.
+const CHART_MESSAGES = 'hsl(var(--chart-messages))'
+const CHART_NEUTRAL = 'hsl(var(--chart-neutral))'
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending:    'Pendiente',
@@ -310,46 +319,70 @@ export default function DashboardClient({
             <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
           </div>
 
-          {/* Alertas operacionales */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {/* BLOQUE G-1: cada card deep-linkea con el filtro que la alerta promete
-                → el operador aterriza en la vista ya filtrada (no re-buscar). */}
-            <OpsCard
-              href="/dashboard/inbox?status=bot_active"
-              label="Conversaciones activas"
-              value={ops.activeConversations}
-              icon={MessageSquare}
-              color="text-primary"
-              description="Bot respondiendo"
-            />
-            <OpsCard
-              href="/dashboard/inbox?status=human_takeover"
-              label="Agente humano"
-              value={ops.humanTakeovers}
-              icon={UserCheck}
-              color="text-amber-700"
-              description="Requieren atención"
-              urgent={ops.humanTakeovers > 0}
-            />
-            <OpsCard
-              href="/dashboard/orders?status=pending"
-              label="Pedidos pendientes"
-              value={ops.pendingOrders}
-              icon={Clock}
-              color="text-blue-700"
-              description="Por confirmar"
-              urgent={ops.pendingOrders > 0}
-            />
-            <OpsCard
-              href="/dashboard/catalog?filter=low_stock"
-              label="Productos con poco stock"
-              value={ops.lowStockCount}
-              icon={AlertTriangle}
-              color="text-red-700"
-              description={`Stock entre 1 y ${lowStockThreshold} u.`}
-              urgent={ops.lowStockCount > 0}
-            />
-          </div>
+          {/* Alertas operacionales — Spec WOW §4.5: en < lg carrusel horizontal
+              con snap + dots (embla); en ≥ lg el grid de siempre. Mismas cards. */
+          }
+          {(() => {
+            // BLOQUE G-1: cada card deep-linkea con el filtro que la alerta promete
+            // → el operador aterriza en la vista ya filtrada (no re-buscar).
+            const opsCards = [
+              {
+                href: '/dashboard/inbox?status=bot_active',
+                label: 'Conversaciones activas',
+                value: ops.activeConversations,
+                icon: MessageSquare,
+                color: 'text-primary',
+                description: 'Bot respondiendo',
+                urgent: false,
+              },
+              {
+                href: '/dashboard/inbox?status=human_takeover',
+                label: 'Agente humano',
+                value: ops.humanTakeovers,
+                icon: UserCheck,
+                color: 'text-amber-700',
+                description: 'Requieren atención',
+                urgent: ops.humanTakeovers > 0,
+              },
+              {
+                href: '/dashboard/orders?status=pending',
+                label: 'Pedidos pendientes',
+                value: ops.pendingOrders,
+                icon: Clock,
+                color: 'text-blue-700',
+                description: 'Por confirmar',
+                urgent: ops.pendingOrders > 0,
+              },
+              {
+                href: '/dashboard/catalog?filter=low_stock',
+                label: 'Productos con poco stock',
+                value: ops.lowStockCount,
+                icon: AlertTriangle,
+                color: 'text-red-700',
+                description: `Stock entre 1 y ${lowStockThreshold} u.`,
+                urgent: ops.lowStockCount > 0,
+              },
+            ]
+            return (
+              <>
+                <div className="hidden lg:grid lg:grid-cols-4 gap-3 sm:gap-4">
+                  {opsCards.map(c => <OpsCard key={c.href} {...c} />)}
+                </div>
+                <div className="lg:hidden">
+                  <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
+                    <CarouselContent className="-ml-3">
+                      {opsCards.map(c => (
+                        <CarouselItem key={c.href} className="pl-3 basis-[68%] sm:basis-[42%]">
+                          <OpsCard {...c} />
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    <CarouselDots labels={opsCards.map(c => c.label)} />
+                  </Carousel>
+                </div>
+              </>
+            )
+          })()}
 
           {/* Acceso rápido */}
           <div>
@@ -360,20 +393,24 @@ export default function DashboardClient({
               {quickLinks.map(({ href, label, icon, desc }) => {
                 const Icon = ICON_MAP[icon] ?? Package
                 return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="group relative rounded-xl border border-border bg-card p-4 shadow-xs hover:shadow-md hover:border-primary/40 transition-all duration-200 card-hover"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                        <Icon className="h-4 w-4 text-primary" />
+                  // Pressable (Spec WOW §4.2): lift en hover / compresión en tap
+                  // con reduced-motion respetado. Reemplaza al transform de
+                  // card-hover (conflicto con framer); borde/sombra quedan en CSS.
+                  <Pressable key={href} className="h-full">
+                    <Link
+                      href={href}
+                      className="group relative block h-full rounded-xl border border-border bg-card p-4 shadow-xs hover:shadow-md hover:border-primary/40 transition-[border-color,box-shadow] duration-200"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                          <Icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
                       </div>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
-                    </div>
-                    <p className="text-sm font-medium text-foreground">{label}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{desc}</p>
-                  </Link>
+                      <p className="text-sm font-medium text-foreground">{label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{desc}</p>
+                    </Link>
+                  </Pressable>
                 )
               })}
             </div>
@@ -387,14 +424,14 @@ export default function DashboardClient({
                 <AreaChart data={messagesPerDay} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
                   <defs>
                     <linearGradient id="msgGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#38A875" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#38A875" stopOpacity={0} />
+                      <stop offset="5%" stopColor={CHART_MESSAGES} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={CHART_MESSAGES} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#7A9490' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#7A9490' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: CHART_NEUTRAL }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_NEUTRAL }} axisLine={false} tickLine={false} allowDecimals={false} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="total" stroke="#38A875" fill="url(#msgGrad)" strokeWidth={2} name="Mensajes" dot={false} />
+                  <Area type="monotone" dataKey="total" stroke={CHART_MESSAGES} fill="url(#msgGrad)" strokeWidth={2} name="Mensajes" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -419,13 +456,34 @@ export default function DashboardClient({
             <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
           </div>
 
-          {/* Totales acumulados */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <KpiCard label="Conversaciones" value={stats.conversations} />
-            <KpiCard label="Pedidos"        value={stats.orders} />
-            <KpiCard label="Contactos"      value={stats.contacts} />
-            <KpiCard label="Productos"      value={stats.products} />
-          </div>
+          {/* Totales acumulados — mismo patrón §4.5: carrusel < lg, grid ≥ lg */}
+          {(() => {
+            const kpiCards = [
+              { label: 'Conversaciones', value: stats.conversations },
+              { label: 'Pedidos',        value: stats.orders },
+              { label: 'Contactos',      value: stats.contacts },
+              { label: 'Productos',      value: stats.products },
+            ]
+            return (
+              <>
+                <div className="hidden lg:grid lg:grid-cols-4 gap-3 sm:gap-4">
+                  {kpiCards.map(c => <KpiCard key={c.label} {...c} />)}
+                </div>
+                <div className="lg:hidden">
+                  <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
+                    <CarouselContent className="-ml-3">
+                      {kpiCards.map(c => (
+                        <CarouselItem key={c.label} className="pl-3 basis-[55%] sm:basis-[38%]">
+                          <KpiCard {...c} />
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    <CarouselDots labels={kpiCards.map(c => c.label)} />
+                  </Carousel>
+                </div>
+              </>
+            )
+          })()}
 
           {/* Gráficas */}
           <div className="grid md:grid-cols-2 gap-5">
@@ -437,10 +495,10 @@ export default function DashboardClient({
                 <ResponsiveContainer width="100%" height={180}>
                   <BarChart data={messagesPerDay} barSize={20} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#7A9490' }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11, fill: '#7A9490' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: CHART_NEUTRAL }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: CHART_NEUTRAL }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="total" fill="#38A875" radius={[4, 4, 0, 0]} name="Mensajes" />
+                    <Bar dataKey="total" fill={CHART_MESSAGES} radius={[4, 4, 0, 0]} name="Mensajes" />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
@@ -465,7 +523,7 @@ export default function DashboardClient({
                       strokeWidth={0}
                     >
                       {ordersByStatus.map((entry) => (
-                        <Cell key={entry.status} fill={ORDER_STATUS_COLORS[entry.status] ?? '#7A9490'} />
+                        <Cell key={entry.status} fill={ORDER_STATUS_COLORS[entry.status] ?? CHART_NEUTRAL} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -484,7 +542,7 @@ export default function DashboardClient({
                     <Legend
                       formatter={(value: string) => ORDER_STATUS_LABELS[value] ?? value}
                       iconSize={8}
-                      wrapperStyle={{ fontSize: '11px', color: '#7A9490' }}
+                      wrapperStyle={{ fontSize: '11px', color: CHART_NEUTRAL }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -562,29 +620,36 @@ function OpsCard({
   description: string
   urgent?: boolean
 }) {
+  // Count-up (Spec WOW §4.7): rAF con reduced-motion → valor final directo.
+  const animated = useCountUp(value)
   return (
-    <Link
-      href={href}
-      className={`group rounded-xl border bg-card p-4 sm:p-5 shadow-xs hover:shadow-md transition-all duration-200 card-hover ${
-        urgent ? 'border-primary/40 bg-primary/5' : 'border-border'
-      }`}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <Icon className={`h-4 w-4 ${color}`} />
-        {urgent && <span className="h-2 w-2 rounded-full bg-amber-600 animate-pulse" />}
-      </div>
-      <p className={`text-2xl sm:text-3xl font-bold ${color}`}>{value}</p>
-      <p className="text-xs font-medium text-foreground mt-1 leading-snug">{label}</p>
-      <p className="text-xs text-muted-foreground leading-snug">{description}</p>
-    </Link>
+    // Pressable reemplaza al transform de card-hover (conflicto con
+    // framer-motion); el hover de borde/sombra se mantiene en CSS.
+    <Pressable className="h-full">
+      <Link
+        href={href}
+        className={`group block h-full rounded-xl border bg-card p-4 sm:p-5 shadow-xs hover:shadow-md hover:border-primary/40 transition-[border-color,box-shadow] duration-200 ${
+          urgent ? 'border-primary/40 bg-primary/5' : 'border-border'
+        }`}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <Icon className={`h-4 w-4 ${color}`} />
+          {urgent && <span className="h-2 w-2 rounded-full bg-amber-600 animate-pulse" />}
+        </div>
+        <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${color}`}>{Math.round(animated)}</p>
+        <p className="text-xs font-medium text-foreground mt-1 leading-snug">{label}</p>
+        <p className="text-xs text-muted-foreground leading-snug">{description}</p>
+      </Link>
+    </Pressable>
   )
 }
 
 function KpiCard({ label, value }: { label: string; value: number }) {
+  const animated = useCountUp(value)
   return (
-    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-xs">
+    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-xs h-full">
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
-      <p className="text-2xl sm:text-3xl font-bold text-primary">{value}</p>
+      <p className="text-2xl sm:text-3xl font-bold text-primary tabular-nums">{Math.round(animated)}</p>
       <p className="text-xs mt-1 text-muted-foreground">Total acumulado</p>
     </div>
   )
@@ -599,11 +664,12 @@ function MoneyKpiCard({ label, value }: { label: string; value: number | null })
   const negative = value !== null && value < 0
   const border = negative ? 'border-red-700/25 bg-red-500/5' : 'border-emerald-700/25 bg-emerald-500/5'
   const text = negative ? 'text-red-700' : 'text-emerald-700'
+  const animated = useCountUp(value ?? 0)
   return (
     <div className={`rounded-xl border p-4 sm:p-5 shadow-xs ${border}`}>
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${text}`}>
-        {value === null ? '—' : negative ? formatCOPNegative(value) : formatCOP(value)}
+        {value === null ? '—' : negative ? formatCOPNegative(Math.round(animated)) : formatCOP(Math.round(animated))}
       </p>
       <p className="text-xs mt-1 text-muted-foreground">
         {value === null ? 'No disponible' : 'Neto de reembolsos'}

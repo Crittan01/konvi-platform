@@ -14,7 +14,7 @@ const ITEMS = [
   { href: '/dashboard/metrics', label: 'Métricas', Icon: BarChart3 },
 ]
 
-export function BottomNav() {
+export function BottomNav({ inboxBadge = 0 }: { inboxBadge?: number }) {
   const pathname = usePathname()
   return (
     <nav
@@ -25,16 +25,35 @@ export function BottomNav() {
       <ul className="flex items-stretch justify-around">
         {ITEMS.map(({ href, label, Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`)
+          // Mismo dato que el badge del sidebar desktop (conversaciones en
+          // human_takeover, sin archivadas — layout.tsx). En móvil el sidebar
+          // queda oculto tras el drawer: sin este badge el operador no ve urgencias.
+          const showBadge = href === '/dashboard/inbox' && inboxBadge > 0
           return (
             <li key={href} className="flex-1">
               <Link
                 href={href}
                 aria-current={active ? 'page' : undefined}
+                aria-label={
+                  showBadge
+                    ? `${label}, ${inboxBadge > 99 ? 'más de 99' : inboxBadge} ${inboxBadge === 1 ? 'conversación necesita' : 'conversaciones necesitan'} atención humana`
+                    : undefined
+                }
                 className={`flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${
                   active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Icon className="h-5 w-5" aria-hidden />
+                <span className="relative">
+                  <Icon className="h-5 w-5" aria-hidden />
+                  {showBadge && (
+                    <span
+                      aria-hidden
+                      className="absolute -top-1.5 -right-2.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-red-100 text-red-600 border border-red-200 text-[10px] font-bold tabular-nums"
+                    >
+                      {inboxBadge > 99 ? '99+' : inboxBadge}
+                    </span>
+                  )}
+                </span>
                 <span>{label}</span>
               </Link>
             </li>

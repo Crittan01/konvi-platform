@@ -7,10 +7,13 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog'
+import { StaggerList, StaggerItem } from '@/components/ui/motion'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import OrdersNewForm from '../orders-new-form'
 
@@ -237,7 +240,10 @@ function ActionButton({
   orderId: string, nextStatus: string, originalStatus: string, canManageMoney: boolean, updateStatusAction: (fd: FormData) => Promise<void>
 }) {
   const [isPending, startTransition] = useTransition()
-  const confirmar = useConfirm()
+  // Spec WOW §4.4: la confirmación del cambio de estado es bottom-sheet (vaul)
+  // en < lg y el Dialog del DS en ≥ lg — mismo contenido, dos presentaciones.
+  // Acotado a ESTE flujo: el ConfirmDialog global (21 consumidores) no se toca.
+  const [confirmAction, setConfirmAction] = useState<'next' | 'cancel' | null>(null)
 
   const run = (fd: FormData, successMsg: string) => {
     startTransition(async () => {
@@ -250,35 +256,21 @@ function ActionButton({
     })
   }
 
-  const handleNext = async () => {
-    const help = STATUS_ADVANCE_HELP[nextStatus] ?? `El pedido pasará a "${STATUS_LABELS[nextStatus]}".`
-    const ok = await confirmar({
-      title: `¿Avanzar a ${STATUS_LABELS[nextStatus]}?`,
-      description: help,
-      confirmLabel: `Avanzar a ${STATUS_LABELS[nextStatus]}`,
-      cancelLabel: 'Volver',
-    })
-    if (!ok) return
+  const handleConfirm = () => {
+    if (!confirmAction) return
     const fd = new FormData()
     fd.append('order_id', orderId)
-    fd.append('next_status', nextStatus)
-    run(fd, `Pedido actualizado a ${STATUS_LABELS[nextStatus]}.`)
+    if (confirmAction === 'cancel') {
+      fd.append('cancel', 'true')
+      run(fd, 'Pedido cancelado.')
+    } else {
+      fd.append('next_status', nextStatus)
+      run(fd, `Pedido actualizado a ${STATUS_LABELS[nextStatus]}.`)
+    }
+    setConfirmAction(null)
   }
 
-  const handleCancel = async () => {
-    const ok = await confirmar({
-      title: '¿Cancelar este pedido?',
-      description: 'El pedido quedará cancelado de forma definitiva. Esta acción no se puede revertir.',
-      confirmLabel: 'Cancelar pedido',
-      cancelLabel: 'Volver',
-      destructive: true,
-    })
-    if (!ok) return
-    const fd = new FormData()
-    fd.append('order_id', orderId)
-    fd.append('cancel', 'true')
-    run(fd, 'Pedido cancelado.')
-  }
+  const isCancel = confirmAction === 'cancel'
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3 border-t border-border">
@@ -286,7 +278,7 @@ function ActionButton({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              onClick={() => { void handleNext() }}
+              onClick={() => setConfirmAction('next')}
               disabled={isPending}
               size="sm"
               className="w-full sm:w-auto h-8 text-xs font-semibold"
@@ -302,7 +294,7 @@ function ActionButton({
       {originalStatus === 'pending' && canManageMoney && (
         <Button
           variant="ghost"
-          onClick={() => { void handleCancel() }}
+          onClick={() => setConfirmAction('cancel')}
           disabled={isPending}
           size="sm"
           className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-700 hover:bg-destructive/10"
@@ -310,11 +302,59 @@ function ActionButton({
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancelar pedido'}
         </Button>
       )}
+
+      <ResponsiveDialog
+        open={confirmAction !== null}
+        onOpenChange={(o) => { if (!o) setConfirmAction(null) }}
+        title={isCancel ? '¿Cancelar este pedido?' : `¿Avanzar a ${STATUS_LABELS[nextStatus]}?`}
+        description={
+          isCancel
+            ? 'El pedido quedará cancelado de forma definitiva. Esta acción no se puede revertir.'
+            : (STATUS_ADVANCE_HELP[nextStatus] ?? `El pedido pasará a "${STATUS_LABELS[nextStatus]}".`)
+        }
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmAction(null)}>
+              Volver
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={isCancel ? 'destructive' : 'default'}
+              disabled={isPending}
+              onClick={handleConfirm}
+            >
+              {isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : isCancel ? 'Cancelar pedido' : `Avanzar a ${STATUS_LABELS[nextStatus]}`}
+            </Button>
+          </>
+        }
+      />
     </div>
   )
 }
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
+
+/**
+ * OrderStatusBadge — badge de estado con micro-transición al CAMBIAR de valor
+ * (Spec WOW §4.2: fade/scale sutil, ~200ms). Solo en cambios reales: ni en el
+ * primer render ni en refetches con el mismo estado (patrón oficial de estado
+ * derivado durante el render). motion-reduce:animate-none cubre reduced-motion.
+ */
+function OrderStatusBadge({ status, colorClass }: { status: string; colorClass: string }) {
+  const [prevStatus, setPrevStatus] = useState(status)
+  const changed = prevStatus !== status
+  if (changed) setPrevStatus(status)
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${colorClass} ${
+      changed ? 'animate-in fade-in-0 zoom-in-95 duration-200 motion-reduce:animate-none' : ''
+    }`}>
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  )
+}
 
 export default function OrdersManager({
   initialOrders, products, contacts, role, canWrite, canManageMoney, counts,
@@ -476,26 +516,33 @@ export default function OrdersManager({
         {/* Lista de pedidos */}
         <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
           {initialOrders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 rounded-xl border border-dashed border-border text-center">
-              <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm max-w-md">
-                {query
+            <EmptyState
+              icon={Package}
+              className="py-16"
+              description={
+                query
                   ? 'No se encontraron resultados para la búsqueda.'
                   : (status === 'all' && !contactId)
                     ? (canWrite
                         ? 'Aún no tienes pedidos. Llegan automáticamente cuando un cliente compra por el bot de WhatsApp, o puedes crear uno a mano con el formulario “Nuevo Pedido” de la izquierda.'
                         : 'Aún no hay pedidos. Llegan automáticamente cuando un cliente compra por el bot de WhatsApp.')
-                    : `No hay pedidos${status !== 'all' ? ` con estado "${STATUS_LABELS[status]}"` : ''}${contactId ? ' para este contacto' : ''}.`}
-              </p>
-              {(status !== 'all' || query || contactId) && (
-                <button type="button" onClick={clearAll} className="mt-2 text-xs text-primary hover:underline">
-                  Limpiar filtros
-                </button>
-              )}
-            </div>
+                    : `No hay pedidos${status !== 'all' ? ` con estado "${STATUS_LABELS[status]}"` : ''}${contactId ? ' para este contacto' : ''}.`
+              }
+              action={
+                (status !== 'all' || query || contactId) ? (
+                  <button type="button" onClick={clearAll} className="text-xs text-primary hover:underline">
+                    Limpiar filtros
+                  </button>
+                ) : undefined
+              }
+            />
           ) : (
-            <div className={`space-y-4 transition-opacity ${isNavPending ? 'opacity-60' : ''}`}>
-              {initialOrders.map((o) => {
+            /* Spec WOW §4.2: entrada escalonada sutil (stagger 25ms) solo en los
+               primeros 6 ítems (sin cascada infinita). Las keys estables (o.id)
+               evitan re-animar en refreshes con la misma data; al cambiar de
+               filtro/página la cascada se repite, que es lo deseado. */
+            <StaggerList stagger={0.025} className={`space-y-4 transition-opacity ${isNavPending ? 'opacity-60' : ''}`}>
+              {initialOrders.map((o, orderIdx) => {
                 const nextStatus = STATUS_NEXT[o.status]
                 const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-700'
                 const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
@@ -504,14 +551,12 @@ export default function OrdersManager({
                 const discount  = o.discount_amount ?? 0
                 const revenue   = o.total_amount ?? (subtotal + shipping - discount)
 
-                return (
+                const card = (
                   <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-xs transition-all focus-within:border-primary/50">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${colorClass}`}>
-                            {STATUS_LABELS[o.status] ?? o.status}
-                          </span>
+                          <OrderStatusBadge status={o.status} colorClass={colorClass} />
                           {o.payment_method === 'cod' && (
                             <TooltipProvider delayDuration={200}>
                               <Tooltip>
@@ -606,6 +651,10 @@ export default function OrdersManager({
                     </div>
                   </div>
                 )
+
+                return orderIdx < 6
+                  ? <StaggerItem key={o.id}>{card}</StaggerItem>
+                  : card
               })}
 
               {/* D7 — Paginación server-side */}
@@ -623,7 +672,7 @@ export default function OrdersManager({
                   </div>
                 </div>
               )}
-            </div>
+            </StaggerList>
           )}
         </div>
       </div>

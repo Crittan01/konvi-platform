@@ -10,6 +10,7 @@ import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
 import { BottomNav } from './bottom-nav'
+import CommandPalette from '@/components/command-palette'
 
 /**
  * Browser title tenant-centric (Sem 7 F2 cierre — segregación Konvi/tenant).
@@ -54,7 +55,7 @@ export default async function DashboardLayout({
     // Si el user usó recovery code en esta sesión, la cookie HttpOnly debe
     // borrarse para que el próximo login REQUIERA TOTP o nuevo recovery.
     const { cookies } = await import('next/headers')
-    const cookieStore = await cookies()   // Next 15: cookies() es async
+    const cookieStore = await cookies()   // Next 16: cookies() es async
     cookieStore.delete('mfa_recovery_session')
     redirect('/login')
   }
@@ -62,7 +63,7 @@ export default async function DashboardLayout({
   // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
   // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
   const { cookies: cookiesFn } = await import('next/headers')
-  const recoveryCookieStore = await cookiesFn()   // Next 15: cookies() es async
+  const recoveryCookieStore = await cookiesFn()   // Next 16: cookies() es async
   // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
   const usedRecoveryCode = await verifyRecoveryCookie(
     recoveryCookieStore.get('mfa_recovery_session')?.value,
@@ -77,9 +78,9 @@ export default async function DashboardLayout({
   let meliBadge = 0
   let planCode = 'enterprise'
   const planCapabilities: Record<string, boolean> = {}
-  // Rev. 107 — `shipping` es abstracción multi-provider: true si CUALQUIER
-  // provider shipping (envia | aveonline) está connected. Habilita el
-  // módulo Cotizador del sidebar independiente del provider activo.
+  // Rev. 107 — `shipping` es la integración de logistics del tenant: true si
+  // Aveonline (provider shipping soportado) está connected. Habilita el
+  // módulo Cotizador del sidebar.
   const integrations = { whatsapp: false, shipping: false, mercadolibre: false }
 
   if (tenantId) {
@@ -149,6 +150,13 @@ export default async function DashboardLayout({
           <div className="w-10 lg:hidden" />
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            {/* Spec WOW §4.3 — entrada a la command palette (⌘K). Móvil: icono;
+                desktop: input fake. Los gates son los mismos del sidebar. */}
+            <CommandPalette
+              role={role}
+              integrations={integrations}
+              planCapabilities={planCapabilities}
+            />
             <ThemeToggle />
             <div className="flex items-center gap-2 text-xs opacity-90">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -179,8 +187,9 @@ export default async function DashboardLayout({
         </div>
       </main>
 
-      {/* Navegación inferior móvil (fixed, < lg) */}
-      <BottomNav />
+      {/* Navegación inferior móvil (fixed, < lg) — badge human_takeover,
+          mismo dato que el sidebar desktop */}
+      <BottomNav inboxBadge={inboxBadge} />
     </div>
   )
 }
