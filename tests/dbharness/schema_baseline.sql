@@ -11753,8 +11753,6 @@ GRANT ALL ON TABLE "public"."products" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."provider_health_alert_dedup" TO "anon";
-GRANT ALL ON TABLE "public"."provider_health_alert_dedup" TO "authenticated";
 GRANT ALL ON TABLE "public"."provider_health_alert_dedup" TO "service_role";
 
 
@@ -11771,8 +11769,6 @@ GRANT ALL ON TABLE "public"."purchase_orders" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."rate_limit_windows" TO "anon";
-GRANT ALL ON TABLE "public"."rate_limit_windows" TO "authenticated";
 GRANT ALL ON TABLE "public"."rate_limit_windows" TO "service_role";
 
 
@@ -11987,7 +11983,6 @@ GRANT ALL ON TABLE "public"."whatsapp_templates" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."whatsapp_webhook_inbox" TO "authenticated";
 GRANT ALL ON TABLE "public"."whatsapp_webhook_inbox" TO "service_role";
 
 
@@ -11998,8 +11993,6 @@ GRANT ALL ON TABLE "public"."wompi_events_seen" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."wompi_webhook_inbox" TO "anon";
-GRANT ALL ON TABLE "public"."wompi_webhook_inbox" TO "authenticated";
 GRANT ALL ON TABLE "public"."wompi_webhook_inbox" TO "service_role";
 
 

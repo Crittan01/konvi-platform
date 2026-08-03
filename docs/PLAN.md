@@ -118,3 +118,18 @@ Los ítems del checklist (A1, A2, A3, M12) no se duplican aquí. Esfuerzo y depe
 | Re-certificación E2E conversacional | Cada release que toque bot (FSM, tools, invariants, prompt) | Con el próximo cambio de bot | `coherence_scenarios.py` 15/15 + `test_a11_coherence_assertions.py` verde; log en `scripts/uat/runs/` |
 | Rotación de secretos | Trimestral y tras cualquier incidente | Tras cerrar B2 (primera rotación documentada) | Supabase keys, DB password, Meta App Secret, Wompi keys, `INTERNAL_SERVICE_SECRET`, `RESEND_API_KEY` |
 | Revisión de este PLAN | Semanal | Próxima sesión de trabajo | Checklist §A al día, P0/P1 re-priorizados, estados verificados contra código (no contra memoria) |
+
+---
+
+## E. Bitácora de ejecución
+
+Registro de hitos del cierre pre-producción. Cada cierre de ítem del checklist §A o del backlog §B debe reflejarse aquí y en su fila correspondiente, en el mismo commit.
+
+| Fecha | Hito | Evidencia |
+|---|---|---|
+| 2026-08-02 | Auditoría profunda 8 dominios (0% suposición) + depuración documental + 13 docs canónicos + hardening código + pack UX wow + certificación local | `.audit/findings/2026-08-02-consolidated-audit.md`; gate `--ci` 24 OK / 0 ERROR, coverage 69.5% |
+| 2026-08-02 | Migración `20260802120000` aplicada a prod (ghost tables droppeadas, grants de infra revocados) | Ledger prod = 251 = repo; `supabase db query --linked` |
+| 2026-08-03 | 5 commits temáticos + push a `develop` (`1d05ce28`…`422d2336`) | `git log origin/develop` |
+| 2026-08-03 | CI #30777152451 falló en job db-harness: baseline `tests/dbharness/schema_baseline.sql` no regenerado tras la migración (gate local `--ci` no incluye ese job — lección registrada). Fix: baseline regenerado con replay real (`scripts/schema_drift_check.sh --update`, podman) + check verde | Run fallido + este commit de fix |
+
+**Pendiente inmediato:** CI verde en develop → decisión founder de `git push origin develop:production` (deploy seguro: no activa guías reales ni MFA; ver §A ítems 1 y 7).
