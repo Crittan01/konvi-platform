@@ -86,10 +86,12 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 ## Herramientas en VM (sin venv)
 
 ```bash
-supabase db query --linked -f archivo.sql   # psql TCP bloqueado por Supavisor
+supabase db query --linked -f archivo.sql   # psql TCP bloqueado por Supavisor (solo para PROD explícito)
 python3.11 main.py                          # usar python3.11 explícito en esta VM
 pnpm --filter web dev                       # Node 22 (`.nvmrc`; v22.23.1 instalada via nvm)
 ```
+
+**Target por defecto del desarrollo local (ENV-1, 2026-08-03):** `.env` y `apps/web/.env.local` apuntan al **Supabase LOCAL en podman** (`http://127.0.0.1:54321`, DB `:54322`, Studio `:54323`) — no a la nube. Levantar stack: `export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock" && supabase start`. Para operar PROD se usa `.env.prod` explícito (ver `docs/infra/environments.md` §2).
 
 ---
 

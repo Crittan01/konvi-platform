@@ -150,6 +150,9 @@ def classify(creds: dict) -> str:
     SUPABASE_PROJECT_REF): si CUALQUIERA apunta a prod → 'prod'/'prelaunch'; si
     cualquiera está seteada pero no se resuelve a un dev conocido → 'unknown'. Solo
     'dev-safe' si todas las fuentes presentes son local o un ref de dev reconocido.
+    Excepción: un SUPABASE_PROJECT_REF sin forma de ref cloud (20 chars [a-z0-9]) —
+    p.ej. el slug del proyecto local del CLI — no puede direccionar un proyecto
+    cloud y se trata como neutro (ENV-1: dev local por defecto contra podman).
 
     'prelaunch' es el ref de PROD antes del lanzamiento: mismo proyecto, pero los
     scripts testing-only pueden correr contra él avisando (ver assert_safe_target).
@@ -188,10 +191,15 @@ def classify(creds: dict) -> str:
     if pr:
         if pr == PROD_REF:
             return _prod_kind()
-        if _REF_RE.match(pr) and pr in safe:
-            saw_safe = True
-        else:
-            saw_unsafe = True
+        if _REF_RE.match(pr):
+            if pr in safe:
+                saw_safe = True
+            else:
+                saw_unsafe = True
+        # else: slug SIN forma de ref cloud (los refs cloud son 20 chars [a-z0-9];
+        # p.ej. el project_id local del CLI "konvi-platform" tiene guion). No puede
+        # direccionar ningún proyecto cloud → neutro: la clasificación la deciden
+        # URL + DATABASE_URL. Un string de 16+ alnum (forma de ref) sigue fail-closed.
 
     if saw_unsafe:
         return "unknown"

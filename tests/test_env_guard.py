@@ -237,6 +237,28 @@ def test_classify_project_ref_dev_is_dev_safe(dev_allowed):
     assert guard.classify({"SUPABASE_PROJECT_REF": DEV_REF}) == "dev-safe"
 
 
+def test_classify_project_ref_local_slug_es_neutro():
+    """ENV-1: el project_id local del CLI ('konvi-platform', con guion) NO es un ref
+    cloud — no puede direccionar ningún proyecto *.supabase.co → es neutro y la
+    clasificación la deciden URL + DATABASE_URL."""
+    local = {
+        "NEXT_PUBLIC_SUPABASE_URL": "http://127.0.0.1:54321",
+        "SUPABASE_PROJECT_REF": "konvi-platform",
+    }
+    assert guard.classify(local) == "dev-safe"
+    # Solo el slug, sin URL/DATABASE_URL local: no prueba nada → sigue fail-closed.
+    assert guard.classify({"SUPABASE_PROJECT_REF": "konvi-platform"}) == "unknown"
+
+
+def test_classify_project_ref_forma_cloud_desconocido_sigue_fail_closed():
+    """Un string CON forma de ref cloud (16+ alnum) fuera de la allowlist sigue
+    siendo 'unknown' aunque la URL sea local — el fail-closed no se afloja."""
+    assert guard.classify({
+        "NEXT_PUBLIC_SUPABASE_URL": "http://127.0.0.1:54321",
+        "SUPABASE_PROJECT_REF": "zzzzzzzzzzzzzzzzzzzz",
+    }) == "unknown"
+
+
 def test_classify_database_url_local_is_dev_safe():
     assert guard.classify(
         {"DATABASE_URL": "postgresql://postgres:pw@localhost:54322/postgres"}

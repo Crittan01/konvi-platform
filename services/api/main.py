@@ -76,7 +76,11 @@ def _validate_startup_config() -> None:
     errors: list[str] = []
 
     # ── Variables críticas de Supabase ────────────────────────────────────────
-    if not os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").startswith("https://"):
+    _sb_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+    # https obligatorio salvo stack local (ENV-1: Supabase local en podman sirve
+    # http plano en loopback; prod/cloud sigue exigiendo https).
+    _is_local_url = _sb_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
+    if not (_sb_url.startswith("https://") or _is_local_url):
         errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
     # Aceptar el nombre nuevo (SECRET_KEY) o el legacy (SERVICE_ROLE_KEY) durante
     # transición A0.2c. Cleanup del legacy en commit final post-migración código.
