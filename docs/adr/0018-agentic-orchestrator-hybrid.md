@@ -1,6 +1,6 @@
 # ADR-0018 — Agentic Orchestrator with Hybrid LLM Tool-Use
 
-**Estado:** ACTIVO (Fase 0 MVP en ejecución).
+**Estado:** IMPLEMENTADO (verificado 2026-08-02 — cutover ejecutado vía `scripts/agentic_cutover.py`; `services/ai-orchestrator/agentic/` es el runtime único).
 **Fecha:** 2026-05-22.
 **Branch:** `phase-2-agentic-rewrite`.
 **Punto de partida:** `phase-0-pre-prod` @ commit `1b2ec16`.

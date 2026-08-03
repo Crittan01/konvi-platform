@@ -60,7 +60,7 @@ Criterio mínimo recomendado:
 
 Referencias de criterio funcional:
 - `docs/operations/inbox-intents-matrix.md`
-- `docs/integrations/wompi-prep.md` (pagos en fase posterior)
+- `docs/integrations/wompi.md` (pagos — integración live; el histórico `wompi-prep.md` está archivado en `docs/_archive/integrations/`)
 
 Detalle y riesgos: `docs/deployment/render-upgrade-path.md`.
 Gate formal de aprobación: `docs/deployment/production-readiness-gate.md`.

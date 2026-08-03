@@ -36,7 +36,7 @@ Regla de activación: **cumplir al menos 2 de 3 triggers** y no tener bloqueador
 1. Contratos runtime ambiguos o no validados en producción-lab.
 2. Secrets/rotación sin cierre documental.
 3. Falta de rollback claro de cutover.
-4. Integraciones críticas con fallos no controlados (Meta/Envia/MeLi).
+4. Integraciones críticas con fallos no controlados (Meta/Aveonline/MeLi/Wompi).
 5. Fase A/B de Inbox sin certificar (catalogo variantes + pedidos/shipping).
 
 ## 4) Ventana de evidencia mínima

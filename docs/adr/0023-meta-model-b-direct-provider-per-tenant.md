@@ -1,5 +1,7 @@
 # ADR-0023 — Meta WhatsApp: Direct Provider per-tenant (Model B)
 
+> ⚠️ **Colisión de numeración**: este archivo y `0023-shipping-provider-integration-pattern.md` comparten el número 0023 (ver [`README.md`](README.md)). Referenciar siempre por nombre de archivo completo.
+
 **Status**: Accepted (2026-06-03)
 **Deciders**: Founder + AI Architect
 **Context**: Auditoría exhaustiva 9-agent workflow (`wyr6c8f2i` 2026-06-03)

@@ -18,7 +18,7 @@ Todo agente y desarrollador debe respetar estas normas antes de crear, modificar
 | **L3** | `docs/integrations/` | Diseño de conectores externos | Con nuevas integraciones o cambios de fase |
 | **L3** | `docs/HANDOFF.md` | Estado operativo, credenciales, lecciones | Con cambios de infra o credenciales |
 | **L3** | `docs/tech/` | Matrices técnicas, hardening y validaciones | Con cambios de contratos runtime |
-| **L1** | `.context/06-contracts.md` | Contratos runtime (FSM, Wompi, Envia, fuentes que consume el bot) | Con cambios en runtime/contracts |
+| **L1** | `.context/06-contracts.md` | Contratos runtime (FSM, Wompi, Aveonline, fuentes que consume el bot) | Con cambios en runtime/contracts |
 | **L1** | `.context/07-schema-canonical.md` | Snapshot del schema DB live (rev. 72+) | Regenerable con `scripts/dump_schema_canonical.py` |
 | **L1** | `.context/08-domain-coherence-matrix.md` | Matriz Front↔API↔DB↔Tests↔Docs por dominio | Con cualquier rev. que cierre/abra drift arquitectural |
 | **L1** | `.context/09-bot-flowchart.md` | Flowchart canónico del bot conversacional (FSM + tools + guards + async). | Con cualquier cambio en FSM/tools/guards |
@@ -62,6 +62,13 @@ es ruido que confunde a agentes. Eliminar o completar.
 ### Regla 7 — Los docs eliminados no deben reaparecer en referencias
 Al eliminar un archivo, buscar y actualizar todas las referencias a él en el repo.
 
+### Regla 8 — Frescura verificada (L1/L2)
+Todo archivo L1/L2 (`.context/*.md`) lleva en su cabecera una línea
+**"Verificado contra repo: YYYY-MM-DD @ commit"**.
+Esa fecha se actualiza en **cada PR que cambie algo que el archivo declara**
+(versiones, estados FSM, conteos, rutas, tablas). Un L1/L2 con fecha vieja es
+sospechoso: verificar antes de confiar en él.
+
 ---
 
 ## Qué Archivos Existen y Para Qué
@@ -73,16 +80,29 @@ Al eliminar un archivo, buscar y actualizar todas las referencias a él en el re
 | `01-state.md` | Estado de implementación real verificado en código |
 | `02-stack.md` | Stack técnico con versiones reales |
 | `03-rules.md` | Reglas quick de implementación para agentes |
-| `04-next-steps.md` | Próximos pasos y deuda técnica |
+| `04-next-steps.md` | Puntero a `docs/PLAN.md` + contexto extra no cubierto por el plan |
+| `05-doc-policy.md` | Este archivo — gobierno de la documentación |
+| `06-contracts.md` | Contratos runtime (FSM, Wompi, Aveonline, Meta, fuentes del bot) |
+| `07-schema-canonical.md` | Snapshot del schema DB live (39 tablas CORE; regenerable) |
+| `08-domain-coherence-matrix.md` | Matriz Front↔API↔DB↔Tests↔Docs por dominio |
+| `09-bot-flowchart.md` | Flowchart canónico del bot agentic (gates, FSM, tools, invariants, async) |
 
 ### `docs/` — Documentación técnica detallada
 | Carpeta | Contenido |
 |---|---|
+| `docs/PLAN.md` | **Plan maestro y backlog priorizado pre-producción (backlog de verdad)** |
+| `docs/product/PRD.md` | PRD — qué es el producto |
+| `docs/tech/TRD.md` | TRD — requisitos técnicos |
+| `docs/backend/BACKEND.md` | Backend canónico (servicios, routers, workers) |
+| `docs/ux/UX-UI.md` | UX/UI canónica (design system Kaiu) |
+| `docs/flows/` | Flujos end-to-end (README + 6 flujos) |
 | `docs/HANDOFF.md` | Estado operativo, credenciales activas, lecciones |
 | `docs/architecture/` | Decisiones técnicas (front-back sep., multi-tenant, conectores) |
-| `docs/integrations/` | Diseño de conectores (Envia, MeLi) |
+| `docs/integrations/` | Diseño de conectores (README + Wompi, Aveonline, Telegram, MeLi, WhatsApp-Meta) |
+| `docs/adr/README.md` | Índice de ADRs |
 | `docs/roadmap/` | Fases con estado |
 | `docs/risks/` | Preguntas abiertas, riesgos, decisiones pendientes |
+| `docs/_archive/` | Histórico superado (cabecera ARCHIVADO + README índice) — no es referencia operativa |
 
 ### Archivos raíz
 | Archivo | Contenido |

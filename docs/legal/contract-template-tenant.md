@@ -5,12 +5,14 @@
 **Objetivo:** plantilla base de cláusulas que el abogado convertirá en contrato definitivo + adaptará a contexto persona natural Konvi → SAS Konvi (Fase 3 estrategia).
 
 > ⚠️ **Este documento NO es un contrato firmable.** Es un punto de partida con cláusulas críticas que el founder debe llevar al abogado para revisión y formalización. NO usar tal cual con tenants.
+>
+> Rev. 2026-08-02: corregido operador logístico (Envia→Aveonline). Pendiente revisión de abogado antes de firma con tenants (ítem B3 del PLAN).
 
 ---
 
 ## Contexto operativo
 
-- **Konvi** (hoy persona natural founder; en Fase 3 estrategia → SAS Konvi) presta servicio SaaS de comercio conversacional WhatsApp + integraciones (Wompi, Envia/Aveonline, MeLi, Telegram) a tenants B2B.
+- **Konvi** (hoy persona natural founder; en Fase 3 estrategia → SAS Konvi) presta servicio SaaS de comercio conversacional WhatsApp + integraciones (Wompi, Aveonline, MeLi, Telegram) a tenants B2B.
 - **Tenant** = pyme/empresa colombiana que contrata Konvi para operar su canal de venta vía WhatsApp + integraciones.
 - **Relación legal**: Konvi presta SERVICIO DE SOFTWARE (SaaS). NO es intermediario financiero, NO procesa pagos a nombre del tenant, NO actúa como agregador. El tenant configura sus propias credenciales Wompi (key-per-tenant). Konvi cobra suscripción mensual SaaS al tenant — esto es pago por servicio prestado, NO recaudo a terceros.
 
@@ -93,7 +95,7 @@
 > - Atender consultas y reclamos de titulares en los términos del artículo 14 y 15 de la Ley 1581 de 2012;
 > - Comunicar a KONVI las solicitudes de los titulares que requieran acción de KONVI como Encargado.
 >
-> **6.4 Subprocesadores:** KONVI podrá subcontratar tratamiento a los subprocesadores listados en [`docs/legal/subprocessors.md`](subprocessors.md) (Supabase, Render, Resend, Sentry, Google Gemini, Meta/WhatsApp, Wompi, Envia/Aveonline, etc.). Cualquier nuevo subprocesador será notificado al CLIENTE con [30] días de anticipación.
+> **6.4 Subprocesadores:** KONVI podrá subcontratar tratamiento a los subprocesadores listados en [`docs/legal/subprocessors.md`](subprocessors.md) (Supabase, Render, Resend, Sentry, Google Gemini, Meta/WhatsApp, Wompi, Aveonline, etc.). Cualquier nuevo subprocesador será notificado al CLIENTE con [30] días de anticipación.
 
 ### 7. Force majeure y caso fortuito
 
@@ -103,7 +105,7 @@
 
 ### 8. Servicios de terceros (disclaimer)
 
-> El CLIENTE reconoce y acepta que la plataforma KONVI integra servicios de terceros (Meta/WhatsApp Business API, Wompi como pasarela de pagos, Envia/Aveonline como operador logístico, Mercado Libre como marketplace, Telegram, Resend, etc.). **KONVI NO controla ni responde por:**
+> El CLIENTE reconoce y acepta que la plataforma KONVI integra servicios de terceros (Meta/WhatsApp Business API, Wompi como pasarela de pagos, Aveonline como operador logístico, Mercado Libre como marketplace, Telegram, Resend, etc.). **KONVI NO controla ni responde por:**
 >
 > - Caídas o degradación de servicio de los proveedores terceros;
 > - Cambios en los términos comerciales, precios, comisiones o políticas de los proveedores terceros;

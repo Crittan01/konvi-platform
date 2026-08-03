@@ -1,352 +1,125 @@
-# Wompi — Integración Técnica (Preparación Fase C)
+# Wompi — Pagos (documento canónico)
 
-Última actualización: 2026-04-24
-Estado: documento de diseño técnico validado en docs oficiales. **Implementación runtime bloqueada hasta gate Fase C.**
+> Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop
 
-> Validado contra: https://docs.wompi.co/en/docs/colombia/
+## Estado
 
----
+**LIVE** — payment links reales, webhook firmado y reconciliación automática de 3 capas en producción. Significa: un tenant con llaves productivas (`prv_prod_*` / `prod_events_*`) cargadas en Vault puede cobrar desde el bot de WhatsApp hoy, sin intervención de plataforma. La activación comercial por tenant (nombre comercio "KONVI" en Wompi, llaves prod) es founder-gate (B6), no bloqueo técnico.
 
-## 1. Decisiones de diseño
+Ambientes soportados por tenant: `sandbox` (`https://sandbox.wompi.co/v1`) y `production` (`https://production.wompi.co/v1`), seleccionado en `tenant_integrations.meta.environment` (`services/api/integrations/wompi_client.py:45`).
 
-- Sandbox primero, luego producción.
-- Confirmación de pago **solo** por webhook server-side validado (checksum).
-- Nunca confirmar pago por interpretación de texto del cliente en chat.
-- Llaves privadas **nunca** en frontend ni en repositorio.
+## Dónde vive el código
 
----
-
-## 2. Ambientes y endpoints
-
-| Ambiente | Base URL |
-|---|---|
-| Sandbox | `https://sandbox.wompi.co/v1` |
-| Producción | `https://production.wompi.co/v1` |
-
-### Endpoints validados
-
-| Endpoint | Método | Auth | Uso |
-|---|---|---|---|
-| `/payment_links` | POST | Bearer private_key | Crear link de pago |
-| `/payment_links/:id` | GET | Ninguna | Consultar link de pago |
-| `/transactions/:id` | GET | Bearer private_key | Consultar estado de transacción |
-
-> **Nota**: No existe endpoint documentado de búsqueda de transacción por `reference`. Solo por `id`. La correlación con la orden propia se hace por `reference` en el webhook `transaction.updated`.
-
-### Webhooks (eventos verificados en docs oficiales)
-
-| Evento | Descripción |
-|---|---|
-| `transaction.updated` | Cambio de estado en transacción (APPROVED, DECLINED, VOIDED, ERROR, PENDING) |
-| `nequi_token.updated` | Estado de token Nequi a estado final |
-| `bancolombia_transfer_token.updated` | Estado de token Bancolombia a estado final |
-
-> **IMPORTANTE**: El evento `payment_link.payment_received` **no está listado en la documentación oficial** de Wompi (validado 2026-04-24). Para detectar pagos vía link, usar `transaction.updated` con el campo `payment_link_id` en el objeto `transaction`.
-
-El endpoint receptor propio:
-```
-POST /api/v1/webhooks/wompi
-```
-
----
-
-## 3. Secretos requeridos
-
-| Variable | Ambiente | Uso |
+| Pieza | Archivo | Líneas |
 |---|---|---|
-| `WOMPI_PUBLIC_KEY_SANDBOX` | Sandbox | Identificar comercio (prefijo `pub_test_`) |
-| `WOMPI_PRIVATE_KEY_SANDBOX` | Sandbox | Auth server-side en requests (prefijo `prv_test_`) |
-| `WOMPI_EVENTS_KEY_SANDBOX` | Sandbox | Validar firma de webhooks (prefijo `test_events_`) |
-| `WOMPI_INTEGRITY_KEY_SANDBOX` | Sandbox | Tokens de integridad (prefijo `test_integrity_`) |
-| `WOMPI_PUBLIC_KEY_PROD` | Producción | Identificar comercio (prefijo `pub_prod_`) |
-| `WOMPI_PRIVATE_KEY_PROD` | Producción | Auth server-side en requests (prefijo `prv_prod_`) |
-| `WOMPI_EVENTS_KEY_PROD` | Producción | Validar firma de webhooks (prefijo `prod_events_`) |
-| `WOMPI_INTEGRITY_KEY_PROD` | Producción | Tokens de integridad (prefijo `prod_integrity_`) |
-| `WOMPI_ENV` | Ambos | `sandbox` o `production` |
+| Cliente HTTP + firma + void | `services/api/integrations/wompi_client.py` | 774 |
+| Webhook receptor + confirmación de orden + guía post-pago | `services/api/routers/wompi_webhook.py` | 2660 |
+| Endpoint manual de link | `services/api/routers/orders.py` (`POST /api/v1/orders/{id}/payment-link`) | — |
+| Tool del bot (genera link en conversación) | `services/ai-orchestrator/tools/payment_link_tool.py` | 906 |
+| Re-drive del inbox + poll de voids | `services/ai-orchestrator/worker.py` | jobs `wompi_inbox_reconcile`, `wompi_void_poll` |
+| Espejo del cliente (orchestrator) | `services/ai-orchestrator/integrations/wompi_client.py` | — |
+| Runbook reconciliación manual | `docs/operations/runbooks/wompi-payment-reconciliation.md` | 99 |
+| ADR ciclo de vida del link | `docs/adr/0011-payment-link-lifecycle.md` | — |
 
-> Llaves se obtienen en: https://comercios.wompi.co → Desarrollo → Programadores
+## Flujos implementados
 
----
+### 1. Generación de payment link (conversacional)
 
-## 4. Contrato de creación de link de pago
+1. El cliente confirma la compra en WhatsApp → el bot invoca `payment_link_tool` (`services/ai-orchestrator/tools/payment_link_tool.py`).
+2. Validaciones determinísticas pre-llamada: mínimo **$1.500 COP = 150.000 cents** (`payment_link_tool.py:37`, modelo Agregador), cap de sanidad $100M COP (`payment_link_tool.py:38`).
+3. Reuso idempotente: si la orden `pending_payment` tiene link vigente (≤ TTL), reutiliza el `checkout_url` en vez de crear otro (`payment_link_tool.py:411-412`).
+4. La API crea el link en Wompi con **`sku = order_id`** (UUID v4 = 36 chars exactos, el máximo del campo) y **`expires_at = now + 30 min`** (`wompi_client.py:274-275,348-349`). El TTL tiene 3 puntos alineados a mano: `orders.py:76` (endpoint manual, hardcoded 30), `wompi_webhook.py:40` (regeneración de links, **este sí lee el env** `WOMPI_PAYMENT_LINK_TTL_MINUTES`, usado en `:760`) y `payment_link_tool.py:45` (boundary del idempotency guard del bot).
+5. La orden queda `pending_payment` con TTL de 35 min (`PENDING_PAYMENT_TTL_MINUTES`, 5 min de buffer sobre el link); un job del worker libera el stock si expira sin pago (`render.yaml:414-418`).
+6. Recordatorio de pago a los 25 min dentro de la ventana CSW de Meta (`PAYMENT_REMINDER_*`, `render.yaml:419-423`).
 
-### Campos requeridos (validados en docs oficiales)
-```
-name, description, single_use, collect_shipping
-```
+La API de Wompi **no acepta `metadata` libre** en payment_links; la correlación orden↔pago es `sku`/`payment_link_id`, nunca `transaction.reference` (la genera Wompi). Endpoint manual equivalente para el operador: `POST /api/v1/orders/{id}/payment-link` [owner, manager] (`orders.py:9`), con el mismo piso de $1.500 COP (`orders.py:522`).
 
-### Campos opcionales
-```
-amount_in_cents, currency, expires_at, redirect_url, image_url, sku (max 36 chars),
-customer_data.customer_references (max 2 items), taxes
-```
+### 2. Webhook `transaction.updated` (confirmación de pago)
 
-### Request
-```http
-POST https://sandbox.wompi.co/v1/payment_links
-Authorization: Bearer {WOMPI_PRIVATE_KEY_SANDBOX}
-Content-Type: application/json
+Receptor: `POST /api/v1/webhooks/wompi` (`services/api/main.py:287` + `wompi_webhook.py:43`). Orden de operaciones dentro del handler:
 
-{
-  "name": "Pedido #ABC123",
-  "description": "Camiseta Tech Negro Talla M x2",
-  "single_use": true,
-  "collect_shipping": false,
-  "amount_in_cents": 12000000,
-  "currency": "COP",
-  "expires_at": "2026-04-24T19:00:00.000Z",
-  "redirect_url": "https://konvi-web.onrender.com/pedido/ABC123",
-  "customer_data": {
-    "customer_references": [
-      {
-        "label": "Pedido",
-        "is_required": true
-      }
-    ]
-  }
-}
-```
+1. **Inbox durable pre-ACK**: el payload crudo se persiste en `wompi_webhook_inbox` (idempotente por checksum) ANTES de responder 200 (`wompi_webhook.py:70-86`, `_persist_inbox:94`). Un crash post-ACK ya no pierde el pago.
+2. **Resolución de tenant** vía `payment_link_id` → `payments` → `tenant_id` (el evento llega sin contexto de tenant).
+3. **Verificación de firma** con el `events_key` **del tenant** cargado desde Vault (`wompi_webhook.py:314-321`). Algoritmo oficial: SHA256 simple sobre `valores(signature.properties) + timestamp + events_key`, comparado contra `signature.checksum` — **no es HMAC** (`wompi_client.py:94`, `verify_event_signature`). Un flake de Vault propaga el error (el inbox queda pendiente y reconcilia) en vez de degradar a firma inválida (`wompi_webhook.py:315-316`).
+4. **Dedup por checksum** — los reintentos de Wompi y los re-drives del worker chocan aquí sin efecto (`wompi_webhook.py:325+`).
+5. **Validación fail-closed de monto y moneda**: `amount_in_cents` debe ser exactamente `orders.total * 100` (`wompi_webhook.py:526-531`) y `currency == "COP"` (`wompi_webhook.py:534-539`). Mismatch → NO se confirma, log para revisión manual.
+6. Si `APPROVED`: confirma orden, descuenta stock (con guard de idempotencia), notifica al cliente por WhatsApp y dispara la generación de guía Aveonline (ver `aveonline.md`).
+7. Si `DECLINED` / `ERROR` / `VOIDED`: no toca la orden; el TTL de `pending_payment` libera el stock.
 
-> **Nota de monto**: `amount_in_cents` es en centavos de COP. Ej: $120.000 COP = `12000000`.
-> **Formato `expires_at`**: ISO 8601 UTC. Ej: `"2026-04-24T19:00:00.000Z"`
-> **Sin `metadata`**: La API de Wompi no acepta campo `metadata` libre en payment_links. La correlación con `tenant_id`/`order_id` debe ir en el campo `sku` (36 chars) o en `customer_references`.
+### 3. Pagos huérfanos (APPROVED sobre orden en estado terminal)
 
-### Response (éxito)
+`_handle_orphan_payment` (`wompi_webhook.py:159-231`): el dinero entró pero no hay orden que confirmar. Se alerta con log estructurado y, si el método es **CARD pre-settlement**, se intenta **void automático** (`is_void_eligible` → `void_transaction_sync`, `wompi_client.py:489-558`). Resultado: `payments.status = 'orphan_voided'` o marcado para **reembolso manual**. NEQUI/PSE/Bancolombia no admiten void (fondos ya transferidos) — siempre manual.
+
+### 4. Reconciliación (3 capas automáticas + 1 manual)
+
+| Capa | Mecanismo | Dónde |
+|---|---|---|
+| 1. Reintentos del proveedor | Wompi reintenta el webhook a los **30 min, 3 h y 24 h** si no recibe 2xx | `wompi_client.py:378`; runbook sección "Primera línea de defensa" |
+| 2. Re-drive del inbox | Worker barre `wompi_webhook_inbox` cada 180 s (gracia 120 s) y re-POSTea el payload crudo a la API; **máx 5 intentos** → dead-letter con log | `worker.py:137-144,3274-3366` |
+| 3. Poll de voids | Cada 30 min consulta transacciones pendientes de void (lookback 48 h) tras cancelación/expiry | `worker.py:122-129,3096` |
+| 4. Manual (pérdida total) | Si el webhook se pierde las 3 veces Y el inbox no lo capturó: Wompi **no expone búsqueda de transacción por `reference` ni `payment_link_id`** (validado 2026-06-26 contra docs oficiales), así que la reconciliación es manual contra el dashboard | `docs/operations/runbooks/wompi-payment-reconciliation.md` |
+
+## Config por tenant vs global
+
+### Por tenant — `tenant_integrations` (`provider='wompi'`)
+
 ```json
-{
-  "data": {
-    "id": "pl-test-...",
-    "name": "Pedido #ABC123",
-    "description": "Camiseta Tech Negro Talla M x2",
-    "single_use": true,
-    "collect_shipping": false,
-    "active": true,
-    "currency": "COP",
-    "amount_in_cents": 12000000,
-    "expires_at": "2026-04-24T19:00:00.000Z",
-    "redirect_url": "https://...",
-    "merchant_public_key": "pub_test_..."
-  },
-  "meta": {}
-}
+"credentials": { "private_key_secret_id": "…", "events_key_secret_id": "…" },
+"meta": { "environment": "sandbox|production", "private_key_preview": "prv_test_…" }
 ```
 
-> **CORRECCIÓN**: El campo en response es `"active": boolean`, no `"status": "active"`.
+Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`); en DB solo queda el preview. Se ingresan por UI: Ajustes → Integraciones → Wompi. La `public_key` no se usa server-side en este flujo (los links se crean con la privada). La URL del webhook se registra en el dashboard de Wompi por ambiente: `https://konvi-api.onrender.com/api/v1/webhooks/wompi` (prod) — ver `.env.example:106-111`.
 
-### URL del link generado
-```
-https://checkout.wompi.co/l/{data.id}
-```
-Esta es la URL que se envía al cliente por WhatsApp.
+### Globales (env vars — sin credenciales Wompi, `render.yaml:289-291`)
 
----
+| Var | Default / valor | Servicio | Qué controla |
+|---|---|---|---|
+| `WOMPI_PAYMENT_LINK_TTL_MINUTES` | `30` | api | TTL del link solo en el path de **regeneración** (`wompi_webhook.py:40,760`); la creación inicial usa el hardcode de `orders.py:76` — cambiar el env sin alinear `orders.py` deja los dos paths divergentes |
+| `WOMPI_INBOX_RECONCILE_ENABLED` | `true` | orchestrator | kill-switch del re-drive (`render.yaml:494-495`) |
+| `WOMPI_INBOX_RECONCILE_INTERVAL_SECONDS` | `180` | orchestrator | período del barrido (`render.yaml:496-497`) |
+| `WOMPI_VOID_POLL_ENABLED` | `true` | orchestrator | poll de voids (`render.yaml:485-486`) |
+| `WOMPI_VOID_POLL_INTERVAL_SECONDS` | `1800` | orchestrator | cada 30 min (`render.yaml:487-488`) |
+| `WOMPI_VOID_POLL_LOOKBACK_HOURS` | `48` | orchestrator | ventana de búsqueda (`render.yaml:489-490`) |
+| `GUIDE_GENERATION_DELAY_SECONDS` | `60` | api | pausa pre-guía post-pago (`render.yaml:228-231`) |
+| `AVEONLINE_GENERATE_REAL_GUIDES` | `false` | api + orchestrator | kill-switch guías reales (ver `aveonline.md`) |
 
-## 5. Validación de webhook
+`WOMPI_INBOX_MIN_AGE_SECONDS` (120 s) y `WOMPI_INBOX_MAX_ATTEMPTS` (5) existen como defaults de código (`worker.py:143-144`), no declaradas en render.yaml.
 
-### Headers entrantes
-```
-X-Event-Checksum: <sha256_hex_string>
-X-Event-Name: transaction.updated
-```
+## Seguridad
 
-### Payload completo `transaction.updated`
-```json
-{
-  "event": "transaction.updated",
-  "data": {
-    "transaction": {
-      "id": "txn-...",
-      "status": "APPROVED",
-      "amount_in_cents": 12000000,
-      "currency": "COP",
-      "reference": "test_g3HGYQ_1777065941_GMZX8yX1Q",
-      "payment_link_id": "test_g3HGYQ",
-      "customer_email": "cliente@ejemplo.com",
-      "payment_method_type": "CARD"
-    }
-  },
-  "sent_at": "2026-04-24T19:05:00.000Z",
-  "timestamp": 1745521500,
-  "signature": {
-    "properties": ["transaction.id", "transaction.status", "transaction.amount_in_cents"],
-    "checksum": "3476DDA50F64CD7CBD160689640506FEBEA93239BC524FC0469B2C68A3CC8BD0"
-  }
-}
-```
+- **Firma SHA256** por evento con `events_key` per-tenant desde Vault (nunca global); comparación case-insensitive del checksum (`wompi_client.py:94`).
+- **Fail-closed de dinero**: monto exacto y moneda COP obligatorios antes de confirmar (`wompi_webhook.py:515-539`); también se valida contra el ledger de pagos (`wompi_webhook.py:964-969`).
+- **Dedup por checksum** + inbox idempotente → replay de Wompi o re-drive interno no duplican efectos.
+- **Rate-limit** per-IP antes de procesar (`webhook_rate_limit_check`, `wompi_webhook.py:48-59`; IP real vía `cf-connecting-ip` — ver gap A2 en `mercadolibre.md`).
+- Confirmación de pago **solo** server-side por webhook; jamás por interpretación de texto del cliente en chat (regla de producto).
 
-### Verificación de firma (CORRECTO — SHA256 simple, NO HMAC)
+## Modo de fallo
 
-El algoritmo oficial de Wompi usa SHA256 simple sobre string concatenado, **no HMAC**.
-
-```python
-import hashlib
-
-def verify_wompi_signature(payload_dict: dict, events_key: str) -> bool:
-    """
-    Algoritmo oficial Wompi (validado 2026-04-24):
-    1. Concatenar valores de signature.properties en orden
-    2. Concatenar timestamp (entero)
-    3. Concatenar events_key
-    4. SHA256 del string completo
-    5. Comparar con signature.checksum (o header X-Event-Checksum)
-    """
-    sig = payload_dict.get("signature", {})
-    properties = sig.get("properties", [])
-    checksum = sig.get("checksum", "")
-    timestamp = payload_dict.get("timestamp", 0)
-
-    # Paso 1: extraer valores de data usando dot-path de signature.properties
-    data = payload_dict.get("data", {})
-    parts = []
-    for prop in properties:
-        keys = prop.split(".")
-        val = data
-        for k in keys:
-            val = val.get(k, "") if isinstance(val, dict) else ""
-        parts.append(str(val))
-
-    # Paso 2 y 3: concatenar timestamp y events_key
-    concat = "".join(parts) + str(timestamp) + events_key
-
-    # Paso 4: SHA256 simple (no HMAC)
-    computed = hashlib.sha256(concat.encode()).hexdigest().upper()
-
-    return computed == checksum.upper()
-```
-
-> **ADVERTENCIA**: La verificación anterior en este documento usaba `hmac.new(events_key, payload, sha256)` — eso es **incorrecto** según la documentación oficial.
-
-### Estados de transacción (validados)
-
-| Status | Significado |
+| Fallo | Comportamiento |
 |---|---|
-| `APPROVED` | Pago exitoso |
-| `DECLINED` | Rechazado (fondos, datos inválidos, etc.) |
-| `PENDING` | En proceso |
-| `VOIDED` | Anulado (solo tarjetas crédito/débito) |
-| `ERROR` | Error en procesamiento |
+| Wompi cae al crear el link | El tool responde al cliente que no pudo generar el link; la orden queda `pending_payment` sin link y expira por TTL liberando stock |
+| Webhook perdido (transitorio) | Reintento Wompi 30m/3h/24h (capa 1) |
+| Crash del API entre ACK y procesamiento | Re-drive del inbox, máx 5 intentos → dead-letter logueado (capa 2) |
+| Webhook perdido total (3 reintentos + sin inbox) | Orden estancada `pending_payment` → **runbook manual** (M4). El cliente pagó: reconciliar en dashboard Wompi y confirmar/voidar a mano |
+| Pago huérfano (orden ya terminal) | Alerta + void automático si CARD pre-settlement; si no, reembolso manual |
+| Refund post-settlement | **Wompi no tiene API pública de refund** (`wompi_client.py:479-481`); NEQUI/PSE siempre manual vía dashboard |
 
-### Acciones del webhook
-1. Validar firma con `verify_wompi_signature()` antes de procesar.
-2. Verificar que `event == "transaction.updated"`.
-3. **Correlacionar orden**:
-   - **NO usar `data.transaction.reference`** — es generado por Wompi (`test_g3HGYQ_timestamp_CODE`), no es nuestro `order_id`.
-   - Usar `data.transaction.payment_link_id` → lookup en `payments.wompi_link_id` → obtener `order_id`.
-   - Validado con pago real sandbox (2026-04-24): `reference = "test_g3HGYQ_1777065941_GMZX8yX1Q"`, `payment_link_id = "test_g3HGYQ"`.
-4. Si `status == "APPROVED"`:
-   - Actualizar `orders.status = confirmed`
-   - Descontar stock definitivamente
-   - Notificar al cliente vía WhatsApp (outbound queue)
-5. Si `status == "DECLINED"` o `"VOIDED"`:
-   - Log de rechazo
-   - NO liberar stock automáticamente (el `release_order_tool` maneja TTL)
-6. Responder `HTTP 200` (vacío es aceptable).
+## Operación
 
-### Política de reintentos de Wompi (validada)
-Si el webhook no recibe `2xx`, Wompi reintentará:
-- Primer reintento: 30 minutos
-- Segundo reintento: 3 horas
-- Tercer reintento: 24 horas (máximo 3 intentos)
+- **Manual por tenant**: alta del comercio en Wompi, copiar llaves a la UI de Integraciones, registrar la URL de eventos en el dashboard Wompi (sandbox y prod por separado).
+- **Runbook**: `docs/operations/runbooks/wompi-payment-reconciliation.md` — esperar ≥24 h antes de reconciliar manualmente (los reintentos resuelven lo transitorio).
+- **Monitoreo disponible**: logs estructurados `[WOMPI]` (evento_recibido, monto_mismatch, moneda_invalida, ORPHAN, INBOX re-drive/DEAD_LETTER) filtrables en Render Dashboard; Sentry en api y orchestrator (`SENTRY_DSN`, `render.yaml:293-297,577-580`).
 
----
+## Gaps conocidos
 
-## 6. Moneda y restricciones (Colombia — validadas)
+| ID | Severidad | Gap |
+|---|---|---|
+| M4 | Medio | Reconciliación de webhook totalmente perdido es **manual** (limitación del API público de Wompi, documentada en runbook) |
+| B5 | Alto | Cobertura de `wompi_webhook.py` 55.0% (754 stmts, 339 sin cubrir) — path de dinero sub-testeado |
+| B6 | Bloqueante | Founder-gates fiscales: nombre de comercio "KONVI" en Wompi, facturación DIAN — sin ellos no hay go-live comercial |
+| A12 | Alto | El re-drive worker→API se autentica con `INTERNAL_SERVICE_SECRET` + `X-Tenant-Id` autodeclarado (barrera única service-to-service) |
+| B4 | Bloqueante | UAT E2E conversacional stale desde 2026-05; el flujo de pago del bot necesita re-certificación pre-lanzamiento |
 
-| Parámetro | Valor / Nota |
-|---|---|
-| Moneda | `COP` (única soportada) |
-| Monto mínimo — modelo Agregador | $1.500 COP = `150000` en cents |
-| Monto mínimo — modelo Gateway | $1 COP = `100` en cents |
-| Formato de monto | Centavos (integer) |
-| Monto máximo | Depende del contrato del comercio |
-| Fees | Depende del medio de pago; consultar dashboard Wompi |
-| TTL link de pago | Configurable via `expires_at` |
-| Campos custom | Máximo 2 por payment link (`customer_references`) |
+## Referencias oficiales
 
----
-
-## 7. Correlación de orden con pago (sin metadata libre)
-
-La API de payment_links **no acepta un campo `metadata` libre**. La correlación `tenant_id + order_id` se gestiona así:
-
-**Opción A — `sku` field** (máx 36 chars, recomendada):
-```json
-"sku": "order-{short_uuid}"
-```
-El `sku` aparece en el webhook `transaction.updated` como `data.transaction.reference`.
-
-**Opción B — `reference` en la transacción**:
-El campo `reference` en el payload del webhook (`data.transaction.reference`) es el identificador de la transacción generado por Wompi. El `sku` del link se correlaciona internamente.
-
-**Estrategia recomendada**:
-- Crear el pedido en DB con `status=pending_payment` antes de generar el link.
-- Usar `order_id` (UUID) como valor del campo `sku` del payment link (si cabe en 36 chars, un UUID v4 estándar tiene exactamente 36 chars incluyendo guiones).
-- Guardar `payment_link_id` de Wompi en la tabla de pagos.
-- En el webhook, buscar la orden por `sku` / `order_id`.
-
----
-
-## 8. Multi-tenant
-
-Cada tenant debe tener sus propias llaves Wompi almacenadas en:
-- Tabla propuesta: `tenant_integrations` con `provider='wompi'`
-- Campos: `config->public_key`, `config->private_key`, `config->events_key`, `config->environment`
-
-> El webhook receptor (`POST /api/v1/webhooks/wompi`) debe identificar el tenant por `sku` (order_id) → join con `orders.tenant_id`. El evento llega sin tenant context.
-
----
-
-## 9. Testing (casos de prueba e2e)
-
-Suite automatizada en `tests/`:
-
-| Test file | Cobertura |
-|---|---|
-| `test_wompi_signature.py` | Validación de firma SHA256: correcta, incorrecta, sin properties, sin checksum, events_key vacío, case-insensitive, dot-paths anidados. |
-| `test_wompi_webhook.py` | Router `_process_wompi_event`: firma inválida rechaza, evento no-transaction ignorado, link no encontrado sin acción, idempotencia (orden ya confirmed), confirmación + decremento de stock + notificación WhatsApp, estados DECLINED/ERROR sin acción, error en confirmación logueado sin crash. |
-| `test_wompi_payment_link_endpoint.py` | Endpoint `POST /orders/{id}/payment-link`: happy path genera link y persiste en `payments`, 404 orden no existe, 409 estado inválido, 422 monto menor a $1.500 COP, 503 Wompi no configurado. |
-| `test_payment_link_tool.py` | Tool del orchestrator: total inválido (bajo/alto), JWT ausente, Core API 503, happy path retorna `PaymentLinkResult`, humanización de nombre (primer nombre) en `response_text`. |
-| `helpers/wompi_payload_builder.py` | Builder reutilizable de payloads `transaction.updated` con firma SHA256 válida determinística para emulación de webhooks. |
-
-Ejecutar suite:
-```bash
-python3.11 -m unittest discover -s tests -p 'test_*.py'
-```
-
-### Prueba e2e simulada (runtime completo)
-
-Script en `scripts/uat/inbox_wompi_e2e_simulated.py` que ejecuta el flujo completo contra la DB linked real:
-1. Crea contacto + conversación `bot_active`.
-2. Siembra historial conversacional completo (saludo → consulta → compra → cotización → dirección → resumen).
-3. Procesa confirmación final con el orchestrator real (incluye llamada a Gemini).
-4. Verifica generación automática de orden `pending_payment` + link Wompi.
-5. Emula webhook `APPROVED` → confirma orden + notificación WhatsApp.
-6. Emula webhook `DECLINED` → valida idempotencia (no afecta orden confirmed).
-
-Ejecutar:
-```bash
-cd /home/ansible/workspaces/konvi-platform
-python3.11 scripts/uat/inbox_wompi_e2e_simulated.py
-```
-
-### Prueba e2e real desde móvil físico
-
-Ver instrucciones paso a paso en:
-```
-scripts/uat/README-inbox-wompi-e2e-real.md
-```
-
-## 10. Go / No-Go checklist
-
-Ver `.context/04-next-steps.md` para checklist completo de Fase C.
-
----
-
-## 11. Referencias oficiales (validadas 2026-04-24)
-
-- https://docs.wompi.co/en/docs/colombia/inicio-rapido/
-- https://docs.wompi.co/en/docs/colombia/ambientes-y-llaves/
-- https://docs.wompi.co/en/docs/colombia/links-de-pago/
-- https://docs.wompi.co/en/docs/colombia/eventos/
-- https://docs.wompi.co/en/docs/colombia/transacciones/
-- https://docs.wompi.co/en/docs/colombia/datos-de-prueba-en-sandbox/
+- https://docs.wompi.co/en/docs/colombia/ (links de pago, eventos, transacciones, ambientes y llaves) — validada 2026-04-24; runbook re-validado 2026-06-26.

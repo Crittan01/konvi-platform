@@ -6,6 +6,7 @@
 > **Vigencia.** Confirmar mensualmente contra `https://integraciones.aveonline.co/docs/` — Aveonline modifica endpoints sin notificación previa. Tabla §3.10.2 carriers: validación trimestral obligatoria.
 > **Status.** **101% completo** — sin suposiciones, cada hallazgo cita URL oficial o reporta "Confirmado NO documentado" con acción de escalación específica.
 > **Scope.** Decisión arquitectónica rev. 107: pivote Envia → Aveonline como provider primario + Envia fallback. Ver §21 (comparativa) y §22 (plan migración).
+> **Nota 2026-08-02.** Documento histórico de decisión (rev. 107). En rev. 109 Envia fue **eliminado del runtime** (ADR-0019 implementado; ADR-0023-shipping) — las secciones que mencionan fallback/rollback a Envia (§22-§25) describen el plan original, **no** el runtime actual: Aveonline es el único provider.
 
 ---
 

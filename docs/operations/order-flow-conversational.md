@@ -7,6 +7,12 @@ Estado: documento de preparación para Fase C (pagos/Wompi)
 > Fase C (crear pedido desde bot + link de pago + webhook Wompi) está bloqueada hasta que
 > se cumplan los gates definidos en `.context/04-next-steps.md`.
 
+> **Verificado 2026-08-02**: shipping real = Aveonline como único provider (Envia eliminado
+> del runtime en rev. 109, ADR-0019). Cotización vía `cotizarDoble` multi-carrier
+> (`services/api/integrations/aveonline_client.py`). Generación de guía automática post-pago
+> en el webhook Wompi (`services/api/routers/wompi_webhook.py::_generate_shipping_guide`),
+> hoy en dry-run (`simulate=True`) salvo flag `AVEONLINE_GENERATE_REAL_GUIDES=true`.
+
 ---
 
 ## 1. Estados de Conversación del Bot (runtime actual)
@@ -15,7 +21,8 @@ Estado: documento de preparación para Fase C (pagos/Wompi)
 [INICIO] ──mensaje inbound──► bot_active
                                 │
                                 ├─── shipping_quote_tool ───► responde cotización real
-                                │                              (Envia, cheapest+fastest)
+                                │                              (Aveonline cotizarDoble
+                                │                               multi-carrier)
                                 │
                                 ├─── order_status_tool ─────► responde estado real de pedido
                                 │                              (orders por conversation/contact)
@@ -130,7 +137,9 @@ Bot: envía link de pago al cliente vía WhatsApp
         │                    Bot: "Pago confirmado. Pedido #XXX listo."
         │                              │
         │                              ▼
-        │                    Sistema: solicita guía Envia (pickup)
+        │                    Sistema: genera guía Aveonline automática post-pago
+        │                              (dry-run simulate=True; guías reales con flag
+        │                               AVEONLINE_GENERATE_REAL_GUIDES=true)
         │
         └─── [No paga en 30 min] ───► release_order_tool
                                       ├── Libera reserva de stock
@@ -183,6 +192,5 @@ Resumen:
 ## Referencias
 
 - `.context/04-next-steps.md` — gates y estado de Fase C
-- `docs/integrations/wompi-prep.md` — preparación de llaves/ambientes
-- `docs/integrations/wompi.md` — contrato técnico Wompi
+- `docs/integrations/wompi.md` — contrato técnico Wompi (la prep histórica `wompi-prep.md` está archivada en `docs/_archive/integrations/`)
 - `services/ai-orchestrator/orchestrator.py` — FSM contextual actual

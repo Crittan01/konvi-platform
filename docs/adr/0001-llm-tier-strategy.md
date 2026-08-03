@@ -151,9 +151,9 @@ Ordenado por ROI:
 
 ### Reportes detallados de implementación
 
-- [docs/reports/rev80_cart_sot_implementation.md](../reports/rev80_cart_sot_implementation.md)
-- [docs/reports/rev81_pendientes_cierre.md](../reports/rev81_pendientes_cierre.md)
-- [docs/reports/rev81_router_y_regression.md](../reports/rev81_router_y_regression.md)
+- [docs/reports/rev80_cart_sot_implementation.md (histórico)](../_archive/reports/rev80_cart_sot_implementation.md)
+- [docs/reports/rev81_pendientes_cierre.md (histórico)](../_archive/reports/rev81_pendientes_cierre.md)
+- [docs/reports/rev81_router_y_regression.md (histórico)](../_archive/reports/rev81_router_y_regression.md)
 
 ### Log fuente
 

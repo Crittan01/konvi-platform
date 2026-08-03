@@ -15,7 +15,7 @@
 - Tenant Console live (módulos operativos de ventas/productos/canales/compras/finanzas/analítica/configuración).
 - API Gateway endurecida (auth, RBAC, rate limit, idempotencia, observabilidad, tiering base).
 - Connector WhatsApp inbound + orchestrator async outbound por colas.
-- Integraciones MeLi y Envia en estado operativo inicial.
+- Integraciones MeLi y Aveonline en estado operativo inicial (shipping = Aveonline único; Envia eliminado del runtime rev. 109, ADR-0019).
 
 ## Fase 12 (bloqueada)
 

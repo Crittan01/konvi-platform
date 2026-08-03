@@ -1,15 +1,70 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-07-26 (revalidación legal colombiana · G-1..G-3 en prod, G-7/G-8 en PR)
-**Branch activo**: `develop` == `origin/production` == `1bb76040` — sin brecha.
+**Última actualización**: 2026-08-02 (auditoría profunda + cierre pre-producción — ver primera sección)
+**Branch activo**: `develop` == `origin/production` == `5fdad396` — sin brecha.
 **Deploy**: `production` autodespliega en Render (los 4 servicios live). NO hay freeze.
-**Ledger**: 246 migraciones en repo = 246 en prod. **Cero drift**.
+**Ledger**: 251 migraciones en repo = 251 en ledger prod. **Cero drift**. 79 tablas live.
+**Tests**: 4.298 pytest colectados (201 dbharness) + 31 archivos Vitest.
 
 > **Lección que costó casi un arreglo entero: mergeado ≠ aplicado ≠ vivo.** Se encontraron 3
 > migraciones mergeadas y sin aplicar — prod seguía vendiendo de más mientras el fix vivía solo en
 > el repo y el reporte lo daba por cerrado. **Cerrar siempre con verificación FUNCIONAL contra prod**
 > (`pg_get_functiondef`, un marcador de código que solo exista en la versión nueva), nunca con el
 > ledger ni con "el PR está mergeado".
+
+---
+
+## 2026-08-02 — Auditoría profunda + cierre pre-producción
+
+Informe canónico: `.audit/findings/2026-08-02-consolidated-audit.md` (8 dominios, evidencia
+`archivo:línea` por hallazgo). Plan resultante: `docs/PLAN.md` (backlog de verdad).
+Varas de medir del cierre: 251 migraciones repo = ledger prod · 79 tablas live · 4.298 tests
+pytest + 31 Vitest · Next 16.2.11 / React 19 / Tailwind 4.3.3 · FastAPI 0.139.0 ·
+google-genai 2.11.0 (Gemini 3.x) · Meta Graph API v22.0 · Aveonline único provider de shipping.
+
+**Oleada A — higiene repo + DB (ejecutada, verificada)**
+
+| Ítem | Resultado |
+|---|---|
+| A1 — 64 docs históricos a `docs/_archive/` | Cabecera ARCHIVADO + README índice; 10 links rotos corregidos. Corpus vigente 186→123 .md |
+| A2 — herramienta drift schema | `dump_schema_canonical.py` reparado (`-o json`), CORE_TABLES 31→39, fixture regenerado, `--diff` verde, `test_coherence_pact` 23 passed |
+| A2 — config | `.env.example` purgado/completado; `render.yaml` declara `WOMPI_INBOX_RECONCILE_*`; `CI_STRICT` muerto eliminado; comentarios stale corregidos; script UAT Envia archivado; `.pyc` Envia borrados |
+| A3 — migración `20260802120000_drop_ghost_tables_and_revoke_grants` | **Aplicada a prod**: 2 ghost tables dropeadas (pre-verificado 0 filas/deps), grants residuales revocados en 4 tablas infra → ledger 251, 79 tablas |
+
+**Cambios de código del cierre (2026-08-02, contra hallazgos de la auditoría)**
+
+| Hallazgo | Fix |
+|---|---|
+| A4 — guardrails fail-open | Dinero/verdad ahora **fail-closed**: `FAIL_CLOSED_INVARIANTS` = payment_coherence, summary_coherence, pii_save_truthfulness, fake_escalation (`agentic/invariants/base.py`) — excepción DB → BLOCK + mensaje neutro |
+| A5 — cascada LLM ~5 min vs heartbeat 120s | Deadline de cascada por turno: `LLM_CASCADE_DEADLINE_SECONDS=100` (`llm_invoke.py`) |
+| A6 — rescate Claude muerto | Módulo de rescate **eliminado** (`anthropic` nunca estuvo en requirements) |
+| M8 — doble default de modelo divergente | Default de modelo **unificado** |
+| M11 — flag `agentic_enabled` fail-closed | Lectura del flag ahora **stale-ok** (caché: un glitch transitorio no escala masivamente) |
+| M10 — promesa de canal fuera de ventana 24h | Promesa corregida: el bot ya no promete confirmación "por este chat" cuando el 131047 mata el canal (email mitiga) |
+| M1 — badge `human_takeover` invisible en móvil | Badge agregado al bottom-nav móvil |
+| M5 (parcial) — sin error boundaries / UI genérica | Error boundaries ×5 por ruta + `EmptyState` compartido + deps UX instaladas (framer-motion, cmdk, vaul, embla-carousel, react-virtual) |
+
+**Oleada D1 — cobertura de paths de dinero (B5)**
+
+| Módulo | Antes (2026-08-01) | Después (2026-08-02) |
+|---|---|---|
+| `wompi_webhook` | 55.0% | ~90% |
+| `meli_webhook` | 37.7% | ~87% |
+| `order_cancellation` | 38.5% | ~90% |
+| `aveonline_client` | 48.2% | ~95% |
+
+**Oleada F — documentación (este cierre)**
+
+Canónicos nuevos: `docs/product/PRD.md`, `docs/PLAN.md`, `docs/tech/TRD.md`,
+`docs/backend/BACKEND.md`, `docs/ux/UX-UI.md`, `docs/flows/` (README + 6 flujos),
+`docs/integrations/` (README + wompi/aveonline/telegram/mercadolibre/whatsapp-meta),
+`docs/adr/README.md`. Sincronización L1/L2 (`.context/00-02,04-09`) + `AGENTS.md` contra
+repo, y archivado de residuos en `docs/_archive/integrations/`.
+
+**Resueltos de hecho que la auditoría confirmó** (ya no son pendientes): G-7/G-8 legal
+(PRs #195/#197 mergeados), comprobante ADR-0040 (en prod), F2 HSM templates (implementado —
+falta solo UAT F2.7 con 2 tenants), M3 AI Agents router, retiro V1, A6.2.7 lint tenant (0 gaps),
+Model B Phase 7, Tailwind 4 (de facto desplegado), P0 Sem 6 HSM, A7 RBAC.
 
 ---
 
@@ -94,8 +149,9 @@ puerta. Era el "COD quote incoherence" anotado sin diagnóstico en el UAT de jul
 nunca cambiar en silencio lo que un cliente ya pagó — y "ya pagado" se decide por un pago aprobado, no
 por la etiqueta de estado (un COD nace `confirmed` sin haberse cobrado).
 
-**Comprobante de compra (ADR-0040, #176):** diseñado y verificado legalmente, **no implementado** —
-7-8 días gated por 7 decisiones del founder, una de ellas necesita abogado.
+**Comprobante de compra (ADR-0040, #176):** ~~diseñado y verificado legalmente, **no implementado**~~
+→ **SUPERADO — implementado y en prod** (#180-#186; ver la entrada posterior en esta misma sección
+"Comprobante de compra (ADR-0040): IMPLEMENTADO y en prod" y `/dashboard/receipts`).
 
 **Stack:** Next 15→16 + ESLint 9 flat + Sentry v10 (#152-#155, desplegado) · Tailwind 3→4 (#158,
 mergeado, **espera visto bueno estético**) · identidad legal del tenant persona natural/jurídica (#163).
@@ -266,7 +322,7 @@ Metodología: un BLOQUE a la vez (branch desde develop → impl → tests → `v
 
 **Cierre arquitectónico**: ✅ Días 1-5 (architecture) + Días 6-10 (regression UAT A-M) cerrados en sesión.
 **Pending live UAT**: founder ejecuta dual-mode WhatsApp para certificar coherencia conversacional turn-a-turn (gate para merge a `main`).
-**Reporte cierre**: [`docs/reports/rev109_inbox_production_grade_complete.md`](../docs/reports/rev109_inbox_production_grade_complete.md).
+**Reporte cierre**: [`docs/_archive/reports/rev109_inbox_production_grade_complete.md`](../docs/_archive/reports/rev109_inbox_production_grade_complete.md) (archivado 2026-08-02).
 
 **Suite final**: 2578 PASS / 8 skip (+123 desde rev. 108). UAT regression A-M: 51/51 PASS.
 
@@ -349,7 +405,7 @@ HUMAN_HANDOFF accesible desde cualquier estado.
 **Fuente de verdad**: DB live (Supabase `***SUPABASE_PROJECT_REF_REDACTED***`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
-**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md`](../docs/reports/rev106_sem5_envia_p1_complete.md).
+**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md` (histórico)](../docs/_archive/reports/rev106_sem5_envia_p1_complete.md).
 
 ---
 
@@ -605,7 +661,7 @@ UX/legal significativos.
 **Suite**: 1178 tests OK · validate.sh 14/14 (incluye `next build`
 opt-in via `--build`).
 
-**Reporte**: [docs/reports/rev102_habeas_data_ux_hardening.md](../docs/reports/rev102_habeas_data_ux_hardening.md).
+**Reporte**: [docs/reports/rev102_habeas_data_ux_hardening.md (histórico)](../docs/_archive/reports/rev102_habeas_data_ux_hardening.md).
 
 ---
 

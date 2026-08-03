@@ -1,5 +1,7 @@
 # Contratos Canónicos — Runtime
 
+> **Verificado contra repo**: 2026-08-02 @ `5fdad396` (develop).
+
 **Leer cuando**: se toca el Orchestrator, API Gateway, Connector, Worker o cualquier lógica de estados de conversación / pedidos.  
 **No leer si**: la tarea es frontend puro, migrations, o UI sin lógica de negocio.
 
@@ -180,7 +182,7 @@ Existentes bootstrappeados a `enterprise` para no cortar operación.
 - Webhook `POST /api/v1/webhooks/wompi`: valida firma SHA256, correlaciona `payment_link_id → payments → order_id`.
 - APPROVED → `order.status = confirmed`, decrementa stock, notifica cliente.
 - Idempotente: si orden ya `confirmed`, skip.
-- TTL 30 min en Wompi; worker cancela `pending_payment` expirados a los 35 min (`PENDING_PAYMENT_TTL_MINUTES`).
+- TTL del link Wompi: 35 min (alineado con `PENDING_PAYMENT_TTL_MINUTES` + buffer); el worker cancela `pending_payment` expirados a los 35 min (`PENDING_PAYMENT_TTL_MINUTES`, default 35) y libera `stock_reservations`.
 
 ## 13) FSM Conversacional — estados
 
@@ -219,7 +221,7 @@ Datos personales: SOLO se piden después de cotización aprobada (carrier selecc
 Carrier selection: detecta inbound corto (≤8 tokens), sin pregunta, DESPUÉS del outbound con "continuamos".  
 Resumen: usa `_build_verified_order_context()` — precios desde catalog DB, envío desde historial. El LLM NO calcula.
 
-## 16) Coherencia core del bot conversacional (rev. 68)
+## 14) Coherencia core del bot conversacional (rev. 68)
 
 ### Datos del cliente para checkout
 
@@ -229,7 +231,7 @@ Resumen: usa `_build_verified_order_context()` — precios desde catalog DB, env
 | `email` | `contacts.email` | Wompi `customer_data.email` |
 | `phone` | `contacts.phone` | Wompi `customer_data.phone_number_prefix` + `phone_number` (+57 separado) |
 | `document_type + document_number` | `contacts.document_type` + `contacts.document_number` | Wompi `customer_data.legal_id_type + legal_id` |
-| `address.neighborhood` | `contacts.address.neighborhood` | Envia `destination.district` |
+| `address.neighborhood` | `contacts.address.neighborhood` | Aveonline (barrio de referencia del destino; el enrutamiento real usa `dane_code`) |
 
 Reglas oficiales:
 - `legal_id_type` Colombia: solo `CC, CE, NIT, PP, TI, OTHER`. NO `DNI` (Argentina/España) ni `RG` (Brasil).
@@ -269,7 +271,7 @@ AWAITING_ORDER_CONFIRMATION → handle_payment_link_if_applicable (Wompi con cus
 {
   "street": "Calle 10 # 5-23",         // requerido
   "number": "401",                     // opcional
-  "neighborhood": "Chapinero",         // requerido (Envia district)
+  "neighborhood": "Chapinero",         // requerido (barrio — referencia Aveonline)
   "city": "Bogotá",                    // requerido
   "state": "DC",                       // requerido (código corto)
   "dane_code": "11001000",             // requerido (DANE 8 dígitos)
@@ -393,7 +395,7 @@ de audit que populaba la tabla `audit_log` (vacía hasta rev. 71).
 
 **`/api/v1/claims`** — `services/api/routers/claims.py`
 - `GET /` (filters: status, customer_id, order_id) · `POST /` · `GET /{id}` · `PATCH /{id}` · `POST /{id}/resolve`
-- Estados: `open|in_progress|resolved|closed|cancelled`
+- Estados: `open|investigating|resolved|refunded|rejected|cancelled` (CHECK `claims_status_check`, migración `20260624010000`)
 - RBAC: read=all, write=owner+manager.
 - Coexiste con orchestrator que también inserta claims via service_role.
 

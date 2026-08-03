@@ -61,7 +61,7 @@ Esto corre Next.js `build` completo y detecta los problemas que Turbopack permit
 | Wompi | sandbox keys | prod keys (por tenant en Vault) |
 | Meta WhatsApp | tenant test (UAT) | tenants prod (multi-WABA) |
 | MercadoLibre | OAuth sandbox | OAuth prod |
-| Envia | sandbox per tenant | prod per tenant |
+| Aveonline | cuenta real per tenant (sin sandbox en el cliente) | prod per tenant |
 
 **Convención multi-tenant**: cada tenant trae sus credenciales en `tenant_integrations.meta` (Vault Supabase). Ningún secret de provider sale al `.env`. Esto garantiza que local y prod difieren solo en WHICH tenant tienen activo, no en HOW se autentican.
 

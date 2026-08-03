@@ -28,7 +28,7 @@ El `tenant_id` se inyecta en backend antes de ejecutar accesos a datos.
 
 ### 3) Cotización de envío (`shipping_quote_tool`)
 - Fuente: Core API `POST /api/v1/shipping/quote` (JWT interno de tenant)
-- Propósito: responder costos de envío reales desde Envia sin delegar al LLM
+- Propósito: responder costos de envío reales desde Aveonline sin delegar al LLM
 - Construye estimación de paquete desde inventario real (`product_variations` peso/dimensiones + cantidad inferida del chat)
 - Responde con highlights: opción más económica + más rápida
 - Normalización DANE5/8 para Colombia; sanitización de errores upstream

@@ -1,6 +1,6 @@
 # ADR-0028 — Catálogo y carrito como servicio cross-surface (contrato canónico)
 
-**Estado:** PROPUESTO (de la auditoría full-stack 2026-06-27) · pendiente founder
+**Estado:** IMPLEMENTADO (verificado 2026-08-02 — Pieza B citada en `services/api/routers/catalog.py:1`; Pieza C en `services/api/routers/conversations.py:1520`)
 **Fecha:** 2026-06-27
 **Coordina con:** ADR-0027 (categorías per-tenant), ADR-0029 (modelo de producto multi-vertical),
 ADR-0011 (cart-as-SoT), ADR-0018 (verdad transaccional), Channel Registry (plan I.3).

@@ -24,7 +24,7 @@ Determinar qué capacidades deben quedar:
 - API Gateway (`services/api`)
 - AI Orchestrator (`services/ai-orchestrator`)
 - Frontend Tenant Console (`apps/web`)
-- Integraciones (WhatsApp, Envia, MeLi, Telegram y futuro Email/Pagos)
+- Integraciones (WhatsApp, Aveonline, MeLi, Telegram y futuro Email/Pagos)
 
 ## Estado actual (implementado)
 

@@ -8,7 +8,7 @@ Antes de cambios en integraciones o infraestructura productiva, validar en docum
 
 - Render pricing/límites vigentes para plan objetivo.
 - Política de retries y timeouts de webhooks Meta.
-- Rate limits actuales de Envia por plan.
+- Rate limits actuales de Aveonline por plan.
 - Límites Realtime/Queues de Supabase para escala objetivo.
 - Límites/costos del proveedor SMTP sender para alertas productivas.
 - Contrato oficial Wompi (ambientes/llaves, eventos por ambiente, tokens de aceptacion).

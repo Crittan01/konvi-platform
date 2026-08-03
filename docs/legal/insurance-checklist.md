@@ -124,7 +124,7 @@
 
 | Campo | Valor |
 |---|---|
-| **Tipo de servicio** | SaaS — comercio conversacional WhatsApp + integraciones (Wompi, Aveonline/Envia, MercadoLibre, Telegram) |
+| **Tipo de servicio** | SaaS — comercio conversacional WhatsApp + integraciones (Wompi, Aveonline, MercadoLibre, Telegram) |
 | **Modelo de negocio** | B2B suscripción mensual + flat fee tier (no per-transaction) |
 | **Mercado objetivo** | PYMES Colombia (verticales: eCommerce, cosmética, moda, alimentos) |
 | **Volumen proyectado año 1** | Ingresos brutos: $[X] COP · Tenants activos: [N] · Conversaciones procesadas mes: [Y] |

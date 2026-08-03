@@ -34,7 +34,6 @@ services/ai-orchestrator/agentic/
 │   └── passive_closing.py    #   Sin frases pasivas/robóticas
 │
 ├── legacy_adapters/          # Helpers para invocar legacy desde tools
-│   ├── envia.py              #   quote_shipping_for_cart (provider Envia)
 │   ├── aveonline.py          #   quote_shipping_for_cart_aveonline
 │   ├── cart.py               #   select_carrier_for_cart (provider-agnostic)
 │   └── payment.py            #   generate_payment_link_for_cart (Wompi)
@@ -71,7 +70,7 @@ Recovery por `finish_reason` está en `agent.py::_recovery_strategy_for_finish_r
 |---|---|---|
 | LLM | Gemini 2.5 flash (cascada → flash-lite con backoff) | `agent.py` |
 | Function calling | Gemini nativo (no JSON-mode) | ADR-0018 |
-| Provider envío | 1 activo per-tenant (Envia **OR** Aveonline) | ADR-0019 |
+| Provider envío | Aveonline único (Envia eliminado del runtime rev. 109) | ADR-0019 / ADR-0023-shipping |
 | Audit log | Habeas Data Ley 1581 — `consent_audit_log` + `pii_access_log` | rev. 99 / commit `43fd0e0` |
 | Cart-as-SoT | `conversation_carts.status='open'` (no `'active'`) | `cart_tool.py` |
 | Shipping cost column | `orders.shipping_cost` (no `shipping_amount`) | commit `515c606` |

@@ -251,8 +251,8 @@ Mitigación definitiva vía velo societario. Setup $1.5-2.5M COP + operativo $50
 - [`docs/legal/privacy-policy.md`](../legal/privacy-policy.md) — Política privacidad
 - [`docs/legal/subprocessors.md`](../legal/subprocessors.md) — Lista subprocesadores
 - [`docs/legal/incident-response.md`](../legal/incident-response.md) — Incident response playbook
-- [`docs/research/wompi-dossier-2026-05-05.md`](../research/wompi-dossier-2026-05-05.md) — Dossier técnico Wompi
-- [`docs/refactor/0006-roadmap-pending-sessions.md`](../refactor/0006-roadmap-pending-sessions.md) — Roadmap Plan K
+- [`docs/research/wompi-dossier-2026-05-05.md` (histórico)](../_archive/research/wompi-dossier-2026-05-05.md) — Dossier técnico Wompi
+- [`docs/refactor/0006-roadmap-pending-sessions.md` (histórico)](../_archive/refactor/0006-roadmap-pending-sessions.md) — Roadmap Plan K
 - Workflow adversarial 2026-05-30 transcript: `~/.claude/projects/.../tasks/wgg1t1qm3.output`
 
 ## Estado

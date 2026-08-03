@@ -1,5 +1,7 @@
 # Handoff — Estado Operativo Real (2026-07-12, rev. 112)
 
+> Datos operativos verificados 2026-08-02.
+
 Este documento describe el estado operativo real de `develop` (= `production`).
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
 Para estado por módulo: `.context/01-state.md` (rev.112 = tabla bloques 0→H).
@@ -14,17 +16,18 @@ tienen prioridad.
 **Lo más reciente (tiene prioridad sobre el histórico de abajo):**
 
 - **Topología de ramas (CORREGIDO):** el deploy target es la rama **`production`**
-  (autodeploy on-push). Hoy `origin/production` == `origin/develop` == `0dbf1180`
-  (PR #53). `main` está **249 commits ATRÁS** — NO es deploy target ni está a la par de
+  (autodeploy on-push). Hoy `develop` == `origin/develop` == `origin/production` ==
+  **`5fdad396`** (verificado 2026-08-02). `main` está **249 commits ATRÁS** — NO es
+  deploy target ni está a la par de
   develop. `develop` es la rama de integración; los PRs de cada bloque van a develop y
   luego se despliega con `git push origin origin/develop:production`. Los 4 servicios
   `konvi-*` corren el código actual.
 - **Deploy:** los bloques 0→H de la iniciativa production-grade (PRs #26..#53, ADRs
   0032-0038) están EN PRODUCCIÓN (múltiples deploys jul-2026). Ver `.context/01-state.md`
   rev.112 para la tabla completa.
-- **Migraciones:** **218 archivos** en `supabase/migrations/` (rango
-  `20260406181235_initial_schema` … `20260712040000_g_shipment_status_monotonic`; 57
-  nuevas en jul-2026). Cuántas están aplicadas a prod requiere query a
+- **Migraciones:** **251 archivos** en `supabase/migrations/` (rango
+  `20260406181235_initial_schema` … `20260802120000_drop_ghost_tables_and_revoke_grants`;
+  verificado 2026-08-02). Cuántas están aplicadas a prod requiere query a
   `supabase_migrations.schema_migrations` (no verificable desde el repo). Protocolo:
   smoke ROLLBACK → apply → `supabase migration repair --status applied <ts>`.
 - **`TENANT_HARD_DELETE_ENABLED`:** ya está `"true"` en `render.yaml` (el worker cron de
@@ -32,7 +35,7 @@ tienen prioridad.
 - **CI:** `.github/workflows/ci.yml` corre `bash scripts/validate.sh --ci` en cada push
   a main + PRs. **Pre-deploy correr `--ci` local (NO `--build`)** — `--ci` añade ruff
   (baseline `BASELINE_RUFF_ERRORS=202`, actual 145), pytest obligatorio, coverage
-  (`COVERAGE_MIN`, actual ~61%), warns→fails. CI workflow instala `pytest`
+  (`COVERAGE_MIN` default 55, cobertura real ~66% — verificado 2026-08-02), warns→fails. CI workflow instala `pytest`
   (sin él cae a unittest discover → errores espurios). Runner del repo asume
   checkout en `/home/ansible/workspaces/konvi-platform` (symlink compat en ci.yml —
   deuda: ~187 tests con path absoluto, fix portable pendiente).
@@ -48,7 +51,7 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (218 migraciones)
+- DB canónica: `supabase/migrations/` (251 migraciones, verificado 2026-08-02)
 - **Habeas Data Ley 1581 end-to-end**: ✅ rev. 93–100 — audit logs append-only,
   SAR endpoint, retention policies per-tenant, PII tokenization aditiva,
   click-wrap acceptance, Resend notifications con fallback graceful.
@@ -190,7 +193,7 @@ supabase db query --linked -f supabase/migrations/<archivo>.sql
 Gate pre-deploy (= comando exacto del CI):
 
 ```bash
-bash scripts/validate.sh --ci   # pytest ~3490 + ruff + coverage + TS + build + tenant lint
+bash scripts/validate.sh --ci   # pytest ~4.031 (+201 dbharness) + ruff + coverage + TS + build + tenant lint
 ```
 
 Runner de tests (rev. 111): **pytest** (`python3.11 -m pytest tests/ -q`). El
@@ -203,7 +206,8 @@ detecta; el CI DEBE tener pytest instalado.
 
 - SMTP propio (cuando exista dominio)
 - Alerting/observabilidad operacional centralizada
-- Aveonline: webhooks async de tracking + polling backup (provider único shipping, ADR-0019)
+- Aveonline: polling backup de tracking (el webhook async YA está implementado — Rev. 108,
+  `services/api/routers/aveonline_webhook.py`; provider único shipping, ADR-0019)
 
 Nota rev. 109: Envia eliminado del runtime (pivote ADR-0019). Tag git
 `archive/envia-investigacion-rev106-2026-05-08` preserva investigación

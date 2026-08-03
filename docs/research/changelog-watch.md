@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **WhatsApp / Meta Cloud API** | **3 meses** | Cambia frecuente (PMP Jul-2025, On-Premise sunset Oct-2025, BSUID Q3-2026) | Email Meta Developer News con "deprecated" o "breaking change"; cualquier cambio en https://developers.facebook.com/docs/graph-api/changelog |
 | **Wompi** | 6 meses | Cambia moderadamente | Cambio en panel Wompi reportado por tenant; nueva regulación Superintendencia Financiera Colombia |
-| **Envia** | 6 meses | Cambia moderadamente, docs fragmentadas | Email Envia comercial; cambio en sandbox/production parity reportado por smoke E2E |
+| **Aveonline** | **1 mes** (vigencia dossier) | Modifica endpoints sin notificación previa | Confirmación mensual contra https://integraciones.aveonline.co/docs/; validación trimestral obligatoria tabla carriers (dossier §3.10.2) |
 | **MercadoLibre** | 6 meses | Cambia frecuente, **portal bloquea WebFetch (403)** — re-investigación manual con login | Cambios en CBT publicados en blog MeLi; comisiones actualizadas anualmente |
 | **Telegram Bot API** | 12 meses | Cambia poco, backward-compat fuerte | Bot API changelog https://core.telegram.org/bots/api#recent-changes |
 | **Render** | 12 meses | Cambia poco, pricing review semestral | Email Render changelog; cambio en planes Workspace/Starter |
@@ -29,9 +29,10 @@
 Cada **15 de Febrero** y **15 de Agosto** del año, ejecutar re-investigación de los providers con frecuencia **3-6 meses**:
 - WhatsApp/Meta (siempre — frecuencia 3 meses)
 - Wompi
-- Envia
 - MercadoLibre
 - Supabase
+
+**Aveonline** se re-investiga **mensual** (vigencia declarada en su dossier — modifica endpoints sin notificación previa).
 
 Cada **15 de Mayo** anual, ejecutar re-investigación de providers **12 meses**:
 - Telegram, Render, Cloudflare, Resend
@@ -59,7 +60,7 @@ Re-investigar **inmediatamente** ante:
 | Tenant reporta error inexplicable en integración | El reportado | Re-investigar sección relevante (autenticación, endpoint, limits) |
 | Smoke E2E sandbox/prod paridad cae <95% | El afectado | Re-investigar limitaciones documentadas |
 | Métrica `tenant_provider_health` cambia a RED inexplicable | El afectado | Re-investigar status page + changelog último trimestre |
-| Cambio regulatorio Colombia (Habeas Data, DIAN, Superfinanciera) | Aplicable a Wompi/Envia/MeLi | Re-investigar compliance section |
+| Cambio regulatorio Colombia (Habeas Data, DIAN, Superfinanciera) | Aplicable a Wompi/Aveonline/MeLi | Re-investigar compliance section |
 
 ---
 
@@ -75,19 +76,20 @@ En vez de calendario fijo, suscribirse a:
 | Render Status | https://status.render.com/ + email status | Render |
 | Resend Changelog | https://resend.com/changelog | Resend |
 | Telegram Bot API Changelog | https://core.telegram.org/bots/api#recent-changes (manual check) | Telegram |
-| Wompi/Envia/MeLi | Email comercial cuenta-persona del provider (no RSS oficial) | Wompi/Envia/MeLi |
+| Wompi/Aveonline/MeLi | Email comercial cuenta-persona del provider (no RSS oficial) | Wompi/Aveonline/MeLi |
 
 ---
 
 ## 4. Tabla de seguimiento (estado actual)
 
-Estado al **2026-05-05** (sesión actual cerró Sem 0):
+Estado al **2026-05-05** (sesión actual cerró Sem 0); filas Envia/Aveonline actualizadas 2026-08-02 (Envia retirado del runtime rev. 109, ADR-0019):
 
 | Provider | Última investigación | Próxima fecha objetivo | Estado |
 |---|---|---|---|
 | WhatsApp/Meta | 2026-05-05 | 2026-08-05 | ✅ Vigente |
 | Wompi | 2026-05-05 | 2026-11-05 | ✅ Vigente |
-| Envia | 2026-05-05 | 2026-11-05 | ✅ Vigente |
+| Aveonline | 2026-05-21 | 2026-08-21 | ✅ Vigente (provider único shipping, ADR-0019; frecuencia mensual) |
+| Envia | 2026-05-05 | — | 🪦 Retirado rev. 109 (ADR-0019) — ya no es provider del runtime; no re-investigar |
 | MercadoLibre | 2026-05-05 | 2026-11-05 | ⚠️ Vigente (portal 403 — datos `[VALIDAR]` marcados) |
 | Telegram | 2026-05-05 | 2027-05-05 | ✅ Vigente |
 | Render | 2026-05-05 | 2027-05-05 | ✅ Vigente |
@@ -122,4 +124,4 @@ Estado al **2026-05-05** (sesión actual cerró Sem 0):
 
 ---
 
-**Documento vivo.** Actualizar tabla §4 al cerrar cada re-investigación. Última actualización: 2026-05-05.
+**Documento vivo.** Actualizar tabla §4 al cerrar cada re-investigación. Última actualización: 2026-08-02 (retiro Envia rev. 109; alta Aveonline).

@@ -1,6 +1,7 @@
 # ADR-0019 — Aveonline como provider de shipping alternativo a Envia (1 activo per-tenant, sin fallback automático)
 
-**Estado:** PROPUESTO (pre-implementación rev. 107).
+**Estado:** IMPLEMENTADO (rev. 109 — Envia eliminado del runtime; verificado 2026-08-02).
+**Nota de estado:** Envia posteriormente eliminado; Aveonline es el único provider de shipping.
 **Fecha:** 2026-05-21.
 **Branch target:** `feat/rev107-aveonline-primary` (a crear post-aprobación founder).
 **Punto de partida histórico:** tag `archive/phase-1-strangler-fig-sem1` @ commit `acf2592` (Sem 1.3 strangler-fig cerrada — branch original eliminada post-pivot, ver ADR-0018).

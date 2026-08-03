@@ -1,5 +1,7 @@
 # ADR-0023 — Shipping Provider Integration Pattern (provider-agnostic playbook)
 
+> ⚠️ **Colisión de numeración**: este archivo y `0023-meta-model-b-direct-provider-per-tenant.md` comparten el número 0023 (ver [`README.md`](README.md)). Referenciar siempre por nombre de archivo completo.
+
 **Estado:** ACTIVO.
 **Fecha:** 2026-05-30.
 **Branch origen:** `feat/remove-envia-pivot-aveonline`.

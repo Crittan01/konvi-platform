@@ -1,0 +1,48 @@
+> **⚠️ ARCHIVADO — 2026-08-02.** Contenido histórico superado, conservado solo como registro de decisiones. No usar como referencia operativa. Estado vigente: `.context/01-state.md` y `docs/PLAN.md`.
+
+---
+
+
+# Rev. 79 — Conversational E2E (2026-05-01T01:04:23+00:00)
+
+**Resumen**: 1 PASS · 0 FAIL · 0 SKIP
+
+| # | Escenario | Status | Mensaje |
+|---|---|---|---|
+| 6 | Datos desordenados (turn-by-turn) | ✅ PASS | Adaptativo: 4/4 campos extraídos de un volcado en 8 turnos |
+
+### S6 — Datos desordenados (turn-by-turn)
+```json
+{
+  "turns": 8,
+  "matched_rules": [
+    "[Q] prio=1 kws=('?', '¿') q='000*  ¿cuál te gustaría llevar?'",
+    "[Q] prio=20 kws=('presentación', 'presentacion') q='para el *jabón artesanal de coco*, ¿cuál presentación te gus'",
+    "[Q] prio=10 kws=('agregar otro', 'algo más') q='¿te ayudo con algo más?'",
+    "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
+    "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
+    "[Q] prio=60 kws=('estás de acuerdo', 'estas de acuerdo') q='🙏  ¿estás de acuerdo?'",
+    "[Q] prio=50 kws=('¿cuál es tu correo', 'cual es tu correo') q='¿cuál es tu correo electrónico?'"
+  ],
+  "transcript_tail": [
+    {
+      "client": "Sí, esa opción",
+      "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
+    },
+    {
+      "client": "Sí, acepto",
+      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+    },
+    {
+      "client": "Soy Cristian Garzón, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
+      "bot": ""
+    }
+  ],
+  "extracted": {
+    "name": true,
+    "email": true,
+    "document": true,
+    "address": true
+  }
+}
+```

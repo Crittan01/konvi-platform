@@ -15,13 +15,13 @@ Los tenants (empresas B2B2C) venden por WhatsApp. El sistema centraliza catálog
 - No es un bot. WhatsApp Cloud API es el canal, no el producto.
 - No es un ERP completo. Es operación comercial conversacional.
 - La IA (Gemini) es asistencia controlada — **nunca fuente de verdad** de stock, precios, pedidos, shipping ni estados transaccionales.
-- Las integraciones (MeLi, Envia, Shopify futuro) son módulos desacoplados.
+- Las integraciones (MeLi, Aveonline, Shopify futuro) son módulos desacoplados.
 
 ---
 
-## 2. Tree Funcional Vigente — Tenant Console (Rev. 5 — 2026-04-17)
+## 2. Tree Funcional Vigente — Tenant Console (Rev. 7 — 2026-08-02)
 
-Esta es la estructura funcional aprobada y cerrada semánticamente (rev. 5, 2026-04-17).
+Esta es la estructura funcional aprobada y cerrada semánticamente (rev. 5, 2026-04-17; rev. 7 sincroniza con la navegación real, 2026-08-02).
 La navegación visible debe calzar exactamente en este árbol. No agregar nada sin decisión formal.
 
 ```text
@@ -33,13 +33,17 @@ Tenant Console
 ├── VENTAS
 │   ├── Pedidos            ← ciclo de vida de la venta: creación, estados, ítems
 │   ├── Contactos          ← CRM mínimo: cliente, historial, consent habeas data
-│   ├── Despachos          ← cotizaciones Envia post-pedido (logística comercial)
-│   └── Reclamos           ← post-venta: tickets, devoluciones, disputas
+│   ├── Cotizador          ← cotizaciones Aveonline post-pedido (logística comercial)
+│   ├── Promociones        ← cupones y reglas de descuento del tenant (owner/manager)
+│   ├── Reclamos           ← post-venta: tickets, devoluciones, disputas
+│   └── Comprobantes       ← comprobantes de compra ADR-0040: impresión + email
 │
-├── PRODUCTOS              ← hoja directa → /dashboard/catalog
-│                            Catálogo + Inventario unificados en una sola pantalla.
-│                            KPI bar (total/bajo/sin stock), ajuste delta inline por variante,
-│                            historial de movimientos colapsable. Inventario ya NO es módulo separado.
+├── PRODUCTOS
+│   ├── Catálogo           ← hoja directa → /dashboard/catalog
+│   │                        Catálogo + Inventario unificados en una sola pantalla.
+│   │                        KPI bar (total/bajo/sin stock), ajuste delta inline por variante,
+│   │                        historial de movimientos colapsable. Inventario ya NO es módulo separado.
+│   └── Categorías         ← categorías del catálogo del tenant (owner/manager)
 │
 ├── CANALES
 │   └── Mercado Libre      ← listings, sync catálogo/stock/precio, órdenes MeLi
@@ -59,7 +63,12 @@ Tenant Console
 └── CONFIGURACIÓN
     ├── General            ← /settings: nombre, logo, threshold, dirección origen
     ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember
-    └── Integraciones      ← /integrations: Envia (API key), MeLi (OAuth), Telegram (Bot Token + Chat ID)
+    ├── Integraciones      ← /integrations: Aveonline, MeLi (OAuth), Telegram, WhatsApp (Model B + plantillas HSM)
+    ├── Seguridad          ← /settings/security: contraseña + MFA TOTP + recovery codes (todos los roles)
+    ├── Salud integraciones← /settings/health: estado de los providers del tenant
+    ├── Legal              ← /settings/legal: click-wrap DPA + privacidad + subprocesadores
+    ├── Retención datos    ← /settings/retention: políticas de retención per-tenant (Habeas Data)
+    └── Cerrar cuenta      ← /settings/account-closure: cierre destructivo del tenant (owner-only)
 ```
 
 **Platform Console — Fuera de alcance absoluto en esta iniciativa:**
@@ -73,7 +82,7 @@ No tiene implementación. Bloqueante OQ-P01 sin resolver.
 | Dominio | Regla de Lectura | Decisión Rev.4 |
 |---|---|---|
 | **INICIO** | Capa de operación inmediata. No es "misc". | Sin cambio |
-| **VENTAS** | Flujo comercial completo: pedido → despachar → resolver. Despachos es un paso del ciclo, no dominio independiente. | Despachos movido a Ventas |
+| **VENTAS** | Flujo comercial completo: pedido → cotizar envío → resolver → comprobante. Cotizador es un paso del ciclo, no dominio independiente. | Despachos (hoy Cotizador) movido a Ventas |
 | **PRODUCTOS** | Core maestro del producto. Catálogo + Inventario fusionados en una sola hoja `/dashboard/catalog`. Media oculta del menú. | Rev.5: Inventario eliminado como módulo separado |
 | **CANALES** | Proyección del catálogo hacia marketplaces externos. Aunque hoy solo hay MeLi, el grupo existe para que no flote suelto. | Restaurado como grupo |
 | **COMPRAS** | Reposición de inventario. Dominio distinto a Ventas. | Sin cambio |
@@ -99,27 +108,28 @@ No tiene implementación. Bloqueante OQ-P01 sin resolver.
 
 ```text
 konvi-platform/
-├── apps/web/                    # Next.js 15.5.20 — Tenant Console
+├── apps/web/                    # Next.js 16.2.11 — Tenant Console
 │   └── app/dashboard/
-│       ├── (sales)/             # Route Group → /dashboard/{orders,contacts,shipping,claims}
-│       ├── (products)/          # Route Group → /dashboard/catalog  (inventory eliminado)
+│       ├── (sales)/             # Route Group → /dashboard/{orders,contacts,shipping,promotions,claims,receipts}
+│       ├── (products)/          # Route Group → /dashboard/{catalog,categories}  (inventory → redirect)
 │       │   └── catalog/         # Productos unificado: catálogo + stock + ajustes
 │       ├── (channels)/          # Route Group → /dashboard/marketplace
 │       ├── (ai)/                # Route Group → /dashboard/{knowledge-base,ai-agents}
 │       ├── (analytics)/         # Route Group → /dashboard/{metrics,audit}
-│       ├── (settings-group)/    # Route Group → /dashboard/{settings,team,integrations}
+│       ├── (settings-group)/    # Route Group → /dashboard/{settings/*,team,integrations}
 │       ├── inbox/               # /dashboard/inbox
 │       ├── finance/             # /dashboard/finance
 │       └── purchases/           # /dashboard/purchases
 ├── services/
-│   ├── api/                     # FastAPI Core Gateway — 9 routers
+│   ├── api/                     # FastAPI Core Gateway
 │   ├── connector-whatsapp/      # FastAPI Webhook Meta
 │   └── ai-orchestrator/         # Polling Gemini — daemon thread en Render Free
 ├── packages/
 │   ├── auth/                    # Wrappers Supabase SSR (parcial)
 │   ├── shared-types/            # Contratos TS compartidos (mínimos)
 │   └── [otros paquetes deferred]
-└── supabase/migrations/         # 42 migraciones — FUENTE CANÓNICA de esquema DB
+└── supabase/migrations/         # 251 migraciones — history reproducible (NO fuente
+                                 # canónica del schema; ver .context/05-doc-policy.md §rev.72)
 ```
 
 **Nota crítica sobre Route Groups:** Las carpetas `(nombre)` en Next.js no cambian las URLs.
@@ -152,3 +162,7 @@ referencias (links, redirects, búsqueda en sidebar, breadcrumbs).
 - No actualizarlo con estados de implementación — eso es `.context/01-state.md`.
 - Todo agente debe leer este archivo antes de proponer crear o mover un módulo.
 - Si hay contradicción entre este archivo y otro, este archivo tiene prioridad.
+
+### Registro de decisiones formales
+
+- **Rev. 7 (2026-08-02) — Sincronización del tree con la navegación real.** Se incorporan 8 rutas reales ya implementadas y expuestas en el sidebar que el tree no registraba: **Promociones** y **Comprobantes** (Ventas), **Categorías** (Productos), y bajo Configuración: **Seguridad**, **Salud integraciones**, **Legal**, **Retención datos**, **Cerrar cuenta**. Además se corrige el label "Despachos ← cotizaciones Envia" → **Cotizador (Aveonline)** — Envia fue eliminado del runtime en rev. 109. **Motivo**: el tree L1 arrastraba drift contra los módulos vivos (hallazgo M2 de la auditoría profunda consolidada 2026-08-02); el founder aprobó esta iniciativa de cierre pre-producción el 2026-08-02. **Verificado contra**: `apps/web/app/dashboard/` (rutas `(sales)/promotions`, `(sales)/receipts`, `(products)/categories`, `(settings-group)/settings/{security,health,legal,retention,account-closure}`) y `apps/web/app/dashboard/sidebar-client.tsx` (las 8 entradas presentes en la navegación).
