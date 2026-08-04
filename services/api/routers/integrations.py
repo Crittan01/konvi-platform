@@ -28,6 +28,11 @@ from dependencies.auth import (
     get_current_tenant,
     get_service_client,
 )
+from dependencies.internal_auth import (
+    get_role_internal_or_user,
+    get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
+)
 from dependencies.plans import PLAN_INTEGRATIONS_MELI
 from dependencies.security import RL_WRITE_DEFAULT
 from integrations import meli_client
@@ -591,9 +596,11 @@ class AveonlineGuideDryRunReq(BaseModel):
 @router.post("/aveonline/guide-dry-run")
 async def aveonline_guide_dry_run(
     req: AveonlineGuideDryRunReq,
-    tenant_id: str = Depends(get_current_tenant),
-    role: str = Depends(get_current_role),
-    supabase: Client = Depends(get_service_client),
+    # Dual-auth (A0.2c): JWT owner (Tenant Console) o X-Internal-Service-Secret
+    # + X-Tenant-Id (ops/orchestrator) — el path interno resuelve role=owner.
+    tenant_id: str = Depends(get_tenant_id_internal_or_user),
+    role: str = Depends(get_role_internal_or_user),
+    supabase: Client = Depends(get_service_client_internal_or_user),
 ):
     """UAT aislado de generate_guide. Solo `owner` puede invocar.
 
@@ -658,18 +665,26 @@ async def aveonline_guide_dry_run(
             },
         }
 
-    # 3. Cargar tenant shipping origin.
+    # 3. Cargar tenant shipping origin. Schema real: el origen vive en
+    # `tenants.shipping_origin` JSONB (keys: city, state, street, dane_code,
+    # phone, name, company, country, postal_code) y nit/teléfono/email en las
+    # columnas planas de contacto — mismo select que el flujo real
+    # (wompi_webhook._generate_shipping_guide_async).
     tenant_res = (
         supabase.table("tenants")
-        .select(
-            "name, shipping_origin_city, shipping_origin_state, "
-            "shipping_origin_dane, shipping_origin_address, "
-            "shipping_origin_nit, shipping_origin_phone, "
-            "shipping_origin_email, idagente"
-        )
+        .select("name, shipping_origin, telefono_contacto, email_contacto, nit")
         .eq("id", tenant_id).single().execute()
     )
     tenant = tenant_res.data or {}
+    tenant_origin = tenant.get("shipping_origin") or {}
+    # Misma validación "origin completo" del flujo real (wompi_webhook.py):
+    # sin city/street Aveonline rechaza la guía — 422 explícito aquí.
+    if not tenant_origin.get("city") or not tenant_origin.get("street"):
+        raise HTTPException(
+            422,
+            "Tenant sin shipping_origin completo (falta city o street). "
+            "Configura la dirección de despacho en Settings antes del dry-run.",
+        )
 
     # 4. Construir payload canónico.
     from integrations.aveonline_client import (
@@ -677,29 +692,38 @@ async def aveonline_guide_dry_run(
         AveonlineClient,
         AveonlinePermanentError,
         AveonlineTransientError,
+        to_aveonline_city_format,
     )
     from lib.dane_resolver import resolve_dane_from_city
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
+    # `idagente` (dirección de despacho Aveonline) NO vive en tenants: se lee
+    # de las credenciales de la integración (mismo patrón que
+    # aveonline_client.generate_guide). Aquí solo para diagnostics — el
+    # cliente lo re-lee internamente al generar (cache compartido).
+    try:
+        _creds = await client._load_credentials()
+    except Exception:
+        _creds = {}
+    idagente = _creds.get("idagente") or _creds.get("asesor_logistico") or ""
 
     # Bug fix rev. 109 (2026-05-31): Aveonline `generarGuia2` rechaza destino
     # sin DANE. Precedencia: shipping_meta.dane_code (resuelto al cotizar) →
     # contact.address.dane_code (si save_address persistió) → DIVIPOLA fallback.
-    # zfill defensivo: tenant.shipping_origin_dane legacy puede estar como
-    # int "5001" (Bogotá sin leading zero) — Aveonline exige 5 dígitos.
-    def _normalize_dane5(raw: object) -> str:
-        digits = "".join(c for c in str(raw or "") if c.isdigit())
-        if len(digits) == 5: return digits
-        if len(digits) == 4: return digits.zfill(5)
-        return ""
+    # Origin: dane_code del jsonb → DIVIPOLA; city en formato canónico
+    # Aveonline ("BOGOTA(CUNDINAMARCA)") — ambos igual que el flujo real.
+    origin_city_norm = to_aveonline_city_format(
+        str(tenant_origin.get("city") or ""),
+        str(tenant_origin.get("state") or ""),
+    )
     origin = {
         "dane": (
-            _normalize_dane5(tenant.get("shipping_origin_dane"))
+            str(tenant_origin.get("dane_code") or "")
             or resolve_dane_from_city(
-                str(tenant.get("shipping_origin_city") or ""),
-                tenant.get("shipping_origin_state"),
+                str(tenant_origin.get("city") or ""),
+                tenant_origin.get("state"),
             )
         ),
-        "city": str(tenant.get("shipping_origin_city") or ""),
+        "city": origin_city_norm or str(tenant_origin.get("city") or ""),
     }
     destination = {
         "dane": (
@@ -729,14 +753,16 @@ async def aveonline_guide_dry_run(
         "idtransportador": str(rate_id),
         "service_level": str(shipping_meta.get("service_level") or ""),
     }
+    # Sender idéntico al flujo real (wompi_webhook): nit/email/teléfono de las
+    # columnas planas de contacto; nombre/dirección del jsonb shipping_origin.
     sender = {
-        "nit": str(tenant.get("shipping_origin_nit") or ""),
-        "nombre": str(tenant.get("name") or ""),
-        "direccion": str(tenant.get("shipping_origin_address") or ""),
+        "nit": str(tenant.get("nit") or ""),
+        "nombre": str(tenant_origin.get("name") or tenant.get("name") or "")[:80],
+        "direccion": str(tenant_origin.get("street") or ""),
         "barrio": "",
-        "telefono": str(tenant.get("shipping_origin_phone") or ""),
-        "celular": str(tenant.get("shipping_origin_phone") or ""),
-        "email": str(tenant.get("shipping_origin_email") or ""),
+        "telefono": str(tenant.get("telefono_contacto") or tenant_origin.get("phone") or ""),
+        "celular": str(tenant.get("telefono_contacto") or tenant_origin.get("phone") or ""),
+        "email": str(tenant.get("email_contacto") or ""),
     }
     recipient = {
         "doc": str(contact.get("document_number") or ""),
@@ -793,14 +819,14 @@ async def aveonline_guide_dry_run(
         "ok": bool(result.get("ok")),
         "result": result,
         "diagnostics": {
-            "tenant_idagente": tenant.get("idagente"),
+            "tenant_idagente": idagente or None,
             "carrier_selected": carrier_name,
             "rate_id": rate_id,
             "origin": origin,
             "destination": destination,
             "simulate": effective_simulate,
             "simulate_requested": req.simulate,
-            "warning_idagente_missing": not tenant.get("idagente"),
+            "warning_idagente_missing": not idagente,
         },
     }
 

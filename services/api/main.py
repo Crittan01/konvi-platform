@@ -17,6 +17,7 @@ init_sentry(service_name="api")
 from fastapi import Depends as _Depends
 
 from dependencies.auth import reject_if_tenant_deleting, enforce_mfa
+from dependencies.internal_auth import enforce_mfa_internal_or_user  # noqa: E402
 from routers import (
     aveonline_webhook,
     catalog,
@@ -281,7 +282,18 @@ from routers import sic_report as _sic  # noqa: E402
 # BLOQUE 0 (P1) — _MFA_GATE: el reporte SIC expone datos de crédito (PII sensible).
 app.include_router(_sic.router, prefix="/api/v1", dependencies=_MFA_GATE)
 app.include_router(settings.router, prefix="/api/v1/settings", dependencies=_MFA_GATE)
-app.include_router(integrations.router, prefix="/api/v1/integrations", dependencies=_MFA_GATE)
+# Integrations: gate MFA internal-aware — el endpoint UAT
+# /aveonline/guide-dry-run es dual-auth (A0.2c) y se invoca service-to-service
+# (X-Internal-Service-Secret); para usuarios JWT el gate exige AAL2 igual que
+# _MFA_GATE (enforce_mfa_internal_or_user delega a la misma lógica).
+app.include_router(
+    integrations.router,
+    prefix="/api/v1/integrations",
+    dependencies=[
+        _Depends(reject_if_tenant_deleting),
+        _Depends(enforce_mfa_internal_or_user),
+    ],
+)
 app.include_router(shipping.router, prefix="/api/v1/shipping", dependencies=_OFFBOARDING_GATE)
 app.include_router(marketplace.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Webhooks externos NO usan _OFFBOARDING_GATE — no tienen JWT del tenant,

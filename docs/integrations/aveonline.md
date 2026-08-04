@@ -50,7 +50,7 @@ Aveonline es el **único provider de shipping** del runtime (ADR-0019).
 3. Gate 1: `tenant_shipping_provider_config.active_provider = 'aveonline'`; si no, skip.
 4. Gate 2 (doble compuerta): master env `AVEONLINE_GENERATE_REAL_GUIDES=true` **Y** `real_guides_enabled=true` del tenant (`:1996-1998`). Hoy el master es `false` → `simulate=True` → `bloquegenerarguia="0"` (`aveonline_client.py:685,764`).
 5. Best-effort: si falla, queda shipment `pending` para generación manual desde Inbox. Path manual del operador (desde `orders.py`) sin delay.
-6. UAT aislado del flujo real: `POST /api/v1/integrations/aveonline/guide-dry-run` [solo owner] (`integrations.py:591-604`).
+6. UAT aislado del flujo real: `POST /api/v1/integrations/aveonline/guide-dry-run` [owner o internal-service] (`integrations.py:596-604`). UAT de guía real ejecutada 2026-08-03: `scripts/uat/runs/aveonline_guia_real_2026-08-03.md`.
 
 ### 4. Webhook de estados (`webhookEstadosGuias`)
 

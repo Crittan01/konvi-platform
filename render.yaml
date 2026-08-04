@@ -222,9 +222,12 @@ services:
       - key: RESEND_FROM_EMAIL
         value: "Konvi <noreply@konvi.co>"
       # Aveonline generación REAL de guías (true=factura) vs simulado (false=dry-run).
-      # Default false hasta que tenant confirme listo para prod facturar guías reales.
+      # ACTIVADO 2026-08-03 (B1): UAT guía real 86732771636 verificada end-to-end
+      # (scripts/uat/runs/aveonline_guia_real_2026-08-03.md). Doble compuerta: este
+      # master + real_guides_enabled per-tenant (KAIU ya activo). Requiere blueprint
+      # sync en Render si el env no se aplica solo.
       - key: AVEONLINE_GENERATE_REAL_GUIDES
-        value: "false"
+        value: "true"
       # UAT founder 2026-07-10: pausa (seg) antes de generar la guía en el path
       # automático post-pago (ventana de cancelación/edición; decisión founder: 1 min).
       - key: GUIDE_GENERATION_DELAY_SECONDS
@@ -346,8 +349,9 @@ services:
       - key: APP_ENV
         value: production
       # AVEONLINE generación REAL de guías (true=factura) vs simulado (false=dry-run).
+      # ACTIVADO 2026-08-03 (B1) — ver nota en konvi-api y run UAT archivado.
       - key: AVEONLINE_GENERATE_REAL_GUIDES
-        value: "false"
+        value: "true"
       # F6 — hard-delete de tenants con grace period expirado (Ley 1581 derecho de supresión).
       # Habilitado tras verificar prerequisitos: RPC fn_hard_delete_tenant ✓, bucket offboarding-archive ✓,
       # grace period + snapshot-antes-de-borrar ✓, 0 pendientes al activar. Solo actúa sobre solicitudes de
