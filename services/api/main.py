@@ -27,6 +27,7 @@ from routers import (
     coupons,
     expenses,
     integrations,
+    internal_meli,
     knowledge_base,
     marketplace,
     meli_webhook,
@@ -309,6 +310,11 @@ app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline"
 # NO por JWT → SIN _OFFBOARDING_GATE, igual que meli/wompi/aveonline. Con el gate, todo
 # POST de Telegram recibía 401 (no manda Authorization) y la feature estaba muerta (F17).
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
+# M17 — Endpoints internos service-to-service (barridos de mantenimiento).
+# Auth propia por-endpoint (require_internal_service: X-Internal-Service-Secret,
+# SIN JWT ni X-Tenant-Id) → SIN _OFFBOARDING_GATE ni _MFA_GATE, igual que los
+# webhooks externos: ningún usuario del Tenant Console debe alcanzarlos.
+app.include_router(internal_meli.router, prefix="/api/v1/internal/meli")
 # Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).
 from routers import ai_agents as _ai_agents  # noqa: E402
 from routers import catalog_ai as _catalog_ai  # noqa: E402

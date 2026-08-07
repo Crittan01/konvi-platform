@@ -312,10 +312,14 @@ def missing_required_config() -> list[str]:
 
 # ─── Token por tenant ─────────────────────────────────────────────────────────
 
-async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
+async def get_valid_token(supabase, tenant_id: str, refresh_window: timedelta = timedelta(hours=1)) -> Optional[str]:
     """
     Retorna un access_token válido para el tenant.
-    Refresca automáticamente si expires_at < now + 1h.
+    Refresca automáticamente si expires_at < now + refresh_window (default 1h —
+    margen para uso inmediato). El barrido proactivo M17 (endpoint interno
+    /api/v1/internal/meli/refresh-tokens) lo invoca con una ventana de 24h para
+    rotar tokens ANTES de que expiren aunque el tenant no tenga actividad MeLi,
+    manteniendo vivo el refresh_token (~6 meses de TTL si no rota).
     Guarda el token nuevo en DB tras un refresh exitoso.
     """
     try:
@@ -351,7 +355,7 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                     exp = datetime.fromisoformat(expires_at_s)
                     if exp.tzinfo is None:
                         exp = exp.replace(tzinfo=timezone.utc)
-                    needs_refresh = exp < datetime.now(timezone.utc) + timedelta(hours=1)
+                    needs_refresh = exp < datetime.now(timezone.utc) + refresh_window
                 except Exception:
                     needs_refresh = True
 

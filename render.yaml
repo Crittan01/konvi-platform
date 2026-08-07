@@ -512,6 +512,16 @@ services:
         value: "6"                               # sin update vía webhook >6h → candidato
       - key: AVEONLINE_STATUS_POLL_BATCH
         value: "25"                              # cap de guías por ciclo
+      # M17 — Refresh PROACTIVO de tokens MeLi: el refresh lazy solo corre con
+      # actividad del tenant; sin ella el refresh_token (~6 meses TTL) muere y
+      # la integración exige re-OAuth manual. El worker llama al endpoint
+      # interno del API (services/api, dueño del cliente OAuth + Vault) que
+      # rota todo token que expire en <24h. Defaults = los del código
+      # (worker.py). Requiere API_URL + INTERNAL_SERVICE_SECRET (ya declaradas).
+      - key: MELI_TOKEN_REFRESH_ENABLED
+        value: "true"
+      - key: MELI_TOKEN_REFRESH_INTERVAL_SECONDS
+        value: "21600"                           # 6 h (= vida del access token)
       # Recordatorio de carrito abandonado (HSM MARKETING cart_abandoned_24h_v1).
       - key: CART_ABANDONED_REMINDER_ENABLED
         value: "true"

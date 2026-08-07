@@ -88,6 +88,30 @@ def _audit_internal_call(
         logger.warning("[INTERNAL_AUTH] audit event falló (%s): %s", outcome, exc)
 
 
+async def require_internal_service(request: Request) -> None:
+    """Guard para endpoints SOLO service-to-service (sin fallback JWT, sin tenant).
+
+    A diferencia de `get_tenant_id_internal_or_user` (dual-auth con X-Tenant-Id
+    obligatorio), esta dependencia es para endpoints de mantenimiento CROSS-TENANT
+    invocados únicamente por otro servicio Konvi (ej. el worker del orchestrator
+    llamando /api/v1/internal/meli/refresh-tokens): no hay tenant declarado y un
+    JWT de usuario NUNCA debe autorizar el barrido.
+
+    401 tanto si falta como si es incorrecto (no se filtra cuál de los dos falló).
+    """
+    if not _verify_internal_secret(request):
+        logger.warning(
+            "[INTERNAL_AUTH] endpoint internal-only sin secret válido — 401 "
+            "path=%s method=%s ua=%s",
+            request.url.path, request.method,
+            (request.headers.get("user-agent") or "")[:100],
+        )
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "INTERNAL_AUTH_REQUIRED", "msg": "X-Internal-Service-Secret inválido o ausente"},
+        )
+
+
 async def get_tenant_id_internal_or_user(request: Request) -> str:
     """Dependencia FastAPI dual-auth: internal-secret O JWT user.
 

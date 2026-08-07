@@ -175,6 +175,28 @@ AVEONLINE_STATUS_POLL_BATCH = int(
 # Pausa fija entre llamadas al proveedor (rate suave — no martillear Aveonline).
 _AVEONLINE_STATUS_POLL_DELAY_SECONDS = 0.25
 
+# M17 — Refresh PROACTIVO de tokens MeLi. El access token vive 6h y el refresh
+# LAZY (meli_client.get_valid_token) solo corre cuando el tenant USA la
+# integración: un tenant sin actividad MeLi por meses deja morir el
+# refresh_token (~6 meses TTL) y la integración muere en silencio (re-OAuth
+# manual). Este job pega al endpoint interno del API que rota todo token que
+# expire en <24h. Intervalo default 6h: igual a la vida del access token, así
+# cualquier token entra en la ventana de 24h ≥3 veces antes de expirar y el
+# refresh_token rota ≥4 veces/día aun sin actividad (sobrado contra el TTL de
+# ~6 meses), sin martillear la API de MeLi. El refresh real vive en
+# services/api (cliente OAuth + Vault + lease fencing) — el orchestrator NO
+# puede importarlo (rootDir=services/ai-orchestrator) → opción (a): POST
+# interno con X-Internal-Service-Secret (patrón payment_link_tool.py).
+MELI_TOKEN_REFRESH_ENABLED = os.getenv("MELI_TOKEN_REFRESH_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+MELI_TOKEN_REFRESH_INTERVAL_SECONDS = int(
+    os.getenv("MELI_TOKEN_REFRESH_INTERVAL_SECONDS", "21600"),  # 6h default
+)
+# Mismas env vars que payment_link_tool.py (A0.2c) para llamar al API interno.
+API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
+INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+
 CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -427,6 +449,9 @@ class OrchestratorWorker:
         # A10 — polling backup de tracking Aveonline.
         self._aveonline_status_poll_enabled = AVEONLINE_STATUS_POLL_ENABLED
         self._last_aveonline_status_poll_at = 0.0
+        # M17 — refresh proactivo de tokens MeLi (vía endpoint interno del API).
+        self._meli_token_refresh_enabled = MELI_TOKEN_REFRESH_ENABLED
+        self._last_meli_token_refresh_at = 0.0
         self._last_sla_check_at = 0.0
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
@@ -513,6 +538,9 @@ class OrchestratorWorker:
             "aveonline_status_poll_updated": 0,             # A10 — shipments cuyo status cambió vía poll
             "aveonline_status_poll_notified": 0,            # A10 — cambios notificados al cliente/operador
             "aveonline_status_poll_errors": 0,              # A10 — errores de proveedor/DB (loop sigue)
+            "meli_token_refresh_runs": 0,                   # M17 — ciclos OK del barrido proactivo (POST al API)
+            "meli_token_refresh_refreshed": 0,              # M17 — tenants con token rotado/validado (suma de respuestas)
+            "meli_token_refresh_errors": 0,                 # M17 — fallos HTTP/API/tenant (loop sigue)
             "poll_job_errors": 0,                           # Ola 0 — jobs aislados que fallaron
             "sla_notify_failed": 0,                         # gap F7-15
             # F5 bot_engine — rate-limit inbound→LLM (protección costo Gemini).
@@ -574,6 +602,7 @@ class OrchestratorWorker:
         await self._run_job("wompi_void_poll", self._poll_wompi_pending_voids_if_due())
         await self._run_job("wompi_inbox_reconcile", self._reconcile_wompi_inbox_if_due())
         await self._run_job("aveonline_status_poll", self._poll_aveonline_shipment_status_if_due())
+        await self._run_job("meli_token_refresh", self._meli_token_refresh_if_due())
         await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
         await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
         await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
@@ -3309,6 +3338,67 @@ class OrchestratorWorker:
                 logger.warning(
                     "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
                 )
+
+    async def _meli_token_refresh_if_due(self) -> None:
+        """M17 — Refresh PROACTIVO de tokens MeLi vía endpoint interno del API.
+
+        POST {API_URL}/api/v1/internal/meli/refresh-tokens con
+        X-Internal-Service-Secret (SIN X-Tenant-Id: es un barrido cross-tenant
+        de mantenimiento). El API selecciona tenants con integración MeLi
+        'connected', rota los tokens que expiran en <24h y devuelve contadores.
+
+        Degradación: sin API_URL/INTERNAL_SERVICE_SECRET → log + skip (el
+        refresh LAZY sigue funcionando para tenants activos). HTTP no-200 o
+        excepción → métrica + siguiente ciclo (el loop nunca se rompe; el
+        aislamiento lo da `_run_job`).
+        """
+        if not self._meli_token_refresh_enabled:
+            return
+        now = time.time()
+        interval = max(3600, MELI_TOKEN_REFRESH_INTERVAL_SECONDS)
+        if now - self._last_meli_token_refresh_at < interval:
+            return
+        self._last_meli_token_refresh_at = now
+
+        if not API_URL or not INTERNAL_SERVICE_SECRET:
+            logger.warning(
+                "[MELI_REFRESH] API_URL/INTERNAL_SERVICE_SECRET no configurados — skip",
+            )
+            return
+
+        # Latido antes del HTTP (un batch largo en el API puede tardar; sin
+        # heartbeat un ciclo lento tumba /health — paridad con los demás jobs).
+        self.last_heartbeat_ts = time.time()
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{API_URL}/api/v1/internal/meli/refresh-tokens",
+                    headers={"X-Internal-Service-Secret": INTERNAL_SERVICE_SECRET},
+                )
+            if resp.status_code != 200:
+                self._metrics["meli_token_refresh_errors"] += 1
+                logger.warning(
+                    "[MELI_REFRESH] API respondió %d: %s",
+                    resp.status_code, resp.text[:200],
+                )
+                return
+            data = resp.json()
+        except Exception as exc:
+            self._metrics["meli_token_refresh_errors"] += 1
+            logger.warning("[MELI_REFRESH] POST al API falló: %s", exc)
+            return
+
+        self._metrics["meli_token_refresh_runs"] += 1
+        self._metrics["meli_token_refresh_refreshed"] += int(data.get("refreshed") or 0)
+        api_errors = int(data.get("errors") or 0)
+        if api_errors:
+            self._metrics["meli_token_refresh_errors"] += api_errors
+        logger.info(
+            "[MELI_REFRESH] ciclo API: candidatos=%s refrescados=%s frescos_skip=%s errores=%s",
+            data.get("candidates"), data.get("refreshed"),
+            data.get("skipped_fresh"), data.get("errors"),
+        )
 
     async def _poll_aveonline_shipment_status_if_due(self) -> None:
         """A10 (auditoría 2026-08-02) — Polling backup de tracking Aveonline.
