@@ -45,7 +45,7 @@ Revocación de consentimiento (STOP), re-opt-in, solicitudes de derechos del tit
 ## 5. Retención de datos
 
 - **Políticas per-tenant**: `/dashboard/settings/retention` (`retention-policies-form.tsx`); la retención archiva conversaciones de cualquier status (el badge de takeover excluye archivadas, `layout.tsx:88-90`).
-- **Motor**: `fn_apply_retention` (SECURITY DEFINER). **Gap latente M6**: la función no tiene rama para `audit_log` (la política insertada queda con condición FALSE) — pendiente.
+- **Motor**: `fn_apply_retention` (SECURITY DEFINER). La rama `audit_log` existe desde 2026-08-07 (migración `20260807120000`) con guarda estructural: solo aplica si la política está `enabled=true` en ambos niveles — hoy la política de audit_log está **disabled** (la rama está dormida; habilitarla es decisión legal explícita).
 - **Retenciones duras verificadas en código**: inbox de webhooks Wompi — **7 días procesadas / 30 días dead-letter** vía RPC `cleanup_wompi_inbox` cada 6h (`worker.py:3290-3301`); el payload crudo contiene PII del pagador y la purga corre aunque el reconcile esté desactivado.
 
 ## 6. Secuencia resumida

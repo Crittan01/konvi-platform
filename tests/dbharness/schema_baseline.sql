@@ -1053,6 +1053,28 @@ BEGIN
                 SELECT COUNT(*) INTO v_count FROM del;
             END IF;
 
+        -- ── audit_log: hard_delete (M6) ─────────────────────────────────────
+        -- Evidencia Habeas Data append-only: SOLO aplica si la política está
+        -- enabled=TRUE (guard de los dos niveles de arriba). Hoy está FALSE —
+        -- rama dormida hasta el worker de archivado a Storage + firma del
+        -- founder (20260704154100). Lo que se cierra acá es la habilitación
+        -- ficticia: quien la habilite obtiene borrado real, no silencio.
+        ELSIF p_entity = 'audit_log' AND v_eff_act = 'hard_delete' THEN
+            IF p_dry_run THEN
+                SELECT COUNT(*) INTO v_count
+                  FROM public.audit_log
+                 WHERE tenant_id = r_tenant.tenant_id
+                   AND created_at < NOW() - (v_eff_ttl || ' days')::INTERVAL;
+            ELSE
+                WITH del AS (
+                    DELETE FROM public.audit_log
+                     WHERE tenant_id = r_tenant.tenant_id
+                       AND created_at < NOW() - (v_eff_ttl || ' days')::INTERVAL
+                     RETURNING 1
+                )
+                SELECT COUNT(*) INTO v_count FROM del;
+            END IF;
+
         ELSE
             CONTINUE;
         END IF;
