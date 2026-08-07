@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from dependencies.auth import _get_service_client, get_service_client
+from dependencies.auth import _get_service_client
 from dependencies.security import webhook_rate_limit_check
 from integrations import meli_client
 from lib.phone import to_db_format as _phone_to_db_format  # rev. 104 F0-4 canon único
@@ -213,7 +213,7 @@ def _extract_request_ip(request: Request) -> str:
     return "" if ip == "unknown" else ip
 
 
-def _verify_meli_origin(request: Request, supabase=Depends(get_service_client)) -> None:
+def _verify_meli_origin(request: Request, supabase=None) -> None:
     """Dependency: valida origen IP + rate-limit. <1ms en happy path."""
     ip = _extract_request_ip(request)
     if ip not in _ALLOWED_MELI_IPS:
@@ -222,8 +222,13 @@ def _verify_meli_origin(request: Request, supabase=Depends(get_service_client)) 
         # Rev. 69 — alerta proactiva: log estructurado si excede umbral en ventana.
         _check_meli_origin_alert(ip)
         raise HTTPException(status_code=403, detail="Origen no autorizado")
+    # Webhook público (MeLi no trae JWT): el service client se construye directo,
+    # NO vía Depends(get_service_client) que exige get_current_tenant (JWT) —
+    # bug detectado 2026-08-07 (T4-01): el endpoint respondía 401 a MeLi.
+    # El parámetro supabase queda inyectable para tests.
+    sb = supabase if supabase is not None else _get_service_client()
     allowed, retry_after = webhook_rate_limit_check(
-        supabase, ip=ip, bucket="webhook.meli", limit=200, window_seconds=60,
+        sb, ip=ip, bucket="webhook.meli", limit=200, window_seconds=60,
     )
     if not allowed:
         logger.warning("meli_webhook.rate_limited ip=%s retry_after=%s", ip, retry_after)
@@ -892,7 +897,7 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
 async def meli_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    supabase=Depends(get_service_client),
+    supabase=None,
 ):
     """
     Recibe notificaciones IPN de MeLi.
@@ -902,6 +907,10 @@ async def meli_webhook(
     Rev. 69 — idempotencia distribuida via Supabase RPC `meli_webhook_seen`,
     coherente cross-réplica.
     """
+    # Webhook público: service client directo, sin Depends JWT (bug T4-01 2026-08-07).
+    # El parámetro supabase queda inyectable para tests.
+    if supabase is None:
+        supabase = _get_service_client()
     try:
         body = await request.json()
     except Exception:

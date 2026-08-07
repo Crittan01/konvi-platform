@@ -28,9 +28,30 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "services" / "api"))
 
+
+def _purge_foreign_integrations(service_dir: str = "api") -> None:
+    """El paquete `integrations` existe en services/api Y services/ai-orchestrator.
+
+    Si otro test de la suite (mismo proceso pytest) ya cargó el paquete del
+    OTRO servicio en sys.modules, lo purgo para que los imports de ESTE archivo
+    resuelvan al servicio correcto sin importar el orden de colección.
+    (Fallo real en CI 2026-08-07: '_Sb' object has no attribute 'rpc' bajo xdist.)
+    """
+    for name in [n for n in list(sys.modules)
+                 if n == "integrations" or n.startswith("integrations.")]:
+        mod = sys.modules[name]
+        paths = [getattr(mod, "__file__", None),
+                 *(getattr(mod, "__path__", None) or [])]
+        paths = [str(p).replace("\\", "/") for p in paths if p]
+        if not any(f"/services/{service_dir}/" in p for p in paths):
+            del sys.modules[name]
+
+
+_purge_foreign_integrations("api")
+
 from fastapi import HTTPException  # noqa: E402
 
-import integrations.aveonline_client as ave_mod  # noqa: E402
+import integrations.aveonline_client as ave_mod  # noqa: E402,F401 — ver _call
 from routers.integrations import (  # noqa: E402
     AveonlineGuideDryRunReq,
     aveonline_guide_dry_run,
@@ -156,7 +177,13 @@ def _tenant_ok():
 class GuideDryRunTests(unittest.IsolatedAsyncioTestCase):
     async def _call(self, sb, simulate=True):
         req = AveonlineGuideDryRunReq(order_id=ORDER_ID, simulate=simulate)
-        with patch.object(ave_mod, "AveonlineClient", _FakeAveClient):
+        # El endpoint lazy-importa AveonlineClient EN CALL TIME → el patch debe
+        # caer sobre la copia que sys.modules resuelva AHÍ (si tests/agentic corrió
+        # antes, `integrations.aveonline_client` puede ser la copia del orchestrator
+        # y patchear `ave_mod` — resuelto en import time — no surte efecto).
+        import integrations.aveonline_client as runtime_ave_mod
+
+        with patch.object(runtime_ave_mod, "AveonlineClient", _FakeAveClient):
             return await aveonline_guide_dry_run(
                 req=req, tenant_id=TID, role="owner", supabase=sb,
             )

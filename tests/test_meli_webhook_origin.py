@@ -5,12 +5,13 @@ import sys
 import time
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 
 def _reload_module(env: dict | None = None):
@@ -232,6 +233,36 @@ class MeliAllowlistTrustedHeaderTests(unittest.TestCase):
             with self.assertRaises(self.mw.HTTPException) as ctx:
                 self.mw._verify_meli_origin(req, supabase=MagicMock())
             self.assertEqual(ctx.exception.status_code, 403)
+
+
+class WebhookPublicoSinJWTTests(unittest.TestCase):
+    """Regresión bug T4-01 (2026-08-07): el webhook de MeLi respondía 401 a
+    llamadas sin JWT porque usaba Depends(get_service_client) (que exige
+    get_current_tenant). Un webhook público de provider NO puede exigir JWT:
+    su auth es IP allowlist + validación de resource. Verificado en prod por
+    el canario XFF: POST sin JWT → 401 antes del chequeo de origen."""
+
+    def test_verify_origin_no_depende_de_jwt(self):
+        import inspect
+        import routers.meli_webhook as mw
+        for fn in (mw._verify_meli_origin, mw.meli_webhook):
+            for name, param in inspect.signature(fn).parameters.items():
+                default = param.default
+                # Ningún parámetro puede ser Depends(get_service_client/get_current_tenant)
+                dep = getattr(default, "dependency", None)
+                if dep is not None:
+                    self.assertNotIn(
+                        getattr(dep, "__name__", ""),
+                        ("get_service_client", "get_current_tenant", "get_current_role"),
+                        f"{fn.__name__}({name}) depende de JWT: {dep}",
+                    )
+
+    def test_modulo_no_importa_get_service_client(self):
+        import routers.meli_webhook as mw
+        self.assertFalse(
+            hasattr(mw, "get_service_client"),
+            "meli_webhook volvió a importar get_service_client (Depends JWT)",
+        )
 
 
 if __name__ == "__main__":
