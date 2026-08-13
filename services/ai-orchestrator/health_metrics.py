@@ -42,6 +42,10 @@ from typing import Any, Optional
 
 import httpx
 
+# Versión Graph API centralizada en whatsapp_sender (G26) — no redefinir aquí
+# (sin ciclo: whatsapp_sender no importa este módulo).
+from whatsapp_sender import GRAPH_API_VERSION
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,7 +185,7 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
     # registry homogéneo (PROVIDER_COLLECTORS) y compatibilidad con los tests que
     # los llaman síncronos. NO convertir a AsyncClient de forma aislada — dejaría
     # los collectors de solo-DB (wompi/aveonline/meli) bloqueando igual.
-    url = f"https://graph.facebook.com/v22.0/{phone_id}"
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{phone_id}"
     try:
         with httpx.Client(timeout=10) as client:
             res = client.get(

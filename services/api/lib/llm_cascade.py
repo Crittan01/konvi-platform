@@ -82,6 +82,21 @@ def _is_transient(exc_or_text: Any) -> bool:
     return any(tok in text for tok in _TRANSIENT_TOKENS)
 
 
+# Modelo inexistente/no disponible (patrón llm_embed._is_model_unavailable):
+# un 404/"not found"/"not supported" del MODELO no se cura reintentando el
+# mismo tier ni debe abortar la cadena — el siguiente tier puede existir aunque
+# éste no. El criterio es el mensaje del error sobre el modelo; un 404 por
+# endpoint mal formado no es frecuente en este cliente (URLs las arma el SDK).
+_MODEL_UNAVAILABLE_TOKENS = (
+    "not found", "404", "not supported", "unsupported",
+)
+
+
+def _is_model_unavailable(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(tok in text for tok in _MODEL_UNAVAILABLE_TOKENS)
+
+
 def _backoff_seconds(attempt_in_tier: int) -> float:
     """Backoff 1, 3, 7, 15, 31, ... (truncado a 31s).
 
@@ -123,6 +138,14 @@ def cascade_invoke(
         el tier Claude automáticamente.
       tiers — orden de modelos. Default ENV o `_DEFAULT_TIERS`.
       attempts_per_tier — reintentos por tier antes de promoter (default 2).
+
+    Clasificación de errores:
+      - Modelo no disponible (404/"not found"/"not supported") → salta al
+        siguiente tier SIN consumir intentos (el modelo no existe; reintentar
+        es inútil). Si TODOS los tiers caen así, degraded=True y el caller
+        decide su fallback (p.ej. Whisper en multimodal).
+      - Transitorio (503/429/timeout…) → retry con backoff dentro del tier.
+      - No-transitorio resto (schema/prompt) → raise inmediato (no cascade).
 
     Returns:
       CascadeOutcome con .response (objeto SDK) o .degraded=True si todos
@@ -168,6 +191,19 @@ def cascade_invoke(
                 return outcome
             except BaseException as exc:  # noqa: BLE001
                 last_exc = exc
+                # Modelo inexistente/no disponible (404, "not found",
+                # "not supported"): saltar DIRECTO al siguiente tier sin
+                # consumir más intentos ni dormir — reintentar un modelo que
+                # no existe es inútil, y un raise aquí mataría la cadena por
+                # encima de fallbacks posteriores (p.ej. Whisper en
+                # multimodal). Patrón espejo de llm_embed.embed_with_cascade.
+                if _is_model_unavailable(exc):
+                    logger.warning(
+                        "[CASCADE] tier=%d model=%s vendor=%s no disponible "
+                        "→ salto de tier (err=%s)",
+                        tier_idx, model, vendor, str(exc)[:240],
+                    )
+                    break
                 transient = _is_transient(exc)
                 logger.warning(
                     "[CASCADE] tier=%d model=%s vendor=%s attempt=%d "

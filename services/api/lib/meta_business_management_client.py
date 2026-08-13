@@ -20,7 +20,9 @@ Auth: Bearer token del tenant (access_token de System User generado en SU
 Business Manager). Se inyecta vía `tenant_id` + `TenantCredentialsFacade`
 (F.11) o directo si caller resuelve.
 
-Graph API version: v22.0 (Meta cortó <v22.0 desde 9-Sep-2025).
+Graph API version: centralizada en `integrations/meta_media.py`
+(`GRAPH_API_VERSION`, env META_GRAPH_API_VERSION, default v22.0 —
+Meta cortó <v22.0 desde 9-Sep-2025).
 
 Refs:
   - https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/
@@ -31,6 +33,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+
+# Versión Graph API centralizada en integrations/meta_media.py (G26) — única
+# definición del servicio API. Sin ciclo: integrations.meta_media no importa lib.
+from integrations.meta_media import GRAPH_API_VERSION
 
 from .integration_client.base import IntegrationClient
 from .integration_client.errors import (
@@ -43,8 +49,11 @@ from .integration_client.errors import (
 logger = logging.getLogger(__name__)
 
 
-META_GRAPH_API_VERSION = "v22.0"
-META_GRAPH_BASE_URL = f"https://graph.facebook.com/{META_GRAPH_API_VERSION}"
+# Alias re-exportado por compatibilidad: consumidores históricos (tests,
+# scripts/admin) importan META_GRAPH_API_VERSION desde este módulo. La
+# definición única vive en integrations/meta_media.py.
+META_GRAPH_API_VERSION = GRAPH_API_VERSION
+META_GRAPH_BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 # Error codes Meta documentados que mapeamos explícitamente.
 # Resto de 4xx genéricos → ProviderRejectedError. 5xx → ProviderUnavailableError.

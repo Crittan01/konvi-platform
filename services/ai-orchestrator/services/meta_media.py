@@ -21,10 +21,13 @@ from typing import Optional
 
 import httpx
 
+# Versión Graph API centralizada en whatsapp_sender (G26) — no redefinir aquí
+# (sin ciclo: whatsapp_sender no importa este módulo).
+from whatsapp_sender import GRAPH_API_VERSION
+
 logger = logging.getLogger("orchestrator.meta_media")
 
-META_API_VERSION = "v22.0"
-META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
+META_BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "10"))
 MEDIA_MAX_BYTES = int(os.getenv("META_MEDIA_MAX_BYTES", str(16 * 1024 * 1024)))

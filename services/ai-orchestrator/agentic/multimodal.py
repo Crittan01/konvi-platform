@@ -188,7 +188,7 @@ async def process_inbound_media(
         return None
 
     # Invocar Gemini multimodal con cascade (rev. 109 fix UAT live BUG 21).
-    # Saturación Gemini Flash 503 es común — retry con Flash Lite y Pro
+    # Saturación Gemini Flash 503 es común — retry con Flash Lite
     # (cross-tier multimodal) antes de fallback. Reusa llm_cascade.
     try:
         from google.genai import types as genai_types
@@ -204,16 +204,22 @@ async def process_inbound_media(
         )
         prompt = _prompt_for(media_type, caption=caption)
 
-        # Cascade multimodal: Flash → Flash Lite → Pro.
+        # Cascade multimodal: Flash → Flash Lite.
         def _invoke_gemini_multimodal(model_name: str):
             return client.models.generate_content(
                 model=model_name,
                 contents=[prompt, part],
             )
 
+        # Sin tier "-preview": alineado con llm_cascade.py::_DEFAULT_TIERS
+        # ("-preview retirado 2026-07-07: sin modelos preview en prod").
+        # No hay equivalente GA claro para un tier multimodal más fuerte:
+        # el tier alto GA de llm_cascade es gemini-3.5-flash (ya es el
+        # tier 1 aquí) y su rescue tier (claude-sonnet-4-5) es text-only —
+        # no procesa inline_data. Quedan 2 tiers GA.
         tiers = (
             [model] if model else
-            ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"]
+            ["gemini-3.5-flash", "gemini-3.1-flash-lite"]
         )
         # Cascade params (rev. 109 fix UAT live founder feedback):
         # 3 attempts × 3 tiers = hasta 9 intentos. Backoff 1s→2s→4s (max 16s).

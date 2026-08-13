@@ -24,8 +24,13 @@ import httpx
 
 logger = logging.getLogger("orchestrator.meta_media")
 
-META_API_VERSION = "v22.0"
-META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
+# Versión de Meta Graph API — ÚNICA definición del servicio API (G26).
+# Env: META_GRAPH_API_VERSION (default "v22.0"). Existe para el bump
+# calendarizado Q4-2026: Meta depreca versiones ~trimestralmente y subir de
+# versión no debe exigir tocar N archivos — basta el env en Render.
+# La consume también lib/meta_business_management_client.py.
+GRAPH_API_VERSION = os.getenv("META_GRAPH_API_VERSION", "v22.0")
+META_BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "10"))
 MEDIA_MAX_BYTES = int(os.getenv("META_MEDIA_MAX_BYTES", str(16 * 1024 * 1024)))
