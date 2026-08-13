@@ -794,7 +794,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                 <div className="space-y-1">
                   <Label className="text-xs flex items-center gap-1">
                     <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">(Envia exige street + city + state + postal)</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(el carrier exige street + city + state + postal)</span>
                   </Label>
                   <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
                 </div>

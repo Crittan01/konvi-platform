@@ -42,12 +42,12 @@ services:
     # pnpm. `corepack enable` falla en Render (EROFS: /usr/bin read-only); el modo
     # shim ejecuta pnpm sin escribir symlinks globales. --frozen-lockfile garantiza
     # el árbol EXACTO validado. COREPACK_ENABLE_DOWNLOAD_PROMPT=0 evita el prompt.
-    buildCommand: corepack pnpm@10.33.0 install --frozen-lockfile && NODE_OPTIONS='--max-old-space-size=1500' corepack pnpm@10.33.0 run build
-    startCommand: corepack pnpm@10.33.0 run start
+    buildCommand: corepack pnpm@10.34.4 install --frozen-lockfile && NODE_OPTIONS='--max-old-space-size=1500' corepack pnpm@10.34.4 run build
+    startCommand: corepack pnpm@10.34.4 run start
     envVars:
       - key: NODE_ENV
         value: production
-      # corepack en modo shim: no preguntar antes de descargar pnmp@10.33.0.
+      # corepack en modo shim: no preguntar antes de descargar pnpm@10.34.4.
       - key: COREPACK_ENABLE_DOWNLOAD_PROMPT
         value: "0"
       - key: NEXT_TELEMETRY_DISABLED

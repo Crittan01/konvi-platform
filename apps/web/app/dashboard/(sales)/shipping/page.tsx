@@ -299,7 +299,7 @@ export default async function ShippingPage(
             description={
               activeProviderConnected
                 ? 'No hay envíos aún. Usa el formulario de cotización.'
-                : `Conecta ${activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} para comenzar a crear envíos.`
+                : 'Conecta tu operador logístico para comenzar a crear envíos.'
             }
           />
         ) : (

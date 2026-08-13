@@ -361,7 +361,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
         <button type="button" onClick={() => setShowDims(d => !d)}
           className="flex items-center gap-1 text-[10px] text-primary/70 font-medium hover:text-primary transition-colors">
           {showDims ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          {showDims ? 'Ocultar dimensiones' : 'Dimensiones y peso (Envia)'}
+          {showDims ? 'Ocultar dimensiones' : 'Dimensiones y peso'}
         </button>
         {showDims && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-border/30">

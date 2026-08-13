@@ -157,7 +157,7 @@ function VariantEditRow({ v, productId, threshold, tenantId, variantCount, editV
       <ImageUploadBox name="image_url" defaultUrl={v.image_url ?? ''} tenantId={tenantId} size="sm" label="Foto de esta variante (opcional)" />
       <button type="button" onClick={() => setShowDims(d => !d)}
         className="text-[10px] text-primary/70 font-medium hover:text-primary transition-colors">
-        {showDims ? '▲ Ocultar dimensiones' : '▼ Dimensiones y peso (Envia)'}
+        {showDims ? '▲ Ocultar dimensiones' : '▼ Dimensiones y peso'}
       </button>
       {showDims && (
         <div className="space-y-2 pt-1 border-t border-border/30">

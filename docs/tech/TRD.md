@@ -24,7 +24,7 @@ Los documentos de contexto histórico (`.context/02-stack.md`, `AGENTS.md`) cont
 | Frontend | Tests | Vitest ^4.1.10 | `apps/web/package.json:53` |
 | Frontend | Observabilidad | @sentry/nextjs ^10.68.0 | `apps/web/package.json:23` |
 | Runtime JS | Node | **22** (CI y prod; Render corre 22.22.0 en konvi-web) | `.nvmrc` (=22); `.github/workflows/ci.yml:19-23` |
-| Runtime JS | pnpm | **10.33.0** (corepack shim en Render, `--frozen-lockfile`) | `ci.yml:24`; `render.yaml:45-46` |
+| Runtime JS | pnpm | **10.34.4** (corepack shim en Render, `--frozen-lockfile`) | `ci.yml:24`; `render.yaml:45-46` |
 | Backend | Python | **3.11.13** (VM y CI `PYTHON_VERSION=3.11`) | `python3.11 --version`; `ci.yml:18` |
 | Backend API/Orch | FastAPI | **0.139.0** | `services/api/requirements.txt:1`; `services/ai-orchestrator/requirements.txt:7` |
 | Backend Connector | FastAPI | 0.128.8 (divergencia intencional, ver §1.2) | `services/connector-whatsapp/requirements.txt:1` |
@@ -79,7 +79,7 @@ Notas verificadas:
 - El orchestrator es `type: web` con `uvicorn server:app` y el `OrchestratorWorker` corriendo en un
   **daemon thread** dentro del mismo proceso (comentario `render.yaml:309-314`). Es un workaround
   histórico del plan Free (que no ofrecía `type: worker`); se mantiene en Starter.
-- Build web: `corepack pnpm@10.33.0 install --frozen-lockfile` + `next build` con heap Node de
+- Build web: `corepack pnpm@10.34.4 install --frozen-lockfile` + `next build` con heap Node de
   1500 MB (`render.yaml:45`). `npm` está prohibido en este repo (lockfile pnpm; ver comentario
   `render.yaml:38-44`).
 - Secrets: toda env var con `sync: false` se configura en el Render Dashboard, no en el repo
@@ -223,7 +223,7 @@ production ── deploy target de los 4 servicios Render (autoDeploy on-push)
 | Herramienta | Uso canónico |
 |---|---|
 | Python | `python3.11` explícito (`python3` del sistema apunta a 3.9) |
-| Node/pnpm | `pnpm` 10.33.0 (`.nvmrc`=22; el shell de la VM resolvía v20.20.2 al verificar — usar `nvm use` para alinear a 22) |
+| Node/pnpm | `pnpm` 10.34.4 (`.nvmrc`=22; el shell de la VM resolvía v20.20.2 al verificar — usar `nvm use` para alinear a 22) |
 | Supabase CLI | `supabase db query --linked -f archivo.sql` — **psql TCP directo está bloqueado por Supavisor**; toda interacción SQL va por la CLI |
 | Stack local | `make -C .local up` levanta api (:8001) + connector (:8000) + orchestrator + web (:3000) + túneles ngrok; logs en `.local/logs/`, PIDs en `.local/pids/` (`.local/Makefile`) |
 
@@ -292,7 +292,7 @@ Triggers: PR a `develop`/`phase-*` y push a `develop`; `concurrency` con cancel-
 | Job | Qué hace | Líneas |
 |---|---|---|
 | `changes` | Detector de dominio (backend/frontend) por paths; **fail-safe**: si no puede determinar archivos → corre todo | `ci.yml:30-69` |
-| `validate` | Corre `bash scripts/validate.sh --ci` completo (Python 3.11, pnpm 10.33.0, Node 22, symlink compat para tests con path absoluto); osv-scanner standalone si solo cambió el frente JS; sube artifact de coverage (7 días) | `ci.yml:71-183` |
+| `validate` | Corre `bash scripts/validate.sh --ci` completo (Python 3.11, pnpm 10.34.4, Node 22, symlink compat para tests con path absoluto); osv-scanner standalone si solo cambió el frente JS; sube artifact de coverage (7 días) | `ci.yml:71-183` |
 | `py-core` | Tests core api+orch bajo **FastAPI 0.139** (pins de prod, sin el connector): `pytest -m 'not dbharness and not connector' -n auto` | `ci.yml:193-234` |
 | `db-harness` | Supabase CLI 2.90.0 + `scripts/schema_drift_check.sh` (levanta Postgres local, replay de migraciones desde cero, gate anti-drift contra baseline) + `pytest tests/dbharness` con `HARNESS_REQUIRED=1` (all-skipped = fallo) | `ci.yml:236-297` |
 | `build-web` | tsc + ESLint + Vitest + `next build` (solo si cambió frontend) | `ci.yml:299-355` |

@@ -21,7 +21,7 @@ Fuente operativa principal:
 | Backend | FastAPI `0.128.8`, Pydantic `2.12.5`, `supabase==2.28.3` |
 | IA | `google-genai==1.47.0`, modelo `gemini-2.5-flash` |
 | DB/Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
-| Mensajería | WhatsApp Cloud API oficial (`v21.0`) |
+| Mensajería | WhatsApp Cloud API oficial (`v22.0`) |
 | Hosting | Render (`render.yaml`) |
 
 ## Estructura del monorepo
