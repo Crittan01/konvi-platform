@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import LoginForm from './login-form'
 import { isBannedError, translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
+import { RECOVERY_SESSION_COOKIE } from '@/lib/mfa-recovery-cookie'
 
 /** Añade `?next=<ruta>` a un destino sólo si el deep-link es una ruta interna. */
 function withNext(base: string, next?: string): string {
@@ -44,6 +45,15 @@ export default async function LoginPage(
     'use server'
     const sb = await createClient()
     await sb.auth.signOut()
+    // G7 (auditoría frontend seguridad) — borrar también la cookie de bypass
+    // AAL2 (`mfa_recovery_session`): si esta sesión entró con un recovery code,
+    // el bypass no debe sobrevivir al cambio de cuenta (el próximo login AAL1
+    // lo heredaría sin pasar TOTP). Es server action → se borra aquí mismo con
+    // cookies() de next/headers, mismo patrón del logout del dashboard
+    // (app/dashboard/layout.tsx).
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()   // Next 16: cookies() es async
+    cookieStore.delete(RECOVERY_SESSION_COOKIE)
     redirect('/login?force=1')
   }
 

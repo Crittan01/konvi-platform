@@ -107,6 +107,12 @@ export function MfaChallengeForm({ factorId, message }: Props) {
   const signOut = async () => {
     setBusy(true)
     try {
+      // G7 (auditoría frontend seguridad) — borrar también la cookie HttpOnly
+      // `mfa_recovery_session` (bypass AAL2) al cerrar sesión: JS no puede
+      // tocarla, la borra el route handler server-side. Best-effort: si
+      // responde 401 (gate MFA del proxy cuando no hay bypass vigente que
+      // limpiar) igual se cierra la sesión local abajo.
+      await fetch('/api/auth/signout', { method: 'POST' }).catch(() => {})
       const sb = createClient()
       await sb.auth.signOut()
     } catch {

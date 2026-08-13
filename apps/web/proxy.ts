@@ -2,6 +2,14 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 
+// G6 (auditoría frontend seguridad) — throttle de la señal a Sentry del catch
+// AAL fail-open: el proxy corre por request, así que un outage de Supabase Auth
+// dispararía un evento POR REQUEST (ruido + cuota). Se envía como máximo 1
+// evento cada 5 min por proceso (best-effort: cada instancia del server lleva
+// su propio contador module-level; el estado no sobrevive redeploys).
+let lastAalFailSignalAt = 0
+const AAL_FAIL_SIGNAL_THROTTLE_MS = 5 * 60 * 1000
+
 // Next 16: `middleware.ts` (Edge) fue renombrado a `proxy.ts` (runtime NODEJS,
 // no configurable). El export DEBE llamarse `proxy` — con otro nombre Next NO lo
 // invoca y el gate MFA/AAL2 desaparecería SIN error de build (bypass silencioso).
@@ -123,15 +131,37 @@ export async function proxy(request: NextRequest) {
           return NextResponse.redirect(url)
         }
       } catch (e) {
-        // Si el check de AAL falla (network/timeout), prefer fail open para no
-        // bloquear users por outage temporal de Supabase Auth. F6: se emite una
-        // señal (antes el catch era vacío → si el check fallaba de forma
-        // sistemática, el gate MFA quedaba desactivado de facto sin que nadie lo
-        // supiera). console.error queda en los logs de Render / Sentry.
+        // Decisión FAIL-OPEN (NO cambiar a fail-closed): si el check de AAL
+        // falla (network/timeout/outage de Supabase Auth) se prefiere dejar
+        // pasar el request antes que bloquear a TODOS los users con MFA por un
+        // outage ajeno. El riesgo — gate MFA desactivado de facto mientras dure
+        // el fallo — se mitiga con señalización (F6: antes el catch era vacío;
+        // G6 auditoría frontend seguridad: el console.error solo vivía en los
+        // logs de Render y nadie lo miraba → ahora también va a Sentry).
         console.error(
           '[proxy] AAL2 check falló — fail-open (gate MFA omitido en este request):',
           e instanceof Error ? e.message : e,
         )
+        const now = Date.now()
+        if (now - lastAalFailSignalAt >= AAL_FAIL_SIGNAL_THROTTLE_MS) {
+          lastAalFailSignalAt = now
+          try {
+            // Import dinámico: el proxy corre en TODOS los requests — no se
+            // carga el SDK de Sentry en su module graph para un path que casi
+            // nunca se dispara, y si el SDK no estuviera disponible en este
+            // contexto el fail-open no debe romperse por culpa de la señal.
+            const Sentry = await import('@sentry/nextjs')
+            Sentry.captureException(e, {
+              extra: {
+                where: 'proxy.aal2_check',
+                impact: 'gate MFA omitido (fail-open) hasta que se recupere Supabase Auth',
+              },
+            })
+          } catch {
+            // Sentry no disponible en este contexto — el console.error de
+            // arriba queda como señal de respaldo (logs de Render).
+          }
+        }
       }
     }
   }
