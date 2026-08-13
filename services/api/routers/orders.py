@@ -82,6 +82,25 @@ def _is_allowed_order_transition(current: str, new: str) -> bool:
 # ver el comentario junto a DEFAULT_PAYMENT_LINK_TTL_MINUTES en wompi_client.py.
 
 
+def _payment_link_expires_at(created_at: object) -> str:
+    """Deriva el `expires_at` de un link REUTILIZADO: created_at + TTL (misma
+    regla que en la creación; la fila payments no persiste expires_at).
+    Formato idéntico al de creación ('%Y-%m-%dT%H:%M:%S.000Z'). Si created_at
+    no es parseable retorna '' (degradación segura — espeja al bot, que en
+    reuso responde expires_at='')."""
+    if not isinstance(created_at, str) or not created_at:
+        return ""
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return (created + timedelta(minutes=payment_link_ttl_minutes())).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
+
+
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
 class OrderItemCreate(BaseModel):
@@ -468,11 +487,17 @@ async def create_payment_link(
     # BLOQUE 0 (P1): genera link de pago (money-movement). Dual-auth → guard
     # internal-aware: NO-OP para el bot (X-Internal-Service-Secret), AAL2 para operador.
     _mfa: None = Depends(enforce_mfa_internal_or_user),
+    # G3 audit: money-movement sin rate-limit → un retry storm del bot u
+    # operador podía martillear Wompi. Mismo bucket write.default que
+    # create_order/patch_order (parámetro, patrón de este archivo).
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """
     Genera un link de pago Wompi para un pedido en estado pending o pending_payment.
     Persiste el link en la tabla payments y retorna la checkout_url.
     Válido por payment_link_ttl_minutes() minutos (env WOMPI_PAYMENT_LINK_TTL_MINUTES, default 30).
+    Si la orden ya tiene un link vigente (payments pending dentro del TTL), lo
+    REUSA: responde con ese link sin llamar a Wompi ni insertar fila nueva.
     """
     try:
         # F105: usar el wrapper resiliente (retry exponencial + circuit breaker) — cierra el riesgo P0
@@ -508,6 +533,63 @@ async def create_payment_link(
                 status_code=409,
                 detail=f"El pedido está en estado '{order['status']}' — solo se puede generar link para pedidos pending o pending_payment",
             )
+
+        # ── G3 audit: reuso de link vigente (anti-duplicado de DINERO) ────────
+        # Antes este endpoint creaba SIEMPRE link nuevo en Wompi + fila payments
+        # nueva por llamada → doble-click del operador o retry del bot generaba
+        # N links/filas vigentes para la misma orden. El path del bot YA resuelve
+        # esto; se espeja EXACTO su criterio de reuso
+        # (services/ai-orchestrator/tools/payment_link_tool.py:_find_pending_order,
+        # líneas 119-138):
+        #     supabase.table("payments")
+        #         .select("checkout_url, wompi_link_id, status, created_at, amount_in_cents")
+        #         .eq("tenant_id", tenant_id)
+        #         .eq("order_id", ord_row["id"])
+        #         .eq("status", "pending")
+        #         .gte("created_at", cutoff)   # cutoff = now - WOMPI_LINK_TTL_MINUTES
+        #         .order("created_at", desc=True)
+        #         .limit(1)
+        # y reusar solo si la fila tiene checkout_url no vacío. El TTL es la
+        # misma fuente compartida (payment_link_ttl_minutes(), default 30, que
+        # el bot fija en WOMPI_LINK_TTL_MINUTES=30 — deben coincidir, ver
+        # docs/adr/0011-payment-link-lifecycle.md). Lookup defensivo igual que
+        # el bot: si falla, se degrada a crear (disponibilidad).
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(minutes=payment_link_ttl_minutes())
+        ).isoformat()
+        try:
+            existing_pay = (
+                supabase.table("payments")
+                .select("checkout_url, wompi_link_id, status, created_at, amount_in_cents")
+                .eq("tenant_id", tenant_id)
+                .eq("order_id", order_id)
+                .eq("status", "pending")
+                .gte("created_at", cutoff)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            pay_rows = existing_pay.data if isinstance(existing_pay.data, list) else []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[PAYMENT_LINK] reuso lookup falló order=%s: %s — procediendo a crear",
+                order_id, exc,
+            )
+            pay_rows = []
+        if pay_rows and isinstance(pay_rows[0], dict) and pay_rows[0].get("checkout_url"):
+            reusable = pay_rows[0]
+            logger.info(
+                "[PAYMENT_LINK] reutilizando link vigente order=%s link=%s "
+                "(sin llamada a Wompi ni fila payments nueva)",
+                order_id, reusable.get("wompi_link_id"),
+            )
+            return {
+                "order_id": order_id,
+                "checkout_url": reusable["checkout_url"],
+                "amount_in_cents": int(reusable.get("amount_in_cents") or 0),
+                "expires_at": _payment_link_expires_at(reusable.get("created_at")),
+                "wompi_link_id": reusable.get("wompi_link_id"),
+            }
 
         total_amount = float(order.get("total_amount") or 0)
         # BLOQUE A (P1): round, no int() — total_amount es numeric(10,2) leído como float;
