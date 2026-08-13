@@ -101,6 +101,56 @@ Los ítems del checklist (A1, A2, A3, M12) no se duplican aquí. Esfuerzo y depe
 
 ---
 
+## B.2. Gaps de auditoría full-stack (G1-G28 — verificados contra código 2026-08-13)
+
+Origen: gap-analysis de los 7 findings de dominio (23-jul) contra este PLAN + código de hoy (`.audit/findings/gap-analysis-2026-08-13.md`, evidencia `archivo:línea` por gap). De 43 hallazgos en alcance: 10 ya cubiertos por este PLAN, 3 cerrados en código, **28 gaps únicos** → tabla siguiente. Ejecución inmediata 2026-08-13 (lotes A-G, commits de esa fecha): **14 cerrados, 2 parciales, 12 agendados con razón**.
+
+### Cerrados 2026-08-13 (lotes A-G, verificación integrada)
+
+| ID | Qué se hizo |
+|---|---|
+| ✅ G1 | PII en logs: `_mask_phone` aplicado en `orchestrator.py` (outbound), `order_status_tool.py`, `db_persistence.py` (6 callsites + dict solo claves/tipos); tests `test_pii_log_masking.py` |
+| ✅ G2 | Body-cap gateway: middleware 413 en `main.py` (`MAX_REQUEST_BODY_BYTES`, default 2MB); 5 tests `test_api_body_cap.py` |
+| ✅ G4 | `RL_CATALOG_AI_SUGGEST` (20/h tenant+user) en `/suggest-content` (patrón ai_agents); test de wiring |
+| ✅ G6 | MFA fail-open del proxy ahora emite Sentry throttled (5 min) vía import dinámico; fail-open conservado y documentado |
+| ✅ G7 | Cookie `mfa_recovery_session` borrada en las 3 vías de logout (nuevo route handler `POST /api/auth/signout` + server action) |
+| ✅ G16 | 5 módulos muertos (738 LOC) borrados con sus tests (`dian_normalization`, `tools/dispatcher`, `tools/inbound_dispatcher`, `slot_extractors`, `guardrails`); sección viva de `test_doc_partial_and_queue_fairness.py` conservada |
+| ✅ G15 (parcial) | `orchestrator.py`: import muerto guardrails + banner vacío eliminados; PII mask. **Queda:** imports lazy por ciclo (diseño aparte, con G12) |
+| ✅ G17 | Labels "Envia" eliminados de UI (catalog ×2, contacts, shipping fallback → neutro) |
+| ✅ G18 | Multimodal: tiers GA (`3.5-flash`/`3.1-flash-lite`, preview fuera); 404/"not found" salta tier sin consumir intentos (patrón `llm_embed`); paridad `llm_cascade` byte-equal api↔orchestrator preservada; 15 tests nuevos |
+| ✅ G21 | `.env.example` embeddings → `gemini-embedding-2` (modelo y fallback) |
+| ✅ G22 | pnpm 10.33.0 → **10.34.4** (CVE-2026-59196/59194): package.json, render.yaml ×4, ci.yml, TRD.md |
+| ✅ G26 | `META_GRAPH_API_VERSION` (env, default v22.0) — una definición por servicio consumida por los 5 puntos; tests por servicio |
+| ✅ G28 | Connector alineado al set core (fastapi 0.139.0, pydantic 2.13.4, supabase 2.31.0, sentry 2.65.0); 70 tests connector verdes; comentarios CI/conftest/manifest actualizados — **follow-up:** el leg `py-core` del CI quedó redundante (merge con `validate` candidato de simplificación) |
+| ✅ P3 residual | "v21.0" corregido en README y `.agents/rules/04` (quedan solo referencias históricas en docs/_archive y tablas de drift, correctas) |
+
+### Parciales (quedan con siguiente paso definido)
+
+| ID | Hecho | Falta |
+|---|---|---|
+| ◐ G3 | Payment-link: **reuso de link vigente** (criterio espejo de `payment_link_tool._find_pending_order`, TTL 30 min, 0 llamada Wompi/0 insert) + `RL_WRITE_DEFAULT`; 4 tests | Idempotency-Key: cablear `begin/finalize/abort_idempotency` requiere ajustar 6 tests existentes de `test_wompi_payment_link_endpoint.py` (mockean `request` sin headers) — cambio de tests existentes, sesión propia |
+| ◐ G15 | (ver cerrados) | Lazy imports de `agentic/dispatcher.py` → top-level requiere resolver el ciclo orchestrator↔dispatcher (diseño, con G12) |
+
+### Agendados (con razón y trigger)
+
+| ID | Qué | Severidad | Razón / trigger |
+|---|---|---|---|
+| G5 | CSP con nonce + quitar `unsafe-inline`/`unsafe-eval` (next.config.js:139) | **P1** | Riesgo de romper render sin UAT visual completa → sesión dedicada con patrón nonce Next 16 (proxy.ts) + verificación visual. Es el primer candidato técnico post-gaps |
+| G9 | Worker single-thread: 21 jobs secuenciales en un loop | **P1** | Diseño propio (separar crons de inbound, semáforo por tenant, métrica `inbound_lag_seconds`). Sesión de arquitectura dedicada |
+| G23 | Retiro legacy Supabase keys (anon/service_role) de los 4 servicios + dashboard | **P1** | Coordinado con B2: runbook credential-rotation §C + paso 12 (desactivar legacy al final de la rotación). Código: quitar fallbacks (8+ puntos) cuando las `sb_secret_` estén en todos los servicios |
+| G8 | Adjuntos inbox en bucket público `tenant-media` → bucket privado + signed URLs | P2 | Migración storage + cambio UX inbox; sesión propia |
+| G10/G11 | `packages/shared-py/` (coupons, notifications, vault_helper ×3, observability, wompi_client divergentes) + parity tests mientras tanto | P2 | Refactor con diseño de paquete; absorbe M16 (espejo aveonline) |
+| G12 | 5 monolitos (15.7K LOC): cortes de cohesión propuestos en el finding | P2 | Sin cambio de comportamiento; 1 archivo por sesión |
+| G13 | `config.py` por servicio con pydantic-settings (161 env vars) | P2 | Migrar primero vars de dinero/seguridad |
+| G14 | `webhook_framework` ABC: adoptar-o-borrar (0 adopción, aún cita Envia) | P2 | Decisión: piloto en `telegram_webhook.py` o ADR de retiro; limpiar refs Envia en cualquier caso |
+| G19 | Embeddings con task-prefixes (calidad RAG) | P2 | Requiere ventana de re-embed (`scripts/admin/reembed_kb_documents.py`) + `embedding_model_version` nuevo |
+| G20 | Cuota Gemini: separar keys por proyecto + sacar la key del web (3 route handlers la ponen en query string: `insights/route.ts:346`, `ai/preview/route.ts:14`, `ai/index-pending/route.ts:24`) | P2 | Founder crea proyectos/keys en AI Studio; agente migra los 3 handlers al patrón proxy del api (drift D3) |
+| G24 | Verificar Python real en Render + migrar pin a `.python-version` 3.13 | P2 | Antes de fin-2026 (3.11 security-only); probar suite en 3.13 |
+| G25 | Realtime: canales públicos `postgres_changes` → Broadcast privado con policies | P2 | Deuda de escalado (trigger: multi-tenant >2); documentado |
+| G27 | MeLi `missed_feeds` (recuperación de notificaciones perdidas) | P2 | Trigger: primer tenant MeLi conectado (mismo que ritual IPs §D); hoy 0 tenants → sin riesgo activo |
+
+---
+
 ## C. Roadmap post-go-live
 
 | Iniciativa | Trigger / gate | Estado |
@@ -149,6 +199,7 @@ Registro de hitos del cierre pre-producción. Cada cierre de ítem del checklist
 | 2026-08-07 | **M9 EN CURSO — portabilidad de tests (SIN commitear):** transformación aplicada en el working tree (255 archivos .py: 240 en `tests/`, 15 en `scripts/` — paths absolutos `/home/ansible` → `Path(__file__).resolve().parents[N]`); shims symlink eliminados de `.github/workflows/ci.yml`; portabilidad probada en `/tmp` (4.152 coleccionan sin errores); polución cross-test corregida (668 passed en el combo que fallaba). **PENDIENTE en la próxima sesión:** correr `python3.11 -m pytest tests/ -q -m 'not dbharness'` completa verde → commitear → verificar CI → eliminar esta fila y marcar M9 ✅ | Working tree local; agente perdido a mitad de verificación final |
 | 2026-08-13 | **M9 — verificación final VERDE (pendiente solo commit + CI):** suite completa sobre el working tree portable → **4143 passed / 23 skipped / 201 dbharness deselected** en 264s; **0 paths absolutos restantes** (grep en `tests/` + `scripts/`); shims symlink eliminados de `ci.yml`. Listo para commit (requiere autorización founder) → CI → marcar M9 ✅. Misma sesión: frescura del PLAN verificada contra código — A1 sigue `false` (`render.yaml:208-209`, founder-gate), `COVERAGE_MIN=60` vigente, fix del bug CASE B2 constatado en `d01b2fd2` (fila §A #4 actualizada) | `pytest tests/ -q -m 'not dbharness'` 2026-08-13 |
 | 2026-08-13 | **M9 CERRADO:** commits `850a2849` (portabilidad 255 archivos) + `298ad1a2` (docs) pusheados; primer run CI `31731556822` falló por advisories JS publicados ese mismo día (js-yaml 4.3.0 GHSA-5p4m, nanoid 3.3.16 GHSA-2v37 — ambos CVSS alto con fix patch) → fix `996b5e95` (overrides pnpm, patrón de `fe8bc539`). **CI run `31732756174` VERDE — 5/5 jobs** (validate.sh full, py-core, db-harness, Next build, detect changes); la suite corrió en CI sin shims symlink por primera vez | `gh run view 31732756174`; gate osv local "No issues found" |
+| 2026-08-13 | **Gaps G1-G28 ejecutados (lotes A-G, 7 agentes + integración):** 14 cerrados + 2 parciales + 12 agendados (detalle y evidencia en §B.2; origen `.audit/findings/gap-analysis-2026-08-13.md`). Verificación integrada: suite **4133 passed / 23 skipped / 201 dbharness deselected** (exit 0, 261s) + tsc 0 errores + Vitest 320 + tenant-lint 0 gaps + ruff 201 ≤ baseline 202. Fixes de integración del orquestador: colisión namespace `services` (orchestrator vs connector) en 2 tests nuevos → patrón importlib con restauración; fallback "Envia" en shipping page → neutro; typo `pnmp@` en render.yaml; comentarios CI/conftest/manifest obsoletos tras G28 | Esta sesión; log `.audit/logs/pytest-integration-final.log` |
 | 2026-08-13 | **Preparación ejecutable de founder-gates (agente, autonomía founder):** rotación sin-caída de `INTERNAL_SERVICE_SECRET` implementada — dual `INTERNAL_SERVICE_SECRET_PREVIOUS` en api (`internal_auth.py`) y orchestrator (`server.py`); 10 tests nuevos (`test_internal_secret_rotation.py`), 18/18 verde con regresiones A11. Runbooks ejecutables: [`operations/runbooks/credential-rotation.md`](operations/runbooks/credential-rotation.md) (B2: matriz sin-caída/ventana verificada contra docs oficiales Supabase/Meta/Wompi/Resend/Gemini + `render.yaml`; orden, verificación, rollback; M19 = paso 11) y [`operations/runbooks/mfa-mandatory-rollout.md`](operations/runbooks/mfa-mandatory-rollout.md) (A1: día 0/X, verificación, rollback) | Esta sesión; tests + gate local |
 
-**Pendiente inmediato:** **backlog técnico §B completamente cerrado o diferido con razón documentada — no queda nada ejecutable por agente en P0/P1.** Lo abierto es founder-gate de §A (B2 y A1 ya tienen **runbook ejecutable paso a paso** en `docs/operations/runbooks/`): B2 rotación credenciales (desbloquea M19), A1 flip MFA, B6 fiscal, plantillas Meta por tenant, Wompi prod keys, anulación guía UAT 86732771636, B4 run live, #16 segregación ambientes (día del lanzamiento). Post-go-live: M18 target 70 coverage, M16 unificación cliente Aveonline, M7 sesión DB por request.
+**Pendiente inmediato:** **§B P0/P1 original cerrado; gaps §B.2 ejecutados 2026-08-13 (14 cerrados / 2 parciales / 12 agendados).** Siguiente frente técnico (por orden): G5 (CSP nonce, sesión dedicada con UAT visual) → G9 (split del worker, sesión de arquitectura) → G23 (retiro legacy keys, coordinado con B2 paso 12 del runbook) → M18 (gate coverage 70; mapa en `.audit/logs/coverage-2026-08-13.log`: TOTAL 69.5%, faltan ~250 stmts — candidatos conversations/marketplace/integrations). Founder-gates de §A (B2 y A1 con **runbook ejecutable** en `docs/operations/runbooks/`): B2 rotación credenciales (desbloquea M19 + G23), A1 flip MFA, B6 fiscal, plantillas Meta por tenant, Wompi prod keys, anulación guía UAT 86732771636, B4 run live, #16 segregación ambientes (día del lanzamiento).
