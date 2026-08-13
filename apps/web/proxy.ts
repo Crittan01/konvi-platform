@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
+import { buildCsp } from '@/lib/csp'
 
 // G6 (auditoría frontend seguridad) — throttle de la señal a Sentry del catch
 // AAL fail-open: el proxy corre por request, así que un outage de Supabase Auth
@@ -17,9 +18,17 @@ const AAL_FAIL_SIGNAL_THROTTLE_MS = 5 * 60 * 1000
 // en Proxy y LANZA error. El helper HMAC (verifyRecoveryCookie) usa Web Crypto
 // (crypto.subtle), que ya corre en nodejs en el resto del código server-side.
 export async function proxy(request: NextRequest) {
+  // G5 — CSP con nonce por request (antes: CSP estática con unsafe-inline en
+  // next.config.js). El nonce viaja en el request header `x-nonce` para que el
+  // render de Next lo aplique a sus scripts; la política se emite en la
+  // respuesta final (abajo, antes del return).
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+
   let supabaseResponse = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: requestHeaders,
     },
   })
 
@@ -39,7 +48,7 @@ export async function proxy(request: NextRequest) {
           })
           supabaseResponse = NextResponse.next({
             request: {
-              headers: request.headers,
+              headers: requestHeaders,
             },
           })
           supabaseResponse.cookies.set({
@@ -56,7 +65,7 @@ export async function proxy(request: NextRequest) {
           })
           supabaseResponse = NextResponse.next({
             request: {
-              headers: request.headers,
+              headers: requestHeaders,
             },
           })
           supabaseResponse.cookies.set({
@@ -170,6 +179,14 @@ export async function proxy(request: NextRequest) {
   // Un usuario baneado no puede obtener sesión válida — getUser() retorna null → redirect a /login.
   // No se necesita check adicional aquí.
 
+  // G5 — la CSP con el nonce de ESTE request se emite en la respuesta final.
+  // Los redirects/401 tempranos no la llevan (no renderizan HTML; el destino
+  // del redirect sí pasará por aquí y recibirá la suya).
+  supabaseResponse.headers.set(
+    'Content-Security-Policy',
+    buildCsp(nonce, process.env.NODE_ENV === 'development'),
+  )
+
   return supabaseResponse
 }
 
@@ -178,6 +195,8 @@ export const config = {
     // F85: `api` YA NO se excluye — el gate MFA debe correr también para /api/* (los route
     // handlers autenticaban con sesiones AAL1). Los endpoints pre-AAL2 (/api/mfa/*) se exceptúan
     // dentro del handler, no aquí.
-    '/((?!_next/static|_next/image|favicon.ico|login|forgot-password|auth/confirm|auth/callback|cuenta-suspendida).*)',
+    // G5: solo se excluyen ASSETS ESTÁTICOS — toda página HTML (incl. /login y
+    // rutas públicas) pasa por el proxy para recibir su CSP con nonce.
+    '/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|.*\\.(?:png|jpg|jpeg|svg|ico|webp|json|txt|xml)$).*)',
   ],
 }

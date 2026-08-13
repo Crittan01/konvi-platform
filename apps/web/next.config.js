@@ -1,14 +1,7 @@
 /** @type {import('next').NextConfig} */
 
-function parseOrigin(url) {
-  if (!url) return null
-  try {
-    return new URL(url).origin
-  } catch {
-    return null
-  }
-}
-
+// G5: la lógica de orígenes para CSP (parseOrigin/toWsOrigin/unique + csp*)
+// se movió a apps/web/lib/csp.ts — aquí solo queda lo que usa remotePatterns.
 function parseHostname(url) {
   if (!url) return null
   try {
@@ -17,43 +10,6 @@ function parseHostname(url) {
     return null
   }
 }
-
-function toWsOrigin(httpOrigin) {
-  if (!httpOrigin) return null
-  if (httpOrigin.startsWith('https://')) return httpOrigin.replace('https://', 'wss://')
-  if (httpOrigin.startsWith('http://')) return httpOrigin.replace('http://', 'ws://')
-  return null
-}
-
-function unique(values) {
-  return Array.from(new Set(values.filter(Boolean)))
-}
-
-const supabaseOrigin = parseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL)
-const supabaseWsOrigin = toWsOrigin(supabaseOrigin)
-const appOrigin = parseOrigin(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL)
-const apiOrigin = parseOrigin(process.env.API_URL)
-const orchestratorOrigin = parseOrigin(process.env.ORCHESTRATOR_URL)
-const connectorOrigin = parseOrigin(process.env.CONNECTOR_URL)
-
-const cspImgSrc = unique([
-  "'self'",
-  'data:',
-  'blob:',
-  supabaseOrigin,
-  'https://http2.mlstatic.com',
-  'https://mlstatic.com',
-]).join(' ')
-
-const cspConnectSrc = unique([
-  "'self'",
-  supabaseOrigin,
-  supabaseWsOrigin,
-  appOrigin,
-  apiOrigin,
-  orchestratorOrigin,
-  connectorOrigin,
-]).join(' ')
 
 const supabaseStorageHost = parseHostname(process.env.NEXT_PUBLIC_SUPABASE_URL)
 const remotePatterns = [
@@ -128,27 +84,11 @@ const securityHeaders = [
     key: 'Strict-Transport-Security',
     value: 'max-age=31536000; includeSubDomains',
   },
-  // Content Security Policy
-  // Permite: mismo origen, Supabase (API + Storage), Google Fonts, data URIs para imágenes
-  // NOTA: Si se añaden más proveedores externos, actualizar esta política aquí
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      // Scripts: mismo origen + inline (Next.js requiere unsafe-inline para hidration)
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      // Estilos: mismo origen + inline (Tailwind) + Google Fonts
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      // Fuentes
-      "font-src 'self' https://fonts.gstatic.com",
-      // Imágenes: mismo origen + Supabase Storage + MeLi CDN + data URIs
-      `img-src ${cspImgSrc}`,
-      // Conexiones API: mismo origen + Supabase + orígenes definidos por env
-      `connect-src ${cspConnectSrc}`,
-      // Frames: ninguno
-      "frame-src 'none'",
-    ].join('; '),
-  },
+  // G5 (2026-08-13): la CSP YA NO se emite aquí. La estática tenía
+  // `script-src 'unsafe-inline' 'unsafe-eval'` (defensa XSS neutralizada).
+  // Ahora la construye el proxy por request con nonce + 'strict-dynamic'
+  // (apps/web/lib/csp.ts + proxy.ts). Si añades proveedores externos,
+  // actualiza lib/csp.ts (no aquí).
 ]
 
 const nextConfig = {

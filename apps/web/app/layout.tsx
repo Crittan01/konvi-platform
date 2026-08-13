@@ -1,5 +1,6 @@
 import './globals.css'
 import type { Metadata, Viewport } from 'next'
+import { headers } from 'next/headers'
 import { Inter } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import { ConfirmProvider } from '@/components/ui/confirm-dialog'
@@ -45,16 +46,20 @@ export const viewport: Viewport = {
   ],
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  // G5: el script anti-FOUC es el único inline propio — lleva el nonce que el
+  // proxy generó para este request (CSP script-src 'nonce-…' 'strict-dynamic').
+  // En rutas sin proxy (assets) no hay CSP → el script corre igual sin nonce.
+  const nonce = (await headers()).get('x-nonce') ?? undefined
   return (
     <html lang="es" className={inter.variable} suppressHydrationWarning>
       <body className="antialiased font-sans">
         {/* Anti-FOUC: primer hijo del body, corre síncrono antes del paint. */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <ThemeProvider>
           <ConfirmProvider>{children}</ConfirmProvider>
           <Toaster />
