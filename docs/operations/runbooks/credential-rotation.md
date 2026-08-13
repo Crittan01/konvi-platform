@@ -57,6 +57,8 @@
 
 ## 3. Verificación post-rotación
 
+**Atajo ejecutable (recomendado):** `python3.11 scripts/admin/verify_credential_rotation.py [--internal-secret <nuevo> --tenant-id <uuid tenant>]` — corre los checks 3.1/3.3 + salud general de los 4 servicios, imprime tabla con evidencia y sale 0/1. Verificado contra prod 2026-08-13: 6/6 verde. Los pasos manuales de abajo sirven para profundizar si algún check falla.
+
 1. **Supabase keys (3.1):** `curl -s https://konvi-api.onrender.com/health/ready` → 200 (lee DB con la key nueva); igual `konvi-connector` `/health/metrics`; web `/login` 200.
 2. **Gemini/LLM:** turno de bot en sandbox o log orchestrator sin `401/403` de Generative Language API.
 3. **INTERNAL_SERVICE_SECRET (3.3):** generar un payment-link o shipping-quote desde el bot sandbox (orchestrator→api con el secret nuevo) → 200; `api_security_events` con `internal_auth.ok` reciente.
