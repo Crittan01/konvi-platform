@@ -11,9 +11,8 @@ from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
 from tools.payment_link_tool import handle_payment_link_if_applicable
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
-from guardrails import validate_orchestrator_output
 from llm_invoke import DEFAULT_PRIMARY_MODEL
-from whatsapp_sender import send_whatsapp_message
+from whatsapp_sender import send_whatsapp_message, _mask_phone
 from conversation_contract import (
     CONVERSATION_STATUS_BOT_ACTIVE,
     CONVERSATION_STATUS_CLOSED,
@@ -1144,7 +1143,7 @@ async def _send_outbound_text(
             "processed": True,
             "processing_status": PROCESSING_STATUS_PROCESSED,
         }).execute()
-        logger.info("[OUTBOUND] Respuesta enviada directamente a %s", customer_phone)
+        logger.info("[OUTBOUND] Respuesta enviada directamente a %s", _mask_phone(customer_phone))
         # Rev. 104 (F1-6) — hook único: si el texto enviado es resumen
         # determinístico (marker `📋`), emitir `summary_rendered` en
         # cart_events para auditoría. Best-effort.
@@ -2626,7 +2625,3 @@ def _truncate_category_listings(text: str) -> str:
         # Append con doble salto antes para separar visualmente.
         result = result.rstrip() + "\n\n" + _MARKETING_CITE
     return result
-
-
-# ─── Core Orchestration ───────────────────────────────────────────────────────
-
