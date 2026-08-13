@@ -104,6 +104,9 @@ class OrderStatusResult:
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 from text_utils import normalize_text as _normalize_text  # noqa: E402
+# W1 Habeas Data — teléfonos enmascarados en logs (whatsapp_sender no importa
+# tools/* ni modules que carguen este módulo → import directo sin ciclo).
+from whatsapp_sender import _mask_phone  # noqa: E402
 
 
 def _tokenize(text: str) -> set[str]:
@@ -267,7 +270,7 @@ def _get_contact_id_by_phone(
         rows = res.data or []
         return rows[0]["id"] if rows else None
     except Exception as exc:
-        logger.warning("Error buscando contacto tenant=%s phone=%s: %s", tenant_id, customer_phone, exc)
+        logger.warning("Error buscando contacto tenant=%s phone=%s: %s", tenant_id, _mask_phone(customer_phone), exc)
         return None
 
 

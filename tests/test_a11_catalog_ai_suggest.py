@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api")
 
 from routers.catalog_ai import (  # noqa: E402
     suggest_product_content, SuggestContentRequest, _strip_blocked_claims,
+    RL_CATALOG_AI_SUGGEST, router as catalog_ai_router,
 )
 from lib.llm_suggest import SuggestionResult  # noqa: E402
 
@@ -70,6 +71,35 @@ class CatalogAISuggestTests(unittest.TestCase):
         )
         self.assertEqual(_strip_blocked_claims("Aceite suave y nutritivo."),
                          "Aceite suave y nutritivo.")
+
+
+class CatalogAIRateLimitWiringTests(unittest.TestCase):
+    """G4 — /suggest-content lleva bucket RL propio (molde RL_AI_SUGGEST de
+    ai_agents): endpoint LLM costoso con tope 20/h por tenant+user+IP.
+    Wiring estructural — no golpea el limiter real."""
+
+    def test_rl_dependency_registrada_en_ruta(self):
+        route = next(
+            r for r in catalog_ai_router.routes
+            if getattr(r, "path", "") == "/catalog/suggest-content"
+        )
+        deps = [getattr(d, "dependency", None) for d in route.dependencies]
+        self.assertIn(RL_CATALOG_AI_SUGGEST, deps)
+
+    def test_bucket_y_tope_del_rule(self):
+        # La dependency cierra sobre el RateLimitRule (ver build_rate_limit_dependency).
+        closure = {
+            var: cell.cell_contents
+            for var, cell in zip(
+                RL_CATALOG_AI_SUGGEST.__code__.co_freevars,
+                RL_CATALOG_AI_SUGGEST.__closure__,
+            )
+        }
+        rule = closure["rule"]
+        self.assertEqual(rule.bucket, "catalog_ai.suggest")
+        self.assertEqual(rule.limit, 20)          # mismo tope que ai.suggest
+        self.assertEqual(rule.window_seconds, 3600)
+        self.assertTrue(closure["include_user_id"])
 
 
 if __name__ == "__main__":

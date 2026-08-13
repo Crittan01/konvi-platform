@@ -12,6 +12,7 @@ contenido publicado. Defensa anti-claims en 2 capas:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Optional
 
@@ -20,10 +21,24 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RateLimitRule, build_rate_limit_dependency
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/catalog", tags=["catalog-ai"])
+
+# Rate limit dedicado para /suggest-content: endpoint LLM costoso (una llamada
+# Gemini por request). Mismo contrato que ai_agents /suggest (RL_AI_SUGGEST):
+# 20/h por tenant+user+IP, ajustable por env. Bucket PROPIO para no compartir
+# contador con ai.suggest (son features distintas con audiencias distintas).
+RL_CATALOG_AI_SUGGEST = build_rate_limit_dependency(
+    RateLimitRule(
+        bucket="catalog_ai.suggest",
+        limit=int(os.getenv("API_RATE_LIMIT_CATALOG_AI_SUGGEST_PER_HOUR", "20")),
+        window_seconds=3600,
+    ),
+    include_user_id=True,
+)
 
 # Disclaimer mostrado SIEMPRE con el draft (el merchant es responsable legal).
 _DISCLAIMER = (
@@ -99,7 +114,11 @@ CAMPOS:
 Devuelve EXCLUSIVAMENTE un objeto JSON: {{"description": "...", "safety_note": "...", "is_sensitive_category": true|false}}"""
 
 
-@router.post("/suggest-content", response_model=SuggestContentResponse)
+@router.post(
+    "/suggest-content",
+    response_model=SuggestContentResponse,
+    dependencies=[Depends(RL_CATALOG_AI_SUGGEST)],  # LLM costoso — tope por tenant+user+IP
+)
 def suggest_product_content(
     payload: SuggestContentRequest,
     tenant_id: str = Depends(get_current_tenant),

@@ -152,6 +152,57 @@ app.add_middleware(
 )
 
 
+# ─── G2 — Body-cap pre-lectura (anti-DoS por payload gigante) ────────────────
+# Registrado DESPUÉS de CORS y ANTES de security_headers/request_id en el código
+# → en ejecución queda por DENTRO de ambos: el 413 hereda X-Request-ID y los
+# security headers en el camino de vuelta.
+# El cap usa SOLO el header Content-Length (rechaza ANTES de leer el body). Sin
+# backstop post-lectura: los endpoints del gateway son JSON (los frameworks
+# respetan Content-Length) y los uploads grandes van directo a Supabase Storage
+# desde el browser — verificado: ningún router de services/api usa UploadFile.
+_MAX_REQUEST_BODY_BYTES_DEFAULT = 2 * 1024 * 1024  # 2MB
+
+
+def _max_request_body_bytes() -> int:
+    """Límite de body en bytes (env MAX_REQUEST_BODY_BYTES, default 2MB).
+
+    Se lee por request (un os.getenv es negligible) para que ops/tests puedan
+    ajustarlo sin reimportar la app.
+    """
+    try:
+        return int(
+            os.getenv("MAX_REQUEST_BODY_BYTES", str(_MAX_REQUEST_BODY_BYTES_DEFAULT))
+        )
+    except ValueError:
+        return _MAX_REQUEST_BODY_BYTES_DEFAULT
+
+
+@app.middleware("http")
+async def body_size_limit_middleware(request: Request, call_next):
+    """413 si Content-Length supera el cap — ANTES de consumir el body."""
+    raw = request.headers.get("Content-Length", "")
+    try:
+        declared = int(raw) if raw else 0
+    except ValueError:
+        # Header malformado: no decidimos aquí — el server HTTP lo rechaza (400).
+        declared = 0
+    max_bytes = _max_request_body_bytes()
+    if declared > max_bytes:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "msg": (
+                        "El cuerpo de la petición supera el máximo permitido "
+                        f"({max_bytes} bytes)."
+                    ),
+                }
+            },
+        )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response: Response = await call_next(request)

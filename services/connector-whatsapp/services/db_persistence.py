@@ -56,6 +56,19 @@ def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> Optional[str
     return tenant_id
 
 
+def _mask_phone(p: str) -> str:
+    """Enmascara el teléfono para logs (W1 Habeas Data): solo últimos 4 dígitos.
+
+    Misma lógica que `ai-orchestrator/whatsapp_sender._mask_phone`. Vive LOCAL
+    (no en `lib/phone.py`) porque ese archivo es byte-idéntico entre los 3
+    servicios — el pact tests/test_phone_helpers_pact.py exige igualdad de hash
+    y añadirla solo aquí lo rompería.
+    """
+    if not p:
+        return "?"
+    return "***" + str(p)[-4:]
+
+
 def _normalize_phone(phone: str) -> str:
     """Normaliza phone usando helper canónico shared (rev. 104, F0-4).
 
@@ -142,7 +155,7 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         # Si el lookup falla, asumimos NO revocado para no bloquear flow
         # accidentalmente. Log para auditoría.
         logger.warning(
-            f"No pude verificar consent_revoked_at para {customer_phone}: {exc}"
+            f"No pude verificar consent_revoked_at para {_mask_phone(customer_phone)}: {exc}"
         )
 
     res = (
@@ -195,7 +208,7 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
             }).execute()
             conversation_id = new_conv.data[0]["id"]
             logger.info(
-                f"Nueva conversación creada: {conversation_id} para {customer_phone} "
+                f"Nueva conversación creada: {conversation_id} para {_mask_phone(customer_phone)} "
                 f"status={initial_status}"
             )
         except Exception as exc:
@@ -221,14 +234,14 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
                 # No debería ocurrir: el 23505 implica que la fila existe. Si pasa, es un
                 # problema real (¿otro constraint único?) y no debe enmascararse.
                 logger.error(
-                    f"Conflicto único al crear conv para {customer_phone} pero el re-SELECT "
+                    f"Conflicto único al crear conv para {_mask_phone(customer_phone)} pero el re-SELECT "
                     f"no encontró la fila ganadora; se propaga el error original"
                 )
                 raise
             conversation_id = retry.data[0]["id"]
             logger.info(
                 f"Carrera de conversación resuelta: se reutiliza {conversation_id} para "
-                f"{customer_phone} (otro mensaje concurrente la creó primero)"
+                f"{_mask_phone(customer_phone)} (otro mensaje concurrente la creó primero)"
             )
 
     return conversation_id
@@ -273,7 +286,12 @@ def persist_whatsapp_message(
     payload: Dict[str, Any] = data.get("payload", {}) or {}
 
     if not customer_phone or (content_type == "text" and not content):
-        logger.warning(f"Mensaje descartado: customer_phone o content vacíos. data={data}")
+        # Habeas Data: NUNCA loguear el dict crudo (trae teléfono + contenido
+        # del mensaje en claro) — solo claves y tipos para diagnóstico.
+        logger.warning(
+            "Mensaje descartado: customer_phone o content vacíos. data_keys=%s",
+            {k: type(v).__name__ for k, v in data.items()},
+        )
         return
 
     try:
@@ -327,7 +345,7 @@ def persist_whatsapp_message(
 
         logger.info(
             f"[INBOUND] Mensaje persistido | tenant={tenant_id} | "
-            f"phone={customer_phone} | type={content_type}"
+            f"phone={_mask_phone(customer_phone)} | type={content_type}"
         )
 
     except Exception as e:
