@@ -1,17 +1,15 @@
-"""conftest raíz — split de tests por DOMINIO DE PINS (venv por servicio en CI).
+"""conftest raíz — atribución de tests por DOMINIO de servicio.
 
-Contexto: los 3 servicios Python NO comparten versión. `api` y `ai-orchestrator` pinnean
-fastapi 0.139.0 / pydantic 2.13.4 / supabase 2.31.0 (idénticos, "core"); el `connector`
-diverge (0.128.8 / 2.12.5 / 2.28.3). El CI histórico instalaba los 3 en UN venv (el
-connector se instalaba último y GANABA) → testeaba api/orch bajo la versión del connector,
-NO bajo la de prod (#77, #134). Ver docs/reports/ci_sec_hardening_2026_07_24.md §4 y
-reference_ci_shared_venv_dep_coupling.
+Contexto histórico: los 3 servicios Python NO compartían versión (`api`/`ai-orchestrator`
+en fastapi 0.139.x; el `connector` una minor atrás) y el CI instalaba todo en UN venv
+(el connector se instalaba último y GANABA) → testeaba api/orch bajo la versión del
+connector, NO bajo la de prod (#77, #134). G28 (2026-08-13) ALINEÓ los 3 servicios al
+mismo set de pins → el venv compartido ya no diverge; el marker `connector` se conserva
+como atribución de dominio (qué test ejercita qué servicio), protegida del drift por
+tests/test_connector_split_guard.py. Ver docs/reports/ci_sec_hardening_2026_07_24.md §4.
 
 Este hook aplica el marker `connector` a los tests connector-only (fuente de verdad:
-connector_manifest.CONNECTOR_OWNED) para que el leg del CI que corre bajo el venv del
-connector (0.139) seleccione `-m connector`, y el leg core `-m 'not connector'`. La
-atribución vive en UN solo lugar y el guard (tests/test_connector_split_guard.py) la
-protege del drift.
+connector_manifest.CONNECTOR_OWNED); el leg core del CI selecciona `-m 'not connector'`.
 """
 import pathlib
 

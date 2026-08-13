@@ -9,10 +9,12 @@ import re
 _TESTS_DIR = pathlib.Path(__file__).resolve().parent
 
 # Tests cuyo código bajo prueba es EXCLUSIVAMENTE del connector-whatsapp → leg del
-# connector (fastapi 0.128.8). Los pact/parity que cargan fuente de varios servicios vía
+# connector. HISTÓRICO: el split nació cuando el connector pinneaba fastapi 0.128.8 y
+# divergía del core; desde 2026-08-13 (G28) los 3 servicios comparten pins (0.139.x) —
+# la atribución por dominio se conserva porque la protege el guard y desambigúa a qué
+# servicio pertenece cada test. Los pact/parity que cargan fuente de varios servicios vía
 # importlib (test_phone_helpers_pact) o son orch-only con el connector en un comentario
-# (test_multimodal_audio) NO son connector-owned → van a core. Verificado: 6 tests →
-# 65 casos verdes bajo el venv del connector; 3312 verdes (el resto) bajo el venv core.
+# (test_multimodal_audio) NO son connector-owned → van a core.
 CONNECTOR_OWNED = frozenset({
     "test_a11_wh01_verified_tenant.py",
     "test_db_persistence_reopen.py",
