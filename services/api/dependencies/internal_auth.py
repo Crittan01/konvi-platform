@@ -36,17 +36,27 @@ from dependencies.auth import (
 logger = logging.getLogger(__name__)
 
 INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+# Rotación sin-caída (docs/operations/runbooks/credential-rotation.md): durante
+# la ventana de rotación, el secret SALIENTE se publica en esta var y ambos se
+# aceptan. Fuera de la ventana debe estar VACÍA — un solo secreto activo es la
+# postura (no se documenta en render.yaml a propósito: es efímera por diseño).
+INTERNAL_SERVICE_SECRET_PREVIOUS = os.getenv("INTERNAL_SERVICE_SECRET_PREVIOUS", "")
 
 
 def _verify_internal_secret(req: Request) -> bool:
     """Compara header X-Internal-Service-Secret con env var (constant-time).
 
-    Retorna True si match, False si missing/wrong.
+    Retorna True si match con el secret vigente (o con PREVIOUS durante la
+    ventana de rotación), False si missing/wrong/sin configurar.
     """
     sent = req.headers.get("X-Internal-Service-Secret", "")
     if not sent or not INTERNAL_SERVICE_SECRET:
         return False
-    return hmac.compare_digest(sent, INTERNAL_SERVICE_SECRET)
+    if hmac.compare_digest(sent, INTERNAL_SERVICE_SECRET):
+        return True
+    return bool(INTERNAL_SERVICE_SECRET_PREVIOUS) and hmac.compare_digest(
+        sent, INTERNAL_SERVICE_SECRET_PREVIOUS
+    )
 
 
 def _audit_internal_call(

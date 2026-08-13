@@ -141,11 +141,25 @@ def status():
 # tenant_id opcional → cualquiera (Render lo sirve público) podía dumpear datos
 # operativos cross-tenant. Se exige internal-service-secret + tenant_id.
 _INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+# Ventana de rotación sin-caída (mismo patrón que services/api internal_auth;
+# runbook: docs/operations/runbooks/credential-rotation.md). Vacío = desactivado.
+_INTERNAL_SERVICE_SECRET_PREVIOUS = os.getenv("INTERNAL_SERVICE_SECRET_PREVIOUS", "")
+
+
+def _internal_secret_matches(sent: str) -> bool:
+    """True si `sent` coincide con el secret vigente (o con PREVIOUS en ventana)."""
+    if not sent or not _INTERNAL_SERVICE_SECRET:
+        return False
+    if hmac.compare_digest(sent, _INTERNAL_SERVICE_SECRET):
+        return True
+    return bool(_INTERNAL_SERVICE_SECRET_PREVIOUS) and hmac.compare_digest(
+        sent, _INTERNAL_SERVICE_SECRET_PREVIOUS
+    )
 
 
 def _require_internal_secret(request: Request) -> None:
     sent = request.headers.get("X-Internal-Service-Secret", "")
-    if not _INTERNAL_SERVICE_SECRET or not sent or not hmac.compare_digest(sent, _INTERNAL_SERVICE_SECRET):
+    if not _internal_secret_matches(sent):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
