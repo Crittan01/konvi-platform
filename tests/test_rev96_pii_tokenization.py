@@ -9,8 +9,9 @@ Cobertura:
 import os
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from lib.pii_tokenize import (  # noqa: E402
     normalize_document,

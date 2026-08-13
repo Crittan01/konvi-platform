@@ -12,7 +12,7 @@ import re
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path("/home/ansible/workspaces/konvi-platform")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Frases robóticas prohibidas en respuestas al cliente.
 # Mantener conservador: solo frases que claramente suenan a script automatizado.

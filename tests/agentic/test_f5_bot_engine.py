@@ -12,10 +12,11 @@ import os
 import sys
 import types
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 from agentic.nontext_content import (

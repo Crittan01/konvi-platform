@@ -18,13 +18,14 @@ import sys
 import unittest
 from collections import defaultdict
 from unittest.mock import patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

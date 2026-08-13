@@ -8,9 +8,10 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 from dependencies import security  # noqa: E402
 from dependencies.security import _client_ip  # noqa: E402
 

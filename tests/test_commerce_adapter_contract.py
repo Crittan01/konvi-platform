@@ -8,10 +8,11 @@ import asyncio
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "k")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from lib import commerce as C  # noqa: E402
 from lib.commerce.base import (  # noqa: E402

@@ -10,8 +10,9 @@ output del LLM, que se ve redundante y poco profesional.
 """
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.catalog_tool import _normalize_attributes_label  # noqa: E402
 

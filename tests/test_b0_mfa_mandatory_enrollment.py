@@ -12,11 +12,12 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-key")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from fastapi import HTTPException  # noqa: E402
 from dependencies import auth as A  # noqa: E402

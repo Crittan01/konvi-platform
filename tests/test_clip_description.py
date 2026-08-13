@@ -6,9 +6,10 @@ chars), poco claro para el cliente. _clip_description recorta por ORACIÓN compl
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.system_prompt import _clip_description  # noqa: E402
 

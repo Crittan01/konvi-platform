@@ -14,8 +14,8 @@ import unittest
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 
-_SERVICE_DIR = pathlib.Path(
-    "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+_SERVICE_DIR = (
+    pathlib.Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"
 )
 sys.path.insert(0, str(_SERVICE_DIR))
 

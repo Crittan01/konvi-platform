@@ -17,13 +17,14 @@ os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")
 os.environ.setdefault("API_URL", "http://localhost:8001")
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0,
+    str(pathlib.Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 from tools import payment_link_tool
 
-_SERVICE_DIR = pathlib.Path(
-    "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+_SERVICE_DIR = (
+    pathlib.Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"
 )
 
 

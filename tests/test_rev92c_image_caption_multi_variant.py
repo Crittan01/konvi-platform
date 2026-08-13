@@ -10,8 +10,9 @@ solo el valor).
 """
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.shipping_quote_tool import _variation_label  # noqa: E402
 
@@ -63,7 +64,7 @@ class CaptionLogicSpecTests(unittest.TestCase):
 
     def setUp(self):
         with open(
-            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/tools/image_send_tool.py",
+            str(Path(__file__).resolve().parents[1] / "services/ai-orchestrator/tools/image_send_tool.py"),
             encoding="utf-8",
         ) as fh:
             self.src = fh.read()

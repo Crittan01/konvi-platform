@@ -16,6 +16,7 @@ revert quita la dependencia de cualquiera de los 12 endpoints.
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
@@ -23,7 +24,7 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from dependencies.security import RL_WRITE_DEFAULT  # noqa: E402
 

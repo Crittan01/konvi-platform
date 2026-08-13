@@ -6,8 +6,9 @@ disambiguación + cotizar con peso/dims reales del cart.
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.shipping_quote_tool import _estimate_package_from_cart_if_available  # noqa
 

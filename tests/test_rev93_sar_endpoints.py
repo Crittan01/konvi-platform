@@ -14,8 +14,9 @@ viven en docs/uat/scenarios/sNN_*.py.
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers.data_subject_request import (  # noqa: E402
     _hash_phone,

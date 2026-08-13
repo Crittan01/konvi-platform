@@ -6,8 +6,9 @@ harness verifica turn-a-turn sobre la respuesta real del bot.
 import os
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "uat"))
 
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,

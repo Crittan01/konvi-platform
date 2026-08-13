@@ -8,11 +8,12 @@ import sys
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("INTERNAL_SERVICE_SECRET", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 import orchestrator
 from tools.payment_link_tool import handle_payment_link_if_applicable

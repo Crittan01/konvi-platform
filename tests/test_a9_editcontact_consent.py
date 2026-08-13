@@ -15,11 +15,12 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from fastapi import HTTPException  # noqa: E402
 from routers.contacts import _compute_consent_update, ContactPatch  # noqa: E402

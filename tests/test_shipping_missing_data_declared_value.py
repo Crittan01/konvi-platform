@@ -7,8 +7,9 @@ ENVIO-2: el valorDeclarado del seguro = subtotal REAL de productos del cart (COP
 import sys
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.cart_tool import compute_shipping_inputs  # noqa: E402
 from tools.shipping_quote_tool import (  # noqa: E402

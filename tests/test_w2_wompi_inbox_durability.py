@@ -9,13 +9,14 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_URL", "https://x.supabase.co")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 import routers.wompi_webhook as wh  # noqa: E402
 from helpers.wompi_payload_builder import WompiPayloadBuilder  # noqa: E402
@@ -140,7 +141,7 @@ class DurableWrapperTests(unittest.TestCase):
 
 class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
     async def test_redrive_repostea_filas_no_procesadas(self):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
         import worker as wk
         from unittest.mock import AsyncMock
 
@@ -176,7 +177,7 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sb.rpc.call_args[0][0], "claim_wompi_inbox_batch")
 
     async def test_cleanup_corre_si_vencido(self):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
         import worker as wk
         w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
         w._wompi_inbox_reconcile_enabled = True
@@ -200,7 +201,7 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deshabilitado_no_hace_redrive(self):
         import time
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
         import worker as wk
         w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
         w._wompi_inbox_reconcile_enabled = False
@@ -213,7 +214,7 @@ class WorkerReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_corre_aun_deshabilitado(self):
         # W3 GAP-PII: el cleanup NO depende del flag de re-drive
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
         import worker as wk
         w = wk.OrchestratorWorker.__new__(wk.OrchestratorWorker)
         w._wompi_inbox_reconcile_enabled = False
@@ -314,12 +315,12 @@ class W3CredsStrictTests(unittest.TestCase):
         return sb
 
     def test_default_degrada(self):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
         from integrations.wompi_client import get_tenant_wompi_creds
         self.assertEqual(get_tenant_wompi_creds(self._sb(), "t1"), (None, None, "sandbox"))
 
     def test_strict_propaga(self):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
         from integrations.wompi_client import get_tenant_wompi_creds
         with self.assertRaises(Exception):
             get_tenant_wompi_creds(self._sb(), "t1", raise_on_error=True)

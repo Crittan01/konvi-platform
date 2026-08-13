@@ -22,10 +22,11 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 from agentic.prompt.builder import build_prompt_for_state, _BUSINESS_OPS_STATES

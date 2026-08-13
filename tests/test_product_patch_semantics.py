@@ -7,9 +7,10 @@ campos opcionales a null: 'campo ausente' = no se toca; 'campo=null' = se limpia
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers.products import (  # noqa: E402
     build_patch_update,

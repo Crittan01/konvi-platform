@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-REPO = Path('/home/ansible/workspaces/konvi-platform')
+REPO = Path(__file__).resolve().parents[1]
 
 
 class FrontendResidualTests(unittest.TestCase):

@@ -17,11 +17,12 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from integrations.wompi_client import (  # noqa: E402
     DEFAULT_PAYMENT_LINK_TTL_MINUTES,

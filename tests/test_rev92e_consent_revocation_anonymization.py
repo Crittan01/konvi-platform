@@ -14,8 +14,9 @@ puede bloquear si requiere supresión total).
 import sys
 import unittest
 from unittest.mock import MagicMock
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from orchestrator import _record_consent  # noqa: E402
 

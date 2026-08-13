@@ -7,9 +7,10 @@ prompt como HECHOS estructurados → el bot los CITA en vez de inventarlos.
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.system_prompt import _render_catalog_block  # noqa: E402
 

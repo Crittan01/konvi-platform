@@ -6,9 +6,10 @@ del Vault (via credentials.app_secret_secret_id) → el HMAC casa. waba_id/phone
 defaults de e2e_chat (coinciden con el cross-tenant invariant del connector).
 """
 import sys
+from pathlib import Path
 
 sys.path.insert(0, "scripts")
-REPO = "/home/ansible/workspaces/konvi-platform"
+REPO = str(Path(__file__).resolve().parents[2])
 creds = {}
 with open(f"{REPO}/.env") as f:
     for line in f:

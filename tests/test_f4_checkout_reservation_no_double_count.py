@@ -16,11 +16,12 @@ Fix: `_reserve_checkout_stock` EXTIENDE las reservas del cart al checkout window
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")
 os.environ.setdefault("API_URL", "http://localhost:8001")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools import payment_link_tool  # noqa: E402
 

@@ -19,15 +19,14 @@ Cuando se consolide el package compartido `packages/python-shared/`
 import hashlib
 import os
 import unittest
+from pathlib import Path
 
 
 _MASTER_PATH = (
-    "/home/ansible/workspaces/konvi-platform/"
-    "services/api/integrations/aveonline_client.py"
+    str(Path(__file__).resolve().parents[2] / "services/api/integrations/aveonline_client.py")
 )
 _COPY_PATH = (
-    "/home/ansible/workspaces/konvi-platform/"
-    "services/ai-orchestrator/integrations/aveonline_client.py"
+    str(Path(__file__).resolve().parents[2] / "services/ai-orchestrator/integrations/aveonline_client.py")
 )
 
 
@@ -68,7 +67,7 @@ class AveonlineClientParityTests(unittest.TestCase):
         # Importar master (api).
         sys.path.insert(
             0,
-            "/home/ansible/workspaces/konvi-platform/services/api",
+            str(Path(__file__).resolve().parents[2] / "services" / "api"),
         )
         import importlib
         if "integrations.aveonline_client" in sys.modules:
@@ -86,7 +85,7 @@ class AveonlineClientParityTests(unittest.TestCase):
         sys.path.pop(0)
         sys.path.insert(
             0,
-            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+            str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
         )
         copy_mod = importlib.import_module("integrations.aveonline_client")
         copy_api = {name for name in dir(copy_mod) if not name.startswith("_")}

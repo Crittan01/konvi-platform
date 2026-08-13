@@ -18,7 +18,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers.orders import OrderCreate, OrderPatch, OrderItemCreate  # noqa: E402
 from routers.contacts import ContactCreate, ContactPatch  # noqa: E402
@@ -35,7 +35,7 @@ from routers.product_categories import (  # noqa: E402
 from routers.coupons import CouponCreate, CouponPatch  # noqa: E402
 from routers.expenses import ExpenseCreate  # noqa: E402
 
-FIXTURE = Path("/home/ansible/workspaces/konvi-platform/tests/fixtures/db_schema_canonical.json")
+FIXTURE = Path(__file__).resolve().parents[1] / "tests/fixtures/db_schema_canonical.json"
 
 
 def _load_schema() -> dict:

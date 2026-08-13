@@ -25,13 +25,14 @@ Tres defectos reproducidos contra el sandbox real (Wompi sandbox + bot en vivo):
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test")
 
-REPO = "/home/ansible/workspaces/konvi-platform"
+REPO = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, f"{REPO}/services/api")
 
 from routers import wompi_webhook  # noqa: E402

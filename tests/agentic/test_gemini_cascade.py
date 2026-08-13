@@ -15,6 +15,7 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 # NO seteamos GEMINI_API_KEY: el test usa MagicMock() para el client
@@ -22,7 +23,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 # fake, contaminaría tests E2E posteriores (golden conversations).
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 

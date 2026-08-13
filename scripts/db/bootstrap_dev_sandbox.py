@@ -12,8 +12,9 @@ Uso: python3.11 scripts/db/bootstrap_dev_sandbox.py
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-REPO = "/home/ansible/workspaces/konvi-platform"
+REPO = str(Path(__file__).resolve().parents[2])
 sys.path.insert(0, f"{REPO}/scripts")
 
 creds: dict[str, str] = {}

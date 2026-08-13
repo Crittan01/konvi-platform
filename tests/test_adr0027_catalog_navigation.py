@@ -6,10 +6,11 @@ Conservador: ante la duda → "full" (nunca rompe compra). Multi-vertical.
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.catalog_navigation import decide_catalog_view  # noqa: E402
 

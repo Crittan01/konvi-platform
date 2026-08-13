@@ -13,11 +13,12 @@ import inspect
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.catalog_contract import CATALOG_VARIATIONS_KEY  # noqa: E402
 import tools.catalog_tool as catalog_tool  # noqa: E402

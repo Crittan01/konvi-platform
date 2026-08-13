@@ -14,10 +14,11 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, AsyncMock, patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/api",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "api"),
 )
 
 from integrations.aveonline_client import (

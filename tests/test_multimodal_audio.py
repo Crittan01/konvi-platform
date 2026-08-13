@@ -13,18 +13,19 @@ import sys
 import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 # Cargar meta_media via importlib con path absoluto para evitar conflicto con
 # el otro package "services" del connector (services/connector-whatsapp/services/).
 import importlib.util as _importlib_util  # noqa: E402
 _spec = _importlib_util.spec_from_file_location(
     "ai_orchestrator_meta_media",
-    "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/services/meta_media.py",
+    str(Path(__file__).resolve().parents[1] / "services/ai-orchestrator/services/meta_media.py"),
 )
 meta_media = _importlib_util.module_from_spec(_spec)
 _spec.loader.exec_module(meta_media)

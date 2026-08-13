@@ -8,10 +8,11 @@ Además valida la forma customer-facing (sin cost_price interno).
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from routers.catalog import shape_catalog_product, CATALOG_VARIATIONS_KEY as API_KEY  # noqa: E402
 from tools.catalog_contract import CATALOG_VARIATIONS_KEY as BOT_KEY  # noqa: E402

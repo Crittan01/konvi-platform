@@ -10,9 +10,10 @@ Cubre:
 """
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from integrations.wompi_client import verify_event_signature
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY

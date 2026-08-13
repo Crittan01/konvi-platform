@@ -31,12 +31,12 @@ os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers import contacts  # noqa: E402
 
-CONTACTS_SRC = Path(
-    "/home/ansible/workspaces/konvi-platform/services/api/routers/contacts.py"
+CONTACTS_SRC = (
+    Path(__file__).resolve().parents[1] / "services/api/routers/contacts.py"
 ).read_text()
 
 

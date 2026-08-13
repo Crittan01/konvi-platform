@@ -8,7 +8,7 @@ como receptor. Guarda source-based (cart_tool tiene deps pesadas), estilo fitnes
 from pathlib import Path
 import re
 
-_SRC = (Path("/home/ansible/workspaces/konvi-platform")
+_SRC = (Path(__file__).resolve().parents[1]
         / "services/ai-orchestrator/tools/cart_tool.py").read_text()
 
 

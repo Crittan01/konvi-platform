@@ -20,8 +20,9 @@ revocación (coherente con consume_redemption / ADR-0015 D5).
 import sys
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.cart_tool import (  # noqa: E402
     invalidate_shipping,

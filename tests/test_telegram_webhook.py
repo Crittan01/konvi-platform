@@ -17,12 +17,13 @@ import os
 import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-key")
 os.environ.setdefault("TELEGRAM_WEBHOOK_SECRET", "test-secret-token-123")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers.telegram_webhook import _cmd_resolver, _cmd_estado, _handle_command
 

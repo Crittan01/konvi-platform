@@ -12,7 +12,7 @@ connector). Espeja el estilo de los fitness-tests del repo (test_audit_*).
 from pathlib import Path
 import re
 
-_REPO = Path("/home/ansible/workspaces/konvi-platform")
+_REPO = Path(__file__).resolve().parents[1]
 _WEBHOOK = (_REPO / "services/connector-whatsapp/routers/webhook.py").read_text()
 _META = (_REPO / "services/connector-whatsapp/dependencies/meta.py").read_text()
 

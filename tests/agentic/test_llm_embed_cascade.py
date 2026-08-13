@@ -15,11 +15,12 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 
@@ -158,12 +159,10 @@ class EmbedCrossServiceParityTests(unittest.TestCase):
 
     def test_archivos_byte_equal(self):
         master = (
-            "/home/ansible/workspaces/konvi-platform/"
-            "services/ai-orchestrator/llm_embed.py"
+            str(Path(__file__).resolve().parents[2] / "services/ai-orchestrator/llm_embed.py")
         )
         copy = (
-            "/home/ansible/workspaces/konvi-platform/"
-            "services/api/lib/llm_embed.py"
+            str(Path(__file__).resolve().parents[2] / "services/api/lib/llm_embed.py")
         )
         with open(master, "rb") as f:
             m_hash = hashlib.md5(f.read()).hexdigest()

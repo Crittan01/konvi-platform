@@ -13,9 +13,10 @@ import re
 import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from dependencies.pii_audit import log_pii_access  # noqa: E402
 import notifications  # noqa: E402
@@ -168,8 +169,10 @@ class RetentionPerTenantMigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/supabase/migrations/"
-            "20260508010000_retention_per_tenant_fix.sql",
+            str(
+                Path(__file__).resolve().parents[1]
+                / "supabase/migrations/20260508010000_retention_per_tenant_fix.sql"
+            ),
             encoding="utf-8",
         ) as f:
             cls.sql = f.read()
@@ -216,7 +219,7 @@ class CspHstsHeadersTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/services/api/main.py",
+            str(Path(__file__).resolve().parents[1] / "services/api/main.py"),
             encoding="utf-8",
         ) as f:
             cls.code = f.read()
@@ -246,8 +249,7 @@ class SarEndpointHardeningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/services/api/routers/"
-            "data_subject_request.py",
+            str(Path(__file__).resolve().parents[1] / "services/api/routers/data_subject_request.py"),
             encoding="utf-8",
         ) as f:
             cls.code = f.read()
@@ -293,12 +295,12 @@ class EnvVarCoherenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/render.yaml",
+            str(Path(__file__).resolve().parents[1] / "render.yaml"),
             encoding="utf-8",
         ) as f:
             cls.render_yaml = f.read()
         with open(
-            "/home/ansible/workspaces/konvi-platform/.env.example",
+            str(Path(__file__).resolve().parents[1] / ".env.example"),
             encoding="utf-8",
         ) as f:
             cls.env_example = f.read()

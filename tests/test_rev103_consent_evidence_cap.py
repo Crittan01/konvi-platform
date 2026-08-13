@@ -9,7 +9,7 @@ JSONB soporta MB pero un cap preventivo a 50 entries:
 from pathlib import Path
 import unittest
 
-REPO = Path('/home/ansible/workspaces/konvi-platform')
+REPO = Path(__file__).resolve().parents[1]
 # A9 finiquito — el cap de renewals_after_revocation MIGRÓ del server action
 # page.tsx al API router contacts.py (_compute_consent_update). Comportamiento
 # verificado byte-a-byte en tests/test_a9_editcontact_consent.py.

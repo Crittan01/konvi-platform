@@ -11,6 +11,7 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
@@ -18,7 +19,7 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 
 def _api_main():
@@ -31,7 +32,7 @@ def _api_main():
     """
     _m = sys.modules.get("main")
     if _m is None or not hasattr(_m, "readiness_check"):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
         sys.modules.pop("main", None)
         import main as _m
     return _m

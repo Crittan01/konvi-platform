@@ -8,9 +8,10 @@ EXPLÍCITA de imagen; si piden LISTAR (término de catálogo o artículo plural)
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from tools.image_send_tool import is_image_request_query  # noqa: E402
 

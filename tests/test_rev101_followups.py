@@ -12,9 +12,10 @@ import sys
 import unittest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 # Imports module-level (evita issues de class-attribute method-binding).
 from orchestrator import _detect_rectification_intent, _detect_minor_intent  # noqa: E402
@@ -246,8 +247,7 @@ class UnifiedAuditViewMigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/supabase/migrations/"
-            "20260509010000_unified_audit_view.sql",
+            str(Path(__file__).resolve().parents[1] / "supabase/migrations/20260509010000_unified_audit_view.sql"),
             encoding="utf-8",
         ) as f:
             cls.sql = f.read()
@@ -287,7 +287,7 @@ class MainPyRoutersTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            "/home/ansible/workspaces/konvi-platform/services/api/main.py",
+            str(Path(__file__).resolve().parents[1] / "services/api/main.py"),
             encoding="utf-8",
         ) as f:
             cls.code = f.read()
@@ -304,8 +304,7 @@ class F2DeferDocumentedTests(unittest.TestCase):
 
     def test_adr_documents_f2_defer(self):
         with open(
-            "/home/ansible/workspaces/konvi-platform/docs/adr/"
-            "0003-habeas-data-compliance-strategy.md",
+            str(Path(__file__).resolve().parents[1] / "docs/adr/0003-habeas-data-compliance-strategy.md"),
             encoding="utf-8",
         ) as f:
             adr = f.read()
@@ -362,7 +361,7 @@ class StricterDocumentRulesTests(unittest.TestCase):
     TI removido del set."""
 
     def test_ti_removed_from_accepted_types(self):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
         from dependencies.contact_validators import DOCUMENT_TYPES_CO  # noqa: E402
         self.assertNotIn("TI", DOCUMENT_TYPES_CO)
         self.assertIn("CC", DOCUMENT_TYPES_CO)

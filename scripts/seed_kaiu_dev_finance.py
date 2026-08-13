@@ -4,9 +4,10 @@ Renderiza los 4 bars del P&L (Ingresos, COGS, OPEX, Beneficio). Idempotente.
 """
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-REPO = "/home/ansible/workspaces/konvi-platform"
+REPO = str(Path(__file__).resolve().parents[1])
 creds = {}
 with open(f"{REPO}/.env") as f:
     for line in f:

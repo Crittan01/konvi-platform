@@ -13,11 +13,12 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/connector-whatsapp")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services/connector-whatsapp"))
 
 from services.db_persistence import _upsert_conversation  # noqa: E402
 

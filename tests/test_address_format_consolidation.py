@@ -12,9 +12,10 @@ distinga casas de torres en el path primario.
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.tools.contact import SaveAddressArgs, _build_address_dict  # noqa: E402
 from lib.address_format import format_address_line  # noqa: E402

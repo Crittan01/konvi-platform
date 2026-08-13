@@ -21,8 +21,9 @@ import os
 import json
 import sys
 import urllib.request
+from pathlib import Path
 
-REPO = "/home/ansible/workspaces/konvi-platform"
+REPO = str(Path(__file__).resolve().parents[2])
 sys.path.insert(0, f"{REPO}/scripts")
 
 creds: dict[str, str] = {}

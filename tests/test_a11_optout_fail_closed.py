@@ -11,11 +11,12 @@ el tráfico normal (NO-STOP sigue al LLM). Test con `is_optout_keyword` REAL.
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.dispatcher import _optout_failclosed_should_skip as should_skip  # noqa: E402
 

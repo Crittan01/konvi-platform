@@ -18,11 +18,12 @@ import importlib
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-_ROOT = "/home/ansible/workspaces/konvi-platform"
+_ROOT = str(Path(__file__).resolve().parents[2])
 _MASTER = f"{_ROOT}/services/ai-orchestrator/llm_cascade.py"
 _COPY = f"{_ROOT}/services/api/lib/llm_cascade.py"
 

@@ -12,9 +12,10 @@ DECIMAL(10,2) que le correspondía la conserva catalog.py, que también trunca.)
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from agentic.cart_render import _cop  # noqa: E402
 from agentic.invariants.cart_render_coherence import _format_cop  # noqa: E402

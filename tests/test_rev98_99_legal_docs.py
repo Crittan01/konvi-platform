@@ -9,13 +9,13 @@ Tests estructurales (no E2E con DB).
 """
 import os
 import unittest
+from pathlib import Path
 
-DOCS_DIR = "/home/ansible/workspaces/konvi-platform/docs"
+DOCS_DIR = str(Path(__file__).resolve().parents[1] / "docs")
 LEGAL_DIR = os.path.join(DOCS_DIR, "legal")
 ADR_DIR = os.path.join(DOCS_DIR, "adr")
 MIGRATION_PATH = (
-    "/home/ansible/workspaces/konvi-platform/supabase/migrations/"
-    "20260507010000_tenant_legal_acceptance.sql"
+    str(Path(__file__).resolve().parents[1] / "supabase/migrations/20260507010000_tenant_legal_acceptance.sql")
 )
 
 

@@ -15,6 +15,7 @@ import os
 import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
@@ -23,7 +24,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 # el client nunca se usa de verdad (la llamada LLM está mockeada).
 os.environ.setdefault("GEMINI_API_KEY", "test-dummy-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"))
 
 import agentic.agent as agent_mod  # noqa: E402
 from agentic.agent import run_agentic_turn  # noqa: E402

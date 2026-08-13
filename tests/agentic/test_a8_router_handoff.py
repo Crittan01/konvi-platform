@@ -17,9 +17,10 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"))
 
 from agentic import dispatcher as disp  # noqa: E402
 

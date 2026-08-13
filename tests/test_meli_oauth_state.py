@@ -5,6 +5,7 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
@@ -16,7 +17,7 @@ os.environ["MELI_AUTH_URL"] = "https://auth.mercadolibre.com.co/authorization"
 os.environ["MELI_OAUTH_STATE_SECRET"] = "test-super-secret"
 os.environ["MELI_OAUTH_STATE_TTL_SECONDS"] = "600"
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from integrations import meli_client as _meli_client
 from routers import integrations as integrations_router

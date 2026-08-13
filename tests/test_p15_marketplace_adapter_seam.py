@@ -13,10 +13,11 @@ import sys
 import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "k")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from routers import marketplace  # noqa: E402
 

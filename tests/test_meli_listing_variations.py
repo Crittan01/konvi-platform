@@ -2,13 +2,14 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 os.environ.setdefault("MELI_CLIENT_ID", "client-id")
 os.environ.setdefault("MELI_CLIENT_SECRET", "client-secret")
 os.environ.setdefault("MELI_REDIRECT_URI", "https://example.com/callback")
 os.environ.setdefault("MELI_OAUTH_STATE_SECRET", "test-super-secret")
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from integrations import meli_client
 

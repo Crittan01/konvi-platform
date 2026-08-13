@@ -33,8 +33,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "uat"))
 
 import e2e_chat as E  # noqa: E402
 from coherence_assertions import (  # noqa: E402
@@ -108,7 +109,7 @@ class BotDriver:
             subprocess.run(
                 ["python3.11", "scripts/wipe_conversation.py", "--phone", self.phone,
                  "--tenant-id", self.tenant_id, *extra, "--yes"],
-                cwd="/home/ansible/workspaces/konvi-platform", check=False,
+                cwd=str(Path(__file__).resolve().parents[2]), check=False,
                 capture_output=True,
             )
 
@@ -185,7 +186,7 @@ class BotDriver:
         if int(cart.get("shipping_cents") or 0) > 0 and not cart.get("requires_requote"):
             return (f"SKIP — envío ya vigente "
                     f"(shipping_cents={cart['shipping_cents']}, requires_requote=False)")
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"))
         from tools.cart_tool import (
             set_quoted_options, set_shipping_destination, set_shipping_meta,
         )

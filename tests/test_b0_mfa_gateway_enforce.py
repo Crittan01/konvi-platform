@@ -8,12 +8,13 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-key")
 os.environ.setdefault("GEMINI_API_KEY", "test")
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
 
 from fastapi import HTTPException
 from dependencies import auth as A
@@ -24,7 +25,7 @@ def _api_main():
     (hay 3 main.py: api/connector/orchestrator). No re-ejecuta main.py."""
     _m = sys.modules.get("main")
     if _m is None or not hasattr(_m, "app"):
-        sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api"))
         sys.modules.pop("main", None)
         import main as _m
     return _m

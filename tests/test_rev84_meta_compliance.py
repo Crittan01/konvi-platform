@@ -9,8 +9,9 @@ depender de la disciplina del modelo.
 """
 import sys
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 
 from orchestrator import (  # noqa: E402
     _detect_mental_health_crisis,

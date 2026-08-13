@@ -25,15 +25,15 @@ from unittest.mock import MagicMock
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
+    0, str(Path(__file__).resolve().parents[2] / "services" / "ai-orchestrator"),
 )
 
 
 def _load_env_if_available() -> bool:
     """Carga .env.local si existe (para SUPABASE creds). Retorna True si OK."""
     candidates = [
-        Path("/home/ansible/workspaces/konvi-platform/apps/web/.env.local"),
-        Path("/home/ansible/workspaces/konvi-platform/.env"),
+        Path(__file__).resolve().parents[2] / "apps/web/.env.local",
+        Path(__file__).resolve().parents[2] / ".env",
     ]
     for env_path in candidates:
         if not env_path.exists():
