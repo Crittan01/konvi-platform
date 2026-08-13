@@ -174,6 +174,8 @@ def test_pasa_la_ventana_y_el_diferimiento_configurados():
 
 
 def test_esta_registrado_en_el_ciclo_del_worker():
-    """Un barrido que existe pero nadie llama es un barrido que no existe."""
+    """Un barrido que existe pero nadie llama es un barrido que no existe.
+    G9: el ciclo itera las tuplas module-level _INBOUND_JOBS/_MAINTENANCE_JOBS;
+    el registro vive ahí (lo ejecutan tanto _poll_cycle como los loops)."""
     fuente = (REPO_ROOT / "services" / "ai-orchestrator" / "worker.py").read_text()
-    assert '_run_job("acceptance_stamp", self._stamp_acceptances_if_due())' in fuente
+    assert '("acceptance_stamp", "_stamp_acceptances_if_due")' in fuente

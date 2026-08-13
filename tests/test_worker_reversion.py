@@ -252,8 +252,10 @@ def test_si_falla_el_buscador_de_constancias_igual_revisa_los_dobles_pagos():
 
 
 def test_esta_registrado_en_el_ciclo_del_worker():
+    # G9: el registro vive en las tuplas module-level _INBOUND_JOBS/_MAINTENANCE_JOBS
+    # (ejecutadas por _poll_cycle y por los loops separados de run()).
     fuente = (REPO_ROOT / "services" / "ai-orchestrator" / "worker.py").read_text()
-    assert '_run_job("reversal_constancias", self._sweep_reversals_if_due())' in fuente
+    assert '("reversal_constancias", "_sweep_reversals_if_due")' in fuente
 
 
 # ─── La ventana de 24h de Meta ──────────────────────────────────────────────

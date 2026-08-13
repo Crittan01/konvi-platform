@@ -409,6 +409,48 @@ def _round_robin_dequeue_by_tenant(
     return out
 
 
+# G9 (2026-08-13) — split del ciclo del worker en dos grupos.
+# INBOUND: latencia-crítica (el cliente espera la respuesta del bot) — corre en
+# su propio loop asyncio. MAINTENANCE: crons "if_due" (toleran segundos de
+# atraso) — corre en un loop paralelo: un cron pesado ya no retrasa al inbound
+# más allá de su propia I/O síncrona. `_poll_cycle` (contrato legado usado por
+# tests) ejecuta ambos grupos en el MISMO orden de siempre.
+_INBOUND_JOBS = (
+    # Capa A — recuperación periódica de mensajes huérfanos en 'processing'
+    # (carrera de coalescing/claim). ANTES del poll inbound para que un mensaje
+    # re-encolado entre de inmediato al ciclo.
+    ("sweep_stale_processing", "_sweep_stale_processing_if_due"),
+    ("poll_inbound", "_poll_inbound_messages"),
+    ("human_takeover_notif", "_poll_human_takeover_notifications"),
+    ("whatsapp_outbound", "_poll_whatsapp_outbound_messages"),
+)
+_MAINTENANCE_JOBS = (
+    ("idempotency_cleanup", "_run_idempotency_cleanup_if_due"),
+    ("payment_reminders", "_send_payment_reminders_if_due"),
+    ("cart_abandoned", "_send_cart_abandoned_reminders_if_due"),
+    ("release_pending_payment", "_release_expired_pending_payment_orders"),
+    ("wompi_void_poll", "_poll_wompi_pending_voids_if_due"),
+    ("wompi_inbox_reconcile", "_reconcile_wompi_inbox_if_due"),
+    ("aveonline_status_poll", "_poll_aveonline_shipment_status_if_due"),
+    ("meli_token_refresh", "_meli_token_refresh_if_due"),
+    ("anti_hibernation", "_anti_hibernation_ping_if_due"),
+    ("takeover_sla", "_check_human_takeover_sla_if_due"),
+    ("silent_conversations", "_detect_silent_conversations_if_due"),
+    ("order_coherence", "_check_order_coherence_if_due"),
+    ("acceptance_stamp", "_stamp_acceptances_if_due"),
+    ("receipts", "_issue_receipts_if_due"),
+    ("reversal_constancias", "_sweep_reversals_if_due"),
+    ("tenant_hard_delete", "_run_tenant_hard_delete_if_due"),
+    ("health_metrics", "_collect_health_metrics_if_due"),
+)
+# Intervalo propio del loop de mantenimiento. Default = POLL_INTERVAL (misma
+# cadencia de chequeo que el ciclo único histórico — cada job decide con su
+# propio "_if_due" si corre o no).
+MAINTENANCE_INTERVAL_SECONDS = float(
+    os.getenv("WORKER_MAINTENANCE_INTERVAL_SECONDS", str(POLL_INTERVAL_SECONDS))
+)
+
+
 class OrchestratorWorker:
     """
     Worker de polling que detecta mensajes entrantes no procesados
@@ -429,6 +471,9 @@ class OrchestratorWorker:
         # A11 audit 2026-06-25: heartbeat para que /health detecte worker
         # colgado/muerto (Render no auto-reinicia si /health sigue 200).
         self.last_heartbeat_ts = time.time()
+        # G9: heartbeat del loop de mantenimiento (el de inbound es
+        # last_heartbeat_ts, el que /health lee). Visibilidad vía snapshot.
+        self.last_maintenance_heartbeat_ts = time.time()
         self._queue_runtime_enabled = HUMAN_TAKEOVER_QUEUE_ENABLED
         self._wa_queue_runtime_enabled = WHATSAPP_OUTBOUND_QUEUE_ENABLED
         self._cleanup_enabled = IDEMPOTENCY_CLEANUP_ENABLED
@@ -484,6 +529,12 @@ class OrchestratorWorker:
         self._health_alert_persistent = True
         self._metrics = {
             "poll_cycles": 0,
+            "inbound_cycles": 0,
+            "maintenance_cycles": 0,
+            # G9 — edad (s) del mensaje inbound pendiente más viejo visto en el
+            # último poll. Alerta temprana de saturación: si crece de forma
+            # sostenida, el loop no da abasto (fase 2: paralelismo por tenant).
+            "inbound_lag_seconds": 0.0,
             "inbound_seen": 0,
             "takeover_events_seen": 0,
             "wa_outbound_events_seen": 0,
@@ -552,18 +603,41 @@ class OrchestratorWorker:
 
     async def run(self):
         self._running = True
-        logger.info(f"Worker activo — polling cada {POLL_INTERVAL_SECONDS}s")
+        logger.info(
+            "Worker activo — loop inbound cada %ss + loop mantenimiento cada %ss (G9: loops separados)",
+            POLL_INTERVAL_SECONDS, MAINTENANCE_INTERVAL_SECONDS,
+        )
         await self._sweep_stale_messages_on_startup()
 
+        # G9: dos loops asyncio concurrentes. El de mantenimiento ya no puede
+        # retrasar al inbound más allá de su propia I/O síncrona (supabase-py
+        # es sync; los crons pesados usan asyncio.to_thread internamente, D-F7).
+        # Ambos salen cuando stop() pone _running=False → gather retorna.
+        await asyncio.gather(
+            self._loop("inbound", _INBOUND_JOBS, POLL_INTERVAL_SECONDS),
+            self._loop("maintenance", _MAINTENANCE_JOBS, MAINTENANCE_INTERVAL_SECONDS),
+        )
+
+    async def _loop(self, label: str, jobs, interval_seconds: float) -> None:
+        """Loop dedicado de un grupo de jobs (G9). Cada job sigue aislado por
+        _run_job (un fallo no aborta los demás). El heartbeat se marca por
+        loop: inbound → last_heartbeat_ts (el que /health lee); maintenance →
+        last_maintenance_heartbeat_ts (observabilidad vía metrics_snapshot)."""
+        counter = f"{label}_cycles"
         while self._running:
-            # Heartbeat al tope del loop: si _poll_cycle se cuelga, el timestamp
-            # NO avanza → /health lo detecta stale → 503 → Render reinicia.
-            self.last_heartbeat_ts = time.time()
+            if label == "inbound":
+                self.last_heartbeat_ts = time.time()
+            else:
+                self.last_maintenance_heartbeat_ts = time.time()
+            self._metrics[counter] = self._metrics.get(counter, 0) + 1
             try:
-                await self._poll_cycle()
+                for name, attr in jobs:
+                    await self._run_job(name, getattr(self, attr)())
             except Exception as e:
-                logger.error(f"Error en ciclo de polling: {e}", exc_info=True)
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                # Defensa extra: _run_job ya aísla por job; esto cubre un fallo
+                # del propio bucle (no debería ocurrir).
+                logger.error(f"[WORKER] error en loop '{label}': {e}", exc_info=True)
+            await asyncio.sleep(interval_seconds)
 
     async def _run_job(self, name: str, coro):
         """Aísla un job del ciclo (Ola 0): si falla, loguea + métrica pero NO aborta
@@ -586,32 +660,14 @@ class OrchestratorWorker:
 
         Cada job va aislado (`_run_job`): un fallo transitorio en uno NO impide que
         corran los demás (dinero/SLA/retención no deben quedar bloqueados por, p.ej.,
-        un blip del poll inbound)."""
+        un blip del poll inbound).
+
+        G9: el cuerpo itera las dos tuplas de grupos en el orden histórico
+        (inbound primero). Contrato preservado para tests y callers legados;
+        en producción los grupos corren en loops separados (ver run())."""
         self._metrics["poll_cycles"] += 1
-        # Capa A — recuperación periódica de mensajes huérfanos en 'processing'
-        # (carrera de coalescing/claim). ANTES del poll inbound para que un mensaje
-        # re-encolado entre de inmediato al ciclo.
-        await self._run_job("sweep_stale_processing", self._sweep_stale_processing_if_due())
-        await self._run_job("poll_inbound", self._poll_inbound_messages())
-        await self._run_job("human_takeover_notif", self._poll_human_takeover_notifications())
-        await self._run_job("whatsapp_outbound", self._poll_whatsapp_outbound_messages())
-        await self._run_job("idempotency_cleanup", self._run_idempotency_cleanup_if_due())
-        await self._run_job("payment_reminders", self._send_payment_reminders_if_due())
-        await self._run_job("cart_abandoned", self._send_cart_abandoned_reminders_if_due())
-        await self._run_job("release_pending_payment", self._release_expired_pending_payment_orders())
-        await self._run_job("wompi_void_poll", self._poll_wompi_pending_voids_if_due())
-        await self._run_job("wompi_inbox_reconcile", self._reconcile_wompi_inbox_if_due())
-        await self._run_job("aveonline_status_poll", self._poll_aveonline_shipment_status_if_due())
-        await self._run_job("meli_token_refresh", self._meli_token_refresh_if_due())
-        await self._run_job("anti_hibernation", self._anti_hibernation_ping_if_due())
-        await self._run_job("takeover_sla", self._check_human_takeover_sla_if_due())
-        await self._run_job("silent_conversations", self._detect_silent_conversations_if_due())
-        await self._run_job("order_coherence", self._check_order_coherence_if_due())
-        await self._run_job("acceptance_stamp", self._stamp_acceptances_if_due())
-        await self._run_job("receipts", self._issue_receipts_if_due())
-        await self._run_job("reversal_constancias", self._sweep_reversals_if_due())
-        await self._run_job("tenant_hard_delete", self._run_tenant_hard_delete_if_due())
-        await self._run_job("health_metrics", self._collect_health_metrics_if_due())
+        for name, attr in (*_INBOUND_JOBS, *_MAINTENANCE_JOBS):
+            await self._run_job(name, getattr(self, attr)())
 
     def _combine_by_conversation(self, msgs: list[dict]) -> list[dict]:
         """Rev. 85 — combina mensajes consecutivos de la MISMA conversación en uno solo
@@ -856,6 +912,28 @@ class OrchestratorWorker:
             )
         return kept
 
+    def _record_inbound_lag(self, rows: list[dict]) -> None:
+        """G9 — lag de la cola inbound: edad (s) del pendiente más viejo visto.
+
+        Es la alerta temprana de saturación del worker: lag sostenido alto =
+        el loop no da abasto (trigger de la fase 2: paralelismo por tenant).
+        Sin filas → 0.0 (cola vacía). Un created_at malformado no rompe el poll.
+        """
+        if not rows:
+            self._metrics["inbound_lag_seconds"] = 0.0
+            return
+        try:
+            oldest = min(
+                datetime.fromisoformat(str(r["created_at"]).replace("Z", "+00:00"))
+                for r in rows
+                if r.get("created_at")
+            )
+            self._metrics["inbound_lag_seconds"] = round(
+                max(0.0, (datetime.now(timezone.utc) - oldest).total_seconds()), 3,
+            )
+        except (ValueError, TypeError):
+            pass
+
     async def _poll_inbound_messages(self):
         """Busca mensajes inbound pendientes y los orquesta.
 
@@ -893,6 +971,7 @@ class OrchestratorWorker:
         # NO responde (ej. 'meli') ANTES del round-robin, para no gastar turnos ni
         # arriesgar responder por WhatsApp a otro canal.
         rows = self._filter_inbound_by_channel(result.data or [])
+        self._record_inbound_lag(rows)
 
         pending = _round_robin_dequeue_by_tenant(rows, max_total=10)
         if not pending:

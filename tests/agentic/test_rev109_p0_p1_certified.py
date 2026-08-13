@@ -1290,9 +1290,13 @@ class TestHumanTakeoverSLA:
             importlib.reload(sys.modules["worker"])
         from worker import OrchestratorWorker
         assert hasattr(OrchestratorWorker, "_check_human_takeover_sla_if_due")
-        # Verifica que el método se invoca en _poll_cycle
-        source = inspect.getsource(OrchestratorWorker._poll_cycle)
-        assert "_check_human_takeover_sla_if_due" in source
+        # Verifica que el método se invoca en _poll_cycle.
+        # G9: _poll_cycle itera las tuplas module-level de grupos (ya no lista
+        # los jobs inline) — el registro se verifica contra esas constantes,
+        # que es lo que _poll_cycle y los dos loops de run() ejecutan.
+        import worker as worker_mod
+        attrs = {attr for _, attr in (*worker_mod._INBOUND_JOBS, *worker_mod._MAINTENANCE_JOBS)}
+        assert "_check_human_takeover_sla_if_due" in attrs
 
 
 class TestOptOutGate:
