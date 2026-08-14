@@ -714,7 +714,6 @@ class RemoveCartItemTool:
 
 
 from agentic.shipping_recipient_intent_resolver import (  # noqa: E402
-    _PARENTESCOS,
     es_un_nombre_de_verdad as _es_un_nombre_de_verdad,
 )
 

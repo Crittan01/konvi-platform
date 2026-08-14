@@ -56,7 +56,6 @@ def _register_telegram_identity(supabase: Client, tenant_id: str, chat_id: Any) 
         if str(_api_root) not in sys.path:
             sys.path.insert(0, str(_api_root))
         from lib.identity_registry import (  # noqa: PLC0415
-            IdentityRegistryError,
             register_identity,
         )
         register_identity(

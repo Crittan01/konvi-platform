@@ -105,7 +105,7 @@ jobs:
           # `unittest discover` si está ausente — y unittest enmascara/errorea
           # tests cross-test que pytest corre bien (rev.111). Sin pytest aquí el
           # CI reportaba 124 errors espurios + coverage artificialmente baja.
-          pip install ruff coverage pip-audit pytest pytest-xdist pytest-cov
+          pip install ruff==0.15.12 coverage pip-audit pytest pytest-xdist pytest-cov
 
       - name: Setup pnpm ${{ env.PNPM_VERSION }}
         if: needs.changes.outputs.backend == 'true'
