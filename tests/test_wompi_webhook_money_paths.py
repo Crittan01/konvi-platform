@@ -35,6 +35,10 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
 from routers import wompi_webhook  # noqa: E402
+# G12 corte 2: el sender de email vive en lib/client_notifications.py — los
+# patches de `_surface_email_failure` van a ESE namespace (donde se resuelve en
+# runtime), no al del router (que solo lo reexporta por compat).
+import lib.client_notifications as client_notifications  # noqa: E402
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY  # noqa: E402
 
 mw = wompi_webhook
@@ -1076,7 +1080,7 @@ class SendEmailTests(unittest.TestCase):
         client = _FakeSyncClient(_resp(429, text="rate limited"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(mw, "_surface_email_failure") as surf:
+             patch.object(client_notifications, "_surface_email_failure") as surf:
             self._send(sb)
         self.assertEqual(surf.call_args[0][0], "rate_or_quota_429")
 
@@ -1085,7 +1089,7 @@ class SendEmailTests(unittest.TestCase):
         client = _FakeSyncClient(_resp(403, text="invalid key"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(mw, "_surface_email_failure") as surf:
+             patch.object(client_notifications, "_surface_email_failure") as surf:
             self._send(sb)
         self.assertEqual(surf.call_args[0][0], "client_4xx")
 
@@ -1094,7 +1098,7 @@ class SendEmailTests(unittest.TestCase):
         client = _FakeSyncClient(_resp(500, text="resend down"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(mw, "_surface_email_failure") as surf:
+             patch.object(client_notifications, "_surface_email_failure") as surf:
             self._send(sb)
         self.assertEqual(surf.call_args[0][0], "server_5xx")
 
@@ -1103,7 +1107,7 @@ class SendEmailTests(unittest.TestCase):
         client = _FakeSyncClient(exc=RuntimeError("dns"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(mw, "_surface_email_failure") as surf:
+             patch.object(client_notifications, "_surface_email_failure") as surf:
             self._send(sb)
         self.assertEqual(surf.call_args[0][0], "transport_exception")
 
