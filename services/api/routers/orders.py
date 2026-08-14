@@ -499,7 +499,25 @@ async def create_payment_link(
     Si la orden ya tiene un link vigente (payments pending dentro del TTL), lo
     REUSA: responde con ese link sin llamar a Wompi ni insertar fila nueva.
     """
+    idem_session = None
     try:
+        # G3 follow-up: Idempotency-Key (mismo patrón que create_order). El
+        # reuso por TTL cubre la doble-ejecución dentro de la ventana de 30 min;
+        # la key cubre el retry exacto (replay de la MISMA respuesta guardada).
+        request_hash = payload_fingerprint({"order_id": order_id, "route": "payment-link"})
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
         # F105: usar el wrapper resiliente (retry exponencial + circuit breaker) — cierra el riesgo P0
         # del dossier Wompi (un 5xx/timeout transitorio rompía el pago al primer intento). max_attempts=2
         # para no exceder el timeout ~20s del cliente orquestador (3×15s lo superaría → ReadTimeout).
@@ -583,13 +601,18 @@ async def create_payment_link(
                 "(sin llamada a Wompi ni fila payments nueva)",
                 order_id, reusable.get("wompi_link_id"),
             )
-            return {
+            reuse_body = {
                 "order_id": order_id,
                 "checkout_url": reusable["checkout_url"],
                 "amount_in_cents": int(reusable.get("amount_in_cents") or 0),
                 "expires_at": _payment_link_expires_at(reusable.get("created_at")),
                 "wompi_link_id": reusable.get("wompi_link_id"),
             }
+            finalize_idempotency(
+                supabase=supabase, tenant_id=tenant_id, session=idem_session,
+                status_code=200, body=reuse_body,
+            )
+            return reuse_body
 
         total_amount = float(order.get("total_amount") or 0)
         # BLOQUE A (P1): round, no int() — total_amount es numeric(10,2) leído como float;
@@ -644,17 +667,24 @@ async def create_payment_link(
         logger.info(
             "Payment link generado para order %s: %s", order_id, link_data["checkout_url"]
         )
-        return {
+        create_body = {
             "order_id": order_id,
             "checkout_url": link_data["checkout_url"],
             "amount_in_cents": amount_in_cents,
             "expires_at": expires_at,
             "wompi_link_id": link_data["link_id"],
         }
+        finalize_idempotency(
+            supabase=supabase, tenant_id=tenant_id, session=idem_session,
+            status_code=200, body=create_body,
+        )
+        return create_body
 
     except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error generando payment link para order %s: %s", order_id, e)
         # F23: no filtrar {e} al cliente; se conserva la causa vía `from e` (como expenses.py).
         raise HTTPException(status_code=500, detail="Error al generar link de pago") from e

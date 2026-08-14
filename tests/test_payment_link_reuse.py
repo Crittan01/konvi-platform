@@ -132,7 +132,7 @@ class PaymentLinkReuseTests(unittest.IsolatedAsyncioTestCase):
         })
 
         result = await orders.create_payment_link(
-            request=MagicMock(),
+            request=MagicMock(headers={}),
             order_id="order-123",
             tenant_id="tenant-1",
             supabase=supabase,
@@ -175,7 +175,7 @@ class PaymentLinkReuseTests(unittest.IsolatedAsyncioTestCase):
         })
 
         result = await orders.create_payment_link(
-            request=MagicMock(),
+            request=MagicMock(headers={}),
             order_id="order-123",
             tenant_id="tenant-1",
             supabase=supabase,
@@ -219,7 +219,7 @@ class PaymentLinkReuseTests(unittest.IsolatedAsyncioTestCase):
         before = datetime.now(timezone.utc)
 
         result = await orders.create_payment_link(
-            request=MagicMock(),
+            request=MagicMock(headers={}),
             order_id="order-123",
             tenant_id="tenant-1",
             supabase=supabase,
@@ -258,6 +258,85 @@ class PaymentLinkRateLimitWiringTests(unittest.TestCase):
             RL_WRITE_DEFAULT, deps,
             "create_payment_link sin Depends(RL_WRITE_DEFAULT) — rate-limit G3 ausente",
         )
+
+
+class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
+    """G3 follow-up — Idempotency-Key en payment-link (patrón de create_order).
+
+    Se parchean begin/finalize/abort en el namespace del router (allí se
+    importaron) para verificar el CABLEADO sin tocar la tabla idempotency_keys.
+    """
+
+    @patch("routers.orders.begin_idempotency")
+    async def test_replay_responde_sin_efectos(self, mock_begin):
+        """Con key + replay registrado → JSONResponse del replay, sin Wompi ni DB."""
+        mock_begin.return_value = (
+            MagicMock(),  # sesión viva
+            {"status_code": 200, "body": {"order_id": "order-123", "checkout_url": "https://replay"}},
+        )
+        req = MagicMock(headers={"Idempotency-Key": "k-replay"})
+        result = await orders.create_payment_link(
+            request=req,
+            order_id="order-123",
+            tenant_id="tenant-1",
+            supabase=MagicMock(),
+            _role="owner",
+        )
+        # JSONResponse con el body del replay
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.headers.get("Idempotency-Replayed"), "true")
+        mock_begin.assert_called_once()
+
+    @patch("routers.orders.finalize_idempotency")
+    @patch("routers.orders.begin_idempotency")
+    @patch.object(wompi_client_module, "get_tenant_wompi_creds", return_value=_FAKE_CREDS)
+    @patch.object(
+        wompi_client_module, "create_payment_link_with_resilience", new_callable=AsyncMock
+    )
+    async def test_sin_replay_crea_y_finaliza(self, mock_wompi, _creds, mock_begin, mock_finalize):
+        """Con key pero sin replay → flujo normal; finalize con 200 al crear."""
+        mock_begin.return_value = (MagicMock(), None)  # sesión nueva, sin replay
+        mock_wompi.return_value = {
+            "link_id": "plink-new",
+            "checkout_url": "https://checkout.wompi.co/l/plink-new",
+        }
+        supabase, _probes = _make_supabase_mock({
+            "orders_single": dict(_ORDER_PENDING),
+            "payments_select": [],
+        })
+        req = MagicMock(headers={"Idempotency-Key": "k-new"})
+        result = await orders.create_payment_link(
+            request=req,
+            order_id="order-123",
+            tenant_id="tenant-1",
+            supabase=supabase,
+            _role="owner",
+        )
+        self.assertEqual(result["wompi_link_id"], "plink-new")
+        mock_finalize.assert_called_once()
+        kwargs = mock_finalize.call_args.kwargs
+        self.assertEqual(kwargs["status_code"], 200)
+        self.assertEqual(kwargs["body"]["wompi_link_id"], "plink-new")
+
+    @patch("routers.orders.abort_idempotency")
+    @patch("routers.orders.begin_idempotency")
+    async def test_error_aborta_sesion(self, mock_begin, mock_abort):
+        """Fallo del handler (404 orden inexistente) → abort de la sesión."""
+        mock_begin.return_value = (MagicMock(), None)
+        supabase, _probes = _make_supabase_mock({
+            "orders_single": None,  # orden no encontrada
+            "payments_select": [],
+        })
+        req = MagicMock(headers={"Idempotency-Key": "k-404"})
+        with self.assertRaises(Exception):  # HTTPException 404
+            await orders.create_payment_link(
+                request=req,
+                order_id="order-inexistente",
+                tenant_id="tenant-1",
+                supabase=supabase,
+                _role="owner",
+            )
+        mock_abort.assert_called_once()
 
 
 if __name__ == "__main__":
