@@ -1,42 +1,17 @@
-"""Webhook framework genérico (rev. 105 Sem 2 F.1).
+"""Webhook framework — utilidades compartidas (lo que quedó con adopción real).
 
-Patrón template-method para webhooks inbound de los 5 providers (Wompi, MeLi,
-Meta, Envia, Telegram). Consolida verify_signature + idempotency + rate_limit
-+ normalize en un flow uniforme.
+G14 (auditoría 2026-08-13): la ABC `WebhookHandler` + `signature.py` +
+`idempotency.py` se RETIRARON por 0 adopción — los 4 webhooks vivos
+(Wompi, MeLi, Aveonline, Telegram) son ad-hoc con su hardening propio
+verificado por tests (firmas, dedup, IP allowlist, ACK inmediato); forzarlos
+a una ABC genérica no aportaba y cada provider difiere de verdad.
 
-Componentes (ver módulos individuales):
-  - base: WebhookHandler abstract + handle() flow standard
-  - signature: SignatureStrategy + 4 implementaciones canónicas
-  - idempotency: IdempotencyStrategy wrappeando F.4 webhook_dedup
-  - rate_limit: TokenBucketRule per (tenant, integration)
-  - errors: excepciones tipadas (WebhookError jerarquía)
+Lo que SÍ tiene consumo productivo (vía `lib/integration_client/base.py`):
+  - rate_limit: TokenBucketRule/TokenBucketLimiter per (tenant, integration)
+  - errors: jerarquía WebhookError (incl. RateLimitExceededError)
 
-Uso típico (cuando se refactorice un webhook existente, ej. Sem 4 Envia):
-
-    from lib.webhook_framework import WebhookHandler
-    from lib.webhook_framework.signature import URLSecretTokenStrategy
-    from lib.webhook_framework.idempotency import GenericIdempotency
-    from lib.webhook_framework.rate_limit import TokenBucketRule
-
-    class AveonlineWebhookHandler(WebhookHandler):
-        integration = "aveonline"
-        signature_strategy = URLSecretTokenStrategy()
-        idempotency_strategy = GenericIdempotency()
-        rate_limit = TokenBucketRule(capacity=60, refill_per_sec=1)
-
-        async def normalize(self, payload: dict) -> dict:
-            # Mapear payload Aveonline → schema interno shipment_tracking_events
-            return {...}
-
-        async def enqueue(self, normalized: dict) -> None:
-            # pgmq publish para procesamiento asíncrono.
-            ...
-
-NO consumidores aún (rev. 105 Sem 2 F.1 deja el framework ready). Refactor
-de webhooks existentes (Wompi, MeLi) y nuevos (Envia, Telegram, Meta) se
-hace en Sem 4-5 (P0 integraciones) cuando consuman este framework.
+Tests: `tests/test_webhook_rate_limit.py` (+ `test_integration_client.py`).
 """
-from .base import WebhookHandler
 from .errors import (
     DuplicateEventError,
     RateLimitExceededError,
@@ -45,7 +20,6 @@ from .errors import (
 )
 
 __all__ = [
-    "WebhookHandler",
     "WebhookError",
     "SignatureError",
     "DuplicateEventError",
