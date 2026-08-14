@@ -878,7 +878,7 @@ async def _import_meli_item(
             "title":            title,
             "sku":              sku,
             "price":            price,
-            "compare_at_price": compare_at_price,
+            "compare_at_price": var_payload.get("compare_at_price"),  # el valor EFECTIVAMENTE persistido (None si ≤ price — ver guard de var_payload)
             "stock_quantity":   available_qty,
             "cover_image_url":  cover_image_url,
             "meli_id":          meli_id,

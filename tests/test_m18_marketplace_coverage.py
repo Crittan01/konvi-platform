@@ -882,9 +882,10 @@ class ImportMeliItemTests(unittest.IsolatedAsyncioTestCase):
             "pictures": [], "thumbnail": "http://th",
         }
         out = await self._call(sb, item=item)
-        # El resumen reporta el original_price crudo de MeLi, pero la variante
-        # solo persiste compare_at_price cuando es MAYOR que price (900 < 1000).
-        self.assertEqual(out["imported"]["compare_at_price"], 900.0)
+        # El resumen reporta lo EFECTIVAMENTE persistido: 900 < 1000 → el guard
+        # no lo guarda → None (antes reportaba el crudo de MeLi, divergiendo de
+        # la DB — corregido 2026-08-13, observación M18 del agente marketplace).
+        self.assertIsNone(out["imported"]["compare_at_price"])
         self.assertEqual(out["imported"]["cover_image_url"], "http://th")  # fallback thumbnail
         var_payload = sb.payloads("product_variations", "insert")[0]
         self.assertNotIn("compare_at_price", var_payload)

@@ -759,8 +759,8 @@ def update_conversation_status(
             .execute()
         )
         if not result.data:
-            if idem_session is not None:
-                abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
+            # El abort de la sesión idempotente lo hace el except HTTPException
+            # (patrón unificado con orders.py — sin abort inline duplicado).
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         body_payload = {"id": conversation_id, "status": body.status}
         if idem_session is not None:
