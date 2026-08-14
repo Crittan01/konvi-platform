@@ -84,7 +84,7 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Mínimo de cobertura se aplica vía validate.sh (COVERAGE_MIN env var, default 60; target 70 — M18).
+# Mínimo de cobertura se aplica vía validate.sh (COVERAGE_MIN env var, default 70 — M18 cerrado 2026-08-13 con TOTAL 72.7%).
 # No fallar aquí — el gate está en validate.sh para flexibilidad.
 skip_empty = true
 skip_covered = false
