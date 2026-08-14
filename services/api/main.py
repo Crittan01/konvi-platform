@@ -72,36 +72,16 @@ def _validate_startup_config() -> None:
     Falla rápido (sys.exit) si detecta incoherencias que causarían errores
     silenciosos en producción.
 
+    G13 (2026-08-13): la lógica vive en `config.validate_critical()` (config
+    central — declaración + defaults + checks en una sola fuente). Esta función
+    es solo el puente boot: loguea y sale.
+
     Nota: las credenciales de Wompi son por-tenant (tenant_integrations + Vault).
     No se validan aquí.
     """
-    errors: list[str] = []
+    from config import validate_critical
 
-    # ── Variables críticas de Supabase ────────────────────────────────────────
-    _sb_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-    # https obligatorio salvo stack local (ENV-1: Supabase local en podman sirve
-    # http plano en loopback; prod/cloud sigue exigiendo https).
-    _is_local_url = _sb_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
-    if not (_sb_url.startswith("https://") or _is_local_url):
-        errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
-    # Aceptar el nombre nuevo (SECRET_KEY) o el legacy (SERVICE_ROLE_KEY) durante
-    # transición A0.2c. Cleanup del legacy en commit final post-migración código.
-    if not (
-        os.getenv("SUPABASE_SECRET_KEY", "")
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    ):
-        errors.append(
-            "SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) no configurada"
-        )
-    # A0.2b/c: SUPABASE_JWT_SECRET dejó de ser bloqueante. auth.py usa JWKS
-    # asymmetric (ES256) sin shared secret. payment_link_tool + shipping_quote_tool
-    # usan INTERNAL_SERVICE_SECRET header-based.
-    if not os.getenv("INTERNAL_SERVICE_SECRET", ""):
-        errors.append(
-            "INTERNAL_SERVICE_SECRET no configurada — el Orchestrator no podrá llamar al "
-            "Core API (payment_link + shipping_quote requieren header X-Internal-Service-Secret)"
-        )
-
+    errors = validate_critical()
     if errors:
         for err in errors:
             logger.error("[STARTUP] ❌ %s", err)
