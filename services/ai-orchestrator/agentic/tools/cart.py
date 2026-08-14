@@ -714,6 +714,7 @@ class RemoveCartItemTool:
 
 
 from agentic.shipping_recipient_intent_resolver import (  # noqa: E402
+    _PARENTESCOS,  # noqa: F401 — re-export consumido por tests/test_destinatario_no_es_un_parentesco.py
     es_un_nombre_de_verdad as _es_un_nombre_de_verdad,
 )
 
