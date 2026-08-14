@@ -133,6 +133,7 @@ def test_las_notificaciones_post_despacho_tambien_salen_por_correo():
         assert f'template_mode="{modo}"' in wh, modo
 
     wompi = (REPO_ROOT / "services" / "api" / "routers" / "wompi_webhook.py").read_text()
+    templates = (REPO_ROOT / "services" / "api" / "lib" / "email_templates.py").read_text()
     for composer in (
         "_compose_shipment_label_ready_email_html",
         "_compose_shipment_in_transit_email_html",
@@ -140,7 +141,11 @@ def test_las_notificaciones_post_despacho_tambien_salen_por_correo():
         "_compose_shipment_exception_email_html",
         "_compose_refund_completed_email_html",
     ):
-        assert f"def {composer}" in wompi, composer
+        # G12: las plantillas viven en lib/email_templates.py; el router las
+        # importa (sus nombres quedan en su namespace). Se verifica AMBOS:
+        # definición en el módulo extraído + import en el router.
+        assert f"def {composer}" in templates, composer
+        assert composer in wompi, composer
 
 
 def test_y_el_correo_es_obligatorio_para_crear_un_pedido():
