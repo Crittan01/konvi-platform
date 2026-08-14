@@ -4,6 +4,7 @@ import os
 import sys  # A11 audit 2026-06-25 (P0 BUG_REAL Clase A): el cron hard-delete usa `sys.path` (~L1881) con `sys` no importado a nivel módulo → NameError al ejecutar.
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from supabase import create_client, Client
 from agentic.dispatcher import dispatch_message as _agentic_dispatch_message
 from conversation_contract import PROCESSING_STATUS_PROCESSING
@@ -47,6 +48,10 @@ from worker_commerce_crons import (  # noqa: F401
 logger = logging.getLogger("orchestrator.worker")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
+# G8b fase 3 — adjuntos privados del inbox (bucket + TTL de la signed URL que
+# Meta descarga en el momento del envío).
+INBOX_MEDIA_BUCKET = os.getenv("INBOX_MEDIA_BUCKET", "tenant-inbox-media")
+INBOX_MEDIA_META_TTL_SECONDS = int(os.getenv("INBOX_MEDIA_META_TTL_SECONDS", "86400"))  # 24h
 MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
 # F5 bot_engine — rate-limit inbound→LLM POR CONVERSACIÓN (protección de costo
 # Gemini). Un contacto que inunda mensajes (loop/abuso) no debe disparar una
@@ -1232,6 +1237,28 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
         except Exception as exc:
             logger.error("No se pudo ACK msg_id=%s: %s", msg_id, exc)
 
+    def _sign_inbox_media_url(self, image_link: str) -> Optional[str]:
+        """G8b fase 3 — firma el path de un adjunto PRIVADO del inbox.
+
+        El esquema `inbox-media://{path}` referencia el bucket privado
+        `tenant-inbox-media`. Meta descarga la imagen en el momento del envío
+        → signed URL con TTL holgado (24h) generada justo antes de llamarla.
+        Retorna None si la firma falla (el caller marca failed + ack).
+        """
+        path = image_link[len("inbox-media://"):]
+        try:
+            res = self.supabase.storage.from_(INBOX_MEDIA_BUCKET).create_signed_url(
+                path, INBOX_MEDIA_META_TTL_SECONDS
+            )
+            url = (res or {}).get("signedURL") or (res or {}).get("signedUrl")
+            if not url or not str(url).startswith("https"):
+                logger.error("[OUTBOUND] signed URL inválida para path=%s", path)
+                return None
+            return str(url)
+        except Exception as exc:  # noqa: BLE001 — firma best-effort; el caller marca failed
+            logger.error("[OUTBOUND] firma de adjunto privado falló path=%s: %s", path, exc)
+            return None
+
     async def _poll_whatsapp_outbound_messages(self):
         """
         Consume cola durable de outbound humano y realiza envío real a WhatsApp.
@@ -1289,6 +1316,21 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
             # Si hay image_link, text se vuelve OPCIONAL (servirá como caption).
             image_link = str(payload.get("image_link") or "").strip() or None
             image_caption = str(payload.get("image_caption") or "").strip() or None
+
+            # G8b fase 3 — adjunto PRIVADO del inbox (esquema inbox-media:// del
+            # bucket tenant-inbox-media): firmar la URL con TTL holgado JUSTO
+            # antes de enviar — Meta la descarga en ese momento y exige HTTPS
+            # accesible sin auth. Legacy/catálogo (https) pasan directo.
+            if image_link and image_link.startswith("inbox-media://"):
+                image_link = self._sign_inbox_media_url(image_link)
+                if not image_link:
+                    logger.error(
+                        "No se pudo firmar adjunto privado msg_id=%s tenant=%s",
+                        msg_id, tenant_id,
+                    )
+                    self._mark_outbound_failed(tenant_id, message_id, "inbox_media_sign_failed")
+                    self._ack_whatsapp_outbound_message(msg_id)
+                    continue
 
             # Validación: tenant+phone+message_id obligatorios SIEMPRE.
             # text obligatorio SOLO si NO hay image_link (modo legacy texto).

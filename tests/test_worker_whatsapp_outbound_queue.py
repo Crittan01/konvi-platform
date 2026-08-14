@@ -202,5 +202,101 @@ class WorkerWhatsAppOutboundQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("image_link", kwargs)
 
 
+class _FakeStorageBucket:
+    """Emula sb.storage.from_(bucket).create_signed_url(path, ttl)."""
+    def __init__(self, signed_url="https://example.supabase.co/storage/v1/object/sign/tenant-inbox-media/firmado.jpg?token=x"):
+        self.signed_url = signed_url
+        self.calls = []
+
+    def create_signed_url(self, path, ttl):
+        self.calls.append((path, ttl))
+        if self.signed_url is None:
+            raise Exception("objeto no existe")
+        return {"signedURL": self.signed_url}
+
+
+class WorkerOutboundInboxMediaSignTests(unittest.IsolatedAsyncioTestCase):
+    """G8b fase 3 — el worker firma los adjuntos PRIVADOS (inbox-media://) del
+    bucket tenant-inbox-media antes de enviarlos a Meta; https pasa directo."""
+
+    def _fake_sb(self, payload, bucket):
+        sb = _FakeSupabase(queue_message=payload)
+        sb.storage = types.SimpleNamespace(from_=lambda _b: bucket)
+        return sb
+
+    async def test_esquema_privado_se_firma_antes_de_enviar(self):
+        payload = {
+            "tenant_id": "t-1",
+            "conversation_id": "c-1",
+            "message_id": "m-priv-1",
+            "customer_phone": "573001112233",
+            "image_link": "inbox-media://t-1/c-1/123.png",
+            "image_caption": None,
+        }
+        bucket = _FakeStorageBucket()
+        fake_supabase = self._fake_sb(payload, bucket)
+        send_mock = AsyncMock(return_value="wamid.priv1")
+        with (
+            patch.object(worker, "create_client", return_value=fake_supabase),
+            patch.object(worker, "send_whatsapp_message", new=send_mock),
+        ):
+            w = worker.OrchestratorWorker()
+            await w._poll_whatsapp_outbound_messages()
+
+        # firmó el path con TTL holgado y envió la URL FIRMADA (no el path)
+        self.assertEqual(bucket.calls, [("t-1/c-1/123.png", 86400)])
+        send_mock.assert_awaited_once()
+        kwargs = send_mock.await_args.kwargs
+        self.assertTrue(kwargs["image_link"].startswith("https://"))
+        self.assertIn("firmado.jpg", kwargs["image_link"])
+        self.assertTrue(any(call[0] == "ack_whatsapp_outbound_message" for call in fake_supabase.rpc_calls))
+
+    async def test_firma_fallida_marca_failed_sin_llamar_meta(self):
+        payload = {
+            "tenant_id": "t-1",
+            "conversation_id": "c-1",
+            "message_id": "m-priv-2",
+            "customer_phone": "573001112233",
+            "image_link": "inbox-media://t-1/c-1/inexistente.png",
+        }
+        bucket = _FakeStorageBucket(signed_url=None)  # firma falla
+        fake_supabase = self._fake_sb(payload, bucket)
+        send_mock = AsyncMock(return_value="wamid.nunco")
+        with (
+            patch.object(worker, "create_client", return_value=fake_supabase),
+            patch.object(worker, "send_whatsapp_message", new=send_mock),
+        ):
+            w = worker.OrchestratorWorker()
+            await w._poll_whatsapp_outbound_messages()
+
+        send_mock.assert_not_awaited()  # Meta nunca se llamó
+        # marcado failed + ack (no queda en la cola para siempre)
+        self.assertTrue(any(call[0] == "ack_whatsapp_outbound_message" for call in fake_supabase.rpc_calls))
+        update_payloads = [p for p in fake_supabase.updated_payloads if p.get("delivery_status") or p.get("processing_status")]
+        self.assertTrue(any("inbox_media_sign_failed" in str(p) for p in fake_supabase.updated_payloads))
+
+    async def test_https_legacy_no_se_firma(self):
+        payload = {
+            "tenant_id": "t-1",
+            "conversation_id": "c-1",
+            "message_id": "m-pub-1",
+            "customer_phone": "573001112233",
+            "image_link": "https://example.supabase.co/storage/v1/object/public/tenant-media/cat.jpg",
+        }
+        bucket = _FakeStorageBucket()
+        fake_supabase = self._fake_sb(payload, bucket)
+        send_mock = AsyncMock(return_value="wamid.pub1")
+        with (
+            patch.object(worker, "create_client", return_value=fake_supabase),
+            patch.object(worker, "send_whatsapp_message", new=send_mock),
+        ):
+            w = worker.OrchestratorWorker()
+            await w._poll_whatsapp_outbound_messages()
+
+        self.assertEqual(bucket.calls, [])  # nunca firmó
+        kwargs = send_mock.await_args.kwargs
+        self.assertEqual(kwargs["image_link"], payload["image_link"])
+
+
 if __name__ == "__main__":
     unittest.main()
