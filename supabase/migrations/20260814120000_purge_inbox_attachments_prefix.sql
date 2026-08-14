@@ -46,6 +46,12 @@ BEGIN
         RETURN 0;
     END IF;
 
+    -- El trigger storage.protect_delete exige storage.allow_delete_query='true'
+    -- en la sesión (protección anti-borrado-accidental de Supabase, verificado
+    -- en prod 2026-08-14). La RPC es la vía autorizada de erasure → lo fija
+    -- LOCAL a su transacción (se revierte al commit; sin efecto fuera).
+    PERFORM set_config('storage.allow_delete_query', 'true', true);
+
     -- Borra AMBOS prefijos del tenant (G8a): '{tenant_id}/%' (media library,
     -- logo) e 'inbox-attachments/{tenant_id}/%' (adjuntos de conversación).
     -- El '/' evita colisión con otro tenant cuyo id sea prefijo de éste.

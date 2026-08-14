@@ -78,7 +78,6 @@ def storage(db):
     # storage.objects lo prohíbe un trigger de Supabase ("Direct deletion from
     # storage tables is not allowed") — la RPC como owner sí puede.
     with db.cursor() as cur:
-        cur.execute("SELECT set_config('role', 'service_role', false)")  # el trigger lee current_setting('role'), no el rol de sesión
         if not _storage_disponible(cur):
             _storage_sintetico(cur)
         for t in (_TENANT, _OTHER):
@@ -89,7 +88,6 @@ def storage(db):
         _seed(cur)
     yield
     with db.cursor() as cur:
-        cur.execute("SELECT set_config('role', 'service_role', false)")
         for t in (_TENANT, _OTHER):
             cur.execute(
                 "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
@@ -99,7 +97,6 @@ def storage(db):
 
 def test_purge_borra_ambos_prefijos_solo_del_tenant(storage, db):
     with db.cursor() as cur:
-        cur.execute("SELECT set_config('role', 'service_role', false)")
         assert _count(cur) == {"tenant": 2, "other": 2}
         # Con el bucket DEFAULT (tenant-media) no toca el bucket de prueba:
         cur.execute("SELECT public.fn_purge_tenant_storage_objects(%s::uuid)", (_TENANT,))
@@ -115,7 +112,6 @@ def test_purge_borra_ambos_prefijos_solo_del_tenant(storage, db):
 
 def test_purge_solo_afecta_al_tenant_objetivo(storage, db):
     with db.cursor() as cur:
-        cur.execute("SELECT set_config('role', 'service_role', false)")
         cur.execute(
             "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
             (_TENANT, ["g8a-bucket"]),
@@ -127,7 +123,6 @@ def test_purge_solo_afecta_al_tenant_objetivo(storage, db):
 
 def test_idempotente_segunda_corrida_cero(storage, db):
     with db.cursor() as cur:
-        cur.execute("SELECT set_config('role', 'service_role', false)")
         cur.execute(
             "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
             (_TENANT, ["g8a-bucket"]),
