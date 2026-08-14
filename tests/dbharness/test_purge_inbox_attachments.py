@@ -74,16 +74,25 @@ def _count(cur) -> dict[str, int]:
 
 @pytest.fixture
 def storage(db):
+    # Limpieza vía la RPC (SECURITY DEFINER): el DELETE directo sobre
+    # storage.objects lo prohíbe un trigger de Supabase ("Direct deletion from
+    # storage tables is not allowed") — la RPC como owner sí puede.
     with db.cursor() as cur:
         if not _storage_disponible(cur):
             _storage_sintetico(cur)
-        cur.execute("DELETE FROM storage.objects WHERE bucket_id = 'g8a-bucket'")
-        cur.execute("DELETE FROM storage.buckets WHERE id = 'g8a-bucket'")
+        for t in (_TENANT, _OTHER):
+            cur.execute(
+                "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
+                (t, ["g8a-bucket"]),
+            )
         _seed(cur)
     yield
     with db.cursor() as cur:
-        cur.execute("DELETE FROM storage.objects WHERE bucket_id = 'g8a-bucket'")
-        cur.execute("DELETE FROM storage.buckets WHERE id = 'g8a-bucket'")
+        for t in (_TENANT, _OTHER):
+            cur.execute(
+                "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
+                (t, ["g8a-bucket"]),
+            )
 
 
 def test_purge_borra_ambos_prefijos_solo_del_tenant(storage, db):
