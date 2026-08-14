@@ -52,14 +52,15 @@ class AgentMessageRequest(BaseModel):
 
 
 class AgentImageRequest(BaseModel):
-    """Rev. 109 P0-2 — outbound humano con imagen.
+    """Rev. 109 P0-2 + G8b — outbound humano con imagen.
 
-    Meta Cloud API v22.0 requiere HTTPS link + MIME image/jpeg|png|webp.
-    El operador sube primero al bucket Supabase Storage 'tenant-media'
-    (vía supabase-js client desde el frontend) y nos pasa el URL público
-    resultante.
+    Meta Cloud API exige HTTPS accesible en el momento del envío.
+    El operador sube primero al bucket Supabase Storage y pasa:
+      • G8b (actual): `inbox-media://{path}` del bucket PRIVADO
+        tenant-inbox-media — el worker firma la URL al enviar a Meta.
+      • Legacy: URL HTTPS pública (tenant-media público — catálogo/viejos).
     """
-    image_url: str  # HTTPS pública del bucket tenant-media
+    image_url: str  # inbox-media://{path} (privado) o HTTPS (legacy)
     caption: str | None = None  # Opcional, máx ~1024 chars Meta
 
 
@@ -131,7 +132,7 @@ async def get_inbound_media(
         raise HTTPException(status_code=409, detail="WhatsApp no conectado para este tenant")
 
     # 3) Descargar de Meta (2-step + caché + límites) — reusa el cliente del orchestrator.
-    from integrations.meta_media import fetch_media_bytes, MediaDownloadError
+    from integrations.meta_media import MediaDownloadError, fetch_media_bytes
     try:
         data, mime = await fetch_media_bytes(media_id, access_token)
     except MediaDownloadError as e:
@@ -1365,10 +1366,21 @@ def send_agent_image(
     image_url = body.image_url.strip()
     caption = (body.caption or "").strip() or None
 
-    if not image_url.startswith("https://"):
+    # G8b: el adjunto del operador ahora vive en el bucket PRIVADO
+    # tenant-inbox-media y se persiste como `inbox-media://{path}` — el worker
+    # firma la URL al enviar a Meta (que exige HTTPS accesible en ese momento).
+    # Se aceptan: el esquema privado (path del tenant) o HTTPS (legacy/catálogo).
+    if image_url.startswith("inbox-media://"):
+        path = image_url[len("inbox-media://"):]
+        if not path.startswith(f"{tenant_id}/"):
+            raise HTTPException(
+                status_code=422,
+                detail="El path del adjunto no pertenece a tu tenant.",
+            )
+    elif not image_url.startswith("https://"):
         raise HTTPException(
             status_code=422,
-            detail="image_url debe ser HTTPS (Meta Cloud API v22.0 lo exige).",
+            detail="image_url debe ser HTTPS o del esquema inbox-media:// (adjunto privado).",
         )
     if caption and len(caption) > 1024:
         raise HTTPException(

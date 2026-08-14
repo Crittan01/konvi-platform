@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Paperclip, X, Loader2, ImageIcon } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { errorDetailToString } from '../_lib/errors'
+import { toInboxMediaUrl } from '../_lib/media'
 
 interface Props {
   conversationId: string | null
@@ -105,19 +106,20 @@ export function AttachmentUploader({ conversationId, onSent, disabled }: Props) 
     try {
       const ext = file.name.split('.').pop() || 'jpg'
       const safeExt = ext.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5)
-      const path = `inbox-attachments/${tenantId}/${conversationId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`
+      // G8b: bucket PRIVADO tenant-inbox-media (antes: tenant-media público —
+      // cualquiera con la URL leía el adjunto). El path queda sin prefijo
+      // extra: el bucket ya es dedicado. Se persiste el esquema
+      // `inbox-media://{path}` (no la URL pública) — el chat lo firma al
+      // render y el worker lo firma al enviar a Meta.
+      const path = `${tenantId}/${conversationId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`
       const sb = createClient()
       const { error: uploadErr } = await sb.storage
-        .from('tenant-media')
+        .from('tenant-inbox-media')
         .upload(path, file, { contentType: file.type, upsert: false })
       if (uploadErr) {
         throw new Error(`Upload falló: ${uploadErr.message}`)
       }
-      const { data: pub } = sb.storage.from('tenant-media').getPublicUrl(path)
-      const imageUrl = pub.publicUrl
-      if (!imageUrl?.startsWith('https://')) {
-        throw new Error('URL pública inválida (Meta requiere HTTPS).')
-      }
+      const imageUrl = toInboxMediaUrl(path)
 
       const res = await fetch(
         `/api/conversations/${conversationId}/send-image`,

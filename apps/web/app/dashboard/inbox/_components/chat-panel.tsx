@@ -37,6 +37,8 @@ import { STATUS_CONFIG } from '../_lib/constants'
 import { formatDateTime, formatPhone, timeAgo } from '../_lib/format'
 import { wrapSelection } from '../_lib/editor'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
+import { InboxImage } from './inbox-image'
+import { isInboxMediaPath } from '../_lib/media'
 
 void _useRef  // suppress unused
 
@@ -444,6 +446,16 @@ export function ChatPanel({
                           ? `/api/conversations/media/${encodeURIComponent(msg.media_id)}`
                           : (msg.media_url || null)
                         if (mediaSrc && ct === 'image') {
+                          // G8b: adjuntos privados (esquema inbox-media://) se
+                          // firman al render; http(s) = legacy/catálogo directo.
+                          if (isInboxMediaPath(mediaSrc)) {
+                            return (
+                              <InboxImage
+                                mediaUrl={mediaSrc}
+                                alt={msg.content || 'imagen'}
+                              />
+                            )
+                          }
                           return (
                             <a href={mediaSrc} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
                               <img
