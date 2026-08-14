@@ -371,13 +371,18 @@ from routers import ai_agents as _ai_agents  # noqa: E402
 from routers import catalog_ai as _catalog_ai  # noqa: E402
 # F-transversales (drift D3): espejos server-side de /api/ai/* (web). Aditivos —
 # el web sigue operando hasta el cutover del founder (retiro de GEMINI_API_KEY).
+# G20: insights se suma como espejo (POST/GET) y cierra el cutover del web —
+# los 3 handlers (/api/insights, /api/ai/preview, /api/ai/index-pending) ya son
+# proxies a este servicio.
 from routers import ai_preview as _ai_preview  # noqa: E402
 from routers import ai_index as _ai_index  # noqa: E402
+from routers import insights as _insights  # noqa: E402
 
 app.include_router(_ai_agents.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 app.include_router(_catalog_ai.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 app.include_router(_ai_preview.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 app.include_router(_ai_index.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
+app.include_router(_insights.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims", dependencies=_OFFBOARDING_GATE)
 app.include_router(purchases.router, prefix="/api/v1/purchases", dependencies=_MFA_GATE)

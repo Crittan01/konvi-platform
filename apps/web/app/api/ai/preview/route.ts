@@ -1,247 +1,86 @@
 /**
  * POST /api/ai/preview
  * Genera una respuesta de prueba del bot con RAG real + config actual del tenant.
- * Permite al operador ver cómo respondería el bot antes de activarlo en producción.
+ *
+ * G20 (drift D3): proxy a FastAPI POST /api/v1/ai/preview — el cómputo Gemini
+ * vive en el servicio `api` (GEMINI_API_KEY ya NO existe en el web). La URL
+ * pública no cambia: bot-preview.tsx sigue llamando aquí. Se conservan las
+ * validaciones locales (sesión, tenant, mensaje) y el shape de respuesta que
+ * el componente espera ({response, kb_used, kb_count, agent_name} o {error}).
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? ''
-// Modelos vigentes (override por env, empatan con render.yaml + orchestrator):
-// gemini-embedding-001 se retira 2026-07-14; gemini-2.5-flash el 2026-10-16.
-const EMBED_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-2'
-const CHAT_MODEL  = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
-const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${GEMINI_API_KEY}`
-const CHAT_URL  = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+const UPSTREAM_TIMEOUT_MS = 30_000
 
-// Rate limit: 20 llamadas / hora / tenant
-// In-memory — válido para instancia única (Render Free). Suficiente para uso de configuración.
-const PREVIEW_LIMIT   = 20
-const PREVIEW_WINDOW  = 60 * 60 * 1000  // 1 hora en ms
-const _rl = new Map<string, { count: number; resetAt: number }>()
-
-function checkLimit(tenantId: string): { ok: boolean; remaining: number; resetIn: number } {
-  const now = Date.now()
-  const entry = _rl.get(tenantId)
-  if (!entry || now > entry.resetAt) {
-    _rl.set(tenantId, { count: 1, resetAt: now + PREVIEW_WINDOW })
-    return { ok: true, remaining: PREVIEW_LIMIT - 1, resetIn: PREVIEW_WINDOW }
+/** Traduce el error de FastAPI ({detail}) al shape que el componente lee ({error}). */
+function upstreamError(data: unknown): string {
+  const d = (data ?? {}) as { detail?: unknown; error?: unknown }
+  if (typeof d.error === 'string') return d.error
+  if (typeof d.detail === 'string') return d.detail
+  if (Array.isArray(d.detail) && d.detail.length) {
+    const first = d.detail[0] as { msg?: string }
+    if (typeof first?.msg === 'string') return first.msg
   }
-  if (entry.count >= PREVIEW_LIMIT) {
-    return { ok: false, remaining: 0, resetIn: entry.resetAt - now }
-  }
-  entry.count++
-  return { ok: true, remaining: PREVIEW_LIMIT - entry.count, resetIn: entry.resetAt - now }
-}
-
-const TONO_DESC: Record<string, string> = {
-  formal:       'Usa un tono formal y respetuoso.',
-  profesional:  'Usa un tono profesional y preciso.',
-  amigable:     'Usa un tono amigable y cercano.',
-  cercano:      'Usa un tono casual y conversacional.',
-  juvenil:      'Usa un tono dinámico, fresco y puedes usar algún emoji.',
+  return 'Error del servidor'
 }
 
 export async function POST(request: NextRequest) {
-  if (!GEMINI_API_KEY) {
-    return NextResponse.json({ error: 'GEMINI_API_KEY no configurada' }, { status: 503 })
-  }
-
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
 
-  const m = (user.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const m = (user.app_metadata ?? {}) as { tenant_id?: string }
   if (!m.tenant_id) return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
 
-  const rl = checkLimit(m.tenant_id)
-  if (!rl.ok) {
-    const minutos = Math.ceil(rl.resetIn / 60000)
-    return NextResponse.json(
-      { error: `Límite de ${PREVIEW_LIMIT} pruebas por hora alcanzado. Disponible en ${minutos} min.` },
-      { status: 429 }
-    )
-  }
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) return NextResponse.json({ error: 'Sesión expirada' }, { status: 401 })
 
   let message = ''
-  let requestedAgentId = ''
+  let agentId = ''
   try {
     const body = await request.json()
     message = (body.message as string)?.trim() ?? ''
     // Multi-agente: el operador puede elegir QUÉ agente probar. Si no envía
-    // agent_id (o el UI tiene 1 solo agente), se prueba el default.
-    requestedAgentId = typeof body.agent_id === 'string' ? body.agent_id.trim() : ''
+    // agent_id (o el UI tiene 1 solo agente), el api prueba el default.
+    agentId = typeof body.agent_id === 'string' ? body.agent_id.trim() : ''
   } catch {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
   }
   if (!message) return NextResponse.json({ error: 'Mensaje requerido' }, { status: 400 })
   if (message.length > 500) return NextResponse.json({ error: 'Mensaje demasiado largo (máx 500 chars)' }, { status: 400 })
 
-  const tenantId = m.tenant_id
-
-  // Query del agente a probar. Fix (F5): antes se usaba .maybeSingle() sin
-  // orden ni filtro → con >1 agente PostgREST devolvía uno ARBITRARIO y el
-  // preview no reflejaba el agente recién creado. Ahora: si el operador pidió
-  // un agent_id concreto lo cargamos (scoped al tenant, sin IDOR); si no, el
-  // default (is_default desc como tie-break determinista).
-  const agentBaseQuery = supabase.from('ai_agents')
-    .select('id, name, role, role_description, strict_guardrails, is_default')
-    .eq('tenant_id', tenantId)
-  const agentQuery = requestedAgentId
-    ? agentBaseQuery.eq('id', requestedAgentId).maybeSingle()
-    : agentBaseQuery.order('is_default', { ascending: false })
-        .order('name', { ascending: true }).limit(1).maybeSingle()
-
-  // ── 1. Cargar contexto del tenant en paralelo ─────────────────────────────
-  const [tenantRes, agentRes, catalogRes] = await Promise.all([
-    supabase.from('tenants')
-      .select('name, mision, vision, valores, tono_comunicacion, store_type')
-      .eq('id', tenantId).single(),
-    agentQuery,
-    supabase.from('products')
-      // F7: la tabla products usa columnas title/status (no name/is_active, que nunca
-      // existieron) — PostgREST erroraba y el catálogo salía SIEMPRE vacío → el preview
-      // respondía sin conocer producto alguno. Alineado con dashboard/catalog/orders pages.
-      .select('title, description, product_variations(price, stock_quantity, attributes)')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .limit(20),
-  ])
-
-  const tenant  = tenantRes.data
-  const catalog = (catalogRes.data ?? []) as Array<{ title: string; description?: string; product_variations?: Array<{ price: number; stock_quantity: number; attributes?: Record<string, string> }> }>
-  // Si el operador pidió un agente concreto y no existe (borrado en otra
-  // pestaña, o no pertenece al tenant), es un 404 explícito — no caer al
-  // fallback genérico, que probaría un agente que no es el pedido.
-  if (requestedAgentId && !agentRes.data) {
-    return NextResponse.json({ error: 'Agente no encontrado' }, { status: 404 })
-  }
-  const agent  = agentRes.data ?? {
-    name: 'Vendedor Oficial',
-    role_description: 'Eres el asistente de ventas. Ayuda al cliente cordialmente.',
-    strict_guardrails: true,
-  }
-
-  // ── 2. RAG: buscar documentos KB relevantes ───────────────────────────────
-  let kbText   = ''
-  let kbUsed   = false
-  let kbCount  = 0
   try {
-    const embedRes = await fetch(EMBED_URL, {
+    const upstream = await fetch(`${CORE_API_URL}/api/v1/ai/preview`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: `models/${EMBED_MODEL}`, content: { parts: [{ text: message }] }, outputDimensionality: 3072 }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ message, ...(agentId ? { agent_id: agentId } : {}) }),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
-    if (embedRes.ok) {
-      const embedData = await embedRes.json()
-      const vector = embedData.embedding?.values as number[] | undefined
-      if (vector?.length) {
-        const kbRes = await supabase.rpc('match_kb_documents', {
-          query_embedding: vector,
-          match_threshold: 0.4,
-          match_count: 3,
-          t_id: tenantId,
-          // BLOQUE G-3: guard de drift (paridad con el runtime del bot). Versión =
-          // `${modelo}:${dim}`, mismo formato que get_embedding_model_version().
-          p_model_version: `${EMBED_MODEL}:3072`,
-        })
-        if (kbRes.data?.length) {
-          kbUsed  = true
-          kbCount = kbRes.data.length
-          kbText  = kbRes.data
-            .map((d: { title: string; content: string }) => `**${d.title}**\n${d.content}`)
-            .join('\n\n')
-        }
-      }
+
+    const data = await upstream.json().catch(() => ({}))
+    if (!upstream.ok) {
+      return NextResponse.json({ error: upstreamError(data) }, { status: upstream.status })
     }
-  } catch { /* KB no disponible — continuar sin contexto */ }
-
-  // Si no hubo RAG, intentar fallback con top-3 docs activos
-  if (!kbUsed) {
-    const { data: fallbackDocs } = await supabase
-      .from('kb_documents')
-      .select('title, content')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(3)
-    if (fallbackDocs?.length) {
-      kbText  = fallbackDocs.map((d: { title: string; content: string }) => `**${d.title}**\n${d.content}`).join('\n\n')
-      kbCount = fallbackDocs.length
-    }
-  }
-
-  // ── 3. Construir system prompt simplificado ───────────────────────────────
-  const tonoInst = TONO_DESC[tenant?.tono_comunicacion ?? 'amigable'] ?? TONO_DESC.amigable
-  const tenantName = tenant?.name ?? 'la tienda'
-  // Multi-agente: el encabezado ya no asume "ventas" — con selector de agente el
-  // preview puede probar Soporte/Reclamos/Marketing. El role_description sigue
-  // definiendo el comportamiento; esto solo evita contradecir el rol elegido.
-  const ROLE_INTRO: Record<string, string> = {
-    sales:     'asesor/a de ventas',
-    support:   'asesor/a de soporte',
-    marketing: 'especialista de marketing',
-    claims:    'especialista en reclamos',
-    custom:    'asistente',
-  }
-  const agentRole = (agent as { role?: string | null }).role ?? 'sales'
-  const roleIntro = ROLE_INTRO[agentRole] ?? 'asistente'
-
-  const systemLines: string[] = [
-    `Eres ${agent.name}, ${roleIntro} de ${tenantName} atendiendo por WhatsApp.`,
-    agent.role_description ? `\nROL Y COMPORTAMIENTO:\n${agent.role_description}` : '',
-    `\nTONO: ${tonoInst}`,
-    tenant?.mision      ? `MISIÓN DEL NEGOCIO: ${tenant.mision}` : '',
-    tenant?.valores     ? `VALORES: ${tenant.valores}` : '',
-    catalog.length ? (() => {
-      const lines = catalog.map(p => {
-        const vars = (p.product_variations ?? []).map(v => {
-          const attrs = v.attributes ? Object.entries(v.attributes).map(([k,val]) => `${k}: ${val}`).join(', ') : ''
-          return `  - $${v.price?.toLocaleString('es-CO')} COP${attrs ? ` (${attrs})` : ''}${v.stock_quantity <= 0 ? ' [Agotado]' : ''}`
-        }).join('\n')
-        return `• ${p.title}${p.description ? ` — ${p.description}` : ''}${vars ? '\n' + vars : ''}`
-      }).join('\n')
-      return `\nCATÁLOGO DE PRODUCTOS:\n${lines}`
-    })() : '',
-    kbText ? `\nCONOCIMIENTO BASE (úsalo para responder):\n${kbText}` : '',
-    agent.strict_guardrails
-      ? '\nREGLA ESTRICTA: NO inventes información, precios ni políticas que no estén arriba. Si no sabes algo, dilo con honestidad.'
-      : '',
-    '\nResponde en español, de forma conversacional y breve (máx 3-4 líneas). Eres un bot de WhatsApp.',
-  ]
-
-  const systemPrompt = systemLines.filter(Boolean).join('\n')
-
-  // ── 4. Llamar a Gemini 2.5 Flash ─────────────────────────────────────────
-  let responseText = ''
-  try {
-    const chatRes = await fetch(CHAT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: message }] }],
-        generationConfig: { temperature: 0.35, maxOutputTokens: 400 },
-      }),
-    })
-    if (!chatRes.ok) {
-      const err = await chatRes.json().catch(() => ({}))
+    return NextResponse.json(data)
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
+    ) {
       return NextResponse.json(
-        { error: `Gemini error ${chatRes.status}: ${err?.error?.message ?? 'desconocido'}` },
-        { status: 502 }
+        { error: 'El servicio de IA tardó demasiado en responder. Intenta de nuevo.' },
+        { status: 503 },
       )
     }
-    const chatData = await chatRes.json()
-    responseText = chatData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-    if (!responseText) return NextResponse.json({ error: 'Sin respuesta del modelo' }, { status: 502 })
-  } catch (e) {
-    return NextResponse.json({ error: `Error llamando a Gemini: ${e instanceof Error ? e.message : e}` }, { status: 502 })
+    return NextResponse.json(
+      { error: 'No se pudo conectar con el servicio de IA.' },
+      { status: 503 },
+    )
   }
-
-  return NextResponse.json({
-    response: responseText,
-    kb_used:  kbUsed,
-    kb_count: kbCount,
-    agent_name: agent.name,
-  })
 }

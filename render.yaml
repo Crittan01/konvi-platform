@@ -78,15 +78,10 @@ services:
         value: https://konvi-api.onrender.com
       - key: APP_ENV
         value: production
-      # Rev. 72 — GEMINI_API_KEY se MOVERÁ del web al api (drift D3 cierre planeado).
-      # Hoy aún se lee en apps/web/app/api/{insights,ai/preview}/route.ts (deuda técnica).
-      # Mantener temporalmente hasta refactorizar esos 2 endpoints SSR al servicio api.
-      - key: GEMINI_API_KEY
-        sync: false
-      # Alinea el modelo del web (insights/ai-preview SSR) con prod. Sin esto el
-      # código cae a su default gemini-3.5-flash → diverge del orchestrator/api.
-      - key: GEMINI_MODEL
-        value: gemini-3.1-flash-lite
+      # G20 (drift D3 CERRADO) — GEMINI_API_KEY/GEMINI_MODEL ya NO viven en el web:
+      # /api/insights, /api/ai/preview y /api/ai/index-pending son proxies al
+      # servicio konvi-api (routers insights.py / ai_preview.py / ai_index.py),
+      # que es donde se declara la key. NO reintroducir GEMINI_* aquí.
       # Rev. 109 J.2.7.4 — Sentry tracing E2E. 4 vars: 2 server + 2 browser bundle.
       - key: SENTRY_DSN
         sync: false                              # konvi-web project DSN
