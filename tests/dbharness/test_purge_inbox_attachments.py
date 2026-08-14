@@ -16,8 +16,10 @@ from _harness import connect
 
 pytestmark = pytest.mark.dbharness
 
+# UUIDs hex-válidos (un UUID no acepta caracteres fuera de 0-9a-f).
 _TENANT = "8a000000-0000-0000-0000-000000000001"
 _OTHER = "8a000000-0000-0000-0000-000000000002"
+_BUCKET = "g8a-bucket"
 
 
 def _storage_disponible(cur) -> bool:
@@ -39,13 +41,11 @@ def _storage_sintetico(cur) -> None:
 
 
 def _seed(cur):
-    """Filas fake en storage.objects: ambos prefijos del tenant + otro tenant."""
+    """Filas fake: ambos prefijos del tenant objetivo + ambos del otro tenant."""
     cur.execute(
-        """
-        INSERT INTO storage.buckets (id, name, public)
-        VALUES ('b8a-bucket', 'b8a-bucket', true)
-        ON CONFLICT (id) DO NOTHING
-        """
+        "INSERT INTO storage.buckets (id, name, public) VALUES (%s, %s, true) "
+        "ON CONFLICT (id) DO NOTHING",
+        (_BUCKET, _BUCKET),
     )
     for name in (
         f"{_TENANT}/logo/x.png",
@@ -55,44 +55,42 @@ def _seed(cur):
     ):
         cur.execute(
             "INSERT INTO storage.objects (id, bucket_id, name, owner) "
-            "VALUES (gen_random_uuid(), 'b8a-bucket', %s, NULL) "
-            "ON CONFLICT DO NOTHING",
-            (name,),
+            "VALUES (gen_random_uuid(), %s, %s, NULL) ON CONFLICT DO NOTHING",
+            (_BUCKET, name),
         )
 
 
 def _count(cur) -> dict[str, int]:
     cur.execute(
-        "SELECT name, bucket_id FROM storage.objects WHERE bucket_id = 'b8a-bucket'"
+        "SELECT name FROM storage.objects WHERE bucket_id = %s", (_BUCKET,)
     )
-    rows = cur.fetchall()
+    rows = [r[0] for r in cur.fetchall()]
     return {
-        "tenant": sum(1 for n, _ in rows if n.startswith(f"{_TENANT}/") or n.startswith(f"inbox-attachments/{_TENANT}/")),
-        "other": sum(1 for n, _ in rows if n.startswith(f"{_OTHER}/") or n.startswith(f"inbox-attachments/{_OTHER}/")),
+        "tenant": sum(1 for n in rows if n.startswith(f"{_TENANT}/") or n.startswith(f"inbox-attachments/{_TENANT}/")),
+        "other": sum(1 for n in rows if n.startswith(f"{_OTHER}/") or n.startswith(f"inbox-attachments/{_OTHER}/")),
     }
+
+
+def _purge(cur, tenant: str) -> int:
+    cur.execute(
+        "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
+        (tenant, [_BUCKET]),
+    )
+    return cur.fetchone()[0]
 
 
 @pytest.fixture
 def storage(db):
-    # Limpieza vía la RPC (SECURITY DEFINER): el DELETE directo sobre
-    # storage.objects lo prohíbe un trigger de Supabase ("Direct deletion from
-    # storage tables is not allowed") — la RPC como owner sí puede.
     with db.cursor() as cur:
         if not _storage_disponible(cur):
             _storage_sintetico(cur)
-        for t in (_TENANT, _OTHER):
-            cur.execute(
-                "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-                (t, ["g8a-bucket"]),
-            )
+        _purge(cur, _TENANT)  # limpieza vía la RPC (SECURITY DEFINER puede
+        _purge(cur, _OTHER)   # borrar; el DELETE directo está prohibido)
         _seed(cur)
     yield
     with db.cursor() as cur:
-        for t in (_TENANT, _OTHER):
-            cur.execute(
-                "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-                (t, ["g8a-bucket"]),
-            )
+        _purge(cur, _TENANT)
+        _purge(cur, _OTHER)
 
 
 def test_purge_borra_ambos_prefijos_solo_del_tenant(storage, db):
@@ -101,35 +99,23 @@ def test_purge_borra_ambos_prefijos_solo_del_tenant(storage, db):
         # Con el bucket DEFAULT (tenant-media) no toca el bucket de prueba:
         cur.execute("SELECT public.fn_purge_tenant_storage_objects(%s::uuid)", (_TENANT,))
         assert _count(cur) == {"tenant": 2, "other": 2}
-        # Con el bucket explícito: borra AMBOS prefijos del tenant, no el ajeno
-        cur.execute(
-            "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-            (_TENANT, ["g8a-bucket"]),
-        )
+        deleted = _purge(cur, _TENANT)
         after = _count(cur)
+    assert deleted == 2, f"la RPC reportó {deleted} borradas (esperaba 2)"
     assert after == {"tenant": 0, "other": 2}
 
 
 def test_purge_solo_afecta_al_tenant_objetivo(storage, db):
     with db.cursor() as cur:
-        cur.execute(
-            "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-            (_TENANT, ["g8a-bucket"]),
-        )
+        deleted = _purge(cur, _TENANT)
         after = _count(cur)
+    assert deleted == 2
     assert after["tenant"] == 0
     assert after["other"] == 2  # el otro tenant intacto (aislamiento)
 
 
 def test_idempotente_segunda_corrida_cero(storage, db):
     with db.cursor() as cur:
-        cur.execute(
-            "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-            (_TENANT, ["g8a-bucket"]),
-        )
-        cur.execute(
-            "SELECT public.fn_purge_tenant_storage_objects(%s::uuid, %s::text[])",
-            (_TENANT, ["g8a-bucket"]),
-        )
-        deleted = cur.fetchone()[0]
+        _purge(cur, _TENANT)
+        deleted = _purge(cur, _TENANT)
     assert deleted == 0
