@@ -35,12 +35,16 @@ from dependencies.auth import (
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+from config import get_settings as _get_settings  # G13: fuente única de config
+
+INTERNAL_SERVICE_SECRET = _get_settings().INTERNAL_SERVICE_SECRET
 # Rotación sin-caída (docs/operations/runbooks/credential-rotation.md): durante
 # la ventana de rotación, el secret SALIENTE se publica en esta var y ambos se
 # aceptan. Fuera de la ventana debe estar VACÍA — un solo secreto activo es la
 # postura (no se documenta en render.yaml a propósito: es efímera por diseño).
-INTERNAL_SERVICE_SECRET_PREVIOUS = os.getenv("INTERNAL_SERVICE_SECRET_PREVIOUS", "")
+# Nota G13: el ATRIBUTO de módulo se conserva como punto de lectura — los tests
+# lo parchean aquí (patch.object) y ese contrato no cambia.
+INTERNAL_SERVICE_SECRET_PREVIOUS = _get_settings().INTERNAL_SERVICE_SECRET_PREVIOUS
 
 
 def _verify_internal_secret(req: Request) -> bool:

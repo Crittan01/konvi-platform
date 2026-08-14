@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from observability import init_sentry
+from config import get_settings  # G13 — config central validada
 
 # Init Sentry ANTES de cargar routers (capturar errores de import también).
 init_sentry(service_name="api")
@@ -110,7 +111,8 @@ app = FastAPI(title="Konvi Core API", description="Síncrona REST", lifespan=lif
 # ─── CORS — restringido a dominios permitidos ──────────────────────────────────
 # En desarrollo: ALLOWED_ORIGINS=http://localhost:3000
 # En producción (Render): configurar como secret con el dominio real del frontend
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+# G13: la fuente de la var es config.get_settings() (declarada + validada en boot).
+_raw_origins = get_settings().ALLOWED_ORIGINS
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
