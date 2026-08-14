@@ -39,6 +39,7 @@ from routers import wompi_webhook  # noqa: E402
 # patches de `_surface_email_failure` van a ESE namespace (donde se resuelve en
 # runtime), no al del router (que solo lo reexporta por compat).
 import lib.client_notifications as client_notifications  # noqa: E402
+import lib.shipping_guides as shipping_guides  # noqa: E402
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY  # noqa: E402
 
 mw = wompi_webhook
@@ -952,7 +953,7 @@ class GenerateGuideTests(unittest.TestCase):
             tenant_shipping_provider_config=[{"tenant_id": "t1", "active_provider": "envia"}],
         ))
         with patch.dict(os.environ, {"GUIDE_GENERATION_DELAY_SECONDS": "no-numero"}), \
-             patch.object(mw.asyncio, "sleep", new=AsyncMock()) as sleep, \
+             patch.object(shipping_guides.asyncio, "sleep", new=AsyncMock()) as sleep, \
              patch.dict(sys.modules, {"integrations.aveonline_client": _fake_ave_module(_GUIDE_OK)}):
             mw._generate_shipping_guide(sb, order_id="order-1", tenant_id="t1")
         sleep.assert_awaited_once_with(60.0)
