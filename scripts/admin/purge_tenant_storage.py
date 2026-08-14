@@ -132,11 +132,17 @@ def purge_tenant_storage(
         b for b in (buckets or DEFAULT_BUCKETS)
         if b and b not in PROTECTED_BUCKETS
     )
-    prefix = f"{tenant_id}/"
+    # G8a: el tenant tiene DOS prefijos con PII en el bucket — '{tenant_id}/'
+    # (media library, logo) e 'inbox-attachments/{tenant_id}/' (adjuntos de
+    # conversación). Antes solo se purgaba el primero → los adjuntos de inbox
+    # sobrevivían al hard-delete (fuga Habeas Data post-erasure).
+    prefixes = [f"{tenant_id}/", f"inbox-attachments/{tenant_id}/"]
     report: dict[str, dict[str, int]] = {}
 
     for bucket in target:
-        paths = _list_all_object_paths(sb, bucket, prefix)
+        paths: list[str] = []
+        for prefix in prefixes:
+            paths.extend(_list_all_object_paths(sb, bucket, prefix))
         removed = 0
         if paths and not dry_run:
             # Borrar en lotes para no exceder límites de payload de la API.

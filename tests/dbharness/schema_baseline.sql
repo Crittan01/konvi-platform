@@ -1583,12 +1583,16 @@ BEGIN
         RETURN 0;
     END IF;
 
-    -- Borra por prefijo '{tenant_id}/'. El '/' evita colisión con otro tenant
-    -- cuyo id sea prefijo de éste (los UUID tienen longitud fija, pero el '/'
-    -- lo hace robusto ante cualquier convención de path).
+    -- Borra AMBOS prefijos del tenant (G8a 2026-08-14): '{tenant_id}/%' (media
+    -- library, logo) e 'inbox-attachments/{tenant_id}/%' (adjuntos de
+    -- conversación — antes sobrevivían al hard-delete, fuga PII post-erasure).
+    -- El '/' evita colisión con otro tenant cuyo id sea prefijo de éste.
     DELETE FROM storage.objects o
      WHERE o.bucket_id = ANY(v_buckets)
-       AND o.name LIKE (p_tenant_id::TEXT || '/%');
+       AND (
+             o.name LIKE (p_tenant_id::TEXT || '/%')
+          OR o.name LIKE ('inbox-attachments/' || p_tenant_id::TEXT || '/%')
+       );
 
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RETURN v_deleted;
@@ -1599,7 +1603,7 @@ $$;
 ALTER FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) IS 'F6 erasure — borra filas de storage.objects con name "{tenant_id}/%" en los buckets dados (default tenant-media). Excluye offboarding-archive. Degrada seguro sin schema storage. La purga FÍSICA del blob la completa scripts/admin/purge_tenant_storage.py (Storage API). Idempotente.';
+COMMENT ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) IS 'F6 erasure + G8a — borra filas de storage.objects con name "{tenant_id}/%" o "inbox-attachments/{tenant_id}/%" en los buckets dados (default tenant-media). Excluye offboarding-archive. Degrada seguro sin schema storage. La purga FÍSICA del blob la completa scripts/admin/purge_tenant_storage.py (Storage API). Idempotente.';
 
 
 
