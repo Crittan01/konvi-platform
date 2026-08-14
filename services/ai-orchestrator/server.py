@@ -41,8 +41,28 @@ logger = logging.getLogger("orchestrator-server")
 # F-doc (Fase 6): migrado de @app.on_event("startup") (deprecado en FastAPI) al patrón
 # lifespan idiomático (mismo que services/api/main.py). `_run_worker_thread` se resuelve
 # en runtime (definido más abajo), por eso la forward-reference es válida.
+def _validate_startup_config() -> None:
+    """Falla rápido (sys.exit) si la configuración crítica es inválida.
+
+    G13 fase 2a (2026-08-14): la lógica vive en `config.validate_critical()`
+    (config central, mismo patrón que services/api). Este puente boot se
+    comparte entre los 2 entry points: este lifespan (Render: uvicorn
+    server:app) y main.py standalone — ambos llaman al mismo validate.
+    """
+    from config import validate_critical
+
+    errors = validate_critical()
+    if errors:
+        for err in errors:
+            logger.error("[STARTUP] ❌ %s", err)
+        sys.exit(1)
+
+    logger.info("[STARTUP] Validación de configuración OK")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _validate_startup_config()
     t = threading.Thread(target=_run_worker_thread, daemon=True, name="orchestrator-worker")
     t.start()
     logger.info("Worker thread iniciado. Servidor HTTP escuchando en $PORT.")

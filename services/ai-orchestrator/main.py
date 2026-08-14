@@ -15,9 +15,29 @@ logging.basicConfig(
 logger = logging.getLogger("ai-orchestrator")
 
 
+def _validate_startup_config() -> None:
+    """Falla rápido (sys.exit) si la configuración crítica es inválida.
+
+    G13 fase 2a (2026-08-14): la lógica vive en `config.validate_critical()`
+    (config central, mismo patrón que services/api). Este entry point
+    standalone comparte la llamada con el lifespan de server.py (lo que
+    arranca Render vía `uvicorn server:app`).
+    """
+    from config import validate_critical
+
+    errors = validate_critical()
+    if errors:
+        for err in errors:
+            logger.error("[STARTUP] ❌ %s", err)
+        sys.exit(1)
+
+    logger.info("[STARTUP] Validación de configuración OK")
+
+
 async def main():
     logger.info("🚀 AI Orchestrator iniciando...")
 
+    _validate_startup_config()
     worker = OrchestratorWorker()
 
     # Graceful shutdown en SIGINT / SIGTERM (Render envía SIGTERM)

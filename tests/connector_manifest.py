@@ -17,6 +17,7 @@ _TESTS_DIR = pathlib.Path(__file__).resolve().parent
 # (test_multimodal_audio) NO son connector-owned → van a core.
 CONNECTOR_OWNED = frozenset({
     "test_a11_wh01_verified_tenant.py",
+    "test_config_g13_connector.py",
     "test_db_persistence_reopen.py",
     "test_f53_connector_no_blocking_io.py",
     "test_meta_hmac_model_b.py",
