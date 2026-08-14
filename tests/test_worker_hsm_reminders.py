@@ -32,6 +32,8 @@ from unittest.mock import AsyncMock, patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "services" / "ai-orchestrator"))
 
+import worker_commerce_crons as _WCC  # noqa: E402 — G12: el método HSM vive en el mixin (sender se parchea ahí)
+
 # Stub vault_helper (worker.py importa whatsapp_sender que lo importa)
 if "vault_helper" not in sys.modules:
     vault_stub = type(sys)("vault_helper")
@@ -240,7 +242,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return None, self.worker_mod.TEMPLATE_ERR_TEMPLATE_NOT_APPROVED
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template):
             result = _run(self.w._try_send_payment_reminder_hsm(
                 order_id="order_xyz",
@@ -260,7 +262,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
             captured["template_name"] = kw.get("template_name")
             return "wamid.hsm_OK_123", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template):
             result = _run(self.w._try_send_payment_reminder_hsm(
                 order_id="order_xyz",
@@ -291,7 +293,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.never_called", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             result = _run(self.w._try_send_payment_reminder_hsm(
                 order_id="order_xyz",
@@ -311,7 +313,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
             captured["body_params"] = kw.get("body_params")
             return "wamid.x", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template):
             _run(self.w._try_send_payment_reminder_hsm(
                 order_id="order_xyz",
@@ -326,7 +328,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return None, "META_RATE_LIMIT"
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template):
             result = _run(self.w._try_send_payment_reminder_hsm(
                 order_id="order_xyz",
@@ -414,7 +416,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.never", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()
@@ -430,7 +432,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.never", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()
@@ -479,7 +481,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.x", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()
@@ -491,7 +493,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.x", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()
@@ -503,7 +505,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.x", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()
@@ -515,7 +517,7 @@ class CartAbandonedCronTests(unittest.TestCase):
         async def fake_send_template(*a, **kw):
             return "wamid.x", None
 
-        with patch.object(self.worker_mod, "send_whatsapp_template",
+        with patch.object(_WCC, "send_whatsapp_template",
                           side_effect=fake_send_template) as mock_send:
             _run(self.w._send_cart_abandoned_reminders_if_due())
         mock_send.assert_not_called()

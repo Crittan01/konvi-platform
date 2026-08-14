@@ -112,7 +112,10 @@ def _worker(sb):
 
 
 def _correr(mod, inst, *, envio="wamid.OK"):
-    with patch.object(mod, "send_whatsapp_message", new=AsyncMock(return_value=envio)) as send:
+    # G12: _send_receipt_* viven en worker_commerce_crons (mixin) — el sender se
+    # resuelve desde ESE namespace de módulo, no desde `worker`.
+    import worker_commerce_crons as _wcc
+    with patch.object(_wcc, "send_whatsapp_message", new=AsyncMock(return_value=envio)) as send:
         asyncio.run(inst._send_receipt_acks())
     return send
 
@@ -221,7 +224,8 @@ def test_si_el_envio_falla_NO_se_marca_y_se_reintenta():
 def test_un_fallo_no_frena_a_los_demas():
     sb = _FakeSB(pendientes=[_pend(), _pend(receipt_id=RID.replace("a", "d"))])
     mod, inst = _worker(sb)
-    with patch.object(mod, "send_whatsapp_message",
+    import worker_commerce_crons as _wcc
+    with patch.object(_wcc, "send_whatsapp_message",
                       new=AsyncMock(side_effect=[Exception("Meta caído"), "wamid.OK"])):
         asyncio.run(inst._send_receipt_acks())
     assert inst._metrics["receipt_acks_sent"] == 1

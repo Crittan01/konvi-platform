@@ -124,7 +124,9 @@ def _correr(w, inst, *, meta_id="wamid.OK", telegram=None, notify_ok=True):
     mod = type(sys)("telegram_notifications")
     mod.notify_escalation_async = _notify
     sys.modules["telegram_notifications"] = mod
-    with patch.object(w, "send_whatsapp_message", _send):
+    import worker_commerce_crons as _wcc  # G12: los métodos movidos resuelven
+    # el sender desde el namespace del MIXIN — el patch va ahí.
+    with patch.object(_wcc, "send_whatsapp_message", _send):
         asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
             inst._sweep_reversals_if_due())
     return _send.enviados, telegram
@@ -218,7 +220,9 @@ def test_si_el_aviso_falla_no_se_marca():
 
     async def _send(**kw):
         return "wamid.X"
-    with patch.object(w, "send_whatsapp_message", _send):
+    import worker_commerce_crons as _wcc  # G12: los métodos movidos resuelven
+    # el sender desde el namespace del MIXIN — el patch va ahí.
+    with patch.object(_wcc, "send_whatsapp_message", _send):
         asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
             inst._sweep_reversals_if_due())
     assert "rpc_mark_doble_pago_avisado" not in sb.nombres()
@@ -314,20 +318,26 @@ def test_el_latido_va_dentro_de_los_dos_loops_nuevos():
     barrido; al reiniciar arranca por las mismas filas. Los demás loops con I/O de red ya
     laten por ítem."""
     import ast
-    fuente = (REPO_ROOT / "services" / "ai-orchestrator" / "worker.py").read_text()
-    arbol = ast.parse(fuente)
+    # G12: `_deliver_reversal_constancias` vive ahora en worker_commerce_crons.py
+    # (mixin). El guardián lee AMBOS archivos — la propiedad (latido por ítem
+    # en el for del barrido) se verifica dondequiera que viva el método.
+    arboles = [
+        ast.parse((REPO_ROOT / "services" / "ai-orchestrator" / f).read_text())
+        for f in ("worker.py", "worker_commerce_crons.py")
+    ]
 
     def late_dentro_del_for(nombre):
-        for n in ast.walk(arbol):
-            if isinstance(n, ast.AsyncFunctionDef) and n.name == nombre:
-                for f in ast.walk(n):
-                    if not isinstance(f, ast.For):
-                        continue
-                    for st in f.body:
-                        if (isinstance(st, ast.Assign)
-                                and any(isinstance(t, ast.Attribute)
-                                        and t.attr == "last_heartbeat_ts" for t in st.targets)):
-                            return True
+        for arbol in arboles:
+            for n in ast.walk(arbol):
+                if isinstance(n, ast.AsyncFunctionDef) and n.name == nombre:
+                    for f in ast.walk(n):
+                        if not isinstance(f, ast.For):
+                            continue
+                        for st in f.body:
+                            if (isinstance(st, ast.Assign)
+                                    and any(isinstance(t, ast.Attribute)
+                                            and t.attr == "last_heartbeat_ts" for t in st.targets)):
+                                return True
         return False
 
     for barrido in ("_deliver_reversal_constancias", "_stamp_acceptances_if_due"):
