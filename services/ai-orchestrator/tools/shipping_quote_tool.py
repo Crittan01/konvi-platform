@@ -1,19 +1,13 @@
 import logging
 import os
 import re
-import unicodedata
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from functools import lru_cache
-from pathlib import Path
 from typing import Optional
 
 import httpx
 # PyJWT removed in A0.2c — service-to-service auth via INTERNAL_SERVICE_SECRET header
 from supabase import Client
 
-from tools.catalog_contract import variant_label  # ADR-0029 F2: label canónico único
 
 logger = logging.getLogger("orchestrator.tools.shipping_quote")
 
@@ -91,180 +85,57 @@ _SHIPPING_FOLLOWUP_PROMPT_MARKERS = (
     "te cotice el envio",
     "cotice el envio",
 )
-_DANE_SOURCE_FILE = Path(__file__).resolve().parents[3] / "apps" / "web" / "lib" / "dane-colombia.ts"
-_PRODUCT_TITLE_STOPWORDS = {
-    "de",
-    "del",
-    "la",
-    "el",
-    "los",
-    "las",
-    "y",
-    "para",
-    "con",
-    "sin",
-    "en",
-}
-
-
-@dataclass
-class ShippingQuoteResult:
-    handled: bool
-    response_text: Optional[str] = None
-    requires_human: bool = False
-
-
-@dataclass
-class PackageEstimate:
-    weight_kg: float
-    length_cm: float
-    width_cm: float
-    height_cm: float
-    quantity: int
-    product_title: Optional[str] = None
-    variant_label: Optional[str] = None
-    declared_value: Optional[int] = None   # valorDeclarado en COP = subtotal de productos del cart (no hardcoded 50k)
-    source: str = "default"
-
-
-@dataclass
-class PackageEstimateDecision:
-    package: Optional[PackageEstimate] = None
-    ambiguous_product_titles: list[str] = field(default_factory=list)
-    # Títulos de productos SIN weight_kg/dims: bloquea la cotización (no cotizar a ~0kg → evita reajuste retroactivo).
-    missing_shipping_data: list[str] = field(default_factory=list)
-
-
 from text_utils import normalize_text as _normalize_text, normalize_phone as _normalize_phone  # noqa: E402
 
-
-def _tokenize_words(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", text))
-
-
-@lru_cache(maxsize=1)
-def _load_city_index() -> dict[str, list[dict[str, str]]]:
-    """
-    Carga índice de municipios CO desde apps/web/lib/dane-colombia.ts.
-    Estructura: { city_normalized: [{city, state, dane_code}, ...] }.
-    """
-    if not _DANE_SOURCE_FILE.exists():
-        logger.warning("No se encontró catálogo DANE en %s", _DANE_SOURCE_FILE)
-        return {}
-
-    try:
-        source = _DANE_SOURCE_FILE.read_text(encoding="utf-8")
-    except Exception as exc:
-        logger.warning("No se pudo leer catálogo DANE: %s", exc)
-        return {}
-
-    city_index: dict[str, list[dict[str, str]]] = {}
-    dept_pattern = re.compile(
-        r"\{\s*codigo:\s*'(?P<dep_code>\d+)'\s*,\s*nombre:\s*'(?P<dep_name>[^']+)'\s*,\s*municipios:\s*\[(?P<munis>.*?)\]\s*,?\s*\}",
-        re.DOTALL,
-    )
-    muni_pattern = re.compile(
-        r"\{\s*codigo:\s*'(?P<code>\d{5})'\s*,\s*nombre:\s*'(?P<name>[^']+)'\s*\}"
-    )
-
-    for dep in dept_pattern.finditer(source):
-        dept_name = dep.group("dep_name").strip()
-        munis_blob = dep.group("munis")
-        for muni in muni_pattern.finditer(munis_blob):
-            city_name = muni.group("name").strip()
-            dane_code = muni.group("code")
-            city_norm = _normalize_text(city_name)
-            
-            aliases = [city_norm]
-            if " d.c." in city_norm:
-                aliases.append(city_norm.replace(" d.c.", ""))
-            if " (distrito capital)" in city_norm:
-                aliases.append(city_norm.replace(" (distrito capital)", ""))
-            if "bogota" in city_norm:
-                aliases.append("bogota") # Catch-all por si las dudas
-                
-            for alias in set(aliases):
-                city_index.setdefault(alias, []).append(
-                    {
-                        "city": city_name,
-                        "state": dept_name,
-                        "dane_code": dane_code,
-                    }
-                )
-
-    return city_index
+# _PRODUCT_TITLE_STOPWORDS movida a tools/shipping_text.py (G12).
+# G12: cotizador descompuesto — los nombres quedan en este namespace
+# por estos imports (callers/tests intactos).
+from tools.shipping_models import (  # noqa: F401
+    ShippingQuoteResult,
+    PackageEstimate,
+    PackageEstimateDecision,
+)
+from tools.shipping_text import (  # noqa: F401
+    _tokenize_words,
+    _extract_weight_kg,
+    _extract_requested_quantity,
+    _sanitize_dane_code,
+    _normalize_country_code,
+    _product_title_tokens,
+    _extract_quantity_near_phrase,
+    _safe_float,
+    _safe_int,
+    _clean_product_title,
+    _variation_label,
+    _format_money,
+    _format_eta,
+    _format_rate_line,
+    _fmt_weight,
+    _fmt_dim,
+    _format_package_context_line,
+    _build_quote_response_text,
+    _build_product_disambiguation_text,
+)
+from tools.shipping_geo import (  # noqa: F401
+    _DANE_SOURCE_FILE,
+    _load_city_index,
+    _city_names_by_length_desc,
+    _find_city_entries_in_text,
+    _destination_from_city_entry,
+    _resolve_destination_from_query,
+)
 
 
-@lru_cache(maxsize=1)
-def _city_names_by_length_desc() -> list[str]:
-    return sorted(_load_city_index().keys(), key=len, reverse=True)
 
 
-def _find_city_entries_in_text(normalized_query: str) -> list[dict[str, str]]:
-    city_index = _load_city_index()
-    if not city_index or not normalized_query:
-        return []
-
-    matches: list[dict[str, str]] = []
-    for city_norm in _city_names_by_length_desc():
-        if len(city_norm) < 3:
-            continue
-        pattern = rf"(^|\b){re.escape(city_norm)}(\b|$)"
-        if not re.search(pattern, normalized_query):
-            continue
-        entries = city_index.get(city_norm, [])
-        if not entries:
-            continue
-        matches.extend(entries)
-        # El match más largo suele ser suficiente para destino conversacional.
-        break
-    return matches
 
 
-def _destination_from_city_entry(entry: dict[str, str]) -> dict[str, str]:
-    return {
-        "city": entry["city"],
-        "state": entry["state"],
-        "country": "CO",
-        "postalCode": entry["dane_code"],
-        "dane_code": entry["dane_code"],
-    }
 
 
-def _resolve_destination_from_query(query_text: str) -> tuple[Optional[dict], Optional[str]]:
-    """
-    Intenta resolver destino desde texto libre.
-    Retorna:
-    - (destination, None) si resolvió
-    - (None, city_name) si ciudad detectada pero ambigua (requiere depto)
-    - (None, None) si no pudo resolver ciudad
-    """
-    normalized_query = _normalize_text(query_text)
-    entries = _find_city_entries_in_text(normalized_query)
-    if not entries:
-        return None, None
 
-    # Deduplicar por dane_code (en caso de alias redundantes)
-    unique_dane = {}
-    for e in entries:
-        unique_dane[e["dane_code"]] = e
-    entries = list(unique_dane.values())
 
-    if len(entries) == 1:
-        return _destination_from_city_entry(entries[0]), None
 
-    # Si la ciudad aparece en múltiples departamentos, intentar desambiguar
-    # por departamento mencionado explícitamente en el mensaje.
-    narrowed = []
-    for entry in entries:
-        state_norm = _normalize_text(entry["state"])
-        if state_norm and state_norm in normalized_query:
-            narrowed.append(entry)
 
-    if len(narrowed) == 1:
-        return _destination_from_city_entry(narrowed[0]), None
-
-    return None, entries[0]["city"]
 
 
 def is_shipping_quote_query(text: str) -> bool:
@@ -514,125 +385,24 @@ def _resolve_destination_from_conversation(
     return None, None
 
 
-def _safe_float(value: object) -> Optional[float]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        cleaned = value.strip().replace(",", ".")
-        if not cleaned:
-            return None
-        try:
-            return float(cleaned)
-        except ValueError:
-            return None
-    return None
 
 
-def _safe_int(value: object) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        if cleaned.isdigit():
-            return int(cleaned)
-    return None
 
 
-def _extract_weight_kg(text: str) -> Optional[float]:
-    normalized = _normalize_text(text)
-    if not normalized:
-        return None
-
-    kg_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(kg|kilo|kilos)", normalized)
-    if kg_match:
-        value = _safe_float(kg_match.group(1))
-        if value and value > 0:
-            return value
-
-    g_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(g|gr|gramo|gramos)", normalized)
-    if g_match:
-        value = _safe_float(g_match.group(1))
-        if value and value > 0:
-            return max(value / 1000.0, 0.05)
-
-    return None
 
 
-def _extract_requested_quantity(text: str) -> int:
-    normalized = _normalize_text(text)
-    if not normalized:
-        return 1
-
-    patterns = [
-        r"\bx\s*(\d{1,3})\b",  # x2
-        r"\b(\d{1,3})\s*x\b",  # 2x
-        r"\b(\d{1,3})\s*(?:unidad|unidades|ud|uds|u)\b",
-        r"\bpara\s+(\d{1,3})\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, normalized)
-        if not match:
-            continue
-        qty = _safe_int(match.group(1))
-        if qty and qty > 0:
-            return min(qty, 200)
-
-    # Fallback: si el mensaje es corto (ej: "3", "quiero 3"), o al menos no contiene indicadores de dirección:
-    if len(normalized) < 15 and not re.search(r"calle|cra|carrera|sur|norte", normalized):
-        generic = re.search(r"\b(\d{1,3})\b", normalized)
-        if generic:
-            qty = _safe_int(generic.group(1))
-            if qty and qty > 0:
-                return min(qty, 200)
-
-    return 1
 
 
-def _sanitize_dane_code(raw: object) -> str:
-    digits = re.sub(r"\D", "", str(raw or ""))
-    if len(digits) == 8 and digits.endswith("000"):
-        return digits[:5]
-    if len(digits) == 5:
-        return digits
-    return ""
 
 
-def _normalize_country_code(raw: object, default: str = "CO") -> str:
-    ascii_country = unicodedata.normalize("NFKD", str(raw or "")).encode("ascii", "ignore").decode("ascii")
-    token = re.sub(r"[^A-Za-z]", "", ascii_country).upper()
-    if not token:
-        return default
-    if token in {"CO", "COL", "COLOMBIA"}:
-        return "CO"
-    if len(token) == 2:
-        return token
-    return token
 
 
-def _product_title_tokens(title: str) -> set[str]:
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", _normalize_text(title))
-        if len(token) >= 3 and token not in _PRODUCT_TITLE_STOPWORDS
-    }
 
 
 # ADR-0029 F2: la canonicalización de unidad + el label de variante viven en tools.catalog_contract
 # (fuente única cross-surface: variant_label / canonicalize_unit_value).
 
 
-def _variation_label(variation: dict) -> str:
-    """Etiqueta legible de una variante. ADR-0029 F2: delega en el label CANÓNICO
-    compartido (tools.catalog_contract.variant_label) — única fórmula cross-surface."""
-    return variant_label(variation.get("attributes"), variation.get("sku"))
 
 
 def _get_tenant_products_for_shipping_quote(supabase: Client, tenant_id: str) -> list[dict]:
@@ -814,21 +584,8 @@ def _scale_dimension(base_value: float, quantity: int) -> float:
     return round(base_value * scale, 2)
 
 
-def _clean_product_title(title: str) -> str:
-    """Elimina prefijos de ambiente como [TEST], [DEMO], [STAGING] del título del producto."""
-    return re.sub(r"^\[.*?\]\s*", "", str(title or "")).strip()
 
 
-def _build_product_disambiguation_text(product_titles: list[str]) -> str:
-    clean_titles = [_clean_product_title(t) for t in product_titles if t and t.strip()]
-    clean_titles = [t for t in clean_titles if t]  # filtrar vacíos post-limpieza
-    if not clean_titles:
-        return "Para cotizar envío necesito confirmar el producto exacto. ¿Cuál deseas?"
-    options = " / ".join(clean_titles[:3])
-    return (
-        f"Para cotizar envío con precisión, confirma el producto: {options}. "
-        "Con eso te paso de inmediato la opción más económica y la más rápida."
-    )
 
 
 def _resolve_multiple_products_with_quantities(
@@ -880,28 +637,6 @@ def _resolve_multiple_products_with_quantities(
     return [(p, q) for p, q, _ in matched]
 
 
-def _extract_quantity_near_phrase(norm_text: str, phrase_tokens: list[str]) -> int:
-    """Busca un número justo antes (o muy cerca) de cualquiera de los tokens del
-    nombre del producto. Ej: '2 aceites de coco virgen' con tokens incluyendo
-    'aceite' o 'coco' → 2.
-    """
-    if not phrase_tokens:
-        return 0
-    sig_tokens = [t for t in phrase_tokens if len(t) > 3]
-    if not sig_tokens:
-        sig_tokens = phrase_tokens
-    pattern = (
-        r"(\d+)\s+(?:[a-zñáéíóú]+s?\s+){0,3}("
-        + "|".join(re.escape(t) for t in sig_tokens)
-        + r")"
-    )
-    m = re.search(pattern, norm_text)
-    if m:
-        try:
-            return int(m.group(1))
-        except ValueError:
-            return 0
-    return 0
 
 
 def _estimate_package_from_cart_if_available(
@@ -1139,138 +874,18 @@ def _estimate_package_from_inventory(
     )
 
 
-def _format_money(value: object, currency: str = "COP") -> str:
-    amount = _safe_float(value)
-    if amount is None:
-        return "N/D"
-    if currency.upper() == "COP":
-        return f"${int(round(amount)):,.0f}".replace(",", ".")
-    return f"{amount:.2f} {currency.upper()}"
 
 
-def _format_eta(rate: dict) -> str:
-    delivery_date = str(rate.get("delivery_date") or "").strip()
-    if delivery_date:
-        try:
-            dt = datetime.fromisoformat(delivery_date.replace("Z", "+00:00"))
-            # Convertir a hora Colombia (America/Bogota = UTC-5 fijo, sin DST)
-            # Usamos timedelta en lugar de zoneinfo para no requerir dependencia extra.
-            from datetime import timedelta
-            BOGOTA_OFFSET = timedelta(hours=-5)
-            dt_bogota = dt.astimezone(timezone(BOGOTA_OFFSET))
-            return dt_bogota.strftime("%d/%m/%Y")
-        except (ValueError, Exception):
-            return delivery_date
-
-    estimate = str(rate.get("delivery_estimate") or "").strip()
-    if estimate:
-        return estimate
-    return "N/D"
 
 
-def _format_rate_line(label: str, rate: dict) -> str:
-    carrier = str(rate.get("carrier") or "carrier").strip()
-    service = str(rate.get("service") or "servicio").strip()
-    # Deduplicar si el nombre del carrier aparece al inicio del service name
-    # Ej: carrier='Deprisa', service='Deprisa Estandar' -> mostramos solo 'Deprisa Estandar'
-    if service.lower().startswith(carrier.lower()):
-        carrier_info = service
-    else:
-        carrier_info = f"{carrier} {service}"
-    currency = str(rate.get("currency") or "COP")
-    price_info = _format_money(rate.get("total_price"), currency)
-    if not price_info:
-        price_info = "Pendiente"
-    eta = _format_eta(rate)
-    return f"• *{label}*: {carrier_info} | {price_info} | entrega {eta}"
 
 
-def _fmt_weight(kg: float) -> str:
-    """Formato legible para peso: evita decimales innecesarios y separadores de miles."""
-    if kg >= 1:
-        return f"{int(kg)} kg" if kg == int(kg) else f"{kg:.1f} kg"
-    grams = kg * 1000
-    return f"{int(grams)} g" if grams == int(grams) else f"{grams:.0f} g"
 
 
-def _fmt_dim(cm: float) -> str:
-    """Formato sin decimales innecesarios para dimensiones."""
-    return str(int(cm)) if cm == int(cm) else f"{cm:.1f}"
 
 
-def _format_package_context_line(package: PackageEstimate) -> str:
-    """Línea interna de log — no se expone al cliente en la respuesta principal."""
-    l, w, h = _fmt_dim(package.length_cm), _fmt_dim(package.width_cm), _fmt_dim(package.height_cm)
-    qty_label = "1 unidad" if package.quantity == 1 else f"{package.quantity} unidades"
-    summary = f"{qty_label}, {_fmt_weight(package.weight_kg)}, {l}\u00d7{w}\u00d7{h} cm"
-    if package.product_title:
-        summary += f" | {package.product_title}"
-    if package.variant_label and package.variant_label.strip().lower() not in {"estandar", "estándar", ""}:
-        summary += f" ({package.variant_label})"
-    return summary
 
 
-def _build_quote_response_text(
-    origin: dict,
-    destination: dict,
-    highlights: dict,
-    package: PackageEstimate,
-) -> Optional[str]:
-    cheapest = highlights.get("cheapest") if isinstance(highlights, dict) else None
-    fastest = highlights.get("fastest") if isinstance(highlights, dict) else None
-    if not isinstance(cheapest, dict):
-        return None
-
-    destination_city = str(destination.get("city") or "tu ciudad")
-    qty_label = "1 unidad" if package.quantity == 1 else f"{package.quantity} unidades"
-    product_label = ""
-    if package.product_title:
-        product_label = f" de {package.product_title}"
-        if package.variant_label and package.variant_label.strip().lower() not in {"estandar", "estándar", ""}:
-            product_label += f" ({package.variant_label})"
-
-    # Multi-producto: header con lista de items con bullets para legibilidad.
-    if package.source == "multi":
-        items_text = package.product_title or ""
-        # product_title viene como "2x A + 1x B + 1x C" — convertir a bullets.
-        if " + " in items_text:
-            items_lines = "\n".join(f"• {item.strip()}" for item in items_text.split(" + "))
-        else:
-            items_lines = f"• {items_text}" if items_text else ""
-        header = (
-            f"Envío de tu pedido ({package.quantity} unidades) a {destination_city}:\n"
-            f"{items_lines}"
-        )
-    else:
-        header = f"Envío de {qty_label}{product_label} a {destination_city}:"
-    cheapest_line = _format_rate_line("Económica", cheapest)
-    lines = [header, cheapest_line]
-
-    if isinstance(fastest, dict):
-        same_eta = _format_eta(fastest) == _format_eta(cheapest)
-        same = (
-            str(fastest.get("carrier") or "") == str(cheapest.get("carrier") or "")
-            and str(fastest.get("service") or "") == str(cheapest.get("service") or "")
-            and str(fastest.get("total_price") or "") == str(cheapest.get("total_price") or "")
-        )
-        if not same and not same_eta:
-            lines.append(_format_rate_line("Rápida", fastest))
-        # Si es la misma opción o la fecha de entrega es idéntica, no agregar línea redundante
-
-    # Solo preguntar por elección si realmente hay 2 opciones distintas
-    has_fast_option = len(lines) > 2  # header + cheapest + fastest
-    if has_fast_option:
-        lines.append("¿Con cuál continuamos? (*Económica* o *Rápida*)")
-    else:
-        lines.append("¿Continuamos con la opción *Económica*?")
-
-    # Detalle técnico del paquete solo en log — no al cliente
-    logger.info("[SHIPPING_QUOTE] Paquete estimado: %s", _format_package_context_line(package))
-    # Párrafos WhatsApp: \n\n entre secciones para respiro visual
-    paragraph = "\n\n"
-    body = "\n".join(lines[1:-1]).strip()
-    question = str(lines[-1]).strip()
-    return paragraph.join([lines[0], body, question])
 
 
 def _build_internal_headers(tenant_id: str) -> Optional[dict]:
