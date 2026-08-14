@@ -16,8 +16,8 @@ from _harness import connect
 
 pytestmark = pytest.mark.dbharness
 
-_TENANT = "g8a00000-0000-0000-0000-000000000001"
-_OTHER = "g8a00000-0000-0000-0000-000000000002"
+_TENANT = "8a000000-0000-0000-0000-000000000001"
+_OTHER = "8a000000-0000-0000-0000-000000000002"
 
 
 def _storage_disponible(cur) -> bool:
@@ -43,7 +43,7 @@ def _seed(cur):
     cur.execute(
         """
         INSERT INTO storage.buckets (id, name, public)
-        VALUES ('g8a-bucket', 'g8a-bucket', true)
+        VALUES ('b8a-bucket', 'b8a-bucket', true)
         ON CONFLICT (id) DO NOTHING
         """
     )
@@ -55,7 +55,7 @@ def _seed(cur):
     ):
         cur.execute(
             "INSERT INTO storage.objects (id, bucket_id, name, owner) "
-            "VALUES (gen_random_uuid(), 'g8a-bucket', %s, NULL) "
+            "VALUES (gen_random_uuid(), 'b8a-bucket', %s, NULL) "
             "ON CONFLICT DO NOTHING",
             (name,),
         )
@@ -63,7 +63,7 @@ def _seed(cur):
 
 def _count(cur) -> dict[str, int]:
     cur.execute(
-        "SELECT name, bucket_id FROM storage.objects WHERE bucket_id = 'g8a-bucket'"
+        "SELECT name, bucket_id FROM storage.objects WHERE bucket_id = 'b8a-bucket'"
     )
     rows = cur.fetchall()
     return {
