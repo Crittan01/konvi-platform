@@ -1603,7 +1603,7 @@ $$;
 ALTER FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) IS 'F6 erasure + G8a — borra filas de storage.objects con name "{tenant_id}/%" o "inbox-attachments/{tenant_id}/%" en los buckets dados (default tenant-media). Excluye offboarding-archive. Degrada seguro sin schema storage. La purga FÍSICA del blob la completa scripts/admin/purge_tenant_storage.py (Storage API). Idempotente.';
+COMMENT ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "uuid", "p_bucket_ids" "text"[]) IS 'F6 erasure + G8a — borra filas de storage.objects con name "{tenant_id}/%" o "inbox-attachments/{tenant_id}/%" en los buckets dados (default tenant-media). Excluye offboarding-archive. Degrada seguro sin schema storage. La purga FÍSICA del blob la completa scripts/admin/purge_tenant_storage.py. Idempotente.';
 
 
 
