@@ -58,7 +58,7 @@ def _code_env_vars() -> set[str]:
 
 
 def _example_vars() -> tuple[set[str], set[str], set[str], set[str]]:
-    """(declaradas con KEY=, tuning-block, scripts-comentario, muertas [ELIMINAR]).
+    """(declaradas con KEY=, tuning-block, scripts/devlocal-comentario, muertas [ELIMINAR]).
 
     La sección [SCRIPTS] (operación humana — leen el archivo, no os.getenv) se
     tolera: el guard no exige que el código las lea por env.
@@ -72,7 +72,7 @@ def _example_vars() -> tuple[set[str], set[str], set[str], set[str]]:
         if line.startswith("## ─── Feature flags / tuning"):
             in_tuning, in_eliminar, in_scripts = True, False, False
         elif line.startswith("## ─── Dev local") :
-            in_tuning, in_eliminar, in_scripts = False, False, False
+            in_tuning, in_eliminar, in_scripts = False, False, True  # toleradas como scripts
         elif line.startswith("## ─── Scripts"):
             in_tuning, in_eliminar, in_scripts = False, False, True
         elif line.startswith("## ─── MUERTAS"):
