@@ -30,9 +30,12 @@ out/
 .env
 .env.local
 .env.*.local
-# Respaldos locales de ENV-1 (contienen secretos de prod)
+.env.prd-backup
+# Respaldos locales (contienen secretos)
 .env.pre-env1
 .env.local.pre-env1
+.env.*.bak-*
+.env.bak-*
 
 # ─── Supabase Local ───────────────────────────────────────────────────────────
 supabase/.temp/
