@@ -26,6 +26,7 @@
 - **Servicios Render:** `konvi-<rol>` × 4. Multi-tenant real: N tenants = siempre los mismos 4 servicios; agregar un tenant son datos (`provision_tenant.py`), no un deploy.
 - **Credenciales:** `.env.local` (dev) y `.env.prd-backup` (backup de prod, operación explícita), ambos gitignored. Convención 2026-08-14: 2 canónicos (local + prd-backup) + `apps/web/.env.local` (Next lo exige) + `.env.example` (contrato). Los scripts destructivos validan el target con `scripts/_env_guard.py` (deny-by-default; override auditable `KONVI_ALLOW_PROD=1`).
 - **Costos de referencia** (verificar antes de cambiar planes): Supabase Pro ~$25/mes + Render 3× Starter ~$21/mes. DEV local: $0. Dev cloud futuro: $0 en org Free (pausa tras 1 semana inactivo; reanudación manual en el dashboard).
+- **Rotación de credenciales por ambiente (decisión 2026-08-14):** solo **PRD** se rota (runbook `docs/operations/runbooks/credential-rotation.md`). **STG local NO se rota**: usa las keys demo públicas del Supabase CLI (no son secretas — las documenta Supabase) y solo tiene datos sintéticos → nada que mitigar. Lo que protege STG no es la rotación sino la **segregación** (`_env_guard.py` + ENV-1: STG nunca escribe en PRD). **Excepción futura:** el dev cloud del lanzamiento (#16, PLAN §A) SÍ tendrá keys reales → entra en la política de rotación.
 
 ## 4. Migraciones entre ambientes (regla)
 
