@@ -18,7 +18,7 @@ Sin secciones históricas — la historia está en git y en `docs/_archive/`.
 | `konvi-api` | `services/api` | Core API REST (28 routers `/api/v1`) |
 | `konvi-orchestrator` | `services/ai-orchestrator` | Worker IA (polling inbound, FSM agentic, outbound, 19 crons; daemon thread dentro del web service) |
 
-**Supabase cloud** (proyecto productivo único): PostgreSQL + RLS + Auth + Vault + pgmq — 251 migraciones aplicadas, 79 tablas live. Credenciales: `.env.prod` y Render Dashboard (nunca en repo).
+**Supabase cloud** (proyecto productivo único): PostgreSQL + RLS + Auth + Vault + pgmq — 251 migraciones aplicadas, 79 tablas live. Credenciales: `.env.prd-backup` (backup de las plataformas integradas) y Render Dashboard (nunca en repo).
 
 Multi-tenant real: N tenants = los mismos 4 servicios; agregar un tenant son datos (`scripts/admin/provision_tenant.py`, runbook `docs/operations/onboarding-tenants.md`), no un deploy.
 

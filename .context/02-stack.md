@@ -72,6 +72,6 @@ Esta VM es dedicada 100% al proyecto. Todas las herramientas del sistema se inst
 
 - Logs: `/home/ansible/workspaces/konvi-platform/.local/logs/{orchestrator,api,connector,web}.log`
 - PIDs: `/home/ansible/workspaces/konvi-platform/.local/pids/`
-- `.env` que cargan los servicios: `/home/ansible/workspaces/konvi-platform/.env` (raíz del repo)
+- `.env` que cargan los servicios: `/home/ansible/workspaces/konvi-platform/.env.local` (raíz del repo)
 
-**Importante** — cambios de código en `services/ai-orchestrator/*.py` requieren reiniciar el orchestrator. Cambios en `.env` (env vars) son leídos al inicio del proceso, **excepto los flags hot-reload** (ver `USE_NEW_ORCHESTRATOR` que se relee por cada llamada).
+**Importante** — cambios de código en `services/ai-orchestrator/*.py` requieren reiniciar el orchestrator. Cambios en `.env.local` (env vars) son leídos al inicio del proceso, **excepto los flags hot-reload** (los flags runtime-fresh se releen por cada llamada — ver G13).
