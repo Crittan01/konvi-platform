@@ -19,7 +19,7 @@ import sys
 from dotenv import load_dotenv
 from supabase import create_client
 
-load_dotenv(".env")
+load_dotenv(".env.local")
 load_dotenv("apps/web/.env.local", override=False)
 
 KONVI_DEV_TENANT_ID = "6115474f-7046-44a8-88ad-182dbf7626a6"

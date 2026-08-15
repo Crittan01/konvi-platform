@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-ENV_PATH = os.path.join(REPO_ROOT, ".env")
+ENV_PATH = os.path.join(REPO_ROOT, ".env.local")
 DEFAULT_LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
 

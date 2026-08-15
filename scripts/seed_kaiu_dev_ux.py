@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REPO = str(Path(__file__).resolve().parents[1])
 creds = {}
-with open(f"{REPO}/.env") as f:
+with open(f"{REPO}/.env.local") as f:
     for line in f:
         s = line.rstrip("\n")
         if "=" in s and not s.lstrip().startswith("#"):

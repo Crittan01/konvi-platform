@@ -69,7 +69,7 @@ class DomainResult:
 
 def _load_env() -> dict[str, str]:
     """Lee .env del repo (no usa python-dotenv para no agregar dependencia)."""
-    env_path = REPO_ROOT / ".env"
+    env_path = REPO_ROOT / ".env.local"
     env: dict[str, str] = {}
     if not env_path.exists():
         return env

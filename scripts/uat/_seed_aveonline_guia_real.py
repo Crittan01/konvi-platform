@@ -32,7 +32,7 @@ REPO = str(Path(__file__).resolve().parents[2])
 sys.path.insert(0, f"{REPO}/scripts")
 
 creds: dict[str, str] = {}
-with open(f"{REPO}/.env.prod") as f:
+with open(f"{REPO}/.env.prd-backup") as f:
     for line in f:
         s = line.rstrip("\n")
         if "=" in s and not s.lstrip().startswith("#"):

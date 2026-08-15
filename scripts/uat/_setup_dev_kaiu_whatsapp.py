@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, "scripts")
 REPO = str(Path(__file__).resolve().parents[2])
 creds = {}
-with open(f"{REPO}/.env") as f:
+with open(f"{REPO}/.env.local") as f:
     for line in f:
         s = line.rstrip("\n")
         if "=" in s and not s.lstrip().startswith("#"):
