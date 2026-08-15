@@ -131,7 +131,7 @@ La arquitectura **Model B per-tenant** (ADR-0023) hace que la mayoría de las cr
 |---|---|---|---|
 | 1 | **Dominio propio** — los webhooks de PRD cuelgan de `*.onrender.com` | DNS/founder + Render custom domain | OQ-4; knobs listos: `PUBLIC_WEBHOOK_URL`, `WHATSAPP_CONNECTOR_URL`, `NEXT_PUBLIC_*_HOST` |
 | 2 | **Dev cloud** para UAT con webhooks reales sin ngrok | founder (crear proyecto Supabase dev) | PLAN §A #16, checklist `environments.md` §1/§2 |
-| 3 | **Guard anti-mezcla de datos** — abortar si un tenant STG tiene `environment='production'` (Wompi) o Meta App prod contra ngrok | agente (ejecutable) | extensión de `_env_guard.py` |
+| 3 | **Guard anti-mezcla de datos** — abortar si un tenant STG tiene `environment='production'` (Wompi) o Meta App prod contra ngrok | ✅ CERRADO 2026-08-15 (agente) | `scripts/check_env_data_mix.py` + `tests/test_check_env_data_mix.py` (13 tests); certificado live: STG limpio exit 0, violación sintética sembrada → FAIL exit 1, PRD read-only → WARN esperado (KAIU sandbox) |
 | 4 | **MeLi app de prueba** — hoy solo hay config de plataforma PRD | founder (crear app MeLi dev) | docs/integrations/mercadolibre.md |
 | 5 | **setWebhook Telegram por ambiente** documentado | ya documentado como HITL manual | `docs/integrations/telegram.md` |
 
@@ -141,7 +141,7 @@ La arquitectura **Model B per-tenant** (ADR-0023) hace que la mayoría de las cr
 
 1. **Cómputo/datos**: `.env.local` → `dev-safe`; `.env.prd-backup` → `prelaunch` (verificado empíricamente 2026-08-14 vía `_env_guard.classify`).
 2. **Sin ngrok en prod**: `check_no_ngrok.sh` en CI.
-3. **Anti-mezcla de tenants** (gap #3): pendiente — extensión del env_guard.
+3. **Anti-mezcla de tenants** (gap #3): `python3.11 scripts/check_env_data_mix.py` (STG, default `.env.local`) y `--env-file .env.prd-backup` (PRD, solo lectura). FAIL si STG tiene config productiva (Wompi `environment='production'` en cualquier status, `real_guides_enabled=true`); WARN si PRD tiene Wompi connected en sandbox (`--strict` la vuelve falla). Meta/Telegram no auto-chequeables (credenciales en Vault + webhook en dashboard del proveedor).
 4. **Health por ambiente**: `scripts/admin/verify_credential_rotation.py` (PRD) + smoke local (Makefile `status`).
 
 ---
