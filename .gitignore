@@ -85,8 +85,11 @@ pip-selfcheck.json
 .mypy_cache/
 .ruff_cache/
 
-# Stack local runtime (Makefile, logs, pids, ngrok-configs) — NO versionar
-.local/
+# Stack local runtime (logs, pids, env filtrados, ngrok-configs) — NO versionar.
+# EXCEPCIÓN (S7, 2026-08-16): el Makefile SÍ se versiona — es la definición de la
+# topología local homologada a PRD (infraestructura como código), no estado.
+.local/*
+!.local/Makefile
 .env.dev
 .env.prod
 .env.local.prod

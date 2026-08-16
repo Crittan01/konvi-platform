@@ -87,6 +87,8 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 
 ### FASE S3 — Render + dominio propio [F] (OQ-4; desbloquea URLs canónicas de webhooks)
 
+> **Decisión founder 2026-08-16:** STG **no dependerá de Render en absoluto** (nada de servicios staging en la nube — el plan free congela y no sirve para probar webhooks). STG = 100% local, **totalmente homologado a la topología real de PRD** (los 4 servicios corriendo con la misma separación de env vars por consumidor, health checks y wiring web→api→orchestrator→connector). La homologación completa y su certificación es tarea del agente → **fase S7**. Esta fase S3 queda solo para PRD (dominio propio + hardening de la cuenta Render).
+
 1. **[F] Crear Project con 2 environments** (staging/production) en Render: habilita `networking.isolation` (que STG no pueda alcanzar recursos de PRD) y `permissions.protection` en production (solo admins hacen cambios destructivos). Hobby permite 2 environments por proyecto — suficiente.
 2. **[F] Env Groups con scope por ambiente**: mover las vars compartidas a grupos con scope al environment correspondiente (la doc confirma que un grupo con scope NO puede linkearse fuera de su ambiente — es la barrera anti-mezcla de Render). Regla: nunca solapar keys entre grupos (precedencia entre grupos no garantizada [DOC]).
 3. **[F] Custom domain** `api.konvi.com` (o el dominio definitivo): agregar en Settings → Custom Domains, DNS, verificación, TLS automático. **NO deshabilitar el subdominio onrender.com de inmediato** — la doc confirma que el servicio conserva ambos; eso permite transición de webhooks sin corte: registrar el dominio nuevo en cada proveedor, verificar, y solo entonces (opcional) `renderSubdomainPolicy: disabled`.
@@ -116,8 +118,28 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 ### FASE S6 — MeLi / Aveonline [F] (cuando el marketplace entre a operación)
 
 1. **MeLi [F]:** crear segunda aplicación en DevCenter ("Konvi STG") con su `client_id/secret`, redirect URI al ambiente STG y callback de notificaciones propio. Crear usuarios de prueba (`POST /users/test_user`, máx 10; **expiran a los 60 días de inactividad** → calendarizar recreación o uso mensual). Regla de la doc: los ítems de prueba se titulan "Item de Prueba - Por favor, NO OFERTAR"; usuarios test solo operan entre usuarios test. Defensa en código (ya existente): allowlist de las 4 IPs de notificación — pendiente la revisión trimestral (S0.4).
-2. **Aveonline [F, decisión]:** el webhook de tracking es **único por empresa** (upsert por token [DOC]) → STG y PRD no pueden tener URLs distintas con la misma cuenta. Opciones: (a) **cuenta Aveonline separada para STG** (segregación total; costo: otra vinculación), o (b) aceptar que STG no recibe tracking real y usa el "API Sandbox" documentado (empresas demo 6077/25505, `avanzarEstado` para simular el flujo de estados). Recomendación: (b) mientras el volumen no lo justifique, (a) antes del lanzamiento con múltiples tenants.
+2. **Aveonline [F, decisión]:** el webhook de tracking es **único por empresa** (upsert por token [DOC]) → STG y PRD no pueden tener URLs distintas con la misma cuenta. **Decisión founder 2026-08-16:** STG usa la **cuenta demo pública homologada** (`demointegracion`/`demointegra2021`, gratis, documentada en la autenticación oficial — dossier §12.1) + el "API Sandbox" (empresas demo 6077/25505, `avanzarEstado` para simular el flujo de estados). La segregación de facturación la garantiza el dry-run (`bloquegenerarguia="0"`, doble compuerta ya en código). Si en el futuro hace falta tracking real en STG, la única vía es cuenta Aveonline separada.
 
+---
+
+### FASE S7 — STG 100% local, homologación total a PRD [A] (decisión founder 2026-08-16)
+
+**Misión:** STG no depende de Render en absoluto, pero corre la MISMA topología que PRD — completo, no parcial. Implementación:
+
+1. **Filtro de env por servicio** (`scripts/dev_env_for_service.py`): el set de variables de cada servicio local es EXACTAMENTE el de su contraparte en render.yaml. Precedencia: valor local gana · anclas de ambiente (`APP_URL`, `API_URL`, `APP_ENV`, `AVEONLINE_GENERATE_REAL_GUIDES`, …) NUNCA heredan el valor PRD (fail-closed si faltan en el env-file local) · tuning con `value:` en render.yaml se hereda (= idéntico a PRD) · `sync:false` sin valor local solo pasa si es delta documentado (Sentry off, MeLi/Telegram hasta S5/S6). Fin del "megáfono" (todos los servicios veían todo).
+2. **Makefile homologado** (`.local/Makefile`, ahora TRACKEADO en git — antes `.local/` entero estaba gitignored, la orquestación local era invisible al repo): orchestrator arranca con `uvicorn server:app :8002` (= PRD; antes `python main.py` sin /health), api/connector `uvicorn main:app` (= PRD), web `next dev` (diario) / `next start` (`make start-web-prod`, = PRD). Cada servicio arranca con entorno limpio (`env -i`) + su env filtrado.
+3. **Guard de paridad en CI** (`tests/test_stg_prd_parity.py`, 13 tests): snapshot del conteo de vars por servicio, precedencia del filtro, entrypoints del Makefile = render.yaml, toda key de render.yaml documentada en `.env.example`.
+4. **Certificación ejecutable** (`scripts/certify_stg.sh`): filtro fail-closed ×4 · health checks en los mismos paths de render.yaml · **aislamiento probado en procesos vivos** (`/proc/<pid>/environ`: api NO tiene GEMINI_MODEL, connector NO tiene RESEND_API_KEY, web NO tiene INTERNAL_SERVICE_SECRET, orchestrator NO tiene NGROK_AUTHTOKEN) · wiring internal-secret (orchestrator 200 + api dual-auth 422) + web→api.
+
+**Estado 2026-08-16: CERRADA — certificación live 18/18 (`bash scripts/certify_stg.sh`).** Bugs reales detectados y corregidos por esta fase:
+- **Drift Sentry PRD:** el client bundle leía `NEXT_PUBLIC_SENTRY_TRACES_RATE` pero render.yaml setea `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` → el override nunca aplicaba (mismo default 0.1, sin impacto; corregido al nombre canónico F97 + contrato actualizado).
+- **Quoting:** valores con espacios (`RESEND_FROM_EMAIL="Konvi <...>"`) rompían el `source` del env filtrado → shlex.quote.
+- **Contrato `.env.example` completado:** PLAN_ENFORCEMENT_ENABLED, API_RATE_LIMIT_ENABLED/DISTRIBUTED, MULTIMODAL_AUDIO_ENABLED, COLOMBIA_UTC_OFFSET_HOURS, build-vars web.
+- **Riesgo latente evitado por diseño:** heredar ciegamente `value:` de render.yaml habría prendido `AVEONLINE_GENERATE_REAL_GUIDES=true` en STG — por eso es ancla de ambiente con `false` explícito local.
+
+
+| Guard | Qué certifica | Dónde corre |
+|---|---|---|
 ---
 
 ## 4. Verificación continua (lo que queda automatizado)
@@ -129,6 +151,8 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 | `tests/test_env_contract_guard.py` | Toda var leída por el código está en el contrato `.env.example` | CI |
 | `tests/test_check_env_data_mix.py` | Lógica del guard (13 casos) | CI |
 | S0.1/S0.2 (nuevos) | Cross-environment Wompi rechazado aunque la firma sea válida | CI |
+| `tests/test_stg_prd_parity.py` (S7) | Paridad STG↔PRD: set de env por servicio = render.yaml, entrypoints, contrato | CI |
+| `scripts/certify_stg.sh` (S7) | Homologación live: health ×5 + aislamiento /proc + wiring interno — 18 checks | Manual (con stack arriba) |
 
 **Checklist de certificación por fase:** cada fase se marca cerrada solo con su verificación ejecutada y evidencia en la bitácora de `docs/PLAN.md` §E.
 
@@ -137,7 +161,8 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 ## 5. Dependencias entre fases y orden recomendado
 
 ```
-S0 [A] ── sin dependencias (código, inmediato)
+S0 [A] ── sin dependencias (código) — ✅ CERRADA 2026-08-16
+S7 [A] ── sin dependencias (STG local homologado) — ✅ CERRADA 2026-08-16
 S4.2 [F] B2 paso 10 (legacy Supabase) ── mata el P0, MÁXIMA PRIORIDAD founder
 S1 [F] Wompi ── depende de activación de Wompi (tiempo externo); desbloquea cobros reales
 S2 [F] Meta ── paralelo a S1

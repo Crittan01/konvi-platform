@@ -91,7 +91,7 @@ python3.11 main.py                          # usar python3.11 explícito en esta
 pnpm --filter web dev                       # Node 22 (`.nvmrc`; v22.23.1 instalada via nvm)
 ```
 
-**Target por defecto del desarrollo local (ENV-1, 2026-08-03):** `.env` y `apps/web/.env.local` apuntan al **Supabase LOCAL en podman** (`http://127.0.0.1:54321`, DB `:54322`, Studio `:54323`) — no a la nube. Levantar stack: `export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock" && supabase start`. Para operar PROD se usa `.env.prod` explícito (ver `docs/infra/environments.md` §2).
+**Target por defecto del desarrollo local (ENV-1, 2026-08-03):** `.env.local` (raíz, 3 servicios Python) y `apps/web/.env.local` apuntan al **Supabase LOCAL en podman** (`http://127.0.0.1:54321`, DB `:54322`, Studio `:54323`) — no a la nube. Levantar DB: `export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock" && supabase start`. Levantar los 4 servicios: `make -C .local up` (topología **homologada a PRD** desde S7 2026-08-16: env filtrado por servicio = render.yaml, mismos entrypoints; certificar con `bash scripts/certify_stg.sh`). Para operar PROD se usa `.env.prd-backup` explícito (ver `docs/infra/environments.md` §2).
 
 ---
 

@@ -10,7 +10,7 @@
 | Ambiente | Qué es | Dónde vive | Quién escribe en él |
 |---|---|---|---|
 | **PROD** | La plataforma real | Render (4 servicios: `konvi-web`, `konvi-connector`, `konvi-api`, `konvi-orchestrator`) + Supabase cloud | Solo deploys desde la rama `production` y migraciones por protocolo seguro (§4) |
-| **DEV local** | Desarrollo diario | VM de desarrollo: apps locales + Supabase local en podman (`scripts/dbharness_up.sh`; Studio GUI en `http://127.0.0.1:54323`) | Desarrolladores/agentes, datos sintéticos |
+| **DEV local** | Desarrollo diario — **homologado a PRD desde S7 (2026-08-16)**: los 4 servicios corren con el MISMO entrypoint y el MISMO set de env vars por servicio que su contraparte Render (filtro fail-closed `scripts/dev_env_for_service.py`; certificación `bash scripts/certify_stg.sh` — 18 checks) | VM de desarrollo: apps locales (`.local/Makefile`, trackeado) + Supabase local en podman (`scripts/dbharness_up.sh`; Studio GUI en `http://127.0.0.1:54323`) | Desarrolladores/agentes, datos sintéticos |
 | **CI** | Verificación | GitHub Actions: db-harness levanta Postgres con replay-desde-cero de las migraciones | Automático en cada push/PR |
 
 **Regla de oro:** el desarrollo diario NO escribe en prod. Prod solo recibe: (a) código vía `git push origin develop:production`, (b) migraciones vía protocolo seguro, (c) flips de config explícitos del founder.

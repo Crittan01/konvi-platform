@@ -28,7 +28,11 @@ Sentry.init({
 
   // Capturar 10% de transacciones — suficiente para detectar patrones sin
   // saturar quota free tier. Ajustable per environment.
-  tracesSampleRate: Number(process.env.NEXT_PUBLIC_SENTRY_TRACES_RATE || 0.1),
+  // Nombre canónico F97 (igual que server/edge y render.yaml): *_SAMPLE_RATE.
+  // Antes leía NEXT_PUBLIC_SENTRY_TRACES_RATE, que ningún ambiente setea → el
+  // override de render.yaml nunca aplicaba (drift detectado por el guard de
+  // paridad STG↔PRD, S7 2026-08-16). Mismo default 0.1 → sin cambio de comportamiento.
+  tracesSampleRate: Number(process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || 0.1),
 
   // PII control: NO enviar emails/IPs/cookies por default (Habeas Data).
   // Si necesitas debug específico → habilitar localmente via env override.
