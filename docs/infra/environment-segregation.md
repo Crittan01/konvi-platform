@@ -1,6 +1,6 @@
 # Segregación total de ambientes — diseño canónico (verificado contra código 2026-08-14)
 
-**Este documento es la fuente de verdad de cómo se separan los ambientes en Konvi, integración por integración.** Escrito tras verificación en código (no suposición). Para el estado operativo de los ambientes ver `environments.md`.
+**Este documento es la fuente de verdad de cómo se separan los ambientes en Konvi, integración por integración.** Escrito tras verificación en código (no suposición). Para el estado operativo de los ambientes ver `environments.md`. **Para el PLAN DE TRABAJO de segregación total (qué configurar en el dashboard de cada plataforma, verificado contra documentación oficial 2026-08-16) ver [`environment-segregation-plan.md`](environment-segregation-plan.md).**
 
 ---
 

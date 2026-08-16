@@ -3,6 +3,7 @@
 > Estado: VIGENTE · Última verificación contra código/infra: 2026-08-03 @ develop
 >
 > **Diseño canónico de la segregación integración-por-integración (Wompi, Meta, Aveonline, MeLi, Telegram, Resend, Gemini, Supabase):** [`environment-segregation.md`](environment-segregation.md) — qué credencial/URL/webhook usa cada ambiente y qué gaps faltan para la segregación total.
+> **Plan de trabajo de segregación TOTAL (código + dashboards de plataformas, verificado contra doc oficial 2026-08-16):** [`environment-segregation-plan.md`](environment-segregation-plan.md).
 
 ## 1. Los tres ambientes que existen
 
