@@ -142,6 +142,38 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 |---|---|---|
 ---
 
+### FASE S8 — Eliminación TOTAL de Sentry [A] (decisión founder 2026-08-16)
+
+**Motivo:** Sentry se adoptó como free tier; vencido el periodo de prueba deja de ser útil/cubierto. Decisión founder: **borrarlo absolutamente todo**. La observabilidad propia (métricas, alerting, error tracking) se diseña y construye en la **fase Platform Console (fase 12)** — hasta entonces la observabilidad queda en: logs estructurados (stdout, Render los retiene), endpoints `/health` + `/health/ready` + `/agentic/metrics` (ya existen, no son Sentry) y los guards de CI.
+
+**Inventario verificado 2026-08-16 (borrado mecánico, sin suposiciones):**
+
+| Capa | Qué borrar |
+|---|---|
+| Deps Python | `sentry-sdk[fastapi]==2.65.0` de los 3 `requirements.txt` (api, ai-orchestrator, connector-whatsapp) |
+| Módulos Python | `services/{api,ai-orchestrator,connector-whatsapp}/observability.py` (149/326/149 líneas — son solo Sentry) |
+| Call sites Python | 13 usos de `init_sentry`/`capture_exception` en services (main.py ×2, server.py, dispatcher.py, invariants/base.py, stock_reservation.py, refund_notifications.py, shipment_status_notifications.py, whatsapp_sender.py, worker.py, dependencies/auth.py, lib/client_notifications.py, routers/wompi_webhook.py) — reemplazar `capture_exception(e)` por `logger.exception(...)` donde no haya ya log |
+| Deps web | `@sentry/nextjs ^10.68.0` de `apps/web/package.json` |
+| Archivos web | `sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`; wrapper `withSentryConfig` en `next.config` (líneas ~126-130); referencias en `instrumentation.ts`, `global-error.tsx`, `proxy.ts`, `app/api/insights/route.ts`, `app/dashboard/(sales)/claims/page.tsx`, `(settings-group)/team/page.tsx` |
+| Paquete muerto | `packages/observability/` (`@commerce/observability`) — **nadie lo importa** (verificado: solo se referencia a sí mismo) → borrar el paquete completo |
+| Config PRD | 19 menciones SENTRY en `render.yaml` (keys SENTRY_DSN/ENV/TRACES_SAMPLE_RATE/NEXT_PUBLIC_* ×4 servicios + SENTRY_AUTH_TOKEN/ORG/PROJECT web) |
+| Contrato | Sección Sentry completa de `.env.example` (9 líneas) |
+| Tests | Los que referencian comportamiento Sentry (test_config_g13*, test_a11_metrics_auth, test_internal_secret_rotation, test_m14_readiness_no_leak, agentic ×2) — actualizar asserts a la postura sin-Sentry |
+| Guards propios | `scripts/dev_env_for_service.py` (_STG_DELTA_OK: quitar SENTRY_* cuando las keys salgan de render.yaml) · `scripts/_reorg_env_f2.py` (one-off histórico — evaluar borrado) |
+| Dashboard [F] | Borrar las env vars SENTRY_* en los 4 servicios Render + cancelar/borrar el proyecto en sentry.io |
+
+**Orden de ejecución:** deps+configs primero, call sites después, suite + build + CI verde, y como cierre: `grep -ri sentry services/ apps/ packages/ scripts/ tests/ render.yaml .env.example` = 0 hits (fuera de docs históricos/archive y este plan). **Certificación:** suite completa + vitest + tsc + `next build` + CI 5/5 + `bash scripts/certify_stg.sh` 18/18 (los conteos de vars por servicio en `test_stg_prd_parity.py` bajan al quitar las SENTRY_* — actualizar el snapshot en el mismo commit).
+
+---
+
+## 3.5 Respuestas founder (2026-08-16)
+
+**¿Cómo se comunican los endpoints en local (webhooks de terceros)?** Sí: **ngrok**. Los túneles los levanta `make -C .local up` (`NGROK_AUTHTOKEN`/`NGROK_DOMAIN_API` para api :8001, `NGROK_AUTHTOKEN_CONNECTOR`/`NGROK_DOMAIN_CONNECTOR` para connector :8000 — vars del `.env.local`, nunca llegan al runtime de los servicios: verificado por el guard de aislamiento S7). `make -C .local print-urls` imprime las URLs exactas a registrar en cada proveedor (Wompi eventos, Meta webhook, MeLi redirect/notificaciones). Los túneles son SOLO para que terceros alcancen tu máquina; el tráfico interno web→api→orchestrator va directo por localhost. Detalle en `environment-segregation.md` §4.
+
+**¿El API de PRD debe quedar en `*.onrender.com`?** **No.** Estado objetivo: dominio propio (`api.konvi.com` o el definitivo) — fase S3.3/S3.4. `onrender.com` es **transitorio**: la doc de Render confirma que el servicio conserva el subdominio onrender tras agregar el custom domain, lo que permite migrar los webhooks de cada proveedor sin corte; cuando todo apunte al dominio propio, el subdominio se puede deshabilitar (`renderSubdomainPolicy: disabled`). Hasta entonces, las URLs onrender registradas en los proveedores siguen siendo válidas.
+
+---
+
 ## 4. Verificación continua (lo que queda automatizado)
 
 | Guard | Qué certifica | Dónde corre |
@@ -162,7 +194,8 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 
 ```
 S0 [A] ── sin dependencias (código) — ✅ CERRADA 2026-08-16
-S7 [A] ── sin dependencias (STG local homologado) — ✅ CERRADA 2026-08-16
+S7 [A] ── sin dependencias (STG local homologado) — ✅ CERRADA 2026-08-16 (CI 5/5 verde)
+S8 [A] ── sin dependencias (borrado total Sentry) — lista para ejecutar; inventario verificado en §S8
 S4.2 [F] B2 paso 10 (legacy Supabase) ── mata el P0, MÁXIMA PRIORIDAD founder
 S1 [F] Wompi ── depende de activación de Wompi (tiempo externo); desbloquea cobros reales
 S2 [F] Meta ── paralelo a S1
