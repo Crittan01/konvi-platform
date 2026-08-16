@@ -24,6 +24,7 @@ from integrations.wompi_client import (
     create_payment_link_sync,
     get_tenant_wompi_creds,
     is_void_eligible,
+    payload_environment_matches,
     payment_link_ttl_minutes,
     verify_event_signature,
     void_transaction_sync,
@@ -354,14 +355,31 @@ def _process_wompi_event(payload: dict) -> None:
     # W3-F1: raise_on_error=True → un flake de Vault PROPAGA (inbox sin procesar →
     # reconcilia) en vez de degradar a events_key='' → 'firma_invalida' → pago perdido.
     events_key: str = ""
+    tenant_env = "sandbox"
     if tenant_id_for_sig:
-        _, events_key_val, _ = get_tenant_wompi_creds(supabase, tenant_id_for_sig, raise_on_error=True)
+        _, events_key_val, tenant_env_val = get_tenant_wompi_creds(supabase, tenant_id_for_sig, raise_on_error=True)
         events_key = events_key_val or ""
+        tenant_env = tenant_env_val or "sandbox"
     if not verify_event_signature(payload, events_key):
         logger.warning("[WOMPI] firma_invalida event=%s link=%s tenant=%s", event_name, payment_link_id, tenant_id_for_sig)
         return
 
-    # ── 3.5. Dedup de eventos duplicados por checksum (Wompi reintenta en
+    # ── 3.5. Anti-mezcla de ambientes (S0.1 — plan segregación 2026-08-16) ────
+    # Wompi envía `environment: "test"|"prod"` en cada evento [doc oficial]. Si el
+    # evento FIRMADO no corresponde al ambiente configurado del tenant, hay llaves
+    # cruzadas (events_key de un ambiente + meta.environment del otro). Rechazar:
+    # procesarlo mezclaría transacciones de prueba con datos reales — exactamente
+    # lo que la doc de Wompi advierte evitar. Fail-closed solo cuando el campo
+    # viene y no cuadra; sin el campo degrada a la barrera de firma.
+    if not payload_environment_matches(payload.get("environment") or "", tenant_env):
+        logger.warning(
+            "[WOMPI] environment_mismatch payload_env=%s tenant_env=%s tenant=%s link=%s txn=%s — "
+            "evento firmado de un ambiente distinto al configurado; revisar llaves del tenant",
+            payload.get("environment"), tenant_env, tenant_id_for_sig, payment_link_id, txn_id,
+        )
+        return
+
+    # ── 3.6. Dedup de eventos duplicados por checksum (Wompi reintenta en
     # 30m/3h/24h cuando merchant responde no-2xx; la firma SHA256 del payload
     # es el identificador más confiable porque no se documenta `event.id`
     # estable). El row se marca processed_at al FINAL del flujo (paso 8).

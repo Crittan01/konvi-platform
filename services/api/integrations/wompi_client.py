@@ -90,6 +90,25 @@ def wompi_base_url(environment: str) -> str:
     return WOMPI_PROD_URL if environment == "production" else WOMPI_SANDBOX_URL
 
 
+def payload_environment_matches(payload_env: str, tenant_env: str) -> bool:
+    """True si el `environment` del evento Wompi corresponde al configurado en el tenant.
+
+    Wompi envía `environment: "test"|"prod"` en cada evento (doc oficial de
+    eventos, verificada 2026-08-16). El tenant guarda `meta.environment` como
+    "sandbox"|"production" (ver wompi_base_url). Mapping: test↔sandbox,
+    prod↔production. Es defensa en profundidad anti-mezcla: la barrera
+    principal es la firma SHA256 (solo pasa con el events_key del ambiente
+    correcto); este check detecta la mala configuración residual "events_key
+    de un ambiente + meta.environment del otro" (la misma que flaggea en
+    reposo scripts/check_env_data_mix.py). Un payload sin el campo no se puede
+    juzgar → True (degrada a la barrera de firma, comportamiento previo).
+    """
+    if not payload_env:
+        return True
+    expected = "prod" if tenant_env == "production" else "test"
+    return payload_env.strip().lower() == expected
+
+
 def get_tenant_wompi_creds(
     supabase, tenant_id: str, *, raise_on_error: bool = False,
 ) -> Tuple[Optional[str], Optional[str], str]:

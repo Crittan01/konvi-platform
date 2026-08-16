@@ -66,7 +66,7 @@ Con `cotizarDoble` + formato `BOGOTA(CUNDINAMARCA)` uppercase + valorDeclarado �
 | Portal de documentación        | `https://integraciones.aveonline.co/docs/`                                                                                                                       |
 | Soporte integraciones técnicas | `desarrollo1@aveonline.co`                                                                                                                                       |
 | PQR / reclamos                 | `pqr@aveonline.co`                                                                                                                                               |
-| Sandbox / staging dedicado     | **NO EXISTE**. Las pruebas se hacen contra producción con la cuenta del cliente. Uso de `bloquegenerarguia: "0"` permite simular generación de guía sin facturar |
+| Sandbox / staging dedicado     | **NO EXISTE** como host aislado. Las pruebas se hacen contra producción con la cuenta del cliente. Uso de `bloquegenerarguia: "0"` permite simular generación de guía sin facturar. **Addendum 2026-08-16: sí existe "API Sandbox" acotado (empresas demo 6077/25505, simulación de estados) — ver §12** |
 | Asesor logístico asignado      | Campo `asesorlogistico` + `nombreasesor` en respuesta de auth (uno por cuenta)                                                                                   |
 
 ---
@@ -828,6 +828,8 @@ set_transient($key_cache, $result, 60);  // TTL 60 segundos
 ## 12. Producción vs sandbox / ambiente de pruebas
 
 > **Confirmación 2026-05-21 vía investigación exhaustiva + probe en vivo.** No existe un host sandbox dedicado (`sandbox.aveonline.co`, `test.aveonline.co`, etc. — todos `NO_DNS`). El mecanismo oficial de pruebas que el equipo de desarrollo de Aveonline confirmó verbalmente y que está documentado es:
+
+> **Addendum 2026-08-16 (verificado en vivo contra integraciones.aveonline.co):** la conclusión de fondo se MANTIENE (no hay host/ambiente aislado), pero hoy SÍ existe documentado un **"API Sandbox"** acotado: las empresas demo **6077 y 25505** sobre la infraestructura productiva permiten simular el flujo de estados de una guía sin mensajero real — creación con `noGenerarEnvio=1`, polling con `obtenerEstadoAuth`, y `avanzarEstado` mueve la guía por el flujo (GENERADA→…→ENTREGADA; forzable a EN NOVEDAD). `avanzarEstado` solo acepta guías de esas dos empresas (otro id → 403). URLs: `/docs/sandbox/sandbox-introduccion`, `/docs/sandbox/sandbox-avanzarEstado`, `/docs/sandbox/sandbox-obtenerEstadoAuth`. **No cubre** cotización ni generación, y los datos son compartidos entre todos los integradores (no hay aislamiento por integrador). Además, verificado el mismo día: el **webhook de tracking es único por empresa** (upsert por token vía `POST api.aveonline.co/api-integrations/public/api/integrations/custom-webhook` o panel "Mis integraciones") → STG y PRD no pueden tener URLs de tracking distintas con la misma cuenta; segregación total exige cuenta separada (ver `docs/infra/environment-segregation-plan.md` §S6.2).
 
 ### 12.1 Cuenta DEMO pública
 

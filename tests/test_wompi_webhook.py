@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from routers import wompi_webhook
+from integrations import wompi_client
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY
 
 
@@ -397,6 +398,109 @@ class WompiWebhookTests(unittest.TestCase):
             wompi_webhook._process_wompi_event(payload)
 
         mock_confirm.assert_called_once()
+
+
+class PayloadEnvironmentMatchesTests(unittest.TestCase):
+    """S0.1 (plan segregación 2026-08-16): mapping y fail-safe del helper puro.
+
+    Wompi envía `environment: "test"|"prod"` por evento; el tenant guarda
+    `meta.environment` "sandbox"|"production". El check solo es estricto cuando
+    el campo viene presente — sin él degrada a la barrera de firma (comportamiento
+    previo, payloads legados/otros eventos)."""
+
+    def test_match_test_sandbox(self):
+        self.assertTrue(wompi_client.payload_environment_matches("test", "sandbox"))
+
+    def test_match_prod_production(self):
+        self.assertTrue(wompi_client.payload_environment_matches("prod", "production"))
+
+    def test_mismatch_prod_contra_sandbox(self):
+        self.assertFalse(wompi_client.payload_environment_matches("prod", "sandbox"))
+
+    def test_mismatch_test_contra_production(self):
+        self.assertFalse(wompi_client.payload_environment_matches("test", "production"))
+
+    def test_campo_ausente_no_bloquea(self):
+        for vacio in ("", None):
+            self.assertTrue(wompi_client.payload_environment_matches(vacio, "sandbox"))
+            self.assertTrue(wompi_client.payload_environment_matches(vacio, "production"))
+
+    def test_tolera_mayusculas_y_espacios(self):
+        self.assertTrue(wompi_client.payload_environment_matches(" PROD ", "production"))
+
+    def test_tenant_env_desconocido_se_trata_como_sandbox(self):
+        # wompi_base_url hace lo mismo: todo lo que no es "production" → sandbox.
+        self.assertTrue(wompi_client.payload_environment_matches("test", "cualquier-cosa"))
+        self.assertFalse(wompi_client.payload_environment_matches("prod", "cualquier-cosa"))
+
+
+class WompiWebhookEnvironmentMismatchTests(unittest.TestCase):
+    """S0.1: el webhook rechaza eventos FIRMADOS de un ambiente distinto al del tenant.
+
+    La firma SHA256 es la barrera principal (un evento del ambiente equivocado no
+    pasa con la events_key del otro). Este check es la defensa en profundidad contra
+    la mala configuración residual: events_key de un ambiente + meta.environment del
+    otro en la misma fila de tenant_integrations."""
+
+    def setUp(self):
+        self._patcher = patch(
+            "routers.wompi_webhook.get_tenant_wompi_creds",
+            return_value=(None, TEST_EVENTS_KEY, "sandbox"),
+        )
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+
+    def _supabase_con_orden_pendiente(self):
+        return _make_supabase_mock({
+            "link_to_order": {"plink-env": "order-env"},
+            "orders": {
+                "order-env": {"id": "order-env", "tenant_id": "tenant-1", "status": "pending_payment", "conversation_id": "conv-env", "total_amount": 1350.0}
+            },
+            "messages_insert": [{"id": "msg-env"}],
+            "conversations": {"conv-env": {"customer_phone": "573001112233"}},
+        })
+
+    def _payload_firmado(self, environment):
+        payload = WompiPayloadBuilder().with_approved_txn(
+            payment_link_id="plink-env", txn_id="txn-env"
+        ).build()
+        if environment is not None:
+            payload["environment"] = environment
+        return payload
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_evento_prod_contra_tenant_sandbox_rechazado(self, mock_get_client, mock_decrement):
+        mock_get_client.return_value = self._supabase_con_orden_pendiente()
+        with self.assertLogs("routers.wompi_webhook", level="WARNING") as cm:
+            wompi_webhook._process_wompi_event(self._payload_firmado("prod"))
+        self.assertIn("environment_mismatch", "\n".join(cm.output))
+        mock_decrement.assert_not_called()
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_evento_test_contra_tenant_production_rechazado(self, mock_get_client, mock_decrement):
+        wompi_webhook.get_tenant_wompi_creds.return_value = (None, TEST_EVENTS_KEY, "production")
+        mock_get_client.return_value = self._supabase_con_orden_pendiente()
+        with self.assertLogs("routers.wompi_webhook", level="WARNING") as cm:
+            wompi_webhook._process_wompi_event(self._payload_firmado("test"))
+        self.assertIn("environment_mismatch", "\n".join(cm.output))
+        mock_decrement.assert_not_called()
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_evento_test_contra_tenant_sandbox_procesa(self, mock_get_client, mock_decrement):
+        mock_get_client.return_value = self._supabase_con_orden_pendiente()
+        wompi_webhook._process_wompi_event(self._payload_firmado("test"))
+        mock_decrement.assert_called_once()
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
+    def test_payload_sin_environment_procesa_como_antes(self, mock_get_client, mock_decrement):
+        """Backward compatible: payloads sin el campo degradan a la barrera de firma."""
+        mock_get_client.return_value = self._supabase_con_orden_pendiente()
+        wompi_webhook._process_wompi_event(self._payload_firmado(None))
+        mock_decrement.assert_called_once()
 
 
 if __name__ == "__main__":

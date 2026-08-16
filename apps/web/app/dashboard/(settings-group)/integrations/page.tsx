@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { wompiKeysMatchEnvironment } from '@/lib/wompi-keys'
 import { IntegrationsManager } from './_components/integrations-manager'
 import {
   connectAveonline as connectAveonlineCore,
@@ -379,6 +380,14 @@ export default async function IntegrationsPage(
 
     if (!privateKey || !eventsKey) {
       redirect(`/dashboard/integrations?error=${encodeURIComponent('Ingresa la Llave Privada y la Llave de Eventos de Wompi.')}`)
+    }
+
+    // S0.2 (plan segregación 2026-08-16): cortar en el origen la mala
+    // configuración "llaves de un ambiente + selector del otro" — Wompi advierte
+    // que esa mezcla cruza transacciones de prueba con datos reales.
+    const keyCheck = wompiKeysMatchEnvironment(environment, privateKey, eventsKey)
+    if (!keyCheck.ok) {
+      redirect(`/dashboard/integrations?error=${encodeURIComponent(keyCheck.error)}`)
     }
 
     const { data: existing } = await sb.from('tenant_integrations').select('credentials')
