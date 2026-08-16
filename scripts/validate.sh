@@ -331,10 +331,14 @@ required_example=(
   "SUPABASE_SERVICE_ROLE_KEY"
   "SUPABASE_JWT_SECRET"
   "GEMINI_API_KEY"
-  "PENDING_PAYMENT_RELEASE_ENABLED"
-  "CONVERSATION_HISTORY_LIMIT"
-  "API_RATE_LIMIT_DISTRIBUTED"
-  "ANTI_HIBERNATION_ENABLED"
+  # NOTA (2026-08-15): PENDING_PAYMENT_RELEASE_ENABLED, CONVERSATION_HISTORY_LIMIT,
+  # API_RATE_LIMIT_DISTRIBUTED y ANTI_HIBERNATION_ENABLED se quitaron de esta lista.
+  # Son overrides de tuning con default en código (fail-safe) — el contrato
+  # .env.example los documenta como comentario en el bloque de tuning (regla
+  # "sin basura": no se declaran vars que no hay que setear). Su presencia en
+  # PRD ya la garantiza el check §6 de render.yaml (arriba). tests/
+  # test_env_contract_guard.py cubre que TODA var leída por el código esté
+  # documentada en el contrato (declarada o en el tuning-block).
 )
 missing_example=()
 for var in "${required_example[@]}"; do
