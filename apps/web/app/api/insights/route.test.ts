@@ -22,11 +22,6 @@ vi.mock('@/utils/supabase/server', () => ({
   }),
 }))
 
-vi.mock('@sentry/nextjs', () => ({
-  captureException: vi.fn(),
-  captureMessage: vi.fn(),
-}))
-
 const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)
 

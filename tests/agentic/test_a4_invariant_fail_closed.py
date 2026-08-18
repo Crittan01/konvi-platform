@@ -116,18 +116,18 @@ class MoneyInvariantRaisesTests(unittest.TestCase):
                 )
                 self.assertIn("fail_closed", result.reason)
 
-    def test_reporta_excepcion_a_sentry_wrapper(self):
-        """El path fail-closed reporta por invariant caído (Sentry wrapper)."""
+    def test_reporta_excepcion_en_log_con_traza(self):
+        """El path fail-closed loguea el invariant caído con traza (logger.exception)."""
         from unittest.mock import patch
-        with patch("agentic.invariants.base._capture_exception") as cap:
+        with patch("agentic.invariants.base.logger.exception") as log_exc:
             result = _run(apply_invariants(
                 [_RaisingInvariant("payment_coherence")],
                 **_BASE_KWARGS,
             ))
             self.assertEqual(result.outcome, InvariantOutcome.BLOCK)
-            cap.assert_called_once()
-            self.assertEqual(
-                cap.call_args.kwargs.get("invariant"), "payment_coherence",
+            log_exc.assert_called_once()
+            self.assertIn(
+                "payment_coherence", str(log_exc.call_args),
             )
 
 

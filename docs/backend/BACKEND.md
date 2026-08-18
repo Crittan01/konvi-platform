@@ -76,7 +76,7 @@ Notas verificadas:
 - Rate limiting: los buckets `RL_WRITE_DEFAULT` / `RL_SEND_MESSAGE` se aplican **por endpoint**, no a
   nivel router; los 12 endpoints que carecían de bucket fueron cubiertos el 2026-08-02 (M15 cerrado).
 - Health: `GET /health` (liveness, no toca DB) y `GET /health/ready` (readiness con check DB; 503 con
-  detalle genérico — el error completo va a logs/Sentry, M14 cerrado) (`main.py:322-357`).
+  detalle genérico — el error completo va a logs, M14 cerrado) (`main.py:322-357`).
 
 ---
 

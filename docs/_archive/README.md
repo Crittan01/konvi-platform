@@ -12,6 +12,8 @@ Cada archivo archivado lleva una cabecera `⚠️ ARCHIVADO — <fecha>` como pr
 
 Existe además `docs/research/_archive/` (9 archivos, creado antes de esta depuración) que sigue el mismo patrón y se mantiene en su ubicación original como precedente.
 
+2026-08-17: +1 a `operations/` (`sentry-setup.md` — S8 eliminó Sentry del repo; el setup ya no aplica).
+
 ## Contenido archivado por directorio
 
 | Directorio | Archivos | Contenido | Motivo |

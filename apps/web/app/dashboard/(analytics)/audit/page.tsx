@@ -35,7 +35,7 @@ type AuditEntry = {
   created_at: string
 }
 
-type PiiAccessEntry = {
+type PiiAccessRecord = {
   id: string
   contact_id: string | null
   accessed_by: string
@@ -110,7 +110,7 @@ export default async function AuditPage(
 
   // ── Fetch según la vista activa ──────────────────────────────────────────
   let entries: AuditEntry[] = []
-  let accessEntries: PiiAccessEntry[] = []
+  let piiAccessRows: PiiAccessRecord[] = []
   let count = 0
   let error: { message: string } | null = null
 
@@ -145,7 +145,7 @@ export default async function AuditPage(
     if (fromUTC) query = query.gte('accessed_at', fromUTC)
     if (toUTC)   query = query.lte('accessed_at', toUTC)
     const res = await query
-    accessEntries = (res.data as PiiAccessEntry[] | null) ?? []
+    piiAccessRows = (res.data as PiiAccessRecord[] | null) ?? []
     count = res.count ?? 0
     error = res.error
     if (error) {
@@ -347,7 +347,7 @@ export default async function AuditPage(
 
         {/* ── Vista: Accesos a PII ─────────────────────────────────────────── */}
         {view === 'access' ? (
-          accessEntries.length === 0 ? (
+          piiAccessRows.length === 0 ? (
             <EmptyState
               variant="plain"
               className="py-12 px-6"
@@ -360,7 +360,7 @@ export default async function AuditPage(
             />
           ) : (
             <div className="divide-y divide-border">
-              {accessEntries.map(e => {
+              {piiAccessRows.map(e => {
                 const actor = describeActor(e.accessed_by)
                 const fields = e.fields_accessed ?? []
                 return (

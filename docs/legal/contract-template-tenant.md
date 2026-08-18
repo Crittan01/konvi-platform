@@ -95,7 +95,7 @@
 > - Atender consultas y reclamos de titulares en los términos del artículo 14 y 15 de la Ley 1581 de 2012;
 > - Comunicar a KONVI las solicitudes de los titulares que requieran acción de KONVI como Encargado.
 >
-> **6.4 Subprocesadores:** KONVI podrá subcontratar tratamiento a los subprocesadores listados en [`docs/legal/subprocessors.md`](subprocessors.md) (Supabase, Render, Resend, Sentry, Google Gemini, Meta/WhatsApp, Wompi, Aveonline, etc.). Cualquier nuevo subprocesador será notificado al CLIENTE con [30] días de anticipación.
+> **6.4 Subprocesadores:** KONVI podrá subcontratar tratamiento a los subprocesadores listados en [`docs/legal/subprocessors.md`](subprocessors.md) (Supabase, Render, Resend, Google Gemini, Meta/WhatsApp, Wompi, Aveonline, etc.). Cualquier nuevo subprocesador será notificado al CLIENTE con [30] días de anticipación.
 
 ### 7. Force majeure y caso fortuito
 

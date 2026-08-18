@@ -153,7 +153,7 @@ por la etiqueta de estado (un COD nace `confirmed` sin haberse cobrado).
 → **SUPERADO — implementado y en prod** (#180-#186; ver la entrada posterior en esta misma sección
 "Comprobante de compra (ADR-0040): IMPLEMENTADO y en prod" y `/dashboard/receipts`).
 
-**Stack:** Next 15→16 + ESLint 9 flat + Sentry v10 (#152-#155, desplegado) · Tailwind 3→4 (#158,
+**Stack:** Next 15→16 + ESLint 9 flat (#152-#155, desplegado) · Tailwind 3→4 (#158,
 mergeado, **espera visto bueno estético**) · identidad legal del tenant persona natural/jurídica (#163).
 
 **Comprobante de compra (ADR-0040): IMPLEMENTADO y en prod** (#180-#186). El comprador recibe

@@ -55,7 +55,7 @@ Antes de confirmar (paso 5b, 512-540; A11 audit 2026-06-25 + F16):
 ### 2.5 Guard de estado terminal + reconciliación de auto-cancel
 
 - Si la orden ya está en estado terminal, un APPROVED tardío normalmente se rechaza (470); excepción BLOQUE A (456-508): si la orden fue **auto-cancelada por TTL** (worker, §4.3) y llega el APPROVED tardío → se **revierte el auto-cancel y se confirma** — única vía documentada de recuperar un webhook perdido. La validación de monto de §2.4 protege contra reconciliaciones erróneas (463-464).
-- Replay del mismo webhook sobre orden confirmada → idempotente (475); pago **distinto** sobre orden confirmada = posible doble cobro → Sentry + void automático si aplica, si no, refund manual (482-486).
+- Replay del mismo webhook sobre orden confirmada → idempotente (475); pago **distinto** sobre orden confirmada = posible doble cobro → ERROR en logs + void automático si aplica, si no, refund manual (482-486).
 
 ### 2.6 Confirmación y notificaciones
 

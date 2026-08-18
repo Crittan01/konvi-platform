@@ -1,3 +1,4 @@
+⚠️ ARCHIVADO — 2026-08-17 (S8: Sentry eliminado del repo por decisión founder; este setup ya no aplica. La observabilidad propia se construye en la fase Platform Console — fase 12).
 # Sentry — Setup + operación
 
 **Rev. 109 J.2.7.4** — Sentry tracing E2E cross-service. Cierra item del Plan K (audit 2026-05-29) ajustado de "OTEL+Grafana" a "Sentry tracing" tras feedback founder (Sentry tiene su UI propia, sin dominio nuevo, free 5k events/mo).

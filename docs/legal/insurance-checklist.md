@@ -128,7 +128,7 @@
 | **Modelo de negocio** | B2B suscripción mensual + flat fee tier (no per-transaction) |
 | **Mercado objetivo** | PYMES Colombia (verticales: eCommerce, cosmética, moda, alimentos) |
 | **Volumen proyectado año 1** | Ingresos brutos: $[X] COP · Tenants activos: [N] · Conversaciones procesadas mes: [Y] |
-| **Stack técnico principal** | Render (hosting), Supabase (DB + Auth), Wompi (pagos), Meta WhatsApp Business API, Google Gemini (LLM), Resend (email), Sentry (observability) |
+| **Stack técnico principal** | Render (hosting), Supabase (DB + Auth), Wompi (pagos), Meta WhatsApp Business API, Google Gemini (LLM), Resend (email) |
 | **¿Procesás pagos?** | NO procesa pagos directamente. Las pasarelas Wompi son configuradas con credenciales del tenant (key-per-tenant). Konvi NO es agregador ni recauda a nombre de terceros. |
 | **¿Manejás datos personales?** | SÍ — actúa como Encargado del Tratamiento conforme Ley 1581/2012. Responsable = tenant. |
 | **¿Datos sensibles?** | NO — no se manejan datos sensibles según art. 5 Ley 1581 (salud, biométricos, vida sexual, política, religión, etc.) |
@@ -140,7 +140,7 @@
 > Compartir esto con el corredor MEJORA significativamente la prima — demuestra postura de riesgo madura.
 
 - ✅ **Habeas Data Ley 1581/2012:** Audit log append-only, SAR endpoint, retention policies pg_cron, anonimización, click-wrap acceptance, política de tratamiento publicada (`docs/legal/privacy-policy.md`), DPA con tenants (`docs/legal/dpa.md`), lista subprocesadores (`docs/legal/subprocessors.md`), incident response playbook (`docs/legal/incident-response.md`).
-- ✅ **Seguridad técnica:** TLS en tránsito (Render gestiona), encriptación at-rest (Supabase Postgres), RLS multi-tenant, RBAC owner/manager/operator, MFA TOTP para owner/manager (J.2.4.3), tenant offboarding workflow con grace period 30d + hard delete (J.2.4.4), Sentry tracing E2E (J.2.7.4).
+- ✅ **Seguridad técnica:** TLS en tránsito (Render gestiona), encriptación at-rest (Supabase Postgres), RLS multi-tenant, RBAC owner/manager/operator, MFA TOTP para owner/manager (J.2.4.3), tenant offboarding workflow con grace period 30d + hard delete (J.2.4.4).
 - ✅ **Auditoría operativa:** suite tests 2783+ pass, validate.sh CI strict, GitHub Actions pre-merge, código abierto al equipo (no hay shadow operations).
 
 ### Información de incidentes previos

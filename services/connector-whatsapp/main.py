@@ -5,10 +5,6 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from observability import init_sentry
-
-# Init Sentry ANTES de routers (captura errores tempranos también).
-init_sentry(service_name="connector-whatsapp")
 
 from routers import webhook
 

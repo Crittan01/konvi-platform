@@ -144,6 +144,17 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 
 ### FASE S8 — Eliminación TOTAL de Sentry [A] (decisión founder 2026-08-16)
 
+**Estado 2026-08-17: CERRADA.** Certificación local completa: grep-cero en código/config (`grep -ri sentry services/ apps/ packages/ scripts/ tests/ render.yaml .env.example` = 0 hits) · suite **4408 passed / 0 failed** · vitest 353 · tsc 0 · `next build` OK · ruff 197 ≤ baseline 201 · `bash scripts/certify_stg.sh` **18/18** live. Evidencia en bitácora `docs/PLAN.md` §E. **Pendiente [F]:** borrar las env vars SENTRY_* en el dashboard de los 4 servicios Render + cancelar/borrar el proyecto en sentry.io.
+
+Desviaciones del inventario (encontradas al ejecutar, verificadas contra código):
+- `services/ai-orchestrator/observability.py` NO era solo Sentry: albergaba el tracing OTEL (`track_op`/`start_span`, rev.109) que usa `agentic/dispatcher.py`. El OTEL no es Sentry y se conserva → movido intacto a `services/ai-orchestrator/tracing.py` (único import actualizado).
+- `_surface_email_failure` (wrapper Sentry en `lib/client_notifications.py`) era re-exportado por `routers/wompi_webhook.py` y patcheado en 4 tests de `test_wompi_webhook_money_paths.py` (no aparecían en el grep "sentry"): eliminado; los 4 tests ahora asertan la clasificación del fallo sobre los logs (assertLogs) en vez del wrapper.
+- `tests/test_parity_shared_modules.py::ObservabilityParityTests` (guard M16 de los espejos observability.py ×3, tampoco decía "sentry"): guard removido con los módulos.
+- `tests/test_w1_sentry_pii_scrub.py`: las clases de scrub PII de Sentry se fueron con los módulos; las de masking en origen (`_mask_phone`, vigente para logs) se conservan en `tests/test_w1_phone_masking.py`.
+- `apps/web/app/dashboard/(analytics)/audit/page.tsx`: falso positivo del grep (`PiiAccessEntry`/`accessEntries` contienen la subcadena) — identificadores renombrados (`PiiAccessRecord`/`piiAccessRows`) para que el cierre grep-cero sea literal.
+- `scripts/_reorg_env_f2.py`: borrado (one-off de la reorg F2 2026-08-14; operaba sobre `.env`/`.env.prod` que ya no existen tras la consolidación de ambientes).
+- Docs vivos actualizados a la postura sin-Sentry (TRD, BACKEND, slo-and-dr, local-prod-symmetry, wompi, pago-wompi, 01-state, 06-contracts, 09-bot-flowchart, credential-rotation, legales ×2); `docs/observability/sentry-setup.md` archivado. Reportes/ADR/research fechados quedan como registro histórico (exentos por criterio de cierre).
+
 **Motivo:** Sentry se adoptó como free tier; vencido el periodo de prueba deja de ser útil/cubierto. Decisión founder: **borrarlo absolutamente todo**. La observabilidad propia (métricas, alerting, error tracking) se diseña y construye en la **fase Platform Console (fase 12)** — hasta entonces la observabilidad queda en: logs estructurados (stdout, Render los retiene), endpoints `/health` + `/health/ready` + `/agentic/metrics` (ya existen, no son Sentry) y los guards de CI.
 
 **Inventario verificado 2026-08-16 (borrado mecánico, sin suposiciones):**
@@ -195,7 +206,7 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 ```
 S0 [A] ── sin dependencias (código) — ✅ CERRADA 2026-08-16
 S7 [A] ── sin dependencias (STG local homologado) — ✅ CERRADA 2026-08-16 (CI 5/5 verde)
-S8 [A] ── sin dependencias (borrado total Sentry) — lista para ejecutar; inventario verificado en §S8
+S8 [A] ── sin dependencias (borrado total Sentry) — ✅ CERRADA 2026-08-17 (grep-cero + suite/CI/certify verdes; queda [F] dashboard Render + sentry.io)
 S4.2 [F] B2 paso 10 (legacy Supabase) ── mata el P0, MÁXIMA PRIORIDAD founder
 S1 [F] Wompi ── depende de activación de Wompi (tiempo externo); desbloquea cobros reales
 S2 [F] Meta ── paralelo a S1

@@ -48,7 +48,7 @@ export default async function ClaimsPage() {
     .order('created_at', { ascending: false })
     .limit(ORDERS_LIMIT)
 
-  // Un fallo de lectura NO es "no hay reclamos": logear (visible en server logs / Sentry)
+  // Un fallo de lectura NO es "no hay reclamos": logear (visible en server logs)
   // y surfacear un estado de error con retry, no un empty state engañoso.
   if (claimsError) {
     console.error('[claims] read error', { tenantId, code: claimsError.code, message: claimsError.message })

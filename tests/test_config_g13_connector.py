@@ -59,7 +59,6 @@ class SettingsBasicsTests(unittest.TestCase):
             self.assertEqual(s.WA_INBOX_RETENTION_DAYS, 7)
             self.assertEqual(s.XFF_TRUSTED_HOPS_FROM_RIGHT, 0)
             self.assertEqual(s.XFF_CANARY, "")
-            self.assertEqual(s.SENTRY_TRACES_SAMPLE_RATE, 0.1)
             cfg.get_settings.cache_clear()
 
 

@@ -17,9 +17,8 @@ Cobertura:
         creds) ⊆ cliente canónico del api con AST idéntico por función.
         (El comentario del módulo citaba un inexistente test_wompi_void.py —
         ESTE es el guard real.)
-      - observability: api == connector (byte); orchestrator es SUPERSET
-        (añade OTEL rev.109) — toda función pública del api existe en el
-        orchestrator con AST idéntico.
+      (observability.py ×3 tenía guard aquí — eliminado en S8 junto con los
+      módulos; el OTEL del orchestrator vive ahora en tracing.py, sin espejo.)
 """
 import ast
 import unittest
@@ -91,26 +90,6 @@ class WompiClientParityTests(unittest.TestCase):
                 a[name], o[name],
                 f"wompi_client.{name} divergió (orchestrator ≠ api) — la copia "
                 f"reducida debe propagar los cambios del canónico",
-            )
-
-
-class ObservabilityParityTests(unittest.TestCase):
-    def test_api_y_connector_identicos(self):
-        a = (API / "observability.py").read_bytes()
-        c = (CONN / "observability.py").read_bytes()
-        self.assertEqual(a, c, "observability.py divergió api↔connector")
-
-    def test_orchestrator_es_superset_exacto_del_api(self):
-        """El orchestrator añade OTEL (rev.109) — pero toda función pública del
-        api debe existir allá con el mismo AST (sin drift de la parte común)."""
-        a = _ast_sin_docs(API / "observability.py")
-        o = _ast_sin_docs(ORCH / "observability.py")
-        for name in a:
-            self.assertIn(name, o, f"observability.{name} ausente en orchestrator")
-            self.assertEqual(
-                a[name], o[name],
-                f"observability.{name} divergió api↔orchestrator (la parte común "
-                f"debe ser idéntica; el extra OTEL va aparte)",
             )
 
 

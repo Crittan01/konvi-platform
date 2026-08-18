@@ -123,39 +123,4 @@ const nextConfig = {
   },
 }
 
-// ── Sentry wrapper (Rev. 109 J.2.7.4) ──────────────────────────────────────
-// Wrap con withSentryConfig para que @sentry/nextjs auto-inject:
-//   - sentry.client.config.ts en el browser bundle
-//   - sentry.server.config.ts en el server runtime Node
-//   - sentry.edge.config.ts si hay middleware/route edge (no usado hoy)
-//   - source maps upload en build (require SENTRY_AUTH_TOKEN)
-//   - tunnel route /monitoring para evadir ad-blockers (opcional)
-//
-// Si NEXT_PUBLIC_SENTRY_DSN no está configurado, Sentry queda inert
-// (enabled: false en cada config). Build sigue funcionando.
-
-// Sentry build wrap condicional — Render Free 512 MB causa OOM heap si se
-// hace source-maps generation + Sentry build instrumentation. Solo aplicar
-// el wrap completo si hay SENTRY_AUTH_TOKEN (Render Starter o local con
-// presupuesto memoria). En Free sin token: SDK runtime sigue activo (capture
-// errors), solo sin source-map line-number mapping en stack traces Sentry.
-const { withSentryConfig } = require('@sentry/nextjs')
-
-const sentryBuildEnabled =
-  Boolean(process.env.SENTRY_AUTH_TOKEN) &&
-  Boolean(process.env.SENTRY_ORG) &&
-  Boolean(process.env.SENTRY_PROJECT)
-
-// @sentry/nextjs v10: withSentryConfig pasó de 3 args a 2 (config + un único
-// objeto de opciones). `hideSourceMaps` fue removido (v9+ borra los sourcemaps
-// tras subirlos por default) y `automaticVercelMonitors` se movió a
-// `webpack.automaticVercelMonitors` (default false → se omite).
-module.exports = sentryBuildEnabled
-  ? withSentryConfig(nextConfig, {
-      silent: true,
-      org: process.env.SENTRY_ORG,
-      project: process.env.SENTRY_PROJECT,
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-      disableLogger: true,
-    })
-  : nextConfig
+module.exports = nextConfig

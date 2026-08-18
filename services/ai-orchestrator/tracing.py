@@ -1,170 +1,30 @@
-"""Inicialización de observability — Sentry SDK con defaults compliance.
+"""OpenTelemetry tracing mínimo (Rev. 109 P1 #2).
 
-Diseño:
-  • No-op si `SENTRY_DSN` env vacío → local dev sin ruido externo.
-  • `send_default_pii=False` → Habeas Data Ley 1581 compliance.
-    NUNCA enviar PII a Sentry sin opt-in explícito. Las request bodies
-    pueden contener email/phone/CC del cliente — Sentry filtra esto.
-  • `traces_sample_rate=0.1` → 10% requests con tracing performance.
-    Suficiente para detectar P95 sin saturar quota gratis.
-  • Release tracking via Render git commit hash → permite filtrar
-    errores por deploy.
-  • `before_send` hook: filtra rutas health/ready y errores HTTP 4xx
-    (no son bugs).
+Activable con OTEL_EXPORTER_ENABLED=true. Default NoOp en producción
+(cero coste runtime).
 
-Uso (api/main.py, ai-orchestrator/server.py, connector-whatsapp/main.py):
+Patrón aplicado a entry points críticos:
+  • agentic/dispatcher.dispatch_message
+  • agentic/dispatcher._run_agentic_full
+  • api/routers/wompi_webhook handlers
 
-    from observability import init_sentry
-    init_sentry(service_name="api")
+Futuros exporters: agregar OTLPSpanExporter (HTTP) en _init_tracer_provider
+para enviar a Grafana Tempo / Jaeger / Honeycomb.
 
-    app = FastAPI(...)
+NOTA (S8, 2026-08-16): este módulo vivía dentro de `observability.py` junto
+al error-tracking externo, que se eliminó por completo del repo (decisión
+founder). El tracing OTEL no dependía de él y se conserva aquí.
 """
 from __future__ import annotations
 
+import functools as _functools
 import logging
 import os
-from typing import Any, Optional
-
-logger = logging.getLogger("observability")
-
-
-
-# ── Scrub PII (Habeas Data Ley 1581): NUNCA teléfono/email a Sentry (W1) ──────
-import re as _re_pii  # noqa: E402
-# Móvil COL: 3XX XXX XXXX, con separadores internos opcionales (espacio/punto/guion/
-# paréntesis), la forma humana más común. Cuantificadores acotados {0,3} → sin ReDoS.
-# Prefijo +57/57 opcional. Cubre contiguo (E.164) y con separadores.
-_RE_PHONE = _re_pii.compile(r'(?<!\d)(?:\+?57[\s.()\-]{0,3})?3\d{2}[\s.()\-]{0,3}\d{3}[\s.()\-]{0,3}\d{4}(?!\d)')
-_RE_EMAIL = _re_pii.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
-
-
-def _scrub_str(s):
-    return _RE_EMAIL.sub('[email]', _RE_PHONE.sub('[phone]', s)) if isinstance(s, str) else s
-
-
-def _scrub_event(obj):
-    """Redacta PII (teléfono COL / email) recursivamente en strings del evento."""
-    if isinstance(obj, str):
-        return _scrub_str(obj)
-    if isinstance(obj, dict):
-        return {k: _scrub_event(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_scrub_event(v) for v in obj]
-    if isinstance(obj, tuple):
-        return tuple(_scrub_event(v) for v in obj)
-    return obj
-
-
-def _before_send(event: dict, hint: dict) -> Optional[dict]:
-    """Filtra eventos que NO valen alertar (health, 4xx normales)."""
-    # Excluir health checks.
-    req = (event.get("request") or {})
-    url = str(req.get("url") or "")
-    if any(x in url for x in ("/health", "/ready", "/ping", "/api/v1/me")):
-        return None
-    # Excluir errores HTTP 401/403/404 (no son bugs, son auth/validación).
-    exc = (hint or {}).get("exc_info")
-    if exc:
-        exc_type = exc[0].__name__ if exc[0] else ""
-        if exc_type == "HTTPException":
-            try:
-                status = getattr(exc[1], "status_code", 0)
-                if status in (400, 401, 403, 404, 422):
-                    return None
-            except Exception:
-                pass
-    # Scrub PII antes de emitir a Sentry (enforcement, no convención).
-    return _scrub_event(event)
-
-
-def init_sentry(service_name: str) -> bool:
-    """Inicializa Sentry SDK. Retorna True si activo, False si no-op.
-
-    `service_name` se usa como tag para filtrar eventos por servicio
-    (api / orchestrator / connector-whatsapp).
-    """
-    dsn = (os.getenv("SENTRY_DSN") or "").strip()
-    if not dsn:
-        logger.info(
-            "[observability] SENTRY_DSN vacío → Sentry no-op (local dev)"
-        )
-        return False
-
-    try:
-        import sentry_sdk
-    except ImportError:
-        logger.warning(
-            "[observability] sentry-sdk no instalado — skip init "
-            "(añadir a requirements.txt)"
-        )
-        return False
-
-    environment = (
-        os.getenv("RENDER_SERVICE_NAME")
-        or os.getenv("RENDER_ENVIRONMENT")
-        or os.getenv("APP_ENV")
-        or "local"
-    )
-    release = (os.getenv("RENDER_GIT_COMMIT") or "unknown")[:12]
-    traces_rate = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
-
-    sentry_sdk.init(
-        dsn=dsn,
-        environment=environment,
-        release=release,
-        traces_sample_rate=traces_rate,
-        profiles_sample_rate=0.0,
-        # Habeas Data compliance — NO enviar PII automático.
-        send_default_pii=False,
-        # Filtros pre-send (health, 4xx, etc.)
-        before_send=_before_send,
-        # Los breadcrumbs se escruban en before_send (recorre event["breadcrumbs"]) al
-        # transmitir el evento — NO se registra before_breadcrumb para evitar escrubar
-        # cada breadcrumb del hot path (todo log INFO+ / request HTTP) sin emitir evento.
-        # Tags por servicio para split en UI Sentry.
-        # tags se setean via `set_tag` después.
-    )
-    try:
-        sentry_sdk.set_tag("service", service_name)
-    except Exception:
-        pass
-
-    logger.info(
-        "[observability] Sentry activo service=%s environment=%s release=%s "
-        "traces_rate=%.2f",
-        service_name, environment, release, traces_rate,
-    )
-    return True
-
-
-def capture_exception(exc: BaseException, **extra: Any) -> None:
-    """Wrapper safe — captura excepción si Sentry activo, no-op si no."""
-    try:
-        import sentry_sdk
-        with sentry_sdk.push_scope() as scope:
-            for k, v in (extra or {}).items():
-                scope.set_extra(k, v)
-            sentry_sdk.capture_exception(exc)
-    except Exception:
-        pass
-
-
-# ─── Rev. 109 P1 #2 — OpenTelemetry tracing mínimo ──────────────────────────
-# Activable con OTEL_EXPORTER_ENABLED=true. Default NoOp en producción
-# (cero coste runtime). Complementa Sentry: Sentry captura errors,
-# OTEL captura spans (latencia, atributos, request chain).
-#
-# Patrón aplicado a entry points críticos:
-#   • agentic/dispatcher.dispatch_message
-#   • agentic/dispatcher._run_agentic_full
-#   • api/routers/wompi_webhook handlers
-#
-# Futuros exporters: agregar OTLPSpanExporter (HTTP) en _init_tracer_provider
-# para enviar a Grafana Tempo / Jaeger / Honeycomb.
-
-import functools as _functools
 import time as _time
 from contextlib import contextmanager as _contextmanager
+from typing import Any
+
+logger = logging.getLogger("tracing")
 
 _OTEL_ENABLED = os.getenv("OTEL_EXPORTER_ENABLED", "false").lower() in {
     "1", "true", "yes", "on",

@@ -28,7 +28,6 @@
 | Supabase **DB password** | Solo local/CLI (`SUPABASE_DB_PASSWORD`, scripts, `supabase db query`) | NO afecta runtime Render (PostgREST/Auth/Realtime autentican por API keys, no por esta password). Reset: Dashboard → Database → Settings ([docs](https://supabase.com/docs/guides/troubleshooting/how-do-i-reset-my-supabase-database-password-oTs5sB)). Actualizar `.env` locales |
 | `MELI_CLIENT_SECRET` (plataforma) | Render env: **api** | Rotar en MeLi Dev Center invalida tokens OAuth en curso → los tenants MeLi tendrían que reconectar. **Hoy 0 tenants MeLi conectados** (verificado prod 2026-08-03) → rotación trivial ahora; con tenants activos, coordinar reconexión OAuth |
 | `MFA_RECOVERY_COOKIE_SECRET` | Render env: **web** | Rotarlo invalida las cookies `mfa_recovery_session` vivas (24h) → usuarios en esa ventana re-verifican TOTP. Sin otro efecto |
-| `SENTRY_AUTH_TOKEN` | Render env: **web** (build) | Reemplazar y redeploy. Sin efecto runtime |
 
 ### C. NO rotar en este ejercicio
 
@@ -50,7 +49,7 @@
 7. Wompi por tenant (B) — orden events → prv → integrity → pub, actualizando Vault tras cada paso.
 8. Meta **App Secret** por tenant (B) — ventana corta, horario valle; smoke HMAC inmediato.
 9. Supabase **DB password** (B) — reset + actualizar `.env` locales.
-10. `MELI_CLIENT_SECRET` + `MFA_RECOVERY_COOKIE_SECRET` + `SENTRY_AUTH_TOKEN` (B, triviales hoy).
+10. `MELI_CLIENT_SECRET` + `MFA_RECOVERY_COOKIE_SECRET` (B, triviales hoy).
 11. **M19 (con esto se desbloquea):** rotar el verify_token dev `konvi-dev-direct-2026` (expuesto en `supabase/migrations/20260622_whatsapp_model_b_backfill_konvi_dev.sql:11`): actualizar la fila del tenant dev (`tenant_integrations.credentials.verify_token`) **y** el webhook en la consola Meta del tenant dev en la misma ventana — si se hace solo un lado, el webhook del tenant dev queda roto.
 12. **Paso final:** desactivar legacy `anon`/`service_role` JWT keys en Supabase (si ya nada las usa) y confirmar §3.1.
 13. Cerrar fila B2 en `docs/PLAN.md` §A con fecha + evidencia; M19 en §B P2.

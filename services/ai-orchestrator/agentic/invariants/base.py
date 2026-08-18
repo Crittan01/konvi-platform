@@ -26,12 +26,6 @@ from agentic.degraded_messages import DEGRADED_GENERIC
 
 logger = logging.getLogger(__name__)
 
-try:
-    from observability import capture_exception as _capture_exception
-except Exception:  # pragma: no cover - import defensivo (tests sin observability)
-    def _capture_exception(exc: BaseException, **extra: Any) -> None:
-        return None
-
 
 # A4 (2026-08-02) — invariants de dinero/verdad que cierran fail-closed ante
 # EXCEPCIÓN (no ante veredicto: un REWRITE/BLOCK normal sigue su curso). Si uno
@@ -124,12 +118,11 @@ async def apply_invariants(
             if inv.name in FAIL_CLOSED_INVARIANTS:
                 # A4 — guardrail de dinero/verdad CAÍDO: el texto NO sale
                 # sin validar. BLOCK + mensaje neutro seguro (el mismo
-                # degraded del dispatcher). Sentry por invariant caído.
-                logger.error(
+                # degraded del dispatcher). Traza completa en logs.
+                logger.exception(
                     "[AGENTIC.INVARIANT] %s raised (fail-closed — outbound "
-                    "bloqueado): %s", inv.name, exc,
+                    "bloqueado)", inv.name,
                 )
-                _capture_exception(exc, invariant=inv.name)
                 return InvariantResult(
                     outcome=InvariantOutcome.BLOCK,
                     invariant_name=inv.name,

@@ -488,7 +488,7 @@ async def reject_if_tenant_deleting(
         )
     except Exception:
         # Si la consulta falla (DB outage), NO bloquear writes — fail open
-        # es menos malo que un degraded service. Sentry captura el error.
+        # es menos malo que un degraded service.
         return tenant_id
 
     rows = res.data or []

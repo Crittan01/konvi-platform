@@ -8,9 +8,8 @@ lifespan y hace sys.exit(1) si hay errores).
 Alcance (deliberado, igual que fase 1): declaración + validación en boot. La
 migración de los `os.getenv` de runtime a `get_settings()` es fase posterior.
 Inventario = grep real de `os.getenv`/`os.environ` en este servicio
-(ALLOWED_ORIGINS y SENTRY_ENV NO se declaran: render.yaml documenta que se
-eliminaron — el connector no monta CORS y deriva environment de
-RENDER_SERVICE_NAME/APP_ENV en observability.py).
+(ALLOWED_ORIGINS NO se declara: render.yaml documenta que se eliminó — el
+connector no monta CORS).
 
 Uso:
     from config import get_settings
@@ -52,9 +51,7 @@ class Settings(BaseSettings):
     WA_INBOX_REDRIVE_BATCH: int = 20
     WA_INBOX_RETENTION_DAYS: int = 7
 
-    # ── Observabilidad (observability.py) ─────────────────────────────────
-    SENTRY_DSN: str = ""
-    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    # ── Ambiente ─────────────────────────────────────────────────────────
     APP_ENV: str = ""
 
 

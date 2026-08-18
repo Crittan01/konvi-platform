@@ -22,7 +22,6 @@ Los documentos de contexto histórico (`.context/02-stack.md`, `AGENTS.md`) cont
 | Frontend | TailwindCSS | **^4.3.3** (v4: sin `tailwind.config`, tokens en `@theme inline`) | `apps/web/package.json:26,36`; `apps/web/app/globals.css:1,11` |
 | Frontend | Componentes UI | 21 componentes propios (shadcn-style) + 1 test | `apps/web/components/ui/` (22 archivos, incl. `badge.test.tsx`) |
 | Frontend | Tests | Vitest ^4.1.10 | `apps/web/package.json:53` |
-| Frontend | Observabilidad | @sentry/nextjs ^10.68.0 | `apps/web/package.json:23` |
 | Runtime JS | Node | **22** (CI y prod; Render corre 22.22.0 en konvi-web) | `.nvmrc` (=22); `.github/workflows/ci.yml:19-23` |
 | Runtime JS | pnpm | **10.34.4** (corepack shim en Render, `--frozen-lockfile`) | `ci.yml:24`; `render.yaml:45-46` |
 | Backend | Python | **3.11.13** (VM y CI `PYTHON_VERSION=3.11`) | `python3.11 --version`; `ci.yml:18` |
@@ -33,7 +32,6 @@ Los documentos de contexto histórico (`.context/02-stack.md`, `AGENTS.md`) cont
 | Backend API/Orch | PyJWT | 2.13.0 | `services/api/requirements.txt:8`; `services/ai-orchestrator/requirements.txt:3` |
 | Backend API/Orch | google-genai | 2.11.0 | `services/api/requirements.txt:10`; `services/ai-orchestrator/requirements.txt:1` |
 | Backend (todos) | httpx | 0.28.1 | `services/api/requirements.txt:7`; `services/ai-orchestrator/requirements.txt:2`; `services/connector-whatsapp/requirements.txt:7` |
-| Backend API/Orch | sentry-sdk | 2.65.0 | `services/api/requirements.txt:12`; `services/ai-orchestrator/requirements.txt:9` |
 | IA | Modelos Gemini (runtime) | `GEMINI_MODEL=gemini-3.1-flash-lite` en prod (web + orchestrator); embeddings `gemini-embedding-2` (3072-dim) | `render.yaml:88-89,359-360,241-243,369-371` |
 | DB/Auth | Supabase | PostgreSQL + RLS + Auth + Realtime + Vault + pgmq | `render.yaml` (env vars); `.context/06-contracts.md` §4,§7,§11 |
 | Herramienta | Supabase CLI | **2.90.0** (binario nativo `/usr/local/bin/supabase`; CI pinea la misma) | `supabase --version`; `ci.yml:264` |
@@ -41,7 +39,7 @@ Los documentos de contexto histórico (`.context/02-stack.md`, `AGENTS.md`) cont
 ### 1.2 Divergencia de versiones por servicio (intencional)
 
 `services/connector-whatsapp` corre su propio pin más viejo (FastAPI 0.128.8 / pydantic 2.12.5 /
-supabase-py 2.28.3 / sentry-sdk 2.18.0 — `services/connector-whatsapp/requirements.txt`). Es un
+supabase-py 2.28.3 — `services/connector-whatsapp/requirements.txt`). Es un
 deploy unit independiente con deps mínimas (no usa PyJWT ni google-genai). El CI tiene un job
 dedicado (`py-core`, `ci.yml:193-234`) que corre los tests de api+orchestrator bajo **sus** pins de
 prod (FastAPI 0.139.0), porque en el job `validate` el venv compartido deja ganar al 0.128.8 del
@@ -177,7 +175,7 @@ production ── deploy target de los 4 servicios Render (autoDeploy on-push)
 
 | Requisito | Implementación | Evidencia |
 |---|---|---|
-| Error tracking | Sentry por servicio (4 DSN distintos), `init_sentry()` antes de cargar routers; `SENTRY_TRACES_SAMPLE_RATE=0.1` | `services/api/main.py:12-15`; `render.yaml:91-102,149-152,293-297,574-579` |
+| Error tracking | Sin error-tracking externo (S8, 2026-08-17: Sentry eliminado por decisión founder — free tier vencido). Postura vigente: logs estructurados stdout (Render los retiene) + `/health` + `/agentic/metrics`; la observabilidad propia se construye en la fase Platform Console (fase 12) | `docs/PLAN.md` §E (S8) |
 | Correlación | `X-Request-ID` middleware (respeta entrante o genera, expone en respuesta); correlation-id en webhook framework | `services/api/main.py:170-186` |
 | Health | `/health` (liveness, no toca DB) + `/health/ready` (readiness con check DB, 503 si cae) | `services/api/main.py:322-357` |
 | Trazas | OpenTelemetry mínimo en orchestrator, exporter desactivado por default (`OTEL_EXPORTER_ENABLED=true` para activar) | `services/ai-orchestrator/requirements.txt:10-15` |

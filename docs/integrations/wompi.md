@@ -108,7 +108,7 @@ Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`)
 
 - **Manual por tenant**: alta del comercio en Wompi, copiar llaves a la UI de Integraciones, registrar la URL de eventos en el dashboard Wompi (sandbox y prod por separado).
 - **Runbook**: `docs/operations/runbooks/wompi-payment-reconciliation.md` — esperar ≥24 h antes de reconciliar manualmente (los reintentos resuelven lo transitorio).
-- **Monitoreo disponible**: logs estructurados `[WOMPI]` (evento_recibido, monto_mismatch, moneda_invalida, ORPHAN, INBOX re-drive/DEAD_LETTER) filtrables en Render Dashboard; Sentry en api y orchestrator (`SENTRY_DSN`, `render.yaml:293-297,577-580`).
+- **Monitoreo disponible**: logs estructurados `[WOMPI]` (evento_recibido, monto_mismatch, moneda_invalida, ORPHAN, INBOX re-drive/DEAD_LETTER) filtrables en Render Dashboard.
 
 ## Gaps conocidos
 

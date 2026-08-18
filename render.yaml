@@ -30,10 +30,10 @@ services:
     region: oregon
     plan: starter
     rootDir: apps/web
-    # Memory profile build: next build + Sentry instrumentation peak ~1.3 GB RSS.
+    # Memory profile build: next build peak ~1.3 GB RSS.
     # Render build container = más RAM que runtime (runtime free=512 MB; build
     # container típicamente 2-4 GB en Free tier). 1500 MB Node heap deja margen.
-    # Si vuelve OOM: subir a 2048 o migrar el wrap Sentry (sin auth token skip).
+    # Si vuelve OOM: subir a 2048.
     #
     # pnpm (via corepack en modo SHIM `corepack pnpm@x ...`) — NO npm, NO `corepack
     # enable`. El repo es un workspace pnpm con lockfile: CI usa `pnpm
@@ -82,27 +82,6 @@ services:
       # /api/insights, /api/ai/preview y /api/ai/index-pending son proxies al
       # servicio konvi-api (routers insights.py / ai_preview.py / ai_index.py),
       # que es donde se declara la key. NO reintroducir GEMINI_* aquí.
-      # Rev. 109 J.2.7.4 — Sentry tracing E2E. 4 vars: 2 server + 2 browser bundle.
-      - key: SENTRY_DSN
-        sync: false                              # konvi-web project DSN
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.1"
-      - key: SENTRY_ENV
-        value: production
-      - key: NEXT_PUBLIC_SENTRY_DSN              # MISMO valor que SENTRY_DSN (bundle)
-        sync: false
-      - key: NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
-        value: "0.1"
-      - key: NEXT_PUBLIC_SENTRY_ENV
-        value: production
-      # Build-time: source map upload + release tagging. Sin esto Sentry
-      # muestra stack traces minified — debugging produccion limitado.
-      - key: SENTRY_ORG
-        value: konvi-e5                          # SLUG real de la org (display "konvi"; Sentry sufijó -e5)
-      - key: SENTRY_PROJECT
-        value: konvi-web                          # confirmar slug en Sentry si el upload de sourcemaps falla por project
-      - key: SENTRY_AUTH_TOKEN
-        sync: false                              # Organization Token (sntrys_...), scope org:ci (Source Map Upload + Release Creation)
       # F83 seguridad — secreto HMAC para firmar la cookie de sesión de recovery MFA.
       # Sin esto la cookie era el literal '1' (bypass total de AAL2). Generar con:
       # openssl rand -hex 32. El middleware (Edge) verifica la firma con Web Crypto.
@@ -140,13 +119,6 @@ services:
       # connector no monta CORS (webhook server-to-server, main.py sin CORSMiddleware).
       - key: APP_ENV
         value: production
-      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-connector project DSN).
-      - key: SENTRY_DSN
-        sync: false
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.1"
-      # SENTRY_ENV eliminada: el connector deriva environment de RENDER_SERVICE_NAME
-      # (observability.py:102), nunca lee SENTRY_ENV.
       # W5/T4-01 — IP real del cliente detrás del edge de Render. Render usa Cloudflare y
       # forwardea CF-Connecting-IP con la IP REAL del cliente (evidencia: arcjet-js#3899
       # muestra XFF de 3 hops "cliente, cf-proxy, hop-interno" + cf-connecting-ip=cliente;
@@ -287,13 +259,6 @@ services:
       # ── Wompi — credenciales por-tenant en Supabase Vault (tenant_integrations) ──
       # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
       # No se necesitan env vars globales para Wompi.
-      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-api project DSN).
-      - key: SENTRY_DSN
-        sync: false
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.1"
-      - key: SENTRY_ENV
-        value: production
       # W5/T4-01 — IP real del cliente vía CF-Connecting-IP (Render forwardea el header de
       # Cloudflare con la IP real, unspoofable, inmune al nº de hops). Cubre rate-limit
       # (wompi/aveonline/meli), allowlist MeLi y audit IP de offboarding. Fallback grácil
@@ -593,13 +558,6 @@ services:
         sync: false                              # Configurar en Render Dashboard
       - key: RESEND_FROM_EMAIL
         value: "Konvi <noreply@konvi.co>"
-      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-orchestrator project DSN).
-      - key: SENTRY_DSN
-        sync: false
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.1"
-      - key: SENTRY_ENV
-        value: production
     healthCheckPath: /health
     # Rev. 92.b: auto-deploy desactivado para iterar el orchestrator
     # localmente sin que cada push a develop lance redeploy en Render.

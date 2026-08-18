@@ -38,10 +38,10 @@ mod = _load_mod()
 # Snapshot de la superficie env por servicio en PRD (render.yaml). Si cambia,
 # actualiza estos conteos en el mismo commit — es la revisión deliberada.
 EXPECTED_KEY_COUNTS = {
-    "konvi-web": 22,
-    "konvi-connector": 7,
-    "konvi-api": 38,
-    "konvi-orchestrator": 99,
+    "konvi-web": 13,
+    "konvi-connector": 5,
+    "konvi-api": 35,
+    "konvi-orchestrator": 96,
 }
 
 
@@ -109,8 +109,8 @@ def test_tuning_con_value_en_render_se_hereda(tmp_path):
 def test_sync_false_delta_documentado_se_omite_sin_faltar(tmp_path):
     f = _env_file(tmp_path, "")
     env, missing, _ = mod.build_service_env("orchestrator", f)
-    assert "SENTRY_DSN" not in env and "SENTRY_DSN" not in missing  # delta STG documentado
     assert "ANTHROPIC_API_KEY" not in env and "ANTHROPIC_API_KEY" not in missing
+    assert "TELEGRAM_WEBHOOK_SECRET" not in env and "TELEGRAM_WEBHOOK_SECRET" not in missing
 
 
 def test_sync_false_no_documentado_es_faltante(tmp_path):

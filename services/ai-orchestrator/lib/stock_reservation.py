@@ -219,7 +219,7 @@ def consume_by_cart(
     # unidades que NO se descontaron del inventario. Antes esto quedaba en un warning por
     # reserva y nadie comparaba el total: el pedido se confirmaba igual y la deriva era
     # invisible hasta que faltaba mercadería.
-    # Se eleva a ERROR (visible en Sentry/logs) con los números concretos para poder cuadrar.
+    # Se eleva a ERROR (greppable en logs) con los números concretos para poder cuadrar.
     if consumed < len(rows):
         logger.error(
             "[STOCK_RES] SOBREVENTA order=%s tenant=%s: %s de %s reservas consumidas — "

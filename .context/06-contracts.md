@@ -81,7 +81,7 @@ modelo A "1 Konvi App + N tenants" ya abandonado).
 
 **NO hay env vars globales de credenciales Meta** en el connector. Verificable:
 `grep -rn 'META_APP_SECRET\|META_VERIFY_TOKEN' services/connector-whatsapp/` → 0 matches.
-Los únicos `os.getenv` del connector son SUPABASE/SENTRY/RENDER.
+Los únicos `os.getenv` del connector son SUPABASE/RENDER.
 
 ### 7.2 Schema canónico `tenant_integrations.credentials` (provider='whatsapp')
 

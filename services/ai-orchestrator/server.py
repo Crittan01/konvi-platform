@@ -19,11 +19,6 @@ import threading
 import time
 from contextlib import asynccontextmanager
 
-from observability import init_sentry
-
-# Init Sentry ANTES de imports pesados.
-init_sentry(service_name="ai-orchestrator")
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 

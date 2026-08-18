@@ -5,7 +5,7 @@ devolvía `detail=str(exc)[:200]`: mensajes internos de PostgREST/DB (host,
 schema, hints de conexión) expuestos a cualquier cliente.
 
 Fix: detalle genérico es-CO ("dependencia no disponible") hacia afuera; el
-error completo queda en logs + Sentry (observability.capture_exception).
+error completo queda en logs (warning truncado a 500 chars).
 """
 import os
 import sys

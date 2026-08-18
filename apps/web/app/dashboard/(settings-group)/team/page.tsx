@@ -2,7 +2,6 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import * as Sentry from '@sentry/nextjs'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -126,9 +125,8 @@ async function writeTeamAudit(
       payload:     args.payload,
     })
   } catch (e) {
-    // El audit no debe tumbar la operación de negocio; log + Sentry y seguir.
+    // El audit no debe tumbar la operación de negocio; log y seguir.
     console.error('[team] audit_log insert falló', { action: args.action, tenantId: args.tenantId, error: e })
-    Sentry.captureException(e, { extra: { where: 'team.audit_log', action: args.action, tenantId: args.tenantId } })
   }
 }
 
@@ -177,7 +175,6 @@ async function findUserByEmail(
     const { data, error } = await adminSb.auth.admin.listUsers({ page, perPage })
     if (error) {
       console.error('[team] listUsers error:', error.message)
-      Sentry.captureException(error, { extra: { where: 'team.findUserByEmail', page } })
       return null
     }
     const users = data?.users ?? []
@@ -215,7 +212,6 @@ export default async function TeamPage(
       // No enmascarar el fallo como "equipo vacío": eso miente al operador.
       teamLoadFailed = true
       console.error('[team] get_tenant_team:', teamErr.message, teamErr.code)
-      Sentry.captureException(teamErr, { extra: { where: 'team.get_tenant_team', tenantId } })
     }
     team = (data as TeamMember[]) || []
   } else {
@@ -314,12 +310,10 @@ export default async function TeamPage(
         })
         if (rpcErr) {
           console.error('[invite] add_member_to_tenant (existing):', rpcErr.message)
-          Sentry.captureException(rpcErr, { extra: { where: 'team.invite.add_existing', tenantId: m.tenant_id } })
           redirect('/dashboard/team?error=respuesta-inesperada')
         }
       } else {
         console.error('[invite] inviteUserByEmail error:', inviteError.message)
-        Sentry.captureException(inviteError, { extra: { where: 'team.invite.inviteUserByEmail', tenantId: m.tenant_id } })
         const isRate = inviteError.message.toLowerCase().includes('rate') || inviteError.message.toLowerCase().includes('limit')
         redirect(`/dashboard/team?error=${isRate ? 'rate-limit' : 'respuesta-inesperada'}`)
       }
@@ -330,12 +324,10 @@ export default async function TeamPage(
       })
       if (rpcErr) {
         console.error('[invite] add_member_to_tenant (new):', rpcErr.message)
-        Sentry.captureException(rpcErr, { extra: { where: 'team.invite.add_new', tenantId: m.tenant_id } })
         redirect('/dashboard/team?error=respuesta-inesperada')
       }
     } else {
       console.error('[invite] inviteUserByEmail returned no user and no error')
-      Sentry.captureException(new Error('inviteUserByEmail returned no user and no error'), { extra: { where: 'team.invite', tenantId: m.tenant_id } })
       redirect('/dashboard/team?error=respuesta-inesperada')
     }
 
@@ -568,7 +560,6 @@ export default async function TeamPage(
     // para no-confirmados, Supabase reenvía sin error
     if (error && !error.message.toLowerCase().includes('already')) {
       console.error('[resend] inviteUserByEmail:', error.message)
-      Sentry.captureException(error, { extra: { where: 'team.resendInvite', tenantId: m.tenant_id } })
       const isRate = error.message.toLowerCase().includes('rate') || error.message.toLowerCase().includes('limit')
       redirect(`/dashboard/team?error=${isRate ? 'rate-limit' : 'respuesta-inesperada'}`)
     }

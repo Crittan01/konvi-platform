@@ -38,11 +38,6 @@ from telegram_notifications import notify_escalation_async
 
 logger = logging.getLogger("shipment_status_notifications")
 
-try:  # observabilidad opcional (paridad con refund_notifications)
-    import sentry_sdk
-except Exception:  # pragma: no cover
-    sentry_sdk = None
-
 
 # ── Mapping de estados Aveonline → canónico interno ──────────────────────────
 # ESPEJO de RAW_STATE_TO_INTERNAL en services/api/routers/aveonline_webhook.py
@@ -321,14 +316,11 @@ async def _send_status_email(
             text=_html_to_text(html),
             idempotency_key=f"{tenant_id}:{order_id}:shipment_status:{internal_status}"[:256],
         )
-        if not ok and sentry_sdk is not None:
-            try:
-                sentry_sdk.capture_message(
-                    f"shipment status email no entregado order={short_id}",
-                    level="warning",
-                )
-            except Exception:
-                pass
+        if not ok:
+            logger.warning(
+                "[SHIPMENT_POLL] shipment status email no entregado order=%s",
+                short_id,
+            )
     except Exception as exc:
         logger.warning(
             "[SHIPMENT_POLL] email status falló order=%s: %s", short_id, exc,

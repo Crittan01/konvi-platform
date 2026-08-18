@@ -9,11 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from observability import init_sentry
 from config import get_settings  # G13 — config central validada
-
-# Init Sentry ANTES de cargar routers (capturar errores de import también).
-init_sentry(service_name="api")
 
 from fastapi import Depends as _Depends
 
@@ -406,14 +402,9 @@ def readiness_check(response: Response):
     except Exception as exc:  # pragma: no cover — depende de infra
         # M14 (auditoría 2026-08-02): el endpoint es PÚBLICO (sin auth) — el
         # mensaje interno de PostgREST/DB (host, schema, hint) NO se expone al
-        # cliente. Detalle genérico hacia afuera; error completo a logs+Sentry.
+        # cliente. Detalle genérico hacia afuera; error completo a logs.
         detail = "dependencia no disponible"
         logger.warning("[READINESS] DB no disponible: %s", str(exc)[:500])
-        try:
-            from observability import capture_exception
-            capture_exception(exc, check="readiness_db")
-        except Exception:
-            pass  # Sentry no inicializado (tests/dev) — el log ya quedó
 
     if not db_ok:
         response.status_code = 503

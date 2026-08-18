@@ -17,7 +17,7 @@
 | `requirements.txt` | Commited per servicio. Render hace `pip install -r requirements.txt`. Local hace lo mismo via `sync-local.sh`. |
 | Node/Python versions | Pin en `render.yaml` (Node 20, Python 3.11). Local usa nvm/pyenv con misma versión. |
 
-**Drift principal detectado**: cuando mergeas PRs con nuevas deps (ej. `@sentry/nextjs` post-PR #6), local NO auto-instala. Solución: correr `bash scripts/sync-local.sh` después de CADA `git pull`.
+**Drift principal detectado**: cuando mergeas PRs con nuevas deps, local NO auto-instala. Solución: correr `bash scripts/sync-local.sh` después de CADA `git pull`.
 
 ### Capa B — Runtime ⚠️ (asimetría intrínseca)
 
@@ -65,15 +65,14 @@ Esto corre Next.js `build` completo y detecta los problemas que Turbopack permit
 
 **Convención multi-tenant**: cada tenant trae sus credenciales en `tenant_integrations.meta` (Vault Supabase). Ningún secret de provider sale al `.env`. Esto garantiza que local y prod difieren solo en WHICH tenant tienen activo, no en HOW se autentican.
 
-### Capa E — Telemetría ✅ (post PR #6 Sentry)
+### Capa E — Telemetría ✅ (post-S8, 2026-08-17)
 
 | Aspecto | Local | Render |
 |---|---|---|
-| Sentry DSN | `SENTRY_DSN` apunta a proyecto Sentry con `SENTRY_ENV=development` | mismo DSN con `SENTRY_ENV=production` |
-| Filtrado | Sentry dashboard filtra por `environment` tag | dashboard idem |
-| Source maps | NO (dev usa source maps inline) | SÍ (upload via `SENTRY_AUTH_TOKEN` en build step) |
+| Error tracking externo | Ninguno (S8: eliminado por decisión founder) | Ninguno |
+| Señal de errores | logs estructurados stdout (greppables) | logs retenidos por Render + health checks |
 
-**Beneficio**: errores prod se ven side-by-side con errores dev en `sentry.io/organizations/konvi/`. Facilita reproducir bugs.
+**Postura**: la observabilidad propia (métricas, alerting, error tracking) se construye en la fase Platform Console (fase 12).
 
 ---
 
@@ -110,7 +109,7 @@ Render hace auto-deploy. Verificar:
 
 1. **Render Dashboard logs** del servicio recién desplegado — buscar errores de startup
 2. **`/health` endpoint** de cada servicio — 200 OK
-3. **Sentry**: filtrar por release tag, verificar 0 errors críticos en primeros 10 min
+3. **Logs**: filtrar por ERROR del deploy reciente, verificar 0 errors críticos en primeros 10 min
 4. **Si hay vars nuevas en el PR**: añadirlas al Render Dashboard ANTES del deploy (sino arranca con valores default que pueden ser inseguros)
 
 ### Cuando añadas una variable de entorno nueva
@@ -155,4 +154,3 @@ Esto cierra la categoría de drift estructural. El drift de env vars NO se valid
 - Validate: [`scripts/validate.sh`](../../scripts/validate.sh) — `--ci`, `--build`, `--full`, `--coverage`, `--lint`
 - Env reference: [`.env.example`](../../.env.example)
 - Render config: [`render.yaml`](../../render.yaml)
-- Sentry setup: [`docs/observability/sentry-setup.md`](../observability/sentry-setup.md)

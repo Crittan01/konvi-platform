@@ -35,11 +35,6 @@ from notifications import _send_email_via_resend
 
 logger = logging.getLogger("refund_notifications")
 
-try:  # observabilidad opcional (paridad con _surface_email_failure del SST)
-    import sentry_sdk
-except Exception:  # pragma: no cover
-    sentry_sdk = None
-
 
 def _fmt_cop(value) -> str:
     """Formato COP estilo WhatsApp del bot: $18.000 (punto miles)."""
@@ -307,17 +302,12 @@ async def notify_client_refund_completed(
             if email_ok:
                 delivered = True
             else:
-                # Paridad de observabilidad con el SST (_surface_email_failure):
-                # el cron backup existe justamente porque los fallos silenciosos
-                # son el problema → escalar a Sentry si está activo.
-                if sentry_sdk is not None:
-                    try:
-                        sentry_sdk.capture_message(
-                            f"refund email no entregado order={order_id[:8]}",
-                            level="warning",
-                        )
-                    except Exception:
-                        pass
+                # El cron backup existe justamente porque los fallos silenciosos
+                # son el problema → warning greppable (señal alertable).
+                logger.warning(
+                    "[WOMPI_POLL_NOTIFY] refund email no entregado order=%s",
+                    order_id[:8],
+                )
             logger.info(
                 "[WOMPI_POLL_NOTIFY] email refund to=%s order=%s ok=%s",
                 _mask_email(email), order_id[:8], email_ok,

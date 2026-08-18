@@ -76,8 +76,8 @@ class FallbackV2CartSnapshotTest(unittest.TestCase):
 
 
 class FallbackAlertTest(unittest.TestCase):
-    def test_alert_true_logs_error_sentry_captured(self):
-        # v3_build_error (regresión real) → ERROR (Sentry LoggingIntegration lo capta).
+    def test_alert_true_logs_error(self):
+        # v3_build_error (regresión real) → ERROR (señal alertable greppable).
         from agentic.dispatcher import _report_agentic_v2_fallback
         with self.assertLogs("agentic.dispatcher", level="ERROR") as cm:
             _report_agentic_v2_fallback("conv12345678", "v3_build_error", "PAYMENT", alert=True)
@@ -87,25 +87,13 @@ class FallbackAlertTest(unittest.TestCase):
         self.assertIn("conv1234", joined)  # conv truncado, sin id completo
 
     def test_alert_false_logs_warning_not_error(self):
-        # resolver_none (infra, ya logueado) → WARNING (bajo umbral Sentry, no storm).
+        # resolver_none (infra, ya logueado) → WARNING (no storm de ERROR).
         from agentic.dispatcher import _report_agentic_v2_fallback
         with self.assertLogs("agentic.dispatcher", level="WARNING") as cm:
             _report_agentic_v2_fallback("conv12345678", "resolver_none", "None", alert=False)
         # NO debe haber ningún record de nivel ERROR.
         self.assertFalse(any(r.levelname == "ERROR" for r in cm.records))
         self.assertTrue(any("resolver_none" in r.getMessage() for r in cm.records))
-
-    def test_no_double_sentry_report(self):
-        # review: el helper NO llama capture_message explícito (evita doble evento;
-        # el logger.error ya va a Sentry vía LoggingIntegration). Busca la LLAMADA,
-        # no la palabra (el docstring la menciona).
-        import inspect
-        from agentic.dispatcher import _report_agentic_v2_fallback
-        # Solo el cuerpo (sin docstring) para no matchear la mención explicativa.
-        src = inspect.getsource(_report_agentic_v2_fallback)
-        body = src.split('"""')[-1]  # todo tras el cierre del docstring
-        self.assertNotIn("capture_message(", body)
-        self.assertNotIn("sentry_sdk", body)
 
     def test_dispatcher_wires_both_fallback_paths(self):
         import inspect

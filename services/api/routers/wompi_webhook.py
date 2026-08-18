@@ -44,7 +44,6 @@ from lib.client_notifications import (  # noqa: F401
     _notify_client_shipment_in_transit,
     _notify_client_shipment_label_ready,
     _send_payment_confirmation_email,
-    _surface_email_failure,
 )
 
 # G12: plantillas de email extraídas a lib/email_templates.py (los nombres
@@ -218,7 +217,7 @@ def _handle_orphan_payment(
     sin intento de anulación y sin nada que lo hiciera consultable como "pago huérfano".
 
     Qué hace ahora:
-      1. ERROR (visible en Sentry) con los datos accionables.
+      1. ERROR en logs (greppable) con los datos accionables.
       2. Intenta el VOID automático si aplica (solo CARD pre-settlement, per el dossier Wompi).
       3. Marca `payments.status` para que sea CONSULTABLE: 'orphan_voided' si se anuló, o
          'orphan_refund_pending' si hay que devolver a mano (NEQUI/PSE/Bancolombia no se pueden
@@ -540,7 +539,7 @@ def _process_wompi_event(payload: dict) -> None:
         #
         # El pago YA quedó registrado en `payments` (paso 4, antes de este punto), así que el
         # dinero deja rastro. Lo que faltaba era que alguien ACTUARA. Ahora: se eleva a ERROR
-        # (visible en Sentry), se intenta el void automático si aplica, y si no se puede se
+        # en logs (greppable), se intenta el void automático si aplica, y si no se puede se
         # marca para reembolso manual.
         if was_duplicate and current_status == "confirmed":
             logger.info(

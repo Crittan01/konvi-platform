@@ -35,10 +35,6 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
 from routers import wompi_webhook  # noqa: E402
-# G12 corte 2: el sender de email vive en lib/client_notifications.py — los
-# patches de `_surface_email_failure` van a ESE namespace (donde se resuelve en
-# runtime), no al del router (que solo lo reexporta por compat).
-import lib.client_notifications as client_notifications  # noqa: E402
 import lib.shipping_guides as shipping_guides  # noqa: E402
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY  # noqa: E402
 
@@ -1076,41 +1072,41 @@ class SendEmailTests(unittest.TestCase):
                     self._send(sb, mode=mode)
                 self.assertIn(fragmento, client.calls[0]["json"]["subject"])
 
-    def test_429_superficia_como_quota(self):
+    def test_429_loguea_quota_como_error(self):
         sb = _Sb(_email_tables())
         client = _FakeSyncClient(_resp(429, text="rate limited"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(client_notifications, "_surface_email_failure") as surf:
+             self.assertLogs("lib.client_notifications", level="ERROR") as cap:
             self._send(sb)
-        self.assertEqual(surf.call_args[0][0], "rate_or_quota_429")
+        self.assertTrue(any("RATE/QUOTA 429" in line for line in cap.output))
 
-    def test_4xx_superficia_como_config(self):
+    def test_4xx_loguea_config_como_error(self):
         sb = _Sb(_email_tables())
         client = _FakeSyncClient(_resp(403, text="invalid key"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(client_notifications, "_surface_email_failure") as surf:
+             self.assertLogs("lib.client_notifications", level="ERROR") as cap:
             self._send(sb)
-        self.assertEqual(surf.call_args[0][0], "client_4xx")
+        self.assertTrue(any("resend 4xx status=403" in line for line in cap.output))
 
-    def test_5xx_superficia_como_transitorio(self):
+    def test_5xx_loguea_transitorio_como_error(self):
         sb = _Sb(_email_tables())
         client = _FakeSyncClient(_resp(500, text="resend down"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(client_notifications, "_surface_email_failure") as surf:
+             self.assertLogs("lib.client_notifications", level="ERROR") as cap:
             self._send(sb)
-        self.assertEqual(surf.call_args[0][0], "server_5xx")
+        self.assertTrue(any("resend 5xx status=500" in line for line in cap.output))
 
-    def test_error_de_red_superficia_transport_exception(self):
+    def test_error_de_red_loguea_transport_exception(self):
         sb = _Sb(_email_tables())
         client = _FakeSyncClient(exc=RuntimeError("dns"))
         with patch.dict(os.environ, {"RESEND_API_KEY": "re_x"}), \
              patch("httpx.Client", client), \
-             patch.object(client_notifications, "_surface_email_failure") as surf:
+             self.assertLogs("lib.client_notifications", level="WARNING") as cap:
             self._send(sb)
-        self.assertEqual(surf.call_args[0][0], "transport_exception")
+        self.assertTrue(any("httpx err" in line for line in cap.output))
 
 
 class ComposerTests(unittest.TestCase):

@@ -6,8 +6,8 @@
 > estable" sin definirlo.
 >
 > **Estado de los targets:** los valores de SLO/RTO/RPO de este documento son una
-> **PROPUESTA inicial a ratificar por el founder** (no hay historial de métricas aún;
-> Sentry se activó 2026-07-18). Se recalibran con datos reales tras ~30 días.
+> **PROPUESTA inicial a ratificar por el founder** (no hay historial de métricas aún).
+> Se recalibran con datos reales tras ~30 días.
 >
 > **Complementa (no duplica):**
 > - `docs/deployment/rollout-and-rollback.md` — mecánica de deploy/rollback.
@@ -28,7 +28,7 @@
 | `konvi-web` | Tenant Console (Next.js) | Sí (`app.konvi.co`) | Alto (operación, no bot) |
 
 Dependencias externas: Supabase (DB/Auth/Realtime), Meta WhatsApp Cloud API, Wompi,
-Aveonline, Gemini (LLM), Sentry (observabilidad).
+Aveonline, Gemini (LLM).
 
 ---
 
@@ -38,20 +38,21 @@ SLI = indicador medido; SLO = objetivo sobre el SLI; ventana = **28 días** roll
 
 | Servicio | SLI | SLO propuesto | Fuente de medición |
 |---|---|---|---|
-| connector | Disponibilidad del `/health` + tasa de webhooks WhatsApp procesados sin 5xx | **99.5%** | Render health check + Sentry (5xx) |
-| api | Disponibilidad `/health` + éxito de webhooks money-path (Wompi) | **99.5%** | Render health check + Sentry |
-| api | Latencia p95 de endpoints de la consola | **< 800 ms** | Sentry tracing (10% sample) |
-| orchestrator | Latencia p95 por turno del bot (inbound → outbound) | **< 6 s** | Sentry tracing + logs por turno |
-| orchestrator | Tasa de turnos del bot sin error no-manejado | **99.0%** | Sentry (excepciones) |
-| web | Disponibilidad de `app.konvi.co` (200/307) | **99.5%** | Uptime check + Sentry |
+| connector | Disponibilidad del `/health` + tasa de webhooks WhatsApp procesados sin 5xx | **99.5%** | Render health check + logs (5xx greppable) |
+| api | Disponibilidad `/health` + éxito de webhooks money-path (Wompi) | **99.5%** | Render health check + logs |
+| api | Latencia p95 de endpoints de la consola | **< 800 ms** | logs por request (medición propia pendiente — fase 12) |
+| orchestrator | Latencia p95 por turno del bot (inbound → outbound) | **< 6 s** | logs por turno |
+| orchestrator | Tasa de turnos del bot sin error no-manejado | **99.0%** | logs (excepciones ERROR greppables) |
+| web | Disponibilidad de `app.konvi.co` (200/307) | **99.5%** | Uptime check + logs |
 
 > **Money-path (Wompi) — SLO reforzado:** 0 órdenes pagadas sin fulfillment por
 > webhook perdido **detectadas sin señal**. La detección se cubre con los reconcilers
 > del worker + alertas (ver §5 y el gap abierto de reconciliación APPROVED-perdido).
 
 ### Cómo se mide (hoy)
-- **Sentry** (activado 2026-07-18): errores + 10% de traces (`traces_sample_rate=0.1`)
-  en los 4 servicios. Latencias p95/p99 desde la pestaña Performance.
+- **Logs estructurados** (stdout; Render los retiene): errores y señales greppables
+  (`[WOMPI]`, `[AGENTIC_*]`, `[WORKER]`, …) en los 4 servicios. Sin error-tracking
+  externo desde S8 (2026-08-17); la observabilidad propia llega en la fase 12.
 - **Render**: health checks (`/health` en backends, `/` en web) — reinicia el
   contenedor si falla; los eventos de deploy/health quedan en el dashboard.
 - **Pendiente (mejora):** un uptime-check externo (p.ej. cron que cURLea los `/health`
@@ -94,8 +95,9 @@ Para un SLO de disponibilidad **99.5%** en 28 días:
 
 Orden de detección de un incidente:
 
-1. **Sentry** — excepciones y spikes de error (los 4 servicios). *Pendiente*: configurar
-   alert rules (umbral de error rate / spike) → Slack/email del founder.
+1. **Logs estructurados** — excepciones y spikes de error greppables en los 4
+   servicios (Render los retiene). *Pendiente*: alerting propio (fase 12, Platform
+   Console) → canal del founder.
 2. **Render** — health check falla → reinicio automático + evento en dashboard.
 3. **Reconcilers del worker** (money-path) — emiten `logger.critical`/métricas ante
    descuadres (p.ej. `paid_orders_protected_from_cancel`, `STUCK refund void`).
@@ -132,7 +134,7 @@ Render (autoDeploy) reconstruye. Verificar salud con el health-watcher (§7).
    seguro si aplica (pausar el worker: `WORKER_ENABLED`/escalar a 0 si existe).
 2. Supabase Dashboard → Database → **Backups / Point-in-Time Recovery** → elegir el
    punto previo al incidente → restore.
-3. **INSUMOS:** timestamp del incidente (de Sentry/logs), confirmación de alcance.
+3. **INSUMOS:** timestamp del incidente (de los logs), confirmación de alcance.
 4. **CRITERIO DE ÉXITO:** integridad verificada (conteos de `orders`/`payments`
    coherentes) + los servicios reconectan sin errores.
 5. Post-restore: correr el harness anti-drift local NO aplica a datos; validar con
@@ -156,7 +158,7 @@ for u in https://app.konvi.co \
 done
 # Esperado: web 307 (redirect a login), backends 200.
 ```
-Complementar con: Sentry (error rate vuelve a baseline) + una conversación UAT mínima
+Complementar con: logs (error rate vuelve a baseline) + una conversación UAT mínima
 del bot (inbound → outbound) para confirmar el hot-path end-to-end.
 
 ---
@@ -171,7 +173,7 @@ Plantilla mínima: (1) timeline; (2) impacto (tenants/órdenes/dinero); (3) caus
 ## INTERVENCIÓN HUMANA REQUERIDA (para ratificar este runbook)
 - **RESPONSABLE:** founder.
 - **PASOS:** (1) ratificar/ajustar los SLO/RTO/RPO propuestos; (2) validar en la doc de
-  Supabase Pro las ventanas reales de backup/PITR; (3) configurar alert rules en Sentry
-  → canal del founder; (4) decidir si se agrega un uptime-check externo.
+  Supabase Pro las ventanas reales de backup/PITR; (3) decidir el canal de alertas
+  propias (fase 12); (4) decidir si se agrega un uptime-check externo.
 - **CRITERIO DE ÉXITO:** SLOs medibles con alertas activas + DR probado al menos una vez
   (restore de Supabase en un entorno de prueba).

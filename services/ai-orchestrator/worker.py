@@ -657,9 +657,9 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
             await coro
         except Exception as exc:  # noqa: BLE001 — fault isolation deliberada
             self._metrics["poll_job_errors"] = self._metrics.get("poll_job_errors", 0) + 1
-            # Sin exc_info=True: el traceback completo puede arrastrar PII de cliente a
-            # Sentry (scrubber sistémico va en W1). Tipo + mensaje truncado bastan para
-            # diagnosticar QUÉ job y QUÉ clase de error, con menor superficie de PII.
+            # Sin exc_info=True: el traceback completo puede arrastrar PII de cliente
+            # a los logs. Tipo + mensaje truncado bastan para diagnosticar QUÉ job y
+            # QUÉ clase de error, con menor superficie de PII.
             logger.error(
                 "[WORKER] job '%s' falló (aislado, ciclo continúa): %s: %.200s",
                 name, type(exc).__name__, str(exc),
@@ -1205,12 +1205,10 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                 # expone el RPC (pgmq.read incrementa el contador por lectura). Si
                 # el evento falla persistentemente, ACK (delete) + alerta para que
                 # NO se re-entregue infinitamente; el operador queda notificado del
-                # escalamiento perdido por el log/Sentry.
+                # escalamiento perdido por el log.
                 read_ct = int(event.get("read_ct") or 0)
                 if read_ct >= HUMAN_TAKEOVER_MAX_READ_CT:
-                    # NO loguear el payload crudo: lleva customer_phone (PII) y
-                    # Sentry LoggingIntegration captura ERROR sin scrub de mensaje
-                    # → violaría "NUNCA PII a Sentry" (observability._before_send).
+                    # NO loguear el payload crudo: lleva customer_phone (PII).
                     # Solo IDs no-PII para diagnóstico.
                     logger.error(
                         "[TAKEOVER] DEAD-LETTER msg_id=%s tras %d reintentos — "
@@ -2951,7 +2949,7 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                 self._metrics["wompi_inbox_dead_lettered"] = (
                     self._metrics.get("wompi_inbox_dead_lettered", 0) + 1
                 )
-                # logger.error → LoggingIntegration lo envía a Sentry (alertable);
+                # logger.error alertable (greppable);
                 # el conteo alimenta health_metrics para el evaluador de SLOs (W7 T3-EVAL).
                 logger.error(
                     "[WOMPI_INBOX][DEAD_LETTER] checksum=%s alcanzó %d intentos — "

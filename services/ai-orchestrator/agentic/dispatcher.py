@@ -49,10 +49,9 @@ def _report_agentic_v2_fallback(
     prod (solo un logger.warning). Se vuelve visible. NO PII: solo
     conversation_id truncado + motivo + estado.
 
-    `alert=True` → logger.error (Sentry lo captura vía LoggingIntegration; NO se
-      añade capture_message explícito para no duplicar el evento). Reservado para
+    `alert=True` → logger.error (señal alertable greppable). Reservado para
       `v3_build_error` (regresión REAL del builder V3 per-state — vale una alerta).
-    `alert=False` → logger.warning (bajo el umbral de Sentry). Para `resolver_none`,
+    `alert=False` → logger.warning. Para `resolver_none`,
       que es un fallo de INFRA (Supabase) ya logueado como WARNING en
       _resolve_and_persist_agentic_state → evita una tormenta de eventos ERROR por
       turno durante una degradación de DB.
@@ -180,7 +179,7 @@ def _load_tenant_agentic_meta(supabase: Any, tenant_id: str) -> dict:
 
 
 try:
-    from observability import track_op as _track_op
+    from tracing import track_op as _track_op
 except Exception:
     def _track_op(*args, **kwargs):  # noqa
         def decorator(f):
@@ -2666,8 +2665,8 @@ async def _run_agentic_full(
                 # El rebuild también falló → queda el system_prompt del build eager
                 # de 1281 (sin cart_snapshot, pero funcional). No romper el turno.
                 # WARNING (no ERROR, review LOW-pii): consistente con los siblings
-                # (cart_snapshot/catalog_view) y evita enviar str(exc) sin scrub a
-                # Sentry (LoggingIntegration solo capta ERROR).
+                # (cart_snapshot/catalog_view) y evita elevar str(exc) a ERROR
+                # (severidad reservada a alertas accionables).
                 logger.warning(
                     "[AGENTIC_FALLBACK_V2] rebuild V2 con cart_snapshot falló "
                     "conv=%s: %s — se usa el build eager previo",
@@ -2678,7 +2677,7 @@ async def _run_agentic_full(
         # BLOQUE J-2 (review): _resolved_state is None significa que el resolver
         # (función total) lanzó excepción — fallo de INFRA (Supabase), NO regresión
         # de código. Ya se logueó WARNING en _resolve_and_persist_agentic_state.
-        # alert=False → WARNING (no ERROR): evita una tormenta de eventos Sentry por
+        # alert=False → WARNING (no ERROR): evita una tormenta de eventos ERROR por
         # turno durante una degradación de DB. El cart tampoco es reconstruible aquí
         # (si la DB está caída, la lectura del carrito también fallaría).
         _report_agentic_v2_fallback(conversation_id, "resolver_none", "None", alert=False)

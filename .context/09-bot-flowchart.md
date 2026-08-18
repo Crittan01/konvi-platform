@@ -94,7 +94,7 @@ de este archivo ya no existen como path principal.
 │  BLOCK → fallback neutro. Primer REWRITE/BLOCK gana.                                       │
 │  Dinero/verdad FAIL-CLOSED (2026-08-02): payment_coherence, summary_coherence,             │
 │  pii_save_truthfulness, fake_escalation — si uno lanza excepción (DB caída), el texto      │
-│  NO sale: BLOCK + mensaje neutro + Sentry. Los cosméticos mantienen fail-open.             │
+│  NO sale: BLOCK + mensaje neutro + ERROR en logs. Los cosméticos mantienen fail-open.      │
 └──────────────────────────────────────┬────────────────────────────────────────────────────┘
                                        ▼
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐

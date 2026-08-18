@@ -14,7 +14,6 @@
  * persistencia en ai_insights y el audit trail viven ahora en el router del api.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import * as Sentry from '@sentry/nextjs'
 import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json(data)
   } catch (err) {
-    Sentry.captureException(err, { extra: { where: 'insights.proxy.POST', module: body.module } })
+    console.error('[insights] proxy POST upstream falló:', { module: body.module, err })
     return upstreamUnavailable(err)
   }
 }
@@ -134,7 +133,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json(data)
   } catch (err) {
-    Sentry.captureException(err, { extra: { where: 'insights.proxy.GET', module: moduleParam } })
+    console.error('[insights] proxy GET upstream falló:', { module: moduleParam, err })
     return NextResponse.json({ insight: null })
   }
 }

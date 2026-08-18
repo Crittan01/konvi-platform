@@ -23,7 +23,6 @@ _BASE_ENV = {
     "SUPABASE_SECRET_KEY": "sb_secret_x",
     "INTERNAL_SERVICE_SECRET": "x" * 40,
     "GEMINI_API_KEY": "g-key",
-    "SENTRY_DSN": "https://sentry.io/x",
     "ALLOWED_ORIGINS": "https://konvi-web.onrender.com",
 }
 
@@ -87,10 +86,6 @@ class ValidateCriticalTests(unittest.TestCase):
     def test_prod_localhost_en_cors(self):
         env = {**_BASE_ENV, "APP_ENV": "production", "ALLOWED_ORIGINS": "http://localhost:3000"}
         self.assertTrue(any("ALLOWED_ORIGINS" in e for e in _validate_with(env)))
-
-    def test_prod_sin_sentry(self):
-        env = {**_BASE_ENV, "APP_ENV": "production", "SENTRY_DSN": ""}
-        self.assertTrue(any("SENTRY_DSN" in e for e in _validate_with(env)))
 
     def test_prod_sin_gemini(self):
         env = {**_BASE_ENV, "APP_ENV": "production", "GEMINI_API_KEY": ""}

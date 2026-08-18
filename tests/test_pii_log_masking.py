@@ -1,7 +1,6 @@
 """G1 (parcial) — PII en logs: teléfonos enmascarados (Habeas Data Ley 1581).
 
-El scrubber de Sentry (before_send) limpia lo que se TRANSMITE a Sentry, NO los
-logs locales de stdout (Render) — fuente de verdad de errores. Estos tests
+Los logs de stdout (Render) son la fuente de verdad de errores. Estos tests
 verifican que los callsites corregidos emiten el teléfono SOLO enmascarado
 (últimos 4 dígitos) y que el descarte de mensaje loguea claves/tipos del dict,
 nunca valores (teléfono + contenido del mensaje son PII).

@@ -391,28 +391,6 @@ def _humanize_shipment_status(raw_status: str = "", internal_status: str = "") -
     return _INTERNAL_STATUS_ES.get((internal_status or "").strip().lower(), "")
 
 
-def _surface_email_failure(
-    reason: str, *, tenant_id: str = "", order_id: str = "",
-    template_mode: str = "", status_code=None, detail: str = "",
-) -> None:
-    """Surfacing de fallos de envío a Sentry (no-op si SENTRY_DSN vacío).
-
-    NO rompe el flujo (best-effort). El log ya se emitió en el caller; esto
-    añade una señal alertable distinta del éxito silencioso."""
-    try:
-        from observability import capture_exception
-        capture_exception(
-            RuntimeError(f"resend_email_failed: {reason}"),
-            tenant_id=tenant_id,
-            order_id=(order_id or "")[:8],
-            template_mode=template_mode,
-            status_code=status_code,
-            detail=(detail or "")[:200],
-        )
-    except Exception:
-        pass
-
-
 def _send_payment_confirmation_email(
     supabase, *, order_id: str, tenant_id: str,
     template_mode: str = "payment_confirmed",
@@ -646,11 +624,6 @@ def _send_payment_confirmation_email(
                 "[WOMPI][EMAIL] resend RATE/QUOTA 429 to=%s order=%s mode=%s body=%s",
                 masked, order_id[:8], template_mode, resp.text[:200],
             )
-            _surface_email_failure(
-                "rate_or_quota_429", tenant_id=tenant_id, order_id=order_id,
-                template_mode=template_mode, status_code=429,
-                detail=resp.text[:200],
-            )
         elif 400 <= resp.status_code < 500:
             # 4xx = config/payload (from no verificado, key inválida) — bug de
             # activación, requiere acción operador.
@@ -658,11 +631,6 @@ def _send_payment_confirmation_email(
                 "[WOMPI][EMAIL] resend 4xx status=%s to=%s order=%s mode=%s body=%s",
                 resp.status_code, masked, order_id[:8], template_mode,
                 resp.text[:200],
-            )
-            _surface_email_failure(
-                "client_4xx", tenant_id=tenant_id, order_id=order_id,
-                template_mode=template_mode, status_code=resp.status_code,
-                detail=resp.text[:200],
             )
         else:
             # 5xx = Resend caído — transitorio (Wompi/Aveonline reintentan el
@@ -672,17 +640,8 @@ def _send_payment_confirmation_email(
                 resp.status_code, masked, order_id[:8], template_mode,
                 resp.text[:200],
             )
-            _surface_email_failure(
-                "server_5xx", tenant_id=tenant_id, order_id=order_id,
-                template_mode=template_mode, status_code=resp.status_code,
-                detail=resp.text[:200],
-            )
     except Exception as exc:
         logger.warning(
             "[WOMPI][EMAIL] httpx err to=%s order=%s mode=%s: %s",
             _mask_email(email), order_id[:8], template_mode, exc,
-        )
-        _surface_email_failure(
-            "transport_exception", tenant_id=tenant_id, order_id=order_id,
-            template_mode=template_mode, detail=str(exc)[:200],
         )

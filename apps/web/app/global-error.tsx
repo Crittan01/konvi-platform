@@ -3,17 +3,12 @@
 /**
  * Global error boundary — Next.js App Router top-level fallback.
  *
- * Rev. 109 J.2.7.4 cleanup post-merge — Sentry 8.x recomienda este
- * archivo para capturar React rendering errors que escapan a los
- * error boundaries de cada page. Sin esto, errores de render en RSC
- * o client components no llegan a Sentry.
- *
- * Docs: https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/#react-render-errors-in-app-router
+ * Captura React rendering errors que escapan a los error boundaries de cada
+ * page (errores de render en RSC o client components).
  *
  * Nota: este componente DEBE incluir <html>+<body> porque reemplaza
  * el layout root cuando se monta (último fallback antes del crash).
  */
-import * as Sentry from '@sentry/nextjs'
 import NextError from 'next/error'
 import { useEffect } from 'react'
 
@@ -23,7 +18,8 @@ export default function GlobalError({
   error: Error & { digest?: string }
 }) {
   useEffect(() => {
-    Sentry.captureException(error)
+    // Sin error-tracking externo (S8): la señal queda en los logs del server.
+    console.error('[global-error] React render error:', error)
   }, [error])
 
   return (

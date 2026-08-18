@@ -10,9 +10,9 @@ logger = logging.getLogger("orchestrator.whatsapp_sender")
 
 def _mask_phone(p: str) -> str:
     """Enmascara el teléfono para logs (W1 Habeas Data): solo últimos 4 dígitos.
-    NECESARIO en el call-site: el scrubber de Sentry (before_send) solo limpia lo que
-    se TRANSMITE a Sentry, NO los logs locales de Render (stdout) — que son fuente de
-    verdad de errores. Todo log que incluya el teléfono debe pasar por aquí."""
+    NECESARIO en el call-site: los logs (stdout, retenidos por Render) son la
+    fuente de verdad de errores — todo log que incluya el teléfono debe pasar
+    por aquí."""
     if not p:
         return "?"
     return "***" + str(p)[-4:]

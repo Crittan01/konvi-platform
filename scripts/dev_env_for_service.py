@@ -60,7 +60,7 @@ _WEB_TOOLCHAIN = {"NODE_ENV", "COREPACK_ENABLE_DOWNLOAD_PROMPT"}
 # venir del env-file local; ausencia = fail-closed.
 _ENV_ANCHORED = {
     "APP_URL", "NEXT_PUBLIC_APP_URL", "API_URL", "PUBLIC_WEBHOOK_URL",
-    "APP_ENV", "SENTRY_ENV",
+    "APP_ENV",
     # Switch maestro de guías reales: en PRD es "true" (B1). Heredarlo en STG
     # dejaría la compuerta global ABIERTA en el ambiente de pruebas — el valor
     # local correcto es siempre false explícito.
@@ -71,10 +71,6 @@ _ENV_ANCHORED = {
 # en STG legítimamente quedan vacíos hasta que su fase del plan se ejecute.
 # Cada entrada está justificada — NO agregar más sin documentar la razón.
 _STG_DELTA_OK = {
-    # Sentry apagado en STG (sin DSN no hay reporting; los NEXT_PUBLIC_SENTRY_*
-    # y ORG/PROJECT con value: se heredan pero son inertes sin DSN).
-    "SENTRY_DSN", "SENTRY_AUTH_TOKEN",
-    "NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE", "NEXT_PUBLIC_SENTRY_ENV",
     # Providers LLM de fallback no usados en STG (Gemini es el primario).
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     # MeLi STG: pendiente fase S6 (app de prueba). MELI_WEBHOOK_ALLOWED_IPS

@@ -65,9 +65,7 @@ class Settings(BaseSettings):
     # Historial que se pasa al LLM por conversación (orchestrator.py).
     CONVERSATION_HISTORY_LIMIT: int = 25
 
-    # ── Observabilidad (observability.py) ─────────────────────────────────
-    SENTRY_DSN: str = ""
-    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    # ── Ambiente ─────────────────────────────────────────────────────────
     APP_ENV: str = ""
 
 

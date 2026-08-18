@@ -80,11 +80,6 @@ class Settings(BaseSettings):
     API_RATE_LIMIT_WRITE_PER_MINUTE: int = 30
     API_RATE_LIMIT_SEND_PER_MINUTE: int = 20
 
-    # ── Observabilidad ────────────────────────────────────────────────────
-    SENTRY_DSN: str = ""
-    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
-    SENTRY_ENV: str = ""
-
     # ── Flags de shipping (guías reales Aveonline; B1) ────────────────────
     AVEONLINE_GENERATE_REAL_GUIDES: bool = False
 
@@ -131,8 +126,6 @@ def validate_critical() -> list[str]:
             )
         if "localhost" in s.ALLOWED_ORIGINS or "127.0.0.1" in s.ALLOWED_ORIGINS:
             errors.append("ALLOWED_ORIGINS incluye localhost/127.0.0.1 en producción")
-        if not s.SENTRY_DSN:
-            errors.append("SENTRY_DSN no configurada en producción (observabilidad ciega)")
         if not s.GEMINI_API_KEY:
             errors.append(
                 "GEMINI_API_KEY no configurada en producción — el api la usa para "
