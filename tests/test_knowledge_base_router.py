@@ -21,7 +21,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "service-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 

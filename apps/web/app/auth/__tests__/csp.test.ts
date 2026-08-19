@@ -85,7 +85,7 @@ import { proxy } from '../../../proxy'
 describe('proxy — emisión CSP (G5)', () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://localhost'
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon'
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'anon'
     state.user = null
   })
 

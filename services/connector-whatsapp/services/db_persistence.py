@@ -9,11 +9,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Supabase con service_role (bypass RLS — se fija tenant_id explícitamente) ──
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-# A0.2c 2026-05-31: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
-SUPABASE_SERVICE_KEY = (
-    os.getenv("SUPABASE_SECRET_KEY", "")
-    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-)
+# G23 2026-08-19: solo SUPABASE_SECRET_KEY (la legacy JWT fue retirada).
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 
 _supabase: Optional[Client] = None
 
@@ -24,7 +21,7 @@ def get_supabase() -> Client:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
             raise RuntimeError(
                 "SUPABASE config incompleta: faltan NEXT_PUBLIC_SUPABASE_URL "
-                "o SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy)"
+                "o SUPABASE_SECRET_KEY"
             )
         _supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     return _supabase

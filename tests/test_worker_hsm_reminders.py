@@ -189,7 +189,7 @@ def _build_worker(fake_sb):
     módulo original en finally (aislamiento entre tests).
     """
     os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://stub.test")
-    os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "stub_key")
+    os.environ.setdefault("SUPABASE_SECRET_KEY", "stub_key")
 
     # Pre-stub supabase.create_client para que el constructor no haga llamada real
     import supabase as _sp

@@ -38,10 +38,10 @@ mod = _load_mod()
 # Snapshot de la superficie env por servicio en PRD (render.yaml). Si cambia,
 # actualiza estos conteos en el mismo commit — es la revisión deliberada.
 EXPECTED_KEY_COUNTS = {
-    "konvi-web": 13,
-    "konvi-connector": 5,
-    "konvi-api": 35,
-    "konvi-orchestrator": 96,
+    "konvi-web": 11,
+    "konvi-connector": 4,
+    "konvi-api": 34,
+    "konvi-orchestrator": 95,
 }
 
 

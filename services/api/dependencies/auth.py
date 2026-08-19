@@ -32,12 +32,9 @@ from supabase import Client, create_client
 logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-# Nuevo nombre canónico Publishable+Secret keys (fallback al legacy
-# SUPABASE_SERVICE_ROLE_KEY durante transición A0.2c).
-SUPABASE_SERVICE_KEY = (
-    os.getenv("SUPABASE_SECRET_KEY", "")
-    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-)
+# Nombre canónico Secret key (las legacy JWT keys fueron retiradas en G23 —
+# desactivadas a nivel Supabase desde 2026-08-19).
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 # Legacy HS256 secret — opcional. Si está, se usa como fallback para sesiones
 # pre-migración. Si no, solo ES256 (sistema nuevo asymmetric).
 _LEGACY_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")

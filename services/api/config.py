@@ -34,8 +34,6 @@ class Settings(BaseSettings):
     # ── Supabase ──────────────────────────────────────────────────────────
     NEXT_PUBLIC_SUPABASE_URL: str = ""
     SUPABASE_SECRET_KEY: str = ""
-    # Legacy A0.2c (retiro trackeado en G23 del PLAN): fallback mientras tanto.
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
     # Legacy opcional — auth.py verifica vía JWKS ES256; HS256 solo fallback.
     SUPABASE_JWT_SECRET: str = ""
 
@@ -106,9 +104,9 @@ def validate_critical() -> list[str]:
     is_local_url = sb_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
     if not (sb_url.startswith("https://") or is_local_url):
         errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
-    if not (s.SUPABASE_SECRET_KEY or s.SUPABASE_SERVICE_ROLE_KEY):
+    if not s.SUPABASE_SECRET_KEY:
         errors.append(
-            "SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) no configurada"
+            "SUPABASE_SECRET_KEY no configurada"
         )
     if not s.INTERNAL_SERVICE_SECRET:
         errors.append(

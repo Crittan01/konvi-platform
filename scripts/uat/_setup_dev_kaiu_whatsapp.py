@@ -24,7 +24,7 @@ assert_safe_target(creds, action="setup_dev_kaiu_whatsapp (UAT)")
 
 from supabase import create_client  # noqa: E402
 sb = create_client(creds["NEXT_PUBLIC_SUPABASE_URL"],
-                   creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"])
+                   creds["SUPABASE_SECRET_KEY"])
 
 TENANT = "d0000000-0000-0000-0000-000000000001"
 WABA = "2159052118202272"        # DEFAULT_META_WABA_ID de e2e_chat

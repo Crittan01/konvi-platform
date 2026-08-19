@@ -10,7 +10,7 @@ Demo + utilidad operativa: dado un order_id, lee los datos de la orden
   - Soporte: founder/CS dispara reminder manual a cliente VIP
 
 Pre-requisitos:
-  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
   - Template `payment_reminder_v1` en estado APPROVED
   - Orden con status=pending_payment + customer_phone
 
@@ -78,7 +78,7 @@ async def main():
     from supabase import create_client  # type: ignore
     sb = create_client(
         os.environ["NEXT_PUBLIC_SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        os.environ["SUPABASE_SECRET_KEY"],
     )
 
     # 1. Lookup orden — ESQUEMA REAL (rev. D-F7):

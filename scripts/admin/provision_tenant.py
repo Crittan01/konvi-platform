@@ -17,7 +17,7 @@ Uso:
   # registrar QUIÉN provisionó (audit trail en public.audit_log):
   python3.11 scripts/admin/provision_tenant.py --tenant-name X --owner-email y@z.co --actor-email founder@konvi.co
 
-Requiere env: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY).
+Requiere env: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY.
 
 IDEMPOTENCIA / SEGURIDAD:
   - Si el owner YA es owner activo de algún tenant, el script ABORTA por defecto (evita crear un 2º tenant
@@ -52,9 +52,9 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def _client():
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.environ.get("SUPABASE_SECRET_KEY")
     if not url or not key:
-        raise SystemExit("Falta NEXT_PUBLIC_SUPABASE_URL y/o SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY")
+        raise SystemExit("Falta NEXT_PUBLIC_SUPABASE_URL y/o SUPABASE_SECRET_KEY")
     return create_client(url, key)
 
 

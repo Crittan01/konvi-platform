@@ -281,7 +281,7 @@ _hdr "Next.js build (apps/web) — opt-in con --build / --ci"
 if $BUILD || [ "${VALIDATE_BUILD:-}" = "1" ]; then
   if command -v pnpm &>/dev/null; then
     build_out=$(NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}" \
-                NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder}" \
+                NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-placeholder}" \
                 pnpm --filter web build 2>&1 || true)
     if echo "$build_out" | grep -qE "Failed to compile|Build failed"; then
       _err "next build FALLÓ (Render no podrá desplegar):"
@@ -328,7 +328,7 @@ _hdr ".env.example coherencia"
 
 required_example=(
   "NEXT_PUBLIC_SUPABASE_URL"
-  "SUPABASE_SERVICE_ROLE_KEY"
+  "SUPABASE_SECRET_KEY"
   "SUPABASE_JWT_SECRET"
   "GEMINI_API_KEY"
   # NOTA (2026-08-15): PENDING_PAYMENT_RELEASE_ENABLED, CONVERSATION_HISTORY_LIMIT,
@@ -408,10 +408,11 @@ if $FULL; then
                GEMINI_API_KEY META_APP_SECRET META_VERIFY_TOKEN WOMPI_ENV; do
       grep -q "^${var}=" .env 2>/dev/null || env_missing+=("$var")
     done
-    # Service key: canónico SUPABASE_SECRET_KEY con fallback legacy SUPABASE_SERVICE_ROLE_KEY
-    # (migración A0.2c 2026-05-31). SUPABASE_JWT_SECRET dejó de ser bloqueante: auth.py verifica
+    # Service key: solo canónico SUPABASE_SECRET_KEY (legacy SERVICE_ROLE_KEY
+    # retirada en G23 — desactivadas a nivel Supabase 2026-08-19).
+    # SUPABASE_JWT_SECRET dejó de ser bloqueante: auth.py verifica
     # vía JWKS y solo usa HS256+JWT_SECRET como fallback legacy opcional (main.py:85).
-    grep -qE "^(SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY)=" .env 2>/dev/null \
+    grep -qE "^SUPABASE_SECRET_KEY=" .env 2>/dev/null \
       || env_missing+=("SUPABASE_SECRET_KEY")
     if [ "${#env_missing[@]}" -eq 0 ]; then
       _ok ".env contiene todas las vars críticas"

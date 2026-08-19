@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 # genai.Client() se crea al inicio de run_agentic_turn y exige api_key no vacía
 # (aunque _gemini_generate_async esté patcheado, el client se instancia). Key dummy:
 # el client nunca se usa de verdad (la llamada LLM está mockeada).

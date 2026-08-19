@@ -63,8 +63,8 @@ from supabase import create_client
 
 SB = create_client(
     os.environ["NEXT_PUBLIC_SUPABASE_URL"],
-    # SUPABASE_SECRET_KEY canónico (nuevo formato) con fallback legacy SERVICE_ROLE_KEY.
-    os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+    # SUPABASE_SECRET_KEY canónico (sin fallback legacy — G23 2026-08-19).
+    os.environ["SUPABASE_SECRET_KEY"],
 )
 
 # Defaults founder KAIU — sobrescribibles por env.

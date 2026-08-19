@@ -45,10 +45,9 @@ def _head(title: str) -> tuple[str, str]:
 
 def _client():
     url = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-    key = (os.environ.get("SUPABASE_SECRET_KEY")
-           or os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+    key = os.environ.get("SUPABASE_SECRET_KEY")
     if not key:
-        raise SystemExit("Falta SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY")
+        raise SystemExit("Falta SUPABASE_SECRET_KEY")
     return create_client(url, key)
 
 

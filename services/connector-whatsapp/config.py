@@ -33,8 +33,6 @@ class Settings(BaseSettings):
     # ── Supabase (services/db_persistence.py) ─────────────────────────────
     NEXT_PUBLIC_SUPABASE_URL: str = ""
     SUPABASE_SECRET_KEY: str = ""
-    # Legacy A0.2c (retiro trackeado en G23 del PLAN): fallback mientras tanto.
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # ── IP real del cliente detrás del edge (dependencies/meta.py, W5/T4-01)
     TRUSTED_CLIENT_IP_HEADER: str = ""
@@ -75,8 +73,8 @@ def validate_critical() -> list[str]:
     is_local_url = sb_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
     if not (sb_url.startswith("https://") or is_local_url):
         errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
-    if not (s.SUPABASE_SECRET_KEY or s.SUPABASE_SERVICE_ROLE_KEY):
+    if not s.SUPABASE_SECRET_KEY:
         errors.append(
-            "SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) no configurada"
+            "SUPABASE_SECRET_KEY no configurada"
         )
     return errors

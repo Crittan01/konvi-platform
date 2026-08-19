@@ -83,7 +83,7 @@ def _load_env() -> dict[str, str]:
 
 
 def _supabase_client():
-    """Cliente Supabase con SERVICE_ROLE — solo para queries diagnósticas."""
+    """Cliente Supabase con la Secret key — solo para queries diagnósticas."""
     env = _load_env()
     url = (
         env.get("SUPABASE_URL")
@@ -92,8 +92,7 @@ def _supabase_client():
         or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     )
     key = (
-        env.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        env.get("SUPABASE_SECRET_KEY")
     )
     if not url or not key:
         return None
@@ -162,7 +161,7 @@ def domain_2_soft_reserve() -> DomainResult:
     sb = _supabase_client()
     if not sb:
         return DomainResult(2, "Soft-reserve", SKIP,
-            "Sin SUPABASE_URL/SERVICE_ROLE_KEY — no puedo consultar DB remota")
+            "Sin SUPABASE_URL/SUPABASE_SECRET_KEY — no puedo consultar DB remota")
     try:
         # Verificar que el RPC nuevo (rev. 78 F1) sea callable.
         res = sb.rpc(

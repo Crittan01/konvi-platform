@@ -32,7 +32,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "k")
 

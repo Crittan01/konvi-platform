@@ -16,14 +16,14 @@
 
 // ─── Config de Supabase (solo desde entorno) ─────────────────────────────────
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const SERVICE_KEY = process.env.SUPABASE_SECRET_KEY
 const TENANT_ID = process.env.TEST_TENANT_ID
 const CATEGORY_ID = process.env.TEST_CATEGORY_ID
 
 if (!SUPABASE_URL || !SERVICE_KEY || !TENANT_ID || !CATEGORY_ID) {
   console.error('Faltan variables de entorno requeridas:')
   console.error('- NEXT_PUBLIC_SUPABASE_URL')
-  console.error('- SUPABASE_SERVICE_ROLE_KEY')
+  console.error('- SUPABASE_SECRET_KEY')
   console.error('- TEST_TENANT_ID')
   console.error('- TEST_CATEGORY_ID')
   process.exit(1)

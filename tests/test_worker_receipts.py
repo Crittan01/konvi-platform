@@ -62,7 +62,7 @@ class _FakeSB:
 
 def _worker(sb):
     os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://stub.test")
-    os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "stub_key")
+    os.environ.setdefault("SUPABASE_SECRET_KEY", "stub_key")
     import supabase as _sp
     saved = sys.modules.get("worker")
     try:

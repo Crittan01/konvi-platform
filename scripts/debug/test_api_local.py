@@ -4,14 +4,14 @@ import asyncio
 from supabase import create_client
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
 API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
 TEST_EMAIL = os.getenv("DEBUG_TEST_EMAIL")
 TEST_PASSWORD = os.getenv("DEBUG_TEST_PASSWORD")
 
 async def main():
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY son obligatorias")
+        raise RuntimeError("NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY son obligatorias")
     if not TEST_EMAIL or not TEST_PASSWORD:
         raise RuntimeError("DEBUG_TEST_EMAIL y DEBUG_TEST_PASSWORD son obligatorias para el script")
 

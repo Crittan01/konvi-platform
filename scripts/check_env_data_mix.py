@@ -116,7 +116,7 @@ def _fetch_rows(creds: dict) -> tuple[list[dict], list[dict]]:
     from supabase import create_client  # type: ignore
 
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL") or creds.get("SUPABASE_URL")
-    key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = creds["SUPABASE_SECRET_KEY"]
     if not url or not key:
         raise RuntimeError("falta NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY en el env-file")
     sb = create_client(url, key)

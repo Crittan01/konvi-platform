@@ -16,12 +16,12 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 from pathlib import Path
 
-# OJO: worker.py lee NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY a
+# OJO: worker.py lee NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY a
 # nivel MÓDULO (import time) — setear esas (no otras) ANTES del import, o los
 # tests que instancian OrchestratorWorker real quedan sin config (orden de
 # colección: este archivo se importa antes que varios de ellos).
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ai-orchestrator"))
 

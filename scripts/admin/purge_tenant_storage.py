@@ -20,7 +20,7 @@ Mecanismo PARAMETRIZADO por lista de buckets/prefijos:
     excluido de forma defensiva aunque se pase por error.
 
 Requiere env:
-  NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY)
+  NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
 
 Uso:
   python3.11 scripts/admin/purge_tenant_storage.py --tenant <uuid> --dry-run
@@ -54,12 +54,11 @@ def _client():
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = (
         os.environ.get("SUPABASE_SECRET_KEY")
-        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     )
     if not url or not key:
         raise SystemExit(
             "Falta NEXT_PUBLIC_SUPABASE_URL y/o "
-            "SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY"
+            "SUPABASE_SECRET_KEY"
         )
     # Cutover dev/prod (D.4): rechaza purgar storage de prod salvo override.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

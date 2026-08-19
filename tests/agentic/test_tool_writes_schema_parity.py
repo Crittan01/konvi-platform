@@ -51,21 +51,13 @@ def _load_env_if_available() -> bool:
             "SUPABASE_URL",
             os.environ.get("NEXT_PUBLIC_SUPABASE_URL", ""),
         )
-        # BLOQUE H: Supabase renombró las llaves — la service_role canónica del
-        # repo es `SUPABASE_SECRET_KEY` (validate.sh: "canónico SUPABASE_SECRET_KEY
-        # con fallback legacy SUPABASE_SERVICE_ROLE_KEY"). Este test buscaba solo
-        # el nombre legacy, ausente de `.env` → NUNCA corría de verdad (su razón
-        # de existir, cazar drift de schema, estaba muerta). Mapear la canónica.
-        _secret = os.environ.get("SUPABASE_SECRET_KEY", "")
-        if _secret:
-            os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", _secret)
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+    key = os.environ.get("SUPABASE_SECRET_KEY") or ""
     # BLOQUE H: rechazar valores centinela dummy. Muchos tests hacen
-    # `os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")`
+    # `os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")`
     # para poder importar módulos del orchestrator; en el suite completo esa
     # key dummy filtra a este módulo (orden de colección) y hacía que el probe
     # intentara conectar a Supabase con credencial inválida → 401 ERROR en vez
-    # de skip limpio. Una service key real (JWT o sb_secret_...) es larga (>40).
+    # de skip limpio. Una service key real (sb_secret_...) es larga (>40).
     _DUMMY_KEYS = {"service-role", "service_role", "test", "test-secret", "x"}
     if key in _DUMMY_KEYS or len(key) < 40:
         return False
@@ -97,7 +89,7 @@ def _get_real_columns(table: str) -> set[str]:
     try:
         sb = create_client(
             os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+            os.environ["SUPABASE_SECRET_KEY"],
         )
         res = sb.table(table).select("*").limit(1).execute()
     except Exception:

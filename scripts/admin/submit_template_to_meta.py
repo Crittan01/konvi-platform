@@ -21,7 +21,7 @@ Uso:
     --all-drafts
 
 Pre-requisitos:
-  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
   - Template en DB con status=LOCAL_DRAFT
   - tenant_integrations.credentials.access_token + waba_id configurados
 """
@@ -230,7 +230,7 @@ async def main():
     from supabase import create_client  # type: ignore
     sb = create_client(
         os.environ["NEXT_PUBLIC_SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        os.environ["SUPABASE_SECRET_KEY"],
     )
 
     if args.all_drafts:

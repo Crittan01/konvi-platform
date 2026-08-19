@@ -35,7 +35,7 @@ _SCHEME = "inbox-media://"
 
 def _client():
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.environ.get("SUPABASE_SECRET_KEY")
     if not url or not key:
         raise SystemExit("Falta NEXT_PUBLIC_SUPABASE_URL y/o SUPABASE_SECRET_KEY")
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

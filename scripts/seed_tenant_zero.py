@@ -16,7 +16,7 @@ except Exception as e:
 
 URL = creds.get("NEXT_PUBLIC_SUPABASE_URL")
 # IMPORTANTE: Usamos la KEY de Servicio, no la anónima, porque RLS rechaza writes anonímos
-KEY = creds.get("SUPABASE_SERVICE_ROLE_KEY")
+KEY = creds.get("SUPABASE_SECRET_KEY")
 
 if not URL or not KEY:
     print("Faltan las variables maestras URL o KEY de servicio.")

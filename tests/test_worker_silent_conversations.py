@@ -93,7 +93,7 @@ def _build_worker(fake_sb):
     """Instancia el worker con Supabase falso, restaurando sys.modules después
     (un `del sys.modules['worker']` sin restaurar contamina otros tests)."""
     os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://stub.test")
-    os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "stub_key")
+    os.environ.setdefault("SUPABASE_SECRET_KEY", "stub_key")
     import supabase as _sp
     saved = sys.modules.get("worker")
     try:

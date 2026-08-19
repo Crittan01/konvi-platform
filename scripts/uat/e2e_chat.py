@@ -39,8 +39,7 @@ def _resolve_app_secret_from_vault(tenant_id: str) -> Optional[str]:
     """Lee app_secret per-tenant desde Vault (Model B ADR-0023)."""
     creds = _load_env()
     sb_url = creds.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    sb_key = (creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
-              or os.environ.get("SUPABASE_SECRET_KEY"))
+    sb_key = creds.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SECRET_KEY")
     if not (sb_url and sb_key):
         return None
     try:
@@ -133,10 +132,9 @@ def _supabase():
     assert_safe_target(creds, action="e2e_chat")
     from supabase import create_client
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
-    # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
-    key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = creds.get("SUPABASE_SECRET_KEY")
     if not url or not key:
-        print("ERROR: faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY (ni legacy SERVICE_ROLE_KEY) en .env",
+        print("ERROR: faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY en .env",
               file=sys.stderr)
         sys.exit(1)
     return create_client(url, key)

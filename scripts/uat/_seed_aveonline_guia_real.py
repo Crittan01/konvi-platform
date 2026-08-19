@@ -48,7 +48,7 @@ from supabase import create_client  # noqa: E402
 
 sb = create_client(
     creds["NEXT_PUBLIC_SUPABASE_URL"],
-    creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"],
+    creds["SUPABASE_SECRET_KEY"],
 )
 
 sys.path.insert(0, f"{REPO}/services/api")

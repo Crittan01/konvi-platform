@@ -61,7 +61,7 @@ def _events_key_del_tenant(tenant_id: str) -> str:
     spec.loader.exec_module(mod)
     from supabase import create_client as _cc
     _sb = _cc(creds["NEXT_PUBLIC_SUPABASE_URL"],
-              creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"])
+              creds["SUPABASE_SECRET_KEY"])
     _, ek, _env = mod.get_tenant_wompi_creds(_sb, tenant_id, raise_on_error=True)
     if not ek:
         sys.exit("ERROR: el tenant no tiene events_key configurada en Vault")
@@ -72,7 +72,7 @@ from supabase import create_client  # noqa: E402
 
 sb = create_client(
     creds["NEXT_PUBLIC_SUPABASE_URL"],
-    creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"],
+    creds["SUPABASE_SECRET_KEY"],
 )
 # El tenant de DEV quedó hardcodeado aquí y ese proyecto ya no existe: hoy el único
 # entorno es konvi-prod. Se parametriza en vez de cambiar la constante, para que el script

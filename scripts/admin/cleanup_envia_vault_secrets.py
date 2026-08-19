@@ -45,10 +45,10 @@ def main(dry_run: bool = True) -> int:
         return 1
 
     supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    service_key = os.getenv("SUPABASE_SECRET_KEY", "")
     if not supabase_url or not service_key:
         logger.error(
-            "Faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY. "
+            "Faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY. "
             "Exportar antes de ejecutar."
         )
         return 1

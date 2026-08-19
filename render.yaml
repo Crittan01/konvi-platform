@@ -62,11 +62,8 @@ services:
         sync: false                              # sb_publishable_* — cliente browser
       - key: SUPABASE_SECRET_KEY
         sync: false                              # sb_secret_* — SSR + auth.admin.*
-      # LEGACY (eliminar post A0.2b refactor apps/web/utils/supabase/*.ts)
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false                              # [DEPRECATED] reemplazado por PUBLISHABLE_KEY
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
+      # Legacy ANON_KEY/SERVICE_ROLE_KEY eliminadas (G23 2026-08-19): el código
+      # ya no las lee y las keys legacy están desactivadas a nivel Supabase.
       # URL pública del frontend — leida en runtime por Server Actions (invite flow)
       # SIN prefijo NEXT_PUBLIC_ para evitar bake-in en tiempo de build
       - key: APP_URL
@@ -107,12 +104,8 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
-      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
-      # Legacy se elimina post A0.2c (refactor services/connector-whatsapp/services/db_persistence.py).
       - key: SUPABASE_SECRET_KEY
-        sync: false                              # sb_secret_*
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false                              # [DEPRECATED] fallback de SECRET_KEY (db_persistence.py:15)
+        sync: false                              # sb_secret_* (G23: legacy SERVICE_ROLE_KEY retirada)
       # META_APP_SECRET / META_VERIFY_TOKEN eliminados (verificado 0 lectores): Model B
       # (ADR-0023) resuelve app_secret + verify_token per-tenant desde Vault/credentials
       # JSONB (dependencies/meta.py), no desde env. ALLOWED_ORIGINS eliminada: el
@@ -147,12 +140,8 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
-      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
-      # Legacy se elimina post A0.2c (refactor services/api/dependencies/auth.py + main.py).
       - key: SUPABASE_SECRET_KEY
-        sync: false                              # sb_secret_*
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
+        sync: false                              # sb_secret_* (G23: legacy SERVICE_ROLE_KEY retirada)
       # JWT secret (legacy HS256) — aún requerido por auth.py + payment_link_tool +
       # shipping_quote_tool hasta refactor A0.2b (JWKS asymmetric) + A0.2c
       # (INTERNAL_SERVICE_SECRET para service-to-service).
@@ -287,12 +276,8 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
-      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
-      # Legacy se elimina post A0.2c (refactor worker.py + server.py + tools/).
       - key: SUPABASE_SECRET_KEY
-        sync: false                              # sb_secret_*
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
+        sync: false                              # sb_secret_* (G23: legacy SERVICE_ROLE_KEY retirada)
       # JWT secret (legacy HS256) — aún requerido por payment_link_tool + shipping_quote_tool
       # hasta refactor A0.2c (INTERNAL_SERVICE_SECRET header-based).
       - key: SUPABASE_JWT_SECRET

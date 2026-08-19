@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")

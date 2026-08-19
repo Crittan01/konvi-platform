@@ -22,7 +22,7 @@ assert_safe_target(creds, action="seed_kaiu_dev_finance (pedidos/gastos de prueb
 
 from supabase import create_client  # noqa: E402
 sb = create_client(creds["NEXT_PUBLIC_SUPABASE_URL"],
-                   creds.get("SUPABASE_SECRET_KEY") or creds["SUPABASE_SERVICE_ROLE_KEY"])
+                   creds["SUPABASE_SECRET_KEY"])
 TENANT = "d0000000-0000-0000-0000-000000000001"
 
 if sb.table("orders").select("id").eq("tenant_id", TENANT).execute().data:

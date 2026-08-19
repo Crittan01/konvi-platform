@@ -77,12 +77,8 @@ class ValidateCriticalTests(unittest.TestCase):
         env = {**_BASE_ENV, "NEXT_PUBLIC_SUPABASE_URL": "http://127.0.0.1:54321"}
         self.assertEqual(_validate_with(env), [])
 
-    def test_falta_secret_key_pero_legacy_cubre(self):
-        env = {**_BASE_ENV, "SUPABASE_SECRET_KEY": "", "SUPABASE_SERVICE_ROLE_KEY": "legacy"}
-        self.assertEqual(_validate_with(env), [])
-
     def test_sin_ninguna_key_supabase(self):
-        env = {**_BASE_ENV, "SUPABASE_SECRET_KEY": "", "SUPABASE_SERVICE_ROLE_KEY": ""}
+        env = {**_BASE_ENV, "SUPABASE_SECRET_KEY": ""}
         self.assertTrue(any("SUPABASE_SECRET_KEY" in e for e in _validate_with(env)))
 
     def test_falta_internal_secret(self):

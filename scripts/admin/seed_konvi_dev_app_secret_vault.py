@@ -9,7 +9,7 @@ Uso:
 
 Pre-requisitos:
   - .env con META_APP_SECRET cargado (debe ser el secret de Konvi App ID 819229210624423)
-  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY o SUPABASE_SERVICE_ROLE_KEY
+  - .env con NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ KONVI_APP_ID = "819229210624423"
 
 def main() -> int:
     sb_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-    sb_key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    sb_key = os.getenv("SUPABASE_SECRET_KEY", "")
     meta_app_secret = os.getenv("META_APP_SECRET")
 
     if not (sb_url and sb_key):

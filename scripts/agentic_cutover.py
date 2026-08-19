@@ -60,7 +60,7 @@ def _load_env():
 def _get_supabase():
     from supabase import create_client
     url = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    key = os.environ["SUPABASE_SECRET_KEY"]
     return create_client(url, key)
 
 

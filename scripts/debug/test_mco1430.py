@@ -2,7 +2,7 @@ import asyncio, httpx, os
 from supabase import create_client
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
 async def main():
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)

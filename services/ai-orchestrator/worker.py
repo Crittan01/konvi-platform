@@ -360,11 +360,8 @@ HEALTH_METRICS_INTERVAL_SECONDS = int(
 )
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-# A0.2c 2026-05-31: SUPABASE_SECRET_KEY (canónico) con fallback legacy SERVICE_ROLE_KEY.
-SUPABASE_SERVICE_KEY = (
-    os.getenv("SUPABASE_SECRET_KEY", "")
-    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-)
+# G23 2026-08-19: solo SUPABASE_SECRET_KEY (la legacy JWT fue retirada).
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 
 
 def _round_robin_dequeue_by_tenant(
@@ -473,8 +470,7 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
             raise RuntimeError(
-                "Faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY "
-                "(o SUPABASE_SERVICE_ROLE_KEY legacy)"
+                "Faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY"
             )
         self.supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         self._running = False

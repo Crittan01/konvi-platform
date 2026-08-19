@@ -20,7 +20,7 @@ Opciones:
     --yes               Salta la confirmación interactiva.
 
 Lee credenciales Supabase desde `.env` en la raíz del repo.
-Requiere SUPABASE_SERVICE_ROLE_KEY (RLS bypass).
+Requiere SUPABASE_SECRET_KEY (RLS bypass).
 
 Recursos borrados por conversación (full_delete):
     1. payments        (donde conversation_id matche)
@@ -375,10 +375,10 @@ def main():
     from _env_guard import assert_safe_target
     assert_safe_target(creds, action="wipe_conversation")
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
-    # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
-    key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
+    # G23 2026-08-19: solo SUPABASE_SECRET_KEY (sin fallback legacy).
+    key = creds["SUPABASE_SECRET_KEY"]
     if not url or not key:
-        print("ERROR: falta NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) en .env",
+        print("ERROR: falta NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY en .env",
               file=sys.stderr)
         sys.exit(1)
 

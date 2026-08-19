@@ -12,7 +12,7 @@ modelo (o antes, si el deploy no ha ocurrido, sabiendo que quedará consistente 
 desplegar). Mientras docs y queries usen modelos distintos, el RAG está degradado.
 
 Requiere env:
-  NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY)
+  NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
   GEMINI_API_KEY  (para llamar al modelo de embedding)
   Opcional: GEMINI_EMBEDDING_MODEL (default gemini-embedding-2), GEMINI_EMBEDDING_DIM (3072).
 
@@ -47,9 +47,9 @@ def _pgvector(values: list[float]) -> str:
 
 def _client():
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.environ.get("SUPABASE_SECRET_KEY")
     if not url or not key:
-        raise SystemExit("Falta NEXT_PUBLIC_SUPABASE_URL y/o SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY")
+        raise SystemExit("Falta NEXT_PUBLIC_SUPABASE_URL y/o SUPABASE_SECRET_KEY")
     return create_client(url, key)
 
 
