@@ -99,7 +99,7 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 ### FASE S4 — Supabase [F+A] (cierra el P0: B2 pasos 8 y 10)
 
 1. **[F] B2 paso 8 — DB password:** reset en Database → Settings (es reset, no hay flujo con password actual [DOC]). Impacto sobre conexiones vivas NO documentado [NO-DOC] → ejecutar en ventana de bajo tráfico y actualizar `DATABASE_URL`/secrets de CI inmediatamente después.
-2. **[F] B2 paso 10 — revocar legacy anon/service_role (MATA EL P0).** Pasos exactos verificados en doc oficial:
+2. **[F] B2 paso 10 — revocar legacy anon/service_role (MATA EL P0).** ✅ **HECHO 2026-08-19:** founder desactivó las legacy JWT-based keys en Settings → API Keys; verificación [A] `check_old_creds.py` → **401 en ambas** ("Legacy API keys are disabled"). Queda como referencia el procedimiento ejecutado (por si se reactivaran por error):
    a. Settings → API Keys: revisar indicadores **"last used"** de `anon` y `service_role` (confirmar que el tráfico ya usa publishable/secret — B2 paso 2 ya migró el runtime).
    b. **Desactivar** `anon` y `service_role` (mismo panel). Son **reactivables** si algo se rompe [DOC] → la ventana de riesgo es reversible.
    c. Verificación [A]: `.audit/check_old_creds.py` debe pasar de HTTP 200 a **401** leyendo `tenants` con las keys viejas (esa es la evidencia que mata el P0).
@@ -144,7 +144,7 @@ Diseño destino (por doc oficial): la **misma cuenta** de comercio alberga ambos
 
 ### FASE S8 — Eliminación TOTAL de Sentry [A] (decisión founder 2026-08-16)
 
-**Estado 2026-08-17: CERRADA.** Certificación local completa: grep-cero en código/config (`grep -ri sentry services/ apps/ packages/ scripts/ tests/ render.yaml .env.example` = 0 hits) · suite **4408 passed / 0 failed** · vitest 353 · tsc 0 · `next build` OK · ruff 197 ≤ baseline 201 · `bash scripts/certify_stg.sh` **18/18** live. Evidencia en bitácora `docs/PLAN.md` §E. **Pendiente [F]:** borrar las env vars SENTRY_* en el dashboard de los 4 servicios Render + cancelar/borrar el proyecto en sentry.io.
+**Estado 2026-08-19: CERRADA TOTAL (agente + founder).** Certificación agente 2026-08-17: grep-cero en código/config · suite 4408 passed/0 failed · vitest 353 · tsc 0 · `next build` OK · ruff 197 ≤ baseline · `certify_stg.sh` 18/18 · CI 5/5 (run 32086032295). Parte founder 2026-08-19: env vars SENTRY_* borradas en los 4 servicios Render + org sentry.io eliminada — **verificado vía Render API (0 SENTRY_* ×4 servicios) + health live 200 ×5**. Evidencia en bitácora `docs/PLAN.md` §E.
 
 Desviaciones del inventario (encontradas al ejecutar, verificadas contra código):
 - `services/ai-orchestrator/observability.py` NO era solo Sentry: albergaba el tracing OTEL (`track_op`/`start_span`, rev.109) que usa `agentic/dispatcher.py`. El OTEL no es Sentry y se conserva → movido intacto a `services/ai-orchestrator/tracing.py` (único import actualizado).
@@ -206,7 +206,7 @@ Desviaciones del inventario (encontradas al ejecutar, verificadas contra código
 ```
 S0 [A] ── sin dependencias (código) — ✅ CERRADA 2026-08-16
 S7 [A] ── sin dependencias (STG local homologado) — ✅ CERRADA 2026-08-16 (CI 5/5 verde)
-S8 [A] ── sin dependencias (borrado total Sentry) — ✅ CERRADA 2026-08-17 (grep-cero + suite/CI/certify verdes; queda [F] dashboard Render + sentry.io)
+S8 [A+F] ── ✅ CERRADA TOTAL 2026-08-19 (código + dashboard Render + sentry.io; verificado Render API + health live)
 S4.2 [F] B2 paso 10 (legacy Supabase) ── mata el P0, MÁXIMA PRIORIDAD founder
 S1 [F] Wompi ── depende de activación de Wompi (tiempo externo); desbloquea cobros reales
 S2 [F] Meta ── paralelo a S1
