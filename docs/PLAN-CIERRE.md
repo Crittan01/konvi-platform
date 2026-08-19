@@ -46,16 +46,20 @@
 
 ## Orden recomendado (dependencias reales)
 
+**Decisión founder 2026-08-19 — modelo STG-first:** se trabaja y certifica TODO en STG; PRD solo recibe lo ya probado. El código fluye STG → `develop` → CI verde → `production` (ya es así); la config de terceros no se promueve (vive por ambiente) — la disciplina equivalente es configurar primero en STG, certificar, y replicar en PRD. **Consecuencia aceptada:** mientras dure la Fase A, KAIU en prod sigue con llaves sandbox (sin cobros reales) — inofensivo pre-launch.
+
 ```
-1.1 Wompi prod ──┐
-2.1 Meta Test App ├─ pueden arrancar YA en paralelo (dependen de dashboards/tiempos de terceros)
-2.2 S5 keys ─────┘
-3.1 dominio api.konvi.co → cuando cierre, migrar URLs de webhook (transición sin corte)
-3.4 G8b → cualquier momento, con autorización
-2.4 M19 → cualquier momento (cierra B2 al 100%)
-1.3 B4 live → tras 1.1 (para probar el money-path completo con Wompi prod)
-3.3 dev cloud → día del lanzamiento
-2.3 S6 → cuando el marketplace entre a operación
+FASE A — STG total (cero riesgo prod, arranca ya):
+  A1. S2 Meta Test App + número de prueba → webhook al connector STG (ngrok)
+  A2. S5 keys STG (Resend sending-access · bot Telegram · proyecto GCP konvi-stg)
+  A3. [A] Certificación E2E en STG: webhooks reales Meta vía ngrok + email Resend STG
+      + Telegram STG + suite + certify_stg + escenarios conversacionales 15/15
+FASE B — Integración a PRD (solo lo certificado en A):
+  B1. Wompi prod keys en KAIU + URL eventos prod (dinero real) [1.1]
+  B2. Dominio api.konvi.co + migración de webhooks sin corte [3.1]
+  B3. B4 live · G8b · M19 · pin Python 3.13 [1.3, 3.4, 2.4, 3.2]
+  B4. A1 MFA cuando el founder decida [4.1]
+  B5. dev cloud, día del lanzamiento [3.3] · S6 MeLi cuando el marketplace opere [2.3]
 ```
 
 **Estado al crear este plan (2026-08-19):** suite 4405 pytest + 353 vitest + tsc 0 + ruff ≤ baseline + CI 5/5 + `certify_stg.sh` 18/18 — todo verde en develop. Cerrados hoy: S8 total (código + Render + sentry.io), B2 paso 10 (legacy Supabase 401), DB password, G23 (fallbacks legacy fuera del código), dashboard Render sin vars legacy/Sentry (verificado vía API).
