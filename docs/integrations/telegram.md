@@ -95,6 +95,19 @@ Un solo secret global para todos los tenants (el aislamiento lo da el mapping ch
 - **Monitoreo disponible**: logs `[TG_WH]` (comandos, self-heal, rechazos) y `[TG_ESCALATION]` en Render Dashboard.
 - **Dependencia de plataforma**: el valor de `TELEGRAM_WEBHOOK_SECRET` en Render debe coincidir con el usado en cada `setWebhook`; rotarlo implica re-registrar los webhooks de todos los bots.
 
+## Alta de un bot (procedimiento verificado E2E en STG 2026-08-19/20)
+
+Un bot por ambiente/tenant (la doc oficial de Telegram recomienda crear bots separados para pruebas vía @BotFather — [Bot Features](https://core.telegram.org/bots/features)). **Nunca** va a env vars globales: el token es per-tenant en Vault (`.env.example:230` — "la global nunca se lee").
+
+1. **Crear el bot:** @BotFather → `/newbot` → nombre visible (ej. `Konvi STG`) → username terminado en `bot` (ej. `konvi_stg_bot`; **inmutable** — elegir bien). BotFather entrega el `token` (`123456:AAH…`).
+2. **Grupo de operadores:** crear el grupo (ej. "Konvi STG Operadores") y **agregar el bot**. Las notificaciones van a grupo, no a chat personal — el formulario del panel exige chat_id de grupo (`pattern="-\d+"`).
+3. **Obtener el `chat_id` del grupo (SIEMPRE negativo):** dentro del grupo enviar `/start@<bot_username>` — con el *privacy mode* por defecto el bot solo ve en grupos los comandos dirigidos a él; un mensaje normal no le llega. Luego leer `https://api.telegram.org/bot<TOKEN>/getUpdates` → `message.chat.id` (formato `-XXXXXXXXXX`; supergrupos `-100XXXXXXXXXX`). Privados son positivos y NO sirven para este campo.
+4. **Alta en el panel del tenant:** Ajustes → Integraciones → Telegram → pegar **Bot Token** + **Chat ID del grupo** (con el signo `-`) → Conectar. El token queda en Vault (`notification_settings.config.bot_token_secret_id`).
+5. **Webhook (si se usan comandos inbound):** `setWebhook` manual por bot (comando de arriba) apuntando al ambiente correspondiente (PRD: `https://konvi-api.onrender.com/…`; STG: la URL ngrok del api, `make -C .local print-urls`).
+6. **Verificación:** provocar una escalación/notificación del tenant → el mensaje llega al grupo. En STG (2026-08-20) verificado con bot `konvi_stg_bot` + grupo `Konvi STG Operadores` (chat_id `-5381900925`).
+
+> STG quedó con: bot `@konvi_stg_bot` + grupo `Konvi STG Operadores` — registrado aquí para re-armado del ambiente (los secretos viven en el Vault local, nunca en docs).
+
 ## Gaps conocidos
 
 | ID | Severidad | Gap |
