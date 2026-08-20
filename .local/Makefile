@@ -129,8 +129,9 @@ print-urls:
 	echo ""; \
 	if [ -n "$$con_url" ] && [ "$$con_url" != "null" ]; then \
 		echo "Meta WhatsApp — Facebook Developers → Webhooks:"; \
-		echo "  Callback URL:  $$con_url/api/v1/whatsapp/webhook"; \
-		echo "  Verify Token:  META_VERIFY_TOKEN (en .env)"; \
+		echo "  Callback URL:  $$con_url/api/v1/whatsapp/webhook/d0000000-0000-0000-0000-000000000001"; \
+		echo "  (el tenant_id del PATH es obligatorio — tenant sandbox STG; verify token per-tenant,"; \
+		echo "   configurado en tenant_integrations del STG, NO en .env)"; \
 	else \
 		echo "  [Connector offline]"; \
 	fi
