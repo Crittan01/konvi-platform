@@ -27,10 +27,10 @@ ENV_DIR := $(STATE_DIR)/env
 # shell que invoca make; HOME para caches de node/python).
 CLEAN_ENV := env -i PATH="$(PATH)" HOME="$(HOME)" LANG="$(LANG)"
 
-.PHONY: help up down restart status logs print-urls clean \
+.PHONY: help up down restart status logs print-urls clean db \
         start-api start-connector start-orchestrator start-web \
         stop-api  stop-connector  stop-orchestrator  stop-web  \
-        _tunnel-api _tunnel-connector _tunnel-down
+        _preflight-db _tunnel-api _tunnel-connector _tunnel-down
 
 # ── Ayuda ─────────────────────────────────────────────────────────────────────
 
@@ -38,8 +38,9 @@ help:
 	@echo ""
 	@echo "Konvi — entorno local (STG homologado a PRD — S7)"
 	@echo ""
-	@echo "  make up           Inicia servicios + túneles ngrok"
-	@echo "  make down         Detiene todo"
+	@echo "  make up           Inicia servicios + túneles ngrok (NO la DB — ver make db)"
+	@echo "  make db           Levanta la DB: Supabase local en podman (supabase start)"
+	@echo "  make down         Detiene todo (no toca la DB)"
 	@echo "  make restart      down + up"
 	@echo "  make status       Estado de todos los procesos"
 	@echo "  make print-urls   URLs para configurar en Meta / Wompi / MeLi"
@@ -74,9 +75,35 @@ _check:
 	@command -v ngrok      >/dev/null     || (echo "ERROR: ngrok no encontrado" && exit 1)
 	@mkdir -p "$(LOG_DIR)" "$(PID_DIR)" "$(ENV_DIR)"
 
+# ── DB local (NO la levanta `up` — pieza separada del stack) ─────────────────
+
+db:
+	@export DOCKER_HOST="unix:///run/user/$$(id -u)/podman/podman.sock"; \
+	supabase start 2>&1 | tail -3; \
+	if ! curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:54321/rest/v1/ 2>/dev/null; then \
+		echo "  db: estado stale de contenedores (la CLI cree que corre pero el contenedor"; \
+		echo "      postgres está exited — pasa tras suspensión/reinicio de la VM)."; \
+		echo "      Recuperando con stop+start…"; \
+		supabase stop >/dev/null 2>&1; supabase start 2>&1 | tail -3; \
+	fi; \
+	curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:54321/rest/v1/ 2>/dev/null \
+		&& echo "  db: Supabase local OK (127.0.0.1:54321)" \
+		|| { echo "  ERROR: la DB sigue sin responder — revisar: supabase status"; exit 1; }
+
+# Preflight de DB para `up`: los servicios arrancan y se recuperan solos cuando
+# la DB vuelve, pero arrancar sin DB deja todo lo que toca datos roto (503 en
+# /health/ready) — advertir fuerte en vez de fallar en silencio.
+_preflight-db:
+	@curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:54321/rest/v1/ 2>/dev/null \
+		&& echo "  db: Supabase local OK (127.0.0.1:54321)" \
+		|| { echo ""; \
+		     echo "  ⚠️  DB local NO responde (127.0.0.1:54321)."; \
+		     echo "     Los servicios arrancan, pero todo lo que toca DB fallará hasta"; \
+		     echo "     que la levantes:  make db   (= supabase start en podman)"; echo ""; }
+
 # ── Stack completo ────────────────────────────────────────────────────────────
 
-up: _check start-api start-connector start-orchestrator start-web _tunnel-api _tunnel-connector
+up: _check _preflight-db start-api start-connector start-orchestrator start-web _tunnel-api _tunnel-connector
 	@echo ""
 	@$(MAKE) -C $(STATE_DIR) print-urls
 
@@ -98,6 +125,9 @@ status:
 			rm -f "$$pidfile"; \
 		fi; \
 	done
+	@curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:54321/rest/v1/ 2>/dev/null \
+		&& echo "  db (supabase local): UP" \
+		|| echo "  db (supabase local): DOWN — levantarla con: make db"
 	@echo ""
 
 logs:
