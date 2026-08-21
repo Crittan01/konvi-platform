@@ -84,6 +84,10 @@ export function useConversations({ supabase }: Options): Result {
   const [showArchived, setShowArchivedState] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  // Ref espejo del seleccionado: permite decidir la selección en loadConversations
+  // SIN un updater de estado con efectos (router.replace dentro del updater corría
+  // durante el render de InboxManager — error React "setState in render").
+  const selectedIdRef = useRef<string | null>(null)
   // Ref para que las suscripciones Realtime lean el valor vigente sin re-suscribirse.
   const showArchivedRef = useRef(false)
   const pendingConvRestore = useRef<string | null>(null)
@@ -108,6 +112,7 @@ export function useConversations({ supabase }: Options): Result {
   }, [router, pathname])
 
   const setSelectedId = useCallback((id: string | null) => {
+    selectedIdRef.current = id
     setSelectedIdState(id)
     syncUrlParam(id)
   }, [syncUrlParam])
@@ -209,19 +214,27 @@ export function useConversations({ supabase }: Options): Result {
     const urlConvId = pendingConvRestore.current
       ?? new URLSearchParams(window.location.search).get('conv')
     if (urlConvId && rows.some(r => r.id === urlConvId)) {
+      selectedIdRef.current = urlConvId
       setSelectedIdState(urlConvId)
       pendingConvRestore.current = null
     } else {
-      setSelectedIdState(prev => {
-        if (prev && rows.some(r => r.id === prev)) return prev
-        if (rows.length === 0) return null
-        const preferred = rows.find(r => r.last_message) ?? rows[0]
-        syncUrlParam(preferred.id)
-        return preferred.id
-      })
+      // Decisión con la ref espejo (los updaters de estado deben ser puros:
+      // router.replace dentro del updater corría durante el render de
+      // InboxManager → error React "setState in render").
+      const prev = selectedIdRef.current
+      if (prev && rows.some(r => r.id === prev)) return
+      if (rows.length === 0) {
+        selectedIdRef.current = null
+        setSelectedIdState(null)
+        return
+      }
+      const preferred = rows.find(r => r.last_message) ?? rows[0]
+      selectedIdRef.current = preferred.id
+      setSelectedIdState(preferred.id)
+      syncUrlParam(preferred.id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase])
+  }, [supabase, syncUrlParam])
 
   // "Ver más": amplía la ventana y re-fetchea (respetando showArchived + filtros).
   const loadMore = useCallback(async () => {
