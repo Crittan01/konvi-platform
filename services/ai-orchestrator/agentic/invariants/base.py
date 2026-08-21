@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # una mentira de dinero.
 FAIL_CLOSED_INVARIANTS = frozenset({
     "payment_coherence",
+    "payment_truth",
     "summary_coherence",
     "pii_save_truthfulness",
     "fake_escalation",

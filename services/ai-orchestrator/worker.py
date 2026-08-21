@@ -296,6 +296,25 @@ ORDER_COHERENCE_INTERVAL_SECONDS = int(
 ORDER_COHERENCE_WINDOW_HOURS = int(os.getenv("ORDER_COHERENCE_WINDOW_HOURS", "48"))
 ORDER_COHERENCE_BATCH = int(os.getenv("ORDER_COHERENCE_BATCH", "50"))
 
+# B4 (auditoría money-path 2026-08-21) — reconciliador "pagado sin guía".
+# Si la generación de la guía Aveonline falla tras un pago confirmado, el
+# webhook ya alerta por Telegram al instante; este barrido es la red de
+# respaldo (webhook caído, alerta perdida, guía rechazada sin excepción).
+# Busca órdenes `confirmed` con antigüedad > min_age y < window sin shipment
+# con guía (labeled/simulated/en tránsito) y alerta UNA vez por orden
+# (marca orders.paid_no_guide_alerted_at, migración 20260821120200).
+PAID_NO_GUIDE_RECONCILE_ENABLED = os.getenv(
+    "PAID_NO_GUIDE_RECONCILE_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+PAID_NO_GUIDE_RECONCILE_INTERVAL_SECONDS = int(
+    os.getenv("PAID_NO_GUIDE_RECONCILE_INTERVAL_SECONDS", "900")  # 15 min
+)
+PAID_NO_GUIDE_MIN_AGE_MINUTES = int(
+    os.getenv("PAID_NO_GUIDE_MIN_AGE_MINUTES", "15")
+)
+PAID_NO_GUIDE_WINDOW_HOURS = int(os.getenv("PAID_NO_GUIDE_WINDOW_HOURS", "48"))
+PAID_NO_GUIDE_BATCH = int(os.getenv("PAID_NO_GUIDE_BATCH", "50"))
+
 # Comprobante de compra (ADR-0040). La emisión es diferida y no un trigger porque en
 # contra entrega el pedido NACE confirmado y sus order_items se insertan después: un
 # trigger vería subtotal 0 y concluiría que las cifras no cuadran. Ley 1480 art. 50
@@ -444,6 +463,7 @@ _MAINTENANCE_JOBS = (
     ("takeover_sla", "_check_human_takeover_sla_if_due"),
     ("silent_conversations", "_detect_silent_conversations_if_due"),
     ("order_coherence", "_check_order_coherence_if_due"),
+    ("paid_no_guide_reconcile", "_reconcile_paid_without_guide_if_due"),
     ("acceptance_stamp", "_stamp_acceptances_if_due"),
     ("receipts", "_issue_receipts_if_due"),
     ("reversal_constancias", "_sweep_reversals_if_due"),
@@ -506,6 +526,8 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
         self._last_sla_check_at = 0.0
         self._silent_conv_enabled = SILENT_CONV_DETECTOR_ENABLED
         self._order_coherence_enabled = ORDER_COHERENCE_CHECK_ENABLED
+        self._paid_no_guide_enabled = PAID_NO_GUIDE_RECONCILE_ENABLED
+        self._last_paid_no_guide_at = 0.0
         self._receipt_enabled = RECEIPT_ISSUE_ENABLED
         self._receipt_ack_enabled = RECEIPT_ACK_ENABLED
         self._receipt_email_enabled = RECEIPT_EMAIL_ENABLED
@@ -566,6 +588,10 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
             "silent_conversations_recovered": 0,
             # Cada unidad es plata que no cuadra en un pedido real.
             "incoherent_orders_detected": 0,
+            # B4 — órdenes pagadas (confirmed) sin guía de envío: cada una es
+            # un cliente que pagó y cuyo paquete nadie despachó.
+            "paid_no_guide_alerts_sent": 0,
+            "paid_no_guide_errors": 0,
             "receipts_issued": 0,
             "receipts_blocked_incoherent": 0,
             "receipts_voided": 0,
@@ -1874,6 +1900,143 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                 str(o.get("order_id"))[:8], str(o.get("tenant_id"))[:8], o.get("status"),
                 o.get("total_registrado"), o.get("total_calculado"), o.get("diferencia"),
             )
+
+    async def _reconcile_paid_without_guide_if_due(self) -> None:
+        """Órdenes pagadas (confirmed) SIN guía de envío — alerta al operador.
+
+        B4 (auditoría money-path 2026-08-21): si la generación de la guía
+        Aveonline falla tras un pago confirmado, el webhook alerta al instante,
+        pero ese camino puede perderse (deploy, crash, canal telegram caído,
+        rechazo silencioso). Este barrido es la red de respaldo: encuentra
+        órdenes `confirmed` con antigüedad > PAID_NO_GUIDE_MIN_AGE_MINUTES
+        (ventana de gracia: la guía automática tarda ~1 min + delay) y sin
+        shipment con guía (labeled/simulated/en tránsito o con tracking), y
+        alerta por Telegram UNA vez por orden — la marca
+        orders.paid_no_guide_alerted_at evita el spam (migración 20260821120200).
+
+        Cubre también COD confirmed (el courier recauda al entregar — sin guía
+        no hay entrega) y órdenes manuales del Inbox olvidadas. La ventana
+        superior (PAID_NO_GUIDE_WINDOW_HOURS) evita alertar historia legacy en
+        el primer barrido. Si Telegram no está configurado/falla NO se marca:
+        se reintenta el próximo ciclo (mejor ruido en logs que alerta perdida).
+        """
+        if not self._paid_no_guide_enabled:
+            return
+        now = time.time()
+        if now - self._last_paid_no_guide_at < max(60, PAID_NO_GUIDE_RECONCILE_INTERVAL_SECONDS):
+            return
+        self._last_paid_no_guide_at = now
+
+        from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+        _now = datetime.now(timezone.utc)
+        min_age = (_now - timedelta(minutes=PAID_NO_GUIDE_MIN_AGE_MINUTES)).isoformat()
+        window = (_now - timedelta(hours=PAID_NO_GUIDE_WINDOW_HOURS)).isoformat()
+        try:
+            res = (
+                self.supabase.table("orders")
+                .select("id, tenant_id, total_amount, payment_method, created_at")
+                .eq("status", "confirmed")
+                .lt("created_at", min_age)
+                .gt("created_at", window)
+                .is_("paid_no_guide_alerted_at", "null")
+                .order("created_at", desc=True)
+                .limit(PAID_NO_GUIDE_BATCH)
+                .execute()
+            )
+            candidates = res.data or []
+        except Exception as exc:
+            # La columna puede no existir aún si el worker se desplegó antes
+            # que la migración — degrada a skip, como los demás crons.
+            logger.warning("[SIN_GUIA] no pude consultar órdenes confirmadas: %s", exc)
+            return
+        if not candidates:
+            return
+
+        # Estados de shipment que SÍ representan guía generada (o más allá).
+        _GUIDE_OK = {
+            "labeled", "simulated", "picked_up", "in_transit",
+            "out_for_delivery", "delivered",
+        }
+        for order in candidates:
+            order_id = order.get("id")
+            tenant_id = order.get("tenant_id")
+            if not order_id or not tenant_id:
+                continue
+            try:
+                shipments = (
+                    self.supabase.table("shipments")
+                    .select("id, status, tracking_number")
+                    .eq("order_id", order_id)
+                    .eq("tenant_id", tenant_id)  # ADR-0025: filtro explícito
+                    .order("created_at", desc=True)
+                    .limit(3)
+                    .execute()
+                ).data or []
+                has_guide = any(
+                    (s.get("status") or "").lower() in _GUIDE_OK
+                    or bool(s.get("tracking_number"))
+                    for s in shipments
+                    if isinstance(s, dict)
+                )
+                if has_guide:
+                    continue
+                short = str(order_id)[:8].upper()
+                total = float(order.get("total_amount") or 0)
+                total_co = f"${int(round(total)):,}".replace(",", ".")
+                pm = (order.get("payment_method") or "credit").lower()
+                pm_txt = "contraentrega" if pm == "cod" else "pago online confirmado"
+                try:
+                    from telegram_notifications import (  # noqa: PLC0415
+                        notify_escalation_async,
+                    )
+                    sent = await notify_escalation_async(
+                        self.supabase,
+                        tenant_id=str(tenant_id),
+                        reason=(
+                            "Pedido pagado SIN guía de envío\n"
+                            f"Pedido #{short} — {total_co} COP ({pm_txt})\n"
+                            f"Creado: {str(order.get('created_at') or '')[:16]} UTC\n"
+                            "La guía Aveonline no se generó. Acción: generarla "
+                            "manual desde Pedidos cuanto antes."
+                        ),
+                        severity="critical",
+                    )
+                except Exception as notif_exc:
+                    sent = False
+                    logger.error(
+                        "[SIN_GUIA] alerta telegram lanzó error order=%s: %s",
+                        short, notif_exc,
+                    )
+                if sent:
+                    try:
+                        self.supabase.table("orders").update({
+                            "paid_no_guide_alerted_at": _now.isoformat(),
+                        }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
+                    except Exception as mark_exc:
+                        # Si la marca falla, el próximo ciclo re-alerta (spam
+                        # acotado al intervalo del job). Se loguea.
+                        logger.warning(
+                            "[SIN_GUIA] no pude marcar order=%s alertada: %s",
+                            short, mark_exc,
+                        )
+                    self._metrics["paid_no_guide_alerts_sent"] += 1
+                    logger.error(
+                        "[SIN_GUIA] orden pagada sin guía order=%s tenant=%s — alertada",
+                        short, str(tenant_id)[:8],
+                    )
+                else:
+                    self._metrics["paid_no_guide_errors"] += 1
+                    logger.error(
+                        "[SIN_GUIA] orden pagada sin guía order=%s SIN canal de "
+                        "alerta (reintento próximo ciclo)",
+                        short,
+                    )
+            except Exception as exc:  # noqa: BLE001 — un pedido no tumba el barrido
+                self._metrics["paid_no_guide_errors"] += 1
+                logger.warning(
+                    "[SIN_GUIA] error procesando order=%s: %s",
+                    str(order_id)[:8], exc,
+                )
 
     async def _detect_silent_conversations_if_due(self) -> None:
         """El cliente escribió y no le llegó respuesta: alerta + escala a un humano.

@@ -54,10 +54,22 @@ async def select_carrier_for_cart(
 
     # F46: usar total_cents del snapshot (con descuento del cupón). Antes se recomponía como
     # subtotal+shipping SIN descuento → el LLM reportaba al cliente un total inflado tras aplicar cupón.
-    return {
+    result = {
         "ok": True,
         "carrier": rate_data.get("carrier"),
         "service_level": rate_data.get("service_level"),
         "shipping_cents": snapshot["shipping_cents"],
         "total_cents": snapshot["total_cents"],
     }
+    # B2 (auditoría 2026-08-21): si había una orden pending_payment con link
+    # emitido, set_shipping_meta ya la invalidó (el total viejo quedó stale con
+    # el carrier nuevo). Se lo decimos al LLM para que avise al cliente que el
+    # link anterior ya no sirve y pida confirmación para generar uno nuevo.
+    if snapshot.get("order_invalidated"):
+        result["order_invalidated"] = snapshot["order_invalidated"]
+        result["notice"] = (
+            "El link de pago anterior quedó invalidado porque cambió el envío. "
+            "Informa al cliente y genera uno nuevo con generate_payment_link "
+            "cuando confirme el nuevo total."
+        )
+    return result

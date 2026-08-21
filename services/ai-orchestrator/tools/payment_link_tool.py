@@ -14,8 +14,10 @@ REGLA: El LLM provee total_in_cents como suma de precios reales del contexto.
        El tool valida mínimo ($1.500 COP = 150.000 cents) antes de proceder.
        Si el total es inválido, retorna None (fallback a requires_human).
 """
+import hashlib
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -170,7 +172,8 @@ async def _regenerate_link_on_existing_order(
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(
                     f"{API_URL}/api/v1/orders/{order_id}/payment-link",
-                    headers=headers,
+                    # B1: retry exacto dentro de la ventana replaya, no duplica.
+                    headers={**headers, "Idempotency-Key": _link_idempotency_key(order_id)},
                 )
                 if resp.status_code == 503:
                     logger.warning(
@@ -212,6 +215,100 @@ def _build_internal_headers(tenant_id: str) -> Optional[dict]:
         "X-Tenant-Id": tenant_id,
         "Content-Type": "application/json",
     }
+
+
+def _link_idempotency_key(order_id: str) -> str:
+    """B1: Idempotency-Key determinístico para POST /{order}/payment-link.
+
+    Bucket de WOMPI_LINK_TTL_MINUTES: un retry dentro de la misma ventana
+    replaya la respuesta guardada (mismo link); en la ventana siguiente se
+    ejecuta fresco y el reuso-por-TTL del endpoint sigue dedupando el link
+    vigente (ADR-0011). Charset restringido por dependencies/idempotency.py.
+    """
+    bucket = int(time.time()) // (WOMPI_LINK_TTL_MINUTES * 60)
+    return f"plink:{order_id}:b{bucket}"
+
+
+async def _result_for_pending_order(
+    *,
+    pending_order: dict,
+    headers: dict,
+    contact_name: Optional[str],
+    conversation_id: str,
+) -> Optional[PaymentLinkResult]:
+    """Resuelve una orden `pending_payment` existente sin crear nada nuevo.
+
+    Plan A.0.1:
+      (a) link vigente (≤ TTL)   → reutilizar ese checkout_url.
+      (b) sin link vigente       → regenerar sobre la MISMA orden.
+      regen fallida              → None (caller degrada a human; NUNCA crear
+                                  una segunda orden — Plan A.0.1 prima sobre
+                                  disponibilidad).
+
+    Compartido por el flujo normal (lookup previo) y por el adopt-winner B1
+    (la creación chocó con la orden ganadora de otro turno concurrente).
+    """
+    order_id_existing = pending_order["order_id"]
+    first_name = _extract_first_name(contact_name)
+    name_part = f" *{first_name}*" if first_name else ""
+    short_id = order_id_existing[:8].upper()
+
+    # (a) Link vigente → reutilizar
+    if pending_order["active_link"]:
+        link = pending_order["active_link"]
+        # M10 (2026-08-02): "por aquí y por correo" en vez de "por este
+        # chat" — fuera de la ventana 24h Meta rechaza el outbound
+        # (131047); el comprobante siempre llega por correo.
+        response_text = (
+            f"Tu pedido *#{short_id}* ya tiene link de pago activo{name_part}.\n\n"
+            f"*Paga aquí:*\n{link['checkout_url']}\n\n"
+            f"> Si ya pagaste, recibirás la confirmación por aquí y por correo. "
+            f"El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos desde su generación."
+        )
+        logger.info(
+            "[PAYMENT_LINK] idempotencia — reutilizando link vigente orden=%s conv=%s",
+            order_id_existing, conversation_id,
+        )
+        return PaymentLinkResult(
+            checkout_url=link["checkout_url"],
+            order_id=order_id_existing,
+            amount_in_cents=link["amount_in_cents"],
+            expires_at="",
+            response_text=response_text,
+        )
+
+    # (b) Orden activa sin link vigente → regenerar sobre misma orden
+    logger.info(
+        "[PAYMENT_LINK] orden=%s sin link vigente — regenerando sobre misma orden conv=%s",
+        order_id_existing, conversation_id,
+    )
+    regen = await _regenerate_link_on_existing_order(
+        order_id=order_id_existing, headers=headers,
+    )
+    if regen:
+        new_url, new_expires = regen
+        existing_amount = int(round(float(pending_order["total_amount"]) * 100))
+        response_text = (
+            f"Tu link anterior expiró. Aquí va el nuevo para *#{short_id}*{name_part}.\n\n"
+            f"*Paga aquí:*\n{new_url}\n\n"
+            f"> El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos. "
+            f"Una vez confirmado el pago recibirás la confirmación por aquí y por correo."
+        )
+        return PaymentLinkResult(
+            checkout_url=new_url,
+            order_id=order_id_existing,
+            amount_in_cents=existing_amount,
+            expires_at=new_expires,
+            response_text=response_text,
+        )
+    # Si regenerar falló, NO crear orden duplicada: degrada a None
+    # (caller decide: human handoff o reintento). Plan A.0.1 prima sobre
+    # disponibilidad — preferimos handoff a basura transaccional.
+    logger.error(
+        "[PAYMENT_LINK] regenerar link falló orden=%s — fallback a human conv=%s",
+        order_id_existing, conversation_id,
+    )
+    return None
 
 
 def _invalidate_stale_pending_order(supabase, order_id: str, tenant_id: str) -> None:
@@ -446,67 +543,12 @@ async def handle_payment_link_if_applicable(
             pending_order = None
 
     if pending_order:
-        order_id_existing = pending_order["order_id"]
-        first_name = _extract_first_name(contact_name)
-        name_part = f" *{first_name}*" if first_name else ""
-        short_id = order_id_existing[:8].upper()
-
-        # (a) Link vigente → reutilizar
-        if pending_order["active_link"]:
-            link = pending_order["active_link"]
-            # M10 (2026-08-02): "por aquí y por correo" en vez de "por este
-            # chat" — fuera de la ventana 24h Meta rechaza el outbound
-            # (131047); el comprobante siempre llega por correo.
-            response_text = (
-                f"Tu pedido *#{short_id}* ya tiene link de pago activo{name_part}.\n\n"
-                f"*Paga aquí:*\n{link['checkout_url']}\n\n"
-                f"> Si ya pagaste, recibirás la confirmación por aquí y por correo. "
-                f"El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos desde su generación."
-            )
-            logger.info(
-                "[PAYMENT_LINK] idempotencia — reutilizando link vigente orden=%s conv=%s",
-                order_id_existing, conversation_id,
-            )
-            return PaymentLinkResult(
-                checkout_url=link["checkout_url"],
-                order_id=order_id_existing,
-                amount_in_cents=link["amount_in_cents"],
-                expires_at="",
-                response_text=response_text,
-            )
-
-        # (b) Orden activa sin link vigente → regenerar sobre misma orden
-        logger.info(
-            "[PAYMENT_LINK] orden=%s sin link vigente — regenerando sobre misma orden conv=%s",
-            order_id_existing, conversation_id,
+        return await _result_for_pending_order(
+            pending_order=pending_order,
+            headers=headers,
+            contact_name=contact_name,
+            conversation_id=conversation_id,
         )
-        regen = await _regenerate_link_on_existing_order(
-            order_id=order_id_existing, headers=headers,
-        )
-        if regen:
-            new_url, new_expires = regen
-            existing_amount = int(round(float(pending_order["total_amount"]) * 100))
-            response_text = (
-                f"Tu link anterior expiró. Aquí va el nuevo para *#{short_id}*{name_part}.\n\n"
-                f"*Paga aquí:*\n{new_url}\n\n"
-                f"> El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos. "
-                f"Una vez confirmado el pago recibirás la confirmación por aquí y por correo."
-            )
-            return PaymentLinkResult(
-                checkout_url=new_url,
-                order_id=order_id_existing,
-                amount_in_cents=existing_amount,
-                expires_at=new_expires,
-                response_text=response_text,
-            )
-        # Si regenerar falló, NO crear orden duplicada: degrada a None
-        # (caller decide: human handoff o reintento). Plan A.0.1 prima sobre
-        # disponibilidad — preferimos handoff a basura transaccional.
-        logger.error(
-            "[PAYMENT_LINK] regenerar link falló orden=%s — fallback a human conv=%s",
-            order_id_existing, conversation_id,
-        )
-        return None
     total_amount = total_in_cents / 100
     shipping_cost = (shipping_cost_cents or 0) / 100
     products_amount = total_amount - shipping_cost
@@ -582,10 +624,11 @@ async def handle_payment_link_if_applicable(
     # Rollback: si una variation falla, liberamos las reservas previas en
     # ese mismo loop para no dejar "trozos" reservados.
     cart_id_for_reserve: Optional[str] = None
+    cart_updated_at: Optional[str] = None
     try:
         cart_lookup = (
             supabase.table("conversation_carts")
-            .select("id")
+            .select("id, updated_at")
             .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .in_("status", ["open", "checkout"])
@@ -594,6 +637,7 @@ async def handle_payment_link_if_applicable(
         )
         if cart_lookup.data:
             cart_id_for_reserve = cart_lookup.data[0]["id"]
+            cart_updated_at = cart_lookup.data[0].get("updated_at")
     except Exception as exc:
         logger.warning("[PAYMENT_LINK] cart_id lookup falló conv=%s err=%s", conversation_id, exc)
 
@@ -669,19 +713,77 @@ async def handle_payment_link_if_applicable(
         "items": items_to_persist,
     }
 
+    # B1 (auditoría money-path 2026-08-21) — Idempotency-Key determinístico por
+    # conversación + versión del cart (G3, contrato dependencies/idempotency.py):
+    # un retry del MISMO checkout replaya la respuesta guardada en vez de crear
+    # una segunda orden. La barrera anti-carrera real es el índice único parcial
+    # (migración 20260821120000) + el adopt-winner del except de abajo.
+    if cart_id_for_reserve:
+        _ver = hashlib.sha256(
+            f"{cart_id_for_reserve}|{cart_updated_at}".encode()
+        ).hexdigest()[:20]
+        _create_idem_key = f"ordc:{conversation_id}:{_ver}"
+    else:
+        # Sin cart visible: bucket por TTL (retry dentro de la ventana replaya).
+        _create_idem_key = (
+            f"ordc:{conversation_id}:b{int(time.time()) // (WOMPI_LINK_TTL_MINUTES * 60)}"
+        )
+
     order_id = None
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{API_URL}/api/v1/orders/",
-                headers=headers,
+                headers={**headers, "Idempotency-Key": _create_idem_key},
                 json=order_payload,
             )
             resp.raise_for_status()
-            order_id = resp.json().get("id")
+            _created_body = resp.json()
+            order_id = _created_body.get("id")
+            if _created_body.get("adopted_existing"):
+                logger.warning(
+                    "[PAYMENT_LINK] B1 API adoptó orden existente %s conv=%s "
+                    "(carrera 23505 absorbida por adopt-winner)",
+                    order_id, conversation_id,
+                )
     except Exception as e:
         logger.error("[PAYMENT_LINK] Error creando orden en Core API: %s", e)
-        return None
+        # B1 adopt-winner (cliente): la creación falló — típicamente 409 por
+        # idempotency in-flight (otro turno de la MISMA conversación está
+        # creando la orden ahora mismo) o 5xx tras insert ganador a remoto.
+        # Re-leer: si ya hay orden pending_payment para la conversación, esa
+        # es la ganadora → reusarla (mismo path (a)/(b) de siempre). NUNCA
+        # reintentar el insert a ciegas: eso era el duplicado original.
+        winner = _find_pending_order(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+        )
+        if not winner:
+            return None
+        _link_w = winner.get("active_link")
+        _w_cents = (
+            int(_link_w["amount_in_cents"]) if _link_w
+            else int(round(float(winner.get("total_amount") or 0) * 100))
+        )
+        if int(_w_cents) != int(total_in_cents):
+            # La ganadora tiene un monto que ya no refleja el cart actual
+            # (mismo criterio F42): invalidarla y degradar — el próximo turno
+            # crea la orden con el total correcto.
+            logger.warning(
+                "[PAYMENT_LINK] B1 winner %s con monto stale (%s != %s) — invalido y degrado",
+                winner["order_id"], _w_cents, total_in_cents,
+            )
+            _invalidate_stale_pending_order(supabase, winner["order_id"], tenant_id)
+            return None
+        logger.warning(
+            "[PAYMENT_LINK] B1 carrera al crear orden conv=%s — adoptando orden ganadora %s",
+            conversation_id, winner["order_id"],
+        )
+        return await _result_for_pending_order(
+            pending_order=winner,
+            headers=headers,
+            contact_name=contact_name,
+            conversation_id=conversation_id,
+        )
 
     if not order_id:
         logger.error("[PAYMENT_LINK] Core API no retornó order_id")
@@ -833,7 +935,8 @@ async def handle_payment_link_if_applicable(
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(
                     f"{API_URL}/api/v1/orders/{order_id}/payment-link",
-                    headers=headers,
+                    # B1: retry exacto dentro de la ventana replaya, no duplica.
+                    headers={**headers, "Idempotency-Key": _link_idempotency_key(order_id)},
                 )
                 if resp.status_code == 503:
                     logger.warning("[PAYMENT_LINK] Wompi no configurado en Core API — fallback a human")

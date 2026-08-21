@@ -4,12 +4,23 @@ Rev. 107 — bug runtime KAIU conv be046dbb 2026-05-23:
   Bot emitió resumen completamente inventado tras `save_address ok=True`.
   Producto fantasma + carrier inventado + total falso vs cart real DB.
 
+B-0 (2026-08-21) — lote dinero/verdad:
+  • F1a: parser tolerante a markdown — caso prod `*Total a pagar*: *$104.990 COP*`
+    hacía bypass de los regex (bold cerrado entre label y monto) y un total
+    falso salía OK "no total parseable".
+  • F1b: guard simétrico de descuento — outbound con línea "Descuento (KAIU15):
+    -$17.100" sobre cart SIN descuento → REWRITE.
+  • F2: cart unreadable ya NO es OK best-effort — la excepción escapa y
+    `apply_invariants` (fail-closed) la convierte en BLOCK + mensaje neutro.
+    Skip de `get_recent_orders` acotado a histórico EXCLUSIVO.
+
 Este invariant cierra el gap. Tests cubren:
   • outbound NO es resumen → OK.
   • outbound es resumen + cart real → OK si total match.
   • outbound es resumen + cart real → REWRITE si total mismatch.
   • outbound es resumen + cart vacío/null → REWRITE.
-  • outbound es resumen + cart unreadable (exception) → OK (best-effort).
+  • outbound es resumen + cart unreadable (exception) → excepción escapa
+    (fail-closed → BLOCK vía apply_invariants).
 """
 import asyncio
 import os
@@ -177,9 +188,14 @@ class SummaryCoherenceTests(unittest.TestCase):
         self.assertEqual(r.outcome, InvariantOutcome.OK)
         self.assertIn("histórico", r.reason)
 
-    def test_cart_unreadable_excepcion_ok_best_effort(self):
-        """Si get_cart_with_items lanza, NO bloqueamos al cliente — OK."""
-        from agentic.invariants.base import InvariantOutcome
+    def test_cart_unreadable_excepcion_escapa_fail_closed(self):
+        """B-0 F2: si get_cart_with_items lanza, la excepción ESCAPA del
+        invariant (NO retorna OK best-effort) — un resumen de dinero no sale
+        sin validar. El wrapper `apply_invariants` (fail-closed A4, este
+        invariant está en FAIL_CLOSED_INVARIANTS) la convierte en BLOCK +
+        mensaje neutro."""
+        from agentic.degraded_messages import DEGRADED_GENERIC
+        from agentic.invariants.base import InvariantOutcome, apply_invariants
         text = (
             "Resumen:\n"
             "* Item: *$10.000*\n"
@@ -187,10 +203,140 @@ class SummaryCoherenceTests(unittest.TestCase):
         )
         with patch("tools.cart_tool.get_cart_with_items",
                    side_effect=Exception("db down")):
+            # 1. La excepción escapa de validate() (fail-closed real).
+            with self.assertRaises(Exception):
+                _run(self.inv.validate(
+                    candidate_text=text, tool_call_log=[], **self.base,
+                ))
+            # 2. Vía pipeline: BLOCK + mensaje neutro, NO el texto del LLM.
+            r = _run(apply_invariants(
+                [self.inv],
+                candidate_text=text,
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=MagicMock(), tool_call_log=[],
+            ))
+        self.assertEqual(r.outcome, InvariantOutcome.BLOCK)
+        self.assertEqual(r.invariant_name, "summary_coherence")
+        self.assertEqual(r.replacement_text, DEGRADED_GENERIC)
+
+    def test_total_real_prod_asterisco_entre_label_y_colon(self):
+        """B-0 F1a — texto EXACTO prod 2026-08: '*Total a pagar*: *$104.990 COP*'.
+        El '*' de cierre de bold entre 'pagar' y ':' rompía ambos regex →
+        total no parseable → OK con total FALSO (cart real $122.090, el link
+        cobraba de más). Ahora parsea 104990 y dispara REWRITE."""
+        from agentic.invariants.base import InvariantOutcome
+        from agentic.invariants.summary_coherence import _extract_total_cop
+        text_real = (
+            "📋 *Resumen de tu pedido:*\n\n"
+            "* 1 *Sérum Facial*: *$122.090 COP*\n\n"
+            "*Total a pagar*: *$104.990 COP*\n\n"
+            "Confirmas para generar el link de pago?"
+        )
+        # Parseo directo del fragmento exacto.
+        self.assertEqual(
+            _extract_total_cop("*Total a pagar*: *$104.990 COP*"), 104990,
+        )
+        # End-to-end: cart real $122.090 ≠ afirmado $104.990 → REWRITE.
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = _fake_cart(12209000)
+            r = _run(self.inv.validate(
+                candidate_text=text_real, tool_call_log=[], **self.base,
+            ))
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("122.090", r.replacement_text)
+
+    def test_descuento_inventado_sobre_cart_sin_descuento_rewrite(self):
+        """B-0 F1b — guard simétrico BUG 38d: outbound muestra línea
+        'Descuento (KAIU15): -$17.100' pero el cart tiene discount_cents=0
+        y sin cupón → REWRITE con resumen canónico (sin línea Descuento y
+        total real recomputado)."""
+        from agentic.invariants.base import InvariantOutcome
+        text_bug = (
+            "📋 *Resumen de tu pedido:*\n\n"
+            "* 1 *Sérum Facial*: *$122.090 COP*\n"
+            "* Descuento (KAIU15): *-$17.100 COP*\n\n"
+            "*Total a pagar*: *$104.990 COP*"
+        )
+        cart = _fake_cart(12209000)
+        cart["discount_cents"] = 0  # explícito: SIN descuento real
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = cart
+            r = _run(self.inv.validate(
+                candidate_text=text_bug, tool_call_log=[], **self.base,
+            ))
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("122.090", r.replacement_text)
+        self.assertNotIn("Descuento", r.replacement_text)
+        self.assertIn("descuento", r.reason.lower())
+
+    def test_descuento_real_en_cart_y_outbound_coherente_ok(self):
+        """Negativo del F1b: cart CON cupón y outbound SÍ muestra la línea
+        Descuento con el total correcto → OK (el guard simétrico no dispara)."""
+        from agentic.invariants.base import InvariantOutcome
+        cart = _fake_cart(10499000)
+        cart["discount_cents"] = 1710000
+        cart["coupon_code"] = "KAIU15"
+        text = (
+            "Resumen de tu pedido:\n"
+            "* 1 Sérum Facial: *$122.090 COP*\n"
+            "* Descuento (KAIU15): *-$17.100 COP*\n"
+            "* Total: *$104.990 COP*"
+        )
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = cart
             r = _run(self.inv.validate(
                 candidate_text=text, tool_call_log=[], **self.base,
             ))
         self.assertEqual(r.outcome, InvariantOutcome.OK)
+
+    def test_skip_get_recent_orders_no_aplica_si_mezcla_resumen_cart(self):
+        """B-0 F2 — skip acotado: el LLM invocó get_recent_orders PERO el
+        outbound mezcla histórico con señales de checkout del cart actual
+        ('Resumen', 'Total a pagar') → NO skip: valida contra cart real y
+        corrige el total falso."""
+        from agentic.invariants.base import InvariantOutcome
+        text = (
+            "Tu pedido #07624CE1 quedó confirmado.\n\n"
+            "Y tu nuevo pedido:\n"
+            "Resumen de tu pedido:\n"
+            "* 1 Jabón Coco: *$50.000 COP*\n"
+            "* Total a pagar: *$50.000 COP*"
+        )
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = _fake_cart(15995000)  # cart real $159.950
+            r = _run(self.inv.validate(
+                candidate_text=text,
+                tool_call_log=[
+                    {"tool": "get_recent_orders",
+                     "result": {"orders": [{"order_short": "07624CE1",
+                                            "status": "confirmed",
+                                            "total_cop": 177950}]}},
+                ],
+                **self.base,
+            ))
+        # Sin el fix: skip ciego → OK. Con el fix: valida y REWRITE (50.000 ≠ 159.950).
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("159.950", r.replacement_text)
+
+    def test_skip_get_recent_orders_total_no_historico_no_skip(self):
+        """B-0 F2 — aunque el texto NO tenga señales de checkout, si el total
+        afirmado no corresponde a ninguna orden histórica reportada por la
+        tool, el skip NO aplica (posible mezcla/invención)."""
+        from agentic.invariants.base import InvariantOutcome
+        text = "Tu pedido está confirmado, total $99.999 COP."
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = _fake_cart(15995000)
+            r = _run(self.inv.validate(
+                candidate_text=text,
+                tool_call_log=[
+                    {"tool": "get_recent_orders",
+                     "result": {"orders": [{"order_short": "07624CE1",
+                                            "status": "confirmed",
+                                            "total_cop": 177950}]}},
+                ],
+                **self.base,
+            ))
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
 
 
 class ExtractTotalTests(unittest.TestCase):
@@ -214,6 +360,19 @@ class ExtractTotalTests(unittest.TestCase):
             _extract_total_cop("*Total:* *$160.000 COP*"), 160000,
         )
         self.assertEqual(_extract_total_cop("* *Total:* $48.000"), 48000)
+
+    def test_extract_total_markdown_entre_label_y_colon(self):
+        """B-0 F1a — caso prod: '*Total a pagar*: *$104.990 COP*' (bold cerrado
+        ENTRE el label y los dos puntos). Bypass total pre-fix. También cubre
+        itálica con underscore."""
+        from agentic.invariants.summary_coherence import _extract_total_cop
+        self.assertEqual(
+            _extract_total_cop("*Total a pagar*: *$104.990 COP*"), 104990,
+        )
+        self.assertEqual(_extract_total_cop("_Total_: _$48.000_"), 48000)
+        self.assertEqual(
+            _extract_total_cop("*Total a pagar* : *$122.090 COP*"), 122090,
+        )
 
 
 if __name__ == "__main__":

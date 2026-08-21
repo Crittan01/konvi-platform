@@ -64,6 +64,23 @@ class PaymentAdapterVerifiedCtxTests(unittest.TestCase):
         sb.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = (
             MagicMock(data=fake_contact)
         )
+        # FIX 5 (2026-08-21): el adapter ahora exige una confirmación afirmativa
+        # del cliente POSTERIOR al último resumen del bot antes de crear la
+        # orden. El historial mockeado incluye ese "sí" tras el resumen.
+        _messages_chain = MagicMock()
+        _messages_chain.execute.return_value = MagicMock(data=[
+            {"direction": "inbound", "content": "sí, confirmo"},
+            {"direction": "outbound", "content": "📋 *Resumen del pedido*\n*TOTAL: $177.950*"},
+        ])
+        for _m in ("select", "eq", "order", "limit"):
+            getattr(_messages_chain, _m).return_value = _messages_chain
+
+        def _table_route(name):
+            if name == "messages":
+                return _messages_chain
+            return sb.table.return_value
+
+        sb.table.side_effect = _table_route
 
         captured = {}
 

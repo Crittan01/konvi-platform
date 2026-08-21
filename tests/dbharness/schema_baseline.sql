@@ -1589,9 +1589,8 @@ BEGIN
     -- LOCAL a su transacción (se revierte al commit; sin efecto fuera).
     PERFORM set_config('storage.allow_delete_query', 'true', true);
 
-    -- Borra AMBOS prefijos del tenant (G8a 2026-08-14): '{tenant_id}/%' (media
-    -- library, logo) e 'inbox-attachments/{tenant_id}/%' (adjuntos de
-    -- conversación — antes sobrevivían al hard-delete, fuga PII post-erasure).
+    -- Borra AMBOS prefijos del tenant (G8a): '{tenant_id}/%' (media library,
+    -- logo) e 'inbox-attachments/{tenant_id}/%' (adjuntos de conversación).
     -- El '/' evita colisión con otro tenant cuyo id sea prefijo de éste.
     DELETE FROM storage.objects o
      WHERE o.bucket_id = ANY(v_buckets)
@@ -5167,6 +5166,7 @@ CREATE TABLE IF NOT EXISTS "public"."conversations" (
     "channel" "text" DEFAULT 'whatsapp'::"text" NOT NULL,
     "human_takeover_at" timestamp with time zone,
     "contact_name" "text",
+    "pending_cancel_confirmation" "jsonb",
     CONSTRAINT "conversations_agentic_state_chk" CHECK ((("agentic_state" IS NULL) OR ("agentic_state" = ANY (ARRAY['GREETING'::"text", 'EXPLORING'::"text", 'CART_BUILDING'::"text", 'PII_COLLECTION'::"text", 'SHIPPING_QUOTE'::"text", 'CARRIER_SELECTION'::"text", 'PAYMENT'::"text", 'POST_PAYMENT'::"text", 'HUMAN_HANDOFF'::"text"])))),
     CONSTRAINT "conversations_status_check" CHECK (("status" = ANY (ARRAY['bot_active'::"text", 'human_takeover'::"text", 'closed'::"text", 'opted_out'::"text"])))
 );
@@ -5198,6 +5198,10 @@ COMMENT ON COLUMN "public"."conversations"."human_takeover_at" IS 'F6 SLA: insta
 
 
 COMMENT ON COLUMN "public"."conversations"."contact_name" IS 'Denormalizado sólo-display del nombre del contacto (Meta profile.name). Poblado por el connector en el write-path del inbound. NULL = no capturado. F2 2026-07-04.';
+
+
+
+COMMENT ON COLUMN "public"."conversations"."pending_cancel_confirmation" IS 'B6: cancelación de orden PAGADA pendiente de confirmación (dos turnos). JSONB {order_id, short_id, total_amount, created_at} o NULL. Lo gestiona services/ai-orchestrator/agentic/cancel_intent_resolver.py + dispatcher.';
 
 
 
@@ -5716,6 +5720,7 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "accepted_message_id" "uuid",
     "accepted_meta_message_id" "text",
     "accepted_source" "text",
+    "paid_no_guide_alerted_at" timestamp with time zone,
     CONSTRAINT "orders_payment_method_check" CHECK (("payment_method" = ANY (ARRAY['credit'::"text", 'cod'::"text"])))
 );
 
@@ -5760,6 +5765,10 @@ COMMENT ON COLUMN "public"."orders"."accepted_meta_message_id" IS 'El id que le 
 
 
 COMMENT ON COLUMN "public"."orders"."accepted_source" IS '"inferida" = la dedujo el barrido de respaldo por posición en el turno. Se registra para que nadie lea el campo como si fuera una manifestación capturada en vivo.';
+
+
+
+COMMENT ON COLUMN "public"."orders"."paid_no_guide_alerted_at" IS 'B4: timestamp de la alerta Telegram "pagado sin guía" enviada por el reconciliador del worker (services/ai-orchestrator/worker.py). NULL = no alertada.';
 
 
 
@@ -8519,6 +8528,14 @@ CREATE UNIQUE INDEX "uniq_tenants_meta_waba_id" ON "public"."tenants" USING "btr
 
 
 CREATE UNIQUE INDEX "uq_orders_accepted_message" ON "public"."orders" USING "btree" ("tenant_id", "accepted_message_id") WHERE ("accepted_message_id" IS NOT NULL);
+
+
+
+CREATE UNIQUE INDEX "uq_orders_one_pending_payment_per_conversation" ON "public"."orders" USING "btree" ("tenant_id", "conversation_id") WHERE ("status" = 'pending_payment'::"text");
+
+
+
+COMMENT ON INDEX "public"."uq_orders_one_pending_payment_per_conversation" IS 'B1: anti doble-cobro. Una conversación = una orden pending_payment activa. El insert perdedor (23505) adopta la orden ganadora (services/api/routers/orders.py create_order).';
 
 
 

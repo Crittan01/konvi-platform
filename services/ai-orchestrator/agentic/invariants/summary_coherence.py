@@ -15,12 +15,22 @@ NO valida resumen contra cart real. Esto cierra el gap arquitectónico.
 
 Diseño:
   1. Detector heurístico: outbound parece resumen (palabras clave
-     'Resumen', 'Total:', 2+ líneas con $-pattern).
-  2. Carga cart real con `get_cart_with_items()`.
+     'Resumen', 'Total:', 2+ líneas con $-pattern). El parseo de cifras se
+     hace sobre el texto SIN markdown (`_strip_md`) — B-0 F1a: un bold
+     cerrado entre label y monto ("*Total a pagar*: *$X*") hacía bypass de
+     los regex y el invariant pasaba OK "no total parseable" con un total
+     falso.
+  2. Carga cart real con `get_cart_with_items()`. FAIL-CLOSED (B-0 F2):
+     si el cart no se puede leer, la excepción escapa al wrapper de
+     `base.apply_invariants` → BLOCK + mensaje neutro. Un resumen de
+     dinero NO sale sin validar.
   3. Cross-valida:
      a. Total afirmado en outbound debe match `total_cents/100` ± tolerancia
         cero (no hay redondeo aceptable).
      b. Carrier afirmado debe match `shipping_meta.carrier`.
+     c. Descuento SIMÉTRICO (B-0 F1b): cart con cupón + outbound sin línea
+        Descuento → REWRITE (BUG 38d); cart SIN descuento + outbound CON
+        línea Descuento → REWRITE (descuento inventado).
   4. Si mismatch → REWRITE con resumen canónico generado del cart real.
 
 NO valida lista exacta de items (LLM puede formatear distinto). Pero el
@@ -110,6 +120,39 @@ _SUBTOTAL_PATTERN = re.compile(
     r"\bsubtotal\b[^.\n$]{0,20}?\$\s*[\d.,]+",
     re.IGNORECASE,
 )
+# B-0 F1b (2026-08-21) — línea de DESCUENTO con monto en el outbound
+# ("Descuento (KAIU15): *-$17.100*"). Guard simétrico del BUG 38d: el cart
+# NO tiene descuento pero el texto sí lo muestra (caso prod: total inflado
+# incoherente + link cobrando de más). Se aplica sobre texto normalizado
+# (sin markdown). Exige el monto en la MISMA línea que el label para no
+# disparar con menciones de descuento en prosa lejos de la cifra.
+_DISCOUNT_LINE_PATTERN = re.compile(
+    r"\b(?:descuento|cup[oó]n|rebaja)\b[^\n$]{0,40}?-?\s*\$\s*[\d.,]+",
+    re.IGNORECASE,
+)
+# B-0 F2 (2026-08-21) — señales de que el outbound habla del CART ACTUAL
+# (checkout en curso), no exclusivamente de histórico. Usadas para acotar el
+# skip de `get_recent_orders`: un texto que mezcla histórico + resumen del
+# cart SÍ se valida contra el cart real.
+_CHECKOUT_SIGNAL_PATTERN = re.compile(
+    r"\bresumen\b|link\s+de\s+pago|generamos|confirmas|subtotal|a\s+pagar",
+    re.IGNORECASE,
+)
+
+
+def _strip_md(text: str) -> str:
+    """Quita marcadores markdown de WhatsApp (`*` bold, `_` itálica).
+
+    B-0 F1a (2026-08-21) — caso prod: el bot emitió
+    `*Total a pagar*: *$104.990 COP*`. El `*` de cierre de bold entre
+    "pagar" y ":" rompía `_TOTAL_PATTERN` y el `\b` del conector en
+    `_TOTAL_PROSE_PATTERN` (entre `*` y `:` no hay word boundary) →
+    `_extract_total_cop` retornaba None → invariant pasaba OK
+    "no total parseable" y un total FALSO salía al cliente.
+    Normalizar antes de aplicar los regex cierra el bypass; los formatos
+    ya soportados siguen parseando igual tras el strip.
+    """
+    return text.replace("*", "").replace("_", "")
 
 
 def _looks_like_summary(text: str) -> bool:
@@ -126,14 +169,18 @@ def _looks_like_summary(text: str) -> bool:
     """
     if not text:
         return False
+    # B-0 F1a: los patterns de Total se evalúan sobre el texto SIN markdown
+    # (ver `_strip_md`) — con el texto crudo un bold cerrado entre label y
+    # monto ("*Total a pagar*: *$X*") dejaba de disparar el detector.
+    norm = _strip_md(text)
     has_resumen_word = bool(re.search(r"\bresumen\b", text, re.IGNORECASE))
-    has_total_with_price = bool(_TOTAL_PATTERN.search(text))
+    has_total_with_price = bool(_TOTAL_PATTERN.search(norm))
     # UAT 2026-07-20: C. total redactado en prosa; D. recap de carrito con precios
     # pero sin total (donde se perdía la línea de descuento). Ver comentarios de
     # _TOTAL_PROSE_PATTERN / _CART_RECAP_PATTERN.
-    has_total_prose = bool(_TOTAL_PROSE_PATTERN.search(text))
+    has_total_prose = bool(_TOTAL_PROSE_PATTERN.search(norm))
     has_cart_recap = bool(_CART_RECAP_PATTERN.search(text)) and bool(_QTY_LINE_PATTERN.search(text))
-    has_subtotal = bool(_SUBTOTAL_PATTERN.search(text))
+    has_subtotal = bool(_SUBTOTAL_PATTERN.search(norm))
     return (has_resumen_word or has_total_with_price or has_total_prose
             or has_cart_recap or has_subtotal)
 
@@ -143,8 +190,13 @@ def _extract_total_cop(text: str) -> Optional[int]:
 
     Primero el formato etiqueta (más estricto); si no matchea, el de prosa
     ("el total ... es $X"), que exige el `$` y no cruza oración.
+
+    B-0 F1a: el texto se normaliza con `_strip_md` antes de aplicar los
+    patterns — los marcadores `*`/`_` entre label y monto ya no hacen
+    bypass del parseo (caso prod `*Total a pagar*: *$104.990 COP*`).
     """
-    m = _TOTAL_PATTERN.search(text) or _TOTAL_PROSE_PATTERN.search(text)
+    norm = _strip_md(text)
+    m = _TOTAL_PATTERN.search(norm) or _TOTAL_PROSE_PATTERN.search(norm)
     if not m:
         return None
     raw = m.group(1)
@@ -220,6 +272,19 @@ def _outbound_mentions_discount(text: str) -> bool:
     # Confirmar que está cerca de un valor monetario (no es solo mención
     # del concepto sin línea de monto).
     return bool(re.search(r"[\-]?\s*\$\s*[\d.,]+", text))
+
+
+def _outbound_shows_discount_line(text: str) -> bool:
+    """B-0 F1b — True si el outbound muestra una línea de descuento con monto.
+
+    Más estricta que `_outbound_mentions_discount`: exige label
+    (descuento/cupón/rebaja) y monto en la MISMA línea (ej.
+    "Descuento (KAIU15): -$17.100"). Se evalúa sobre el texto sin
+    markdown (`_strip_md`) para que el bold no rompa el match.
+    """
+    if not text:
+        return False
+    return bool(_DISCOUNT_LINE_PATTERN.search(_strip_md(text)))
 
 
 def _build_canonical_summary(
@@ -373,30 +438,59 @@ class SummaryCoherenceInvariant:
         # 2026-05-23: bot informó "Tu pedido #07624CE1 confirmado total
         # $177.950" desde get_recent_orders y el invariant lo reescribió
         # incorrectamente como "no tengo pedido").
+        #
+        # B-0 F2 (2026-08-21) — skip ACOTADO: solo aplica si el outbound
+        # habla EXCLUSIVAMENTE del histórico. Antes bastaba que la tool se
+        # hubiera invocado para salvar CUALQUIER resumen de validación,
+        # así un texto que mezclaba histórico + resumen del cart actual
+        # (o un total que no corresponde a ninguna orden histórica) salía
+        # sin validar contra el cart real. Ahora se exige: (a) sin señales
+        # de checkout del cart actual (`_CHECKOUT_SIGNAL_PATTERN`), y
+        # (b) el total afirmado (si hay) coincide con una orden histórica
+        # reportada por la tool.
         for call in (tool_call_log or []):
-            if call.get("tool") == "get_recent_orders":
-                if "error" not in (call.get("result") or {}):
-                    return InvariantResult(
-                        outcome=InvariantOutcome.OK,
-                        invariant_name=self.name,
-                        reason="LLM reportó pedido histórico vía get_recent_orders",
-                    )
+            if call.get("tool") != "get_recent_orders":
+                continue
+            result = call.get("result") or {}
+            if "error" in result:
+                continue
+            orders = result.get("orders") or []
+            historic_totals = {
+                int(o.get("total_cop") or 0)
+                for o in orders
+                if o.get("total_cop")
+            }
+            affirmed = _extract_total_cop(candidate_text)
+            talks_current_cart = bool(
+                _CHECKOUT_SIGNAL_PATTERN.search(_strip_md(candidate_text))
+            )
+            if not talks_current_cart and (
+                affirmed is None or affirmed in historic_totals
+            ):
+                return InvariantResult(
+                    outcome=InvariantOutcome.OK,
+                    invariant_name=self.name,
+                    reason="LLM reportó pedido histórico vía get_recent_orders",
+                )
+            # Mezcla histórico + checkout del cart actual (o total que no
+            # corresponde a ninguna histórica) → NO skip: seguir y validar
+            # contra el cart real.
+            break
 
         # Cargar cart real.
-        try:
-            from tools.cart_tool import get_cart_with_items
-            cart = get_cart_with_items(
-                supabase,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-            )
-        except Exception:
-            # Si no podemos leer cart, no podemos validar — OK best-effort.
-            return InvariantResult(
-                outcome=InvariantOutcome.OK,
-                invariant_name=self.name,
-                reason="cart unreadable — skipped validation",
-            )
+        # B-0 F2 (2026-08-21) — FAIL-CLOSED: si el cart no se puede leer NO
+        # hay forma de validar un resumen de dinero → NO retornar OK. La
+        # excepción ESCAPA al wrapper de `base.apply_invariants` (este
+        # invariant está en FAIL_CLOSED_INVARIANTS), que convierte el fallo
+        # en BLOCK + mensaje neutro. Antes se retornaba OK "cart unreadable"
+        # = fail-open encubierto: un resumen mintiendo salía sin validar
+        # justo cuando la DB estaba mal.
+        from tools.cart_tool import get_cart_with_items
+        cart = get_cart_with_items(
+            supabase,
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+        )
 
         if not cart or not (cart.get("items") or []):
             # Outbound habla de resumen pero NO hay cart — claramente bot
@@ -434,6 +528,36 @@ class SummaryCoherenceInvariant:
                     f"cart con cupón aplicado (discount=${discount_cents//100:,}) "
                     f"pero outbound omite línea Descuento — cliente no ve "
                     f"motivo del rebaja"
+                ),
+            )
+
+        # B-0 F1b (2026-08-21) — guard SIMÉTRICO del BUG 38d: el outbound
+        # muestra línea de descuento pero el cart NO tiene cupón/descuento
+        # (discount_cents=0). Caso prod: bot escribió
+        # "Descuento (KAIU15): -$17.100" sobre un cart sin descuento y un
+        # total falso ($104.990 vs real $122.090) — el link cobraba de más.
+        # REWRITE con resumen canónico del cart real: quita la línea de
+        # descuento y recompone el total correcto (determinístico, misma
+        # mecánica del guard inverso de arriba).
+        coupon_code = (cart.get("coupon_code") or "").strip()
+        if (
+            discount_cents <= 0
+            and not coupon_code
+            and _outbound_shows_discount_line(candidate_text)
+        ):
+            real_total = (cart.get("total_cents") or 0) // 100
+            replacement = _build_canonical_summary(
+                cart, cart.get("shipping_meta") or {},
+                contact=_load_contact_safe(supabase, tenant_id, contact_id),
+            )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    "outbound muestra línea de Descuento pero cart NO tiene "
+                    f"cupón/descuento (total real ${real_total:,}) — "
+                    f"descuento inventado removido"
                 ),
             )
 

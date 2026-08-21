@@ -2,9 +2,13 @@
 
 Antes: un invariant que lanzaba se tragaba con warning y el texto del LLM
 pasaba SIN validar (fail-open). Ahora los invariants de dinero/verdad
-(`FAIL_CLOSED_INVARIANTS`: payment_coherence, summary_coherence,
-pii_save_truthfulness, fake_escalation) BLOQUEAN el texto y sirven un
-mensaje neutro seguro. Los demás invariants mantienen fail-open.
+(`FAIL_CLOSED_INVARIANTS`: payment_coherence, payment_truth,
+summary_coherence, pii_save_truthfulness, fake_escalation) BLOQUEAN el texto
+y sirven un mensaje neutro seguro. Los demás invariants mantienen fail-open.
+
+B-0 (2026-08-21): se agrega `payment_truth` (verdad de estado de pago) al
+set fail-closed — un claim de pago no validado contra DB es riesgo de
+dinero/verdad igual que los anteriores.
 """
 import asyncio
 import os
@@ -63,11 +67,13 @@ _BASE_KWARGS = {
 
 class FailClosedRegistryTests(unittest.TestCase):
     def test_registry_cubre_los_guardrails_de_dinero(self):
-        """Los 4 invariantes señalados por la auditoría están en el set."""
+        """Los invariantes señalados por la auditoría están en el set
+        (B-0 2026-08-21: + payment_truth)."""
         self.assertEqual(
             FAIL_CLOSED_INVARIANTS,
             frozenset({
                 "payment_coherence",
+                "payment_truth",
                 "summary_coherence",
                 "pii_save_truthfulness",
                 "fake_escalation",
@@ -80,11 +86,13 @@ class FailClosedRegistryTests(unittest.TestCase):
         from agentic.invariants import (
             FakeEscalationInvariant,
             PaymentCoherenceInvariant,
+            PaymentTruthInvariant,
             PIISaveTruthfulnessInvariant,
             SummaryCoherenceInvariant,
         )
         for cls in (
             PaymentCoherenceInvariant,
+            PaymentTruthInvariant,
             SummaryCoherenceInvariant,
             PIISaveTruthfulnessInvariant,
             FakeEscalationInvariant,
@@ -97,6 +105,7 @@ class MoneyInvariantRaisesTests(unittest.TestCase):
         """El texto del LLM NO pasa: outcome BLOCK + mensaje neutro seguro."""
         for name in (
             "payment_coherence",
+            "payment_truth",
             "summary_coherence",
             "pii_save_truthfulness",
             "fake_escalation",

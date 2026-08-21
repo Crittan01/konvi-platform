@@ -283,6 +283,63 @@ def _handle_orphan_payment(
         )
 
 
+def _alert_paid_without_guide_operator(
+    supabase, *, order_id: str, tenant_id: str, detail: str = "",
+) -> bool:
+    """B4 (auditoría money-path 2026-08-21): alerta Telegram INMEDIATA al
+    operador cuando un pago confirmado queda sin guía de envío.
+
+    Antes solo había un logger.warning: el cliente pagó, la guía Aveonline
+    falló y nadie se enteraba. Aquí se avisa al instante; la red de respaldo
+    es el reconciliador `paid_no_guide` del worker (barre cada 15 min y
+    alerta una sola vez por orden).
+
+    Solo aplica si el tenant usa Aveonline: con otro provider la guía no pasa
+    por este path y un falso positivo por cada pago sería spam.
+    Best-effort: nunca lanza.
+    """
+    try:
+        cfg = (
+            supabase.table("tenant_shipping_provider_config")
+            .select("active_provider")
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        provider = ((getattr(cfg, "data", None) or {}).get("active_provider") or "").lower()
+    except Exception as exc:
+        logger.warning(
+            "[WOMPI][B4] provider lookup falló tenant=%s: %s",
+            str(tenant_id)[:8], exc,
+        )
+        return False
+    if provider != "aveonline":
+        return False
+    total_txt = ""
+    try:
+        ores = (
+            supabase.table("orders")
+            .select("total_amount")
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        _total = float((getattr(ores, "data", None) or {}).get("total_amount") or 0)
+        total_txt = f" por *${int(round(_total)):,} COP*".replace(",", ".")
+    except Exception:
+        total_txt = ""
+    detalle = f": `{detail}`" if detail else "."
+    text = (
+        "🚨 *Pago confirmado SIN guía de envío*\n\n"
+        f"Pedido *#{str(order_id)[:8].upper()}*{total_txt} — la generación "
+        f"automática de la guía Aveonline falló{detalle}\n\n"
+        "Acción: genera la guía manual desde Pedidos (el cliente YA pagó)."
+    )
+    from lib.operator_alerts import notify_operator_telegram  # noqa: PLC0415
+    return notify_operator_telegram(supabase, tenant_id=tenant_id, text=text)
+
+
 def _process_wompi_event(payload: dict) -> None:
     event_name = payload.get("event", "")
 
@@ -641,15 +698,33 @@ def _process_wompi_event(payload: dict) -> None:
     # simulate=True por default — tenant setea AVEONLINE_GENERATE_REAL_GUIDES
     # =true para guías facturables reales.
     guide_ok = False
+    _guide_detail = ""
     try:
         guide_ok = _generate_shipping_guide(
             supabase=supabase, order_id=order_id, tenant_id=tenant_id,
         ) is True
     except Exception as e:
+        _guide_detail = str(e)[:200]
         logger.warning(
             "[WOMPI][AVEONLINE] generación guía falló order=%s err=%s",
             order_id, e,
         )
+
+    # B4 (auditoría money-path 2026-08-21): pagado-sin-guía NO puede quedar
+    # silencioso. Alerta operativa inmediata por Telegram al operador del
+    # tenant (best-effort; la red de respaldo es el reconciliador
+    # paid_no_guide del worker, que barre cada 15 min y avisa una vez por orden).
+    if not guide_ok:
+        try:
+            _alert_paid_without_guide_operator(
+                supabase, order_id=order_id, tenant_id=tenant_id,
+                detail=_guide_detail,
+            )
+        except Exception as _b4_exc:  # noqa: BLE001
+            logger.warning(
+                "[WOMPI][B4] alerta Telegram guía fallida order=%s err=%s",
+                order_id, _b4_exc,
+            )
 
     # ── 7.7. Etapa 2 (solo si guía OK): Email + WhatsApp "Guía generada" ──────
     # Cambio rev. 108 — el copy ya NO promete "envío en camino" porque la

@@ -896,6 +896,7 @@ async def _run_agentic_full(
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         NoInternalsExposureInvariant,
         PaymentCoherenceInvariant,
+        PaymentTruthInvariant,
         PIICoherenceInvariant,
         PIISaveTruthfulnessInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
@@ -1555,14 +1556,80 @@ async def _run_agentic_full(
         )
 
         _cancel_match = _detect_cancel(content)
+
+        # B6 (auditoría money-path 2026-08-21) — SEGUNDO turno de la
+        # confirmación de cancelación de orden PAGADA. El primer turno (más
+        # abajo, en el branch de ejecución) solo PREGUNTA y persiste
+        # conversations.pending_cancel_confirmation; aquí se resuelve la
+        # respuesta. El pendiente se limpia SIEMPRE (un solo turno de gracia):
+        # confirmar ejecuta, negar acusa, cualquier otro mensaje lo descarta
+        # y el mensaje sigue su flujo normal.
+        _b6_confirmed_order_id: Optional[str] = None
+        try:
+            from agentic.cancel_intent_resolver import (
+                CancelIntent as _CancelIntent,
+                clear_pending_cancel_confirmation as _b6_clear,
+                get_pending_cancel_confirmation as _b6_get,
+                resolve_cancel_confirmation_answer as _b6_resolve,
+            )
+            _b6_pend = _b6_get(
+                supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            )
+            if _b6_pend:
+                _b6_verdict = _b6_resolve(content, _b6_pend)
+                _b6_clear(
+                    supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+                )
+                if _b6_verdict == "deny":
+                    await _send_outbound_text(
+                        supabase=supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=(
+                            "Entendido — no cancelé nada. Tu pedido sigue su "
+                            "curso normal. ¿Te ayudo en algo más?"
+                        ),
+                    )
+                    _mark_message_processing(
+                        supabase, tenant_id, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    logger.info(
+                        "[CANCEL][B6] cliente negó la cancelación conv=%s order=%s",
+                        conversation_id[:8],
+                        str(_b6_pend.get("order_id") or "")[:8],
+                    )
+                    _resolve_and_persist_agentic_state(
+                        supabase=supabase, tenant_id=tenant_id,
+                        conversation_id=conversation_id, contact=contact,
+                        history=history,
+                    )
+                    return
+                if _b6_verdict == "confirm":
+                    _b6_confirmed_order_id = (
+                        str(_b6_pend.get("order_id") or "") or None
+                    )
+                    if _b6_confirmed_order_id:
+                        _cancel_match = _CancelIntent(
+                            intent="cancel_order",
+                            reason_text=(content or "")[:300],
+                        )
+                # 'reset' → pendiente ya limpio; el mensaje sigue su flujo.
+        except Exception as _b6_exc:
+            logger.warning(
+                "[CANCEL][B6] resolución de confirmación falló: %s — skip", _b6_exc,
+            )
+
         if _cancel_match:
-            # Resolver order_id
-            target_order_id: Optional[str] = None
+            # Resolver order_id (B6: en el segundo turno de confirmación la
+            # orden ya viene resuelta del primer turno).
+            target_order_id: Optional[str] = _b6_confirmed_order_id
             # Rev. 109 fix UAT live BUG 28: track si cliente mencionó un
             # order_id explícito que NO existe → mensaje específico, no
             # fall-through al LLM.
             _explicit_id_not_found = False
-            if _cancel_match.order_id_long:
+            if target_order_id:
+                pass  # B6: orden resuelta en el primer turno de la confirmación
+            elif _cancel_match.order_id_long:
                 target_order_id = _cancel_match.order_id_long
             elif _cancel_match.order_id_short:
                 _found = _find_by_short(
@@ -1694,6 +1761,86 @@ async def _run_agentic_full(
 
             if target_order_id:
                 if _cancel_match.intent == "cancel_order":
+                    # B6 (auditoría money-path 2026-08-21) — una orden PAGADA
+                    # NO se cancela con un solo mensaje: anular implica void de
+                    # dinero real (CARD) o refund manual. Primer turno: preguntar
+                    # + persistir pendiente; solo el "sí" del siguiente mensaje
+                    # ejecuta (arriba). pending_payment sigue en 1 turno (aún no
+                    # hay dinero en juego).
+                    if not _b6_confirmed_order_id:
+                        _b6_needs_confirm = True
+                        _b6_order_row = None
+                        try:
+                            from agentic.cancel_intent_resolver import (
+                                order_is_paid_for_cancel as _b6_paid,
+                                set_pending_cancel_confirmation as _b6_set,
+                            )
+                            _b6_needs_confirm, _b6_order_row = _b6_paid(
+                                supabase, tenant_id=tenant_id,
+                                order_id=target_order_id,
+                            )
+                        except Exception as _b6_gate_exc:
+                            # Fail-closed ante fallo de lectura: mejor preguntar
+                            # de más que cancelar dinero real sin confirmar.
+                            logger.warning(
+                                "[CANCEL][B6] gate pagada falló order=%s: %s — "
+                                "se asume pagada (fail-closed)",
+                                target_order_id[:8], _b6_gate_exc,
+                            )
+                            _b6_needs_confirm = True
+                        if _b6_needs_confirm:
+                            _b6_short = target_order_id[:8].upper()
+                            _b6_total = float(
+                                (_b6_order_row or {}).get("total_amount") or 0
+                            )
+                            _b6_total_co = f"${int(round(_b6_total)):,}".replace(",", ".")
+                            try:
+                                _b6_set(
+                                    supabase, tenant_id=tenant_id,
+                                    conversation_id=conversation_id,
+                                    order_id=target_order_id,
+                                    total_amount=_b6_total,
+                                )
+                            except Exception as _b6_set_exc:
+                                # Sin persistencia no hay segundo turno confiable
+                                # (el "sí" no encontraría pendiente). Degrada al
+                                # flujo previo al fix SOLO en esta ventana
+                                # (típico: migración 20260821120100 aún no aplicada).
+                                logger.error(
+                                    "[CANCEL][B6] no pude persistir confirmación "
+                                    "pendiente order=%s: %s — degrada a 1 turno",
+                                    target_order_id[:8], _b6_set_exc,
+                                )
+                                _b6_needs_confirm = False
+                        if _b6_needs_confirm:
+                            _ask_msg = (
+                                f"Tu pedido *#{_b6_short}* por *{_b6_total_co} COP* "
+                                f"ya está *pagado*.\n\n"
+                                f"Si lo cancelo, se anula el pago y el reembolso "
+                                f"vuelve a tu medio de pago (tarda unos días hábiles "
+                                f"según tu banco).\n\n"
+                                f"¿Confirmas que quieres cancelarlo? Respóndeme "
+                                f"*sí* para confirmar o *no* para dejarlo como está."
+                            )
+                            await _send_outbound_text(
+                                supabase=supabase, conversation_id=conversation_id,
+                                tenant_id=tenant_id, text=_ask_msg,
+                            )
+                            _mark_message_processing(
+                                supabase, tenant_id, message_id,
+                                processing_status=PROCESSING_STATUS_PROCESSED,
+                            )
+                            logger.info(
+                                "[CANCEL][B6] orden pagada — confirmación pedida "
+                                "conv=%s order=%s",
+                                conversation_id[:8], target_order_id[:8],
+                            )
+                            _resolve_and_persist_agentic_state(
+                                supabase=supabase, tenant_id=tenant_id,
+                                conversation_id=conversation_id, contact=contact,
+                                history=history,
+                            )
+                            return
                     # Pre-entrega cancellation pipeline.
                     from lib.order_cancellation import (
                         cancel_order, CancellationRequest,
@@ -2915,6 +3062,12 @@ async def _run_agentic_full(
             # debe especificar modo antes de pago, outbound léxico
             # coherente con cart.payment_method).
             PaymentCoherenceInvariant(),
+            # B-0 F3 2026-08-21 — verdad de estado de pago: si el outbound
+            # afirma "pago recibido/confirmado/aprobado" sin orden paga
+            # reciente en DB ni evidencia de pago en el turno, REWRITE a
+            # texto neutro. Fail-closed (FAIL_CLOSED_INVARIANTS). Después de
+            # PaymentCoherence (léxico) y antes del resumen.
+            PaymentTruthInvariant(),
             # A11 2026-06-26 — ANTES de SummaryCoherence: si el envío está
             # pendiente de recotizar (item agregado a mitad de checkout invalidó
             # el envío), el bot NO debe presentar resumen/total sin envío
@@ -2997,6 +3150,34 @@ async def _run_agentic_full(
         supabase, tenant_id, message_id,
         processing_status=PROCESSING_STATUS_PROCESSED,
     )
+
+    # B-0 F4 2026-08-21 — BLOCK de invariant (guard de dinero/verdad caído
+    # — fail-closed A4 — o intervención de dinero): el cliente recibe
+    # DEGRADED_GENERIC ("te respondo en un momento") pero antes NADIE era
+    # notificado → seguimiento prometido que no existía. Escalación
+    # silenciosa (human_takeover + audit + Telegram) con throttle de 10 min
+    # por conversación. No aplica en el path `requires_silent_escalation`:
+    # ese ya escala en el bloque de abajo (su invariant_set es solo
+    # cosmético, pero por defensa evitamos doble escalación).
+    if (
+        invariant_result.outcome == InvariantOutcome.BLOCK
+        and not is_silent_escalation
+    ):
+        try:
+            from agentic.invariant_escalation import escalate_invariant_block
+            await escalate_invariant_block(
+                supabase,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                invariant_name=invariant_result.invariant_name,
+                reason=invariant_result.reason,
+            )
+        except Exception as _ib_exc:
+            logger.warning(
+                "[AGENTIC_DISPATCH] invariant_block escalation falló "
+                "conv=%s: %s",
+                conversation_id[:8], _ib_exc,
+            )
 
     # Rev. 107 founder feedback: si el agente agotó recoveries y produjo
     # mensaje degraded ("déjame revisar con mi equipo"), escalar

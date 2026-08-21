@@ -756,6 +756,28 @@ def set_shipping_meta(
     )
     if not cur.data:
         raise RuntimeError(f"set_shipping_meta: cart {cart_id} no encontrado")
+
+    # B2 (auditoría money-path 2026-08-21): elegir/cambiar carrier o re-cotizar
+    # cambia shipping_cents → el total congelado en un link Wompi ya emitido
+    # queda STALE (el cliente pagaría un envío que ya no es el elegido). Las
+    # mutaciones de items ya invalidaban la orden pending_payment (ADR-0011)
+    # pero esta mutación NO — un cliente pagó un link viejo tras cambiar de
+    # carrier. Mismo patrón: invalidar ANTES de mutar. No-op seguro si no hay
+    # orden pendiente (cliente aún armando el pedido antes de generar link), y
+    # no-op si la selección es IDÉNTICA a la persistida (re-selección del mismo
+    # carrier al mismo precio no cambia el total — sería invalidar de gratis).
+    _prev_meta = cur.data[0].get("shipping_meta") or {}
+    _same_selection = (
+        str(_prev_meta.get("carrier") or "") == str(carrier or "")
+        and int(_prev_meta.get("shipping_cents") or 0) == int(shipping_cents)
+    )
+    if _same_selection:
+        invalidated = None
+    else:
+        invalidated = invalidate_pending_order_on_cart_change(
+            supabase, cart_id=cart_id, tenant_id=tenant_id,
+            reason="carrier_selected" if int(shipping_cents) > 0 else "shipping_quoted",
+        )
     subtotal = int(cur.data[0].get("subtotal_cents") or 0)
     # Rev. 109 fix UAT live BUG 34 — preservar descuento de cupón ya aplicado.
     # F50: además RECOMPUTAR. Antes reutilizaba discount_cents congelado; con un
@@ -833,7 +855,7 @@ def set_shipping_meta(
     )
     # Devolvemos el snapshot computado, no la fila del UPDATE — el caller
     # solo necesita los nuevos totales y la meta para mostrar al cliente.
-    return {
+    snapshot = {
         "id": cart_id,
         "shipping_cents": int(shipping_cents),
         "subtotal_cents": subtotal,
@@ -841,6 +863,11 @@ def set_shipping_meta(
         "shipping_meta": shipping_meta,
         "requires_requote": False,
     }
+    if invalidated:
+        # B2: el caller (adapter/orchestrator) informa al cliente que el link
+        # de pago anterior quedó invalidado por el cambio de envío.
+        snapshot["order_invalidated"] = invalidated
+    return snapshot
 
 
 def set_shipping_recipient(

@@ -265,17 +265,79 @@ def create_order(
             initial_status = (
                 "pending_payment" if order.payment_link else "pending"
             )
-        order_result = supabase.table("orders").insert({
-            "tenant_id": tenant_id,
-            "contact_id": order.contact_id,
-            "conversation_id": order.conversation_id,
-            "status": initial_status,
-            "total_amount": total,
-            "discount_amount": discount_amount,   # F1: snapshot del descuento (moneda) para trazabilidad + coherencia
-            "shipping_cost": order.shipping_cost,
-            "notes": order.notes,
-            "payment_method": order.payment_method,
-        }).execute()
+        # B1 (auditoría money-path 2026-08-21): el índice único parcial
+        # uq_orders_one_pending_payment_per_conversation (migración 20260821120000)
+        # cierra la carrera de dos turnos concurrentes creando dos órdenes pagables
+        # para la misma conversación. El insert perdedor (23505) ADOPTA la orden
+        # ganadora: se re-lee y se devuelve — nunca se duplica ni se explota con 500.
+        try:
+            order_result = supabase.table("orders").insert({
+                "tenant_id": tenant_id,
+                "contact_id": order.contact_id,
+                "conversation_id": order.conversation_id,
+                "status": initial_status,
+                "total_amount": total,
+                "discount_amount": discount_amount,   # F1: snapshot del descuento (moneda) para trazabilidad + coherencia
+                "shipping_cost": order.shipping_cost,
+                "notes": order.notes,
+                "payment_method": order.payment_method,
+            }).execute()
+        except Exception as insert_exc:
+            _winner = None
+            _emsg = str(insert_exc)
+            if (
+                ("23505" in _emsg or "duplicate" in _emsg.lower())
+                and order.conversation_id
+                and initial_status == "pending_payment"
+            ):
+                try:
+                    _wres = (
+                        supabase.table("orders")
+                        .select("*")
+                        .eq("tenant_id", tenant_id)
+                        .eq("conversation_id", order.conversation_id)
+                        .eq("status", "pending_payment")
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    _winner = (_wres.data or [None])[0]
+                except Exception:
+                    _winner = None
+            if not isinstance(_winner, dict) or not _winner.get("id"):
+                raise  # no era la carrera B1 → propagar el error original
+            # Adopt-winner: responder la orden ganadora con sus items reales
+            # (mismo shape que el happy path + marca adopted_existing para el caller).
+            _winner_items: list = []
+            try:
+                _wi = (
+                    supabase.table("order_items")
+                    .select("order_id, tenant_id, product_id, variation_id, "
+                            "title, unit_price, unit_cost, quantity")
+                    .eq("order_id", _winner["id"])
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+                _winner_items = _wi.data or []
+            except Exception as _wi_exc:
+                logger.warning(
+                    "[ORDER] B1 adopt-winner: no pude leer items de %s: %s",
+                    _winner["id"], _wi_exc,
+                )
+            adopted_body = {**_winner, "items": _winner_items, "adopted_existing": True}
+            logger.warning(
+                "[ORDER] B1 adopt-winner: carrera 23505 conv=%s — reuso orden ganadora %s "
+                "en vez de duplicar",
+                order.conversation_id, _winner["id"],
+            )
+            finalize_idempotency(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                session=idem_session,
+                status_code=200,
+                body=adopted_body,
+            )
+            return JSONResponse(status_code=200, content=adopted_body)
 
         if not order_result.data:
             raise HTTPException(status_code=500, detail="Error al crear pedido")

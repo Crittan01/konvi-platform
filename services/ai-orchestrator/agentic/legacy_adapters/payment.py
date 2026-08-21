@@ -113,6 +113,42 @@ async def generate_payment_link_for_cart(
                 "missing_fields": faltan_receptor,
             }
 
+    # FIX 5 (auditoría money-path 2026-08-21) — gate determinístico de
+    # confirmación del cliente. Antes de este gate, generar el link solo exigía
+    # que el LLM DECIDIERA llamar el tool tras "ver" una confirmación
+    # (prompt-only): una alucinación o un apuro del modelo creaba orden +
+    # cobro real sin un "sí" del cliente. Aquí se exige evidencia en el
+    # historial: un mensaje inbound afirmativo POSTERIOR al último
+    # resumen/total mostrado por el bot (si el total cambió después de aquel
+    # "sí" viejo, hay que volver a confirmar). Fail-closed: si el historial no
+    # se puede leer, se pide confirmación en vez de crear la orden.
+    from agentic.affirmation import has_confirmation_after_summary
+
+    try:
+        _recent = (
+            supabase.table("messages")
+            .select("direction, content")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=True)
+            .limit(30)
+            .execute()
+        ).data or []
+    except Exception:
+        _recent = []
+    if not has_confirmation_after_summary(_recent):
+        return {
+            "ok": False,
+            "error": (
+                "El cliente aún no ha confirmado la compra después del último "
+                "resumen con el total. Muestra el resumen 📋 con items, envío y "
+                "TOTAL y pide una confirmación explícita ('sí, confirmo'). Solo "
+                "cuando responda afirmativamente vuelve a llamar "
+                "generate_payment_link. NO crees la orden todavía."
+            ),
+            "code": "CONFIRMATION_REQUIRED",
+        }
+
     # Rev. 107: refactor — invocar in-process la función canónica
     # `handle_payment_link_if_applicable` del legacy (mismo runtime
     # ai-orchestrator). Evita el round-trip HTTP a la API y reusa toda

@@ -379,7 +379,7 @@ tenant desde Vault (`:315-358`).
   (`LLM_CASCADE_DEADLINE_SECONDS`, default 100 s < 120 s) que corta al path degraded antes de
   superar el heartbeat.
 
-### 6.2 Los 19 jobs de `_poll_cycle` (`worker.py:518-546`, cada uno aislado con `_run_job`)
+### 6.2 Los 20 jobs de `_poll_cycle` (`worker.py:518-546`, cada uno aislado con `_run_job`)
 
 | # | Job | Método (`worker.py`) | Intervalo | Qué hace |
 |---|---|---|---|---|
@@ -402,6 +402,7 @@ tenant desde Vault (`:315-358`).
 | 17 | `reversal_constancias` | `:1619` | 300 s | Constancia Decreto 1074 por WhatsApp (`:1646`) + alerta doble pago → Telegram (`:1737`) |
 | 18 | `tenant_hard_delete` | `:3631` | 21600 s (6 h) | Hard-delete tenants con grace expirado: archiva a Storage + RPC atómica, batch 10. **ACTIVO en prod** (`render.yaml:355-356`) aunque el default de código es false (`:281-283`) |
 | 19 | `health_metrics` | `:3763` | 300 s | Salud de integraciones per-tenant/per-provider; alerta Telegram en transiciones healthy→warning/critical |
+| 20 | `paid_no_guide_reconcile` | `:1904` | 900 s | B4 (2026-08-21): órdenes `confirmed` >15 min sin guía (shipment labeled/simulated/tracking) → alerta Telegram al operador UNA vez por orden (`orders.paid_no_guide_alerted_at`); ventana 48 h |
 
 Runbook de knobs/kill-switches: `services/ai-orchestrator/README.md` (todas las vars
 `*_ENABLED` están versionadas en `render.yaml`).
