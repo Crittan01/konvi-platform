@@ -58,8 +58,12 @@ export default async function RootLayout({
   return (
     <html lang="es" className={inter.variable} suppressHydrationWarning>
       <body className="antialiased font-sans">
-        {/* Anti-FOUC: primer hijo del body, corre síncrono antes del paint. */}
-        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        {/* Anti-FOUC: primer hijo del body, corre síncrono antes del paint.
+            suppressHydrationWarning: el nonce viene del header x-nonce del proxy
+            (server, por request) — en dev el client re-renderiza sin ese contexto
+            y React reportaba un hydration mismatch cosmético sobre este atributo;
+            el valor del server es el autoritativo (así funciona la CSP). */}
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <ThemeProvider>
           <ConfirmProvider>{children}</ConfirmProvider>
           <Toaster />
