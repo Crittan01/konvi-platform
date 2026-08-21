@@ -90,16 +90,14 @@ db:
 		&& echo "  db: Supabase local OK (127.0.0.1:54321)" \
 		|| { echo "  ERROR: la DB sigue sin responder — revisar: supabase status"; exit 1; }
 
-# Preflight de DB para `up`: los servicios arrancan y se recuperan solos cuando
-# la DB vuelve, pero arrancar sin DB deja todo lo que toca datos roto (503 en
-# /health/ready) — advertir fuerte en vez de fallar en silencio.
+# Preflight de DB para `up`: si la DB no responde, la recupera (make db, que ya
+# resuelve el contenedor postgres exited post-reboot de la VM) y solo entonces
+# arranca los servicios. Si la recuperación falla, aborta — no arrancar roto.
 _preflight-db:
 	@curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:54321/rest/v1/ 2>/dev/null \
 		&& echo "  db: Supabase local OK (127.0.0.1:54321)" \
-		|| { echo ""; \
-		     echo "  ⚠️  DB local NO responde (127.0.0.1:54321)."; \
-		     echo "     Los servicios arrancan, pero todo lo que toca DB fallará hasta"; \
-		     echo "     que la levantes:  make db   (= supabase start en podman)"; echo ""; }
+		|| { echo "  db: no responde — recuperando con make db…"; \
+		     $(MAKE) -C $(STATE_DIR) db || exit 1; }
 
 # ── Stack completo ────────────────────────────────────────────────────────────
 
@@ -169,13 +167,18 @@ print-urls:
 
 # ── Start servicios ───────────────────────────────────────────────────────────
 
+# En los targets web: forzar la versión de Node del repo (.nvmrc = 22) vía nvm —
+# el default del shell puede ser otra (v20 → WARN "Unsupported engine" y drift
+# con CI/Render que corren 22). Solo aplica a web (node); Python va por python3.11.
+NVM_USE := source "$$HOME/.nvm/nvm.sh" >/dev/null 2>&1 && nvm use >/dev/null 2>&1 || true
+
 start-web: _check
 	@if [ -f "$(PID_DIR)/web.pid" ] && kill -0 $$(cat "$(PID_DIR)/web.pid") 2>/dev/null; then \
 		echo "  web: ya corriendo"; \
 	else \
 		rm -f "$(PID_DIR)/web.pid"; \
 		python3.11 "$(REPO)/scripts/dev_env_for_service.py" web --out "$(ENV_DIR)/web.env" || exit 1; \
-		nohup $(CLEAN_ENV) bash -c 'cd "$(REPO)" && set -a && source "$(ENV_DIR)/web.env" && set +a && PORT=3000 exec pnpm --filter web dev' \
+		nohup $(CLEAN_ENV) bash -c 'cd "$(REPO)" && $(NVM_USE); set -a && source "$(ENV_DIR)/web.env" && set +a && PORT=3000 exec pnpm --filter web dev' \
 			> "$(LOG_DIR)/web.log" 2>&1 & echo $$! > "$(PID_DIR)/web.pid"; \
 		sleep 1; \
 		kill -0 $$(cat "$(PID_DIR)/web.pid") 2>/dev/null \
@@ -190,7 +193,7 @@ start-web-prod: _check
 	@$(MAKE) -C $(STATE_DIR) stop-web
 	@python3.11 "$(REPO)/scripts/dev_env_for_service.py" web --out "$(ENV_DIR)/web.env" || exit 1
 	@rm -f "$(PID_DIR)/web.pid"
-	@nohup $(CLEAN_ENV) bash -c 'cd "$(REPO)" && set -a && source "$(ENV_DIR)/web.env" && set +a && PORT=3000 exec pnpm --filter web start' \
+	@nohup $(CLEAN_ENV) bash -c 'cd "$(REPO)" && $(NVM_USE); set -a && source "$(ENV_DIR)/web.env" && set +a && PORT=3000 exec pnpm --filter web start' \
 		> "$(LOG_DIR)/web.log" 2>&1 & echo $$! > "$(PID_DIR)/web.pid"
 	@sleep 2; kill -0 $$(cat "$(PID_DIR)/web.pid") 2>/dev/null \
 		&& echo "  web(PROD): iniciado → http://localhost:3000" \
