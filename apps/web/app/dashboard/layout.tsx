@@ -158,10 +158,10 @@ export default async function DashboardLayout({
               planCapabilities={planCapabilities}
             />
             <ThemeToggle />
-            <div className="flex items-center gap-2 text-xs opacity-90">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="hidden sm:inline">Live</span>
-            </div>
+            {/* El indicador estático "Live" se eliminó (2026-08-21): afirmaba tiempo
+                real sin medirlo y contradecía el badge real del dashboard
+                ("Sin tiempo real"/"Reconectando…" en dashboard-client, que SÍ
+                refleja el estado del canal). Sin señal falsa: sano = sin aviso. */}
           </div>
         </div>
 

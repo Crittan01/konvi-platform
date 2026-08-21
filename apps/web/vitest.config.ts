@@ -20,6 +20,7 @@ export default defineConfig({
       'app/**/*.test.{ts,tsx}',
       'lib/**/*.test.{ts,tsx}',
       'components/**/*.test.{ts,tsx}',
+      'utils/**/*.test.{ts,tsx}',
     ],
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],

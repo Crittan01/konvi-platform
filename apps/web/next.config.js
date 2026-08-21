@@ -92,6 +92,13 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // STG local (2026-08-21): permitir ver el dev server desde otro equipo de la
+  // LAN (la IP de la VM). Sin esto, Next 16 bloquea el origen por protección
+  // anti-DNS-rebinding: el HMR ws moría con ERR_INVALID_HTTP_RESPONSE y la
+  // página servida por LAN nunca hidrataba (formularios nativos sin React).
+  // Solo aplica a `next dev`; producción (Render) no usa dev origins.
+  allowedDevOrigins: ['192.168.20.5'],
+
   // Sem 5 perf (rev. 105 2026-05-07): activa gzip en respuestas Next.
   // Reduce 3-4x el tamaño de bundles JS (.js dev son 6.5MB sin
   // comprimir; con gzip ~1.5-2MB). Crítico para devs accediendo via
