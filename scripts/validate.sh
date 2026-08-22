@@ -242,6 +242,22 @@ else
   _warn "Anti-drift: scripts/check_no_ngrok.sh ausente"
 fi
 
+# ─── 4.7 Migration SECDEF lint (Track 9) — anti-funciones-sin-REVOKE ───────────
+# Toda función SECURITY DEFINER creada por una migración NUEVA debe traer SET
+# search_path + REVOKE de PUBLIC/anon (o exención justificada `-- track9:exempt:`).
+# La causa raíz de la ola de exposiciones: Postgres otorga EXECUTE a PUBLIC por
+# built-in y Supabase a anon/authenticated por default ACL (ver 20260822120300).
+_hdr "Migration SECDEF lint (Track 9: sin SECURITY DEFINER abierta)"
+if [ -f "scripts/check_secdef_grants.py" ]; then
+  if python3.11 scripts/check_secdef_grants.py; then
+    _ok "Migraciones nuevas: 0 funciones SECURITY DEFINER abiertas"
+  else
+    _err "Migration SECDEF lint: función SECURITY DEFINER sin REVOKE/search_path en migración nueva"
+  fi
+else
+  _warn "Migration SECDEF lint script ausente (scripts/check_secdef_grants.py)"
+fi
+
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 
