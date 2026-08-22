@@ -52,6 +52,32 @@ La plataforma como UN todo modular para cualquier e-commerce: los dominios (cat�
 
 ---
 
+## Track 9 — Seguridad DB: RLS/grants hardening (directiva founder 2026-08-22; hallazgos verificados por muestreo contra DB live 2026-08-22)
+
+Hallazgos de auditoría RLS/grants (el muestreo confirmó el patrón: funciones SECURITY DEFINER con EXECUTE a `authenticated`). Patrón de fix: REVOKE PUBLIC/anon/authenticated + GRANT solo `service_role` (o guarda de membresía/rol), **cada fix con su test dbharness que simula el ataque** (la red ya existe en tests/dbharness). Orden por severidad:
+
+**Crítico:**
+- C1 — `dequeue_human_takeover_notifications` / `ack_human_takeover_notification`: PII cross-tenant + DoS de escalaciones humanas → REVOKE a service_role (el caller es el worker).
+
+**Altos:**
+- A1 — `rpc_meli_*_refresh_lease` (×3): robo de lease + marcar integración MeLi de otro tenant en error → REVOKE a service_role.
+- A2 — `upsert_aveonline_jwt`: escritura cross-tenant de credenciales del carrier → REVOKE a service_role (verificar que el worker lo usa con service_role).
+- A3 — `fn_record_shipment_tracking_event`: manipulación de estados de envío + forenses falsos → REVOKE authenticated (webhooks usan service_role).
+- A4 — `consume_tenant_capability`: DoS de cuotas cross-tenant → REVOKE o guarda `app_current_tenant()`.
+- A5 — claims: UPDATE/DELETE por operator sobre dinero del cliente → policies RESTRICTIVE (update solo owner/manager; delete nadie).
+- A6 — order_cancellations: "append-only" declarado pero mutable → RESTRICTIVE UPDATE/DELETE false.
+- A7 — payments: lectura financiera/PII sin gate de rol → owner-only (o vista proyectada sin raw_webhook).
+- A8 — api_security_events mutable → patrón append-only (REVOKE + trigger + service_role).
+- A9 — miembros `status='inactive'` conservan acceso (pgsec_*, ai_agents, storage policies, etc.) → añadir `status='active'` a todos los gates basados en tenant_users o migrar a `app_current_role()`.
+
+**Medios (M1-M14):** integration_oauth_states, idempotency_keys, wompi_events_seen, tenant_usage_*, escritura sin rol en configs críticas (tenant_shipping_provider_config con real_guides_enabled!, tenant_cancellation_policy, rma, marketplace_listings, shipments, order_tracking), notification_settings.config con bot_token legible, messages/conversations/contacts sin lockdown, conversation_notes sin WITH CHECK, outbound_idempotency_* sin search_path/revoke, retención de pii_access_log rota por trigger incondicional, get_aveonline_credentials sin gate de rol, reversion_procede oráculo cross-tenant, storage legacy tenant-media público (ampliar purge hard-delete).
+
+**Bajos:** rol stale desde JWT claim → `app_current_role()` fresco; RESTRICTIVE que no cubre DELETE; user_dismissed_alerts sin WITH CHECK; bot_source_log mutable; 9 funciones sin SET search_path; mfa_recovery_codes; overloads legacy por dropear; grants ALL+TRUNCATE residuales en tablas de auditoría.
+
+**Guard para no repetir la ola (mi adición):** lint en CI que falle si una migración crea función SECURITY DEFINER sin REVOKE explícito de PUBLIC/anon o sin SET search_path — la causa raíz sistémica.
+
+---
+
 ## Track 6 — Alineación total con docs oficiales de TODAS las tecnologías embebidas (directiva founder 2026-08-22)
 
 No solo conformidad: **explotación máxima de cada plataforma según su documentación oficial vigente** (fetch live, cero suposiciones), evolucionando lo actual con mirada al futuro. Patrón de trabajo = el aplicado a Aveonline 2026-08-22 (matriz acción × doc × código, verificación live, dossier actualizado).
@@ -89,47 +115,52 @@ Todo lo que se construye ahora se diseña pensando en la futura **Platform Conso
 
 ```
 HOY → en curso:
-  1. Track 6 — Alineación total con docs oficiales de TODAS las          [A]
+  1. Track 9 — SEGURIDAD DB (RLS/grants): migración por tiers con test          [A]
+     de ataque por hallazgo (C1, A1-A9, luego M1-M14, luego bajos) +
+     guard CI anti-funciones-sin-REVOKE. Va primero: son huecos de PII/dinero
+     cross-tenant abiertos hoy.
+  2. Track 6 — Alineación total con docs oficiales de TODAS las          [A]
      tecnologías (Wompi 4 llaves + widget futuro, Meta, Supabase, Gemini
      context caching, Resend webhooks, Telegram, MeLi). Aveonline ya
      cerrado 2026-08-22. Matriz capacidad×doc×código por tecnología.
-  2. B-1 — Calidad conversacional (la queja original del founder):    [A]
+  3. B-1 — Calidad conversacional (la queja original del founder):    [A]
      resumen rodante de conversación (amnesia estructural), routing de modelo
      por estado (lite→flash en transaccional), contradicción de longitud,
      few-shots + manejo de objeciones, gate de pago NO destructivo (F5),
      resolvers de afirmación/preguntas mid-flow (F4/F6), instrucción de cupón
      (F3), convivencia bot↔operador y salida de human_takeover (F7/F8).
-  3. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por    [A]
-     estado FSM, TurnContext único, TurnFinalizer único; strangler por fases,
-     Fase 0 sin riesgo primero: matar V2 eager, resolver estado ANTES de
-     mutaciones, borrar estados/reglas muertos).
-  4. B-3 — Harness de evaluación serio: assertions de outcome en DB       [A]
+  4. B-3 — Harness de evaluación serio (ANTES de B-2, es la red de      [A]
+     seguridad de la re-ingeniería): assertions de outcome en DB
      obligatorias, fail por respuesta stale, CI nocturno; corpus dorado
      (conversaciones reales anonimizadas) + LLM-judge + métricas SQL.
      INCLUYE Track 8: corpus adversarial (cliente grosero, "corchar",
      lenguaje roto, estrés, multi-intención, arrepentimientos).
-  5. B-4 — Observabilidad mínima post-Sentry: cron /agentic/metrics +     [A]
+  5. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por    [A]
+     estado FSM, TurnContext único, TurnFinalizer único; strangler por fases,
+     Fase 0 sin riesgo primero: matar V2 eager, resolver estado ANTES de
+     mutaciones, borrar estados/reglas muertos). Con B-3 ya operativo.
+  6. B-4 — Observabilidad mínima post-Sentry: cron /agentic/metrics +     [A]
      alertas Telegram (error rate, p95, tokens/día), señal Gemini caído,
      uptime externo /health. Diseñado como base de la futura Platform Console.
-  6. Track 7 — UX/UI de clase mundial (login animado, módulos             [A]
+  7. Track 7 — UX/UI de clase mundial (login animado, módulos             [A]
      completos y pulidos, micro-interacciones framer-motion, estados
      vacíos/errores/cargas con diseño, móvil primero — contra Kaiu DS).
 
 DESPUÉS (visión de plataforma — Track 5):
-  7. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
+  8. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
      inventario de capacidades por dominio → contrato de domain services
      (pilotos: pedidos + reclamos) → tools del bot generadas del contrato →
      packs de vertical (belleza/moda/tecnología/juguetería) → analítica
      conversacional para el owner. Todo deja el punto de extensión para
      la futura Platform Console (Fase 12).
 
-DESCONGELAR PRD (cuando 1-2 cierren en STG, mínimo):
-  8. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
-     …120100, …120200) + 20260822020000 (RPC idagente). Antes: SELECT de
-     duplicados legacy para el pre-paso del índice B1.
-  9. Deploy develop→production + verificación Render ×4 + health ×5.
- 10. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
- 11. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
+DESCONGELAR PRD (cuando Track 9 cierre en STG + migraciones aplicadas; el resto sigue en paralelo):
+  9. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
+     …120100, …120200) + 20260822020000 (RPC idagente) + las de Track 9.
+     Antes: SELECT de duplicados legacy para el pre-paso del índice B1.
+ 10. Deploy develop→production + verificación Render ×4 + health ×5.
+ 11. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
+ 12. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
      apps prod de la WABA de prueba (2.5) · anular guía UAT 86732771636 ·
      pin Python 3.13 · A1 MFA (cuando decida).
 ```
