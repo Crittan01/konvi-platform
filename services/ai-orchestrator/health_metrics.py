@@ -190,9 +190,20 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         with httpx.Client(timeout=10) as client:
             res = client.get(
                 url,
-                params={"fields": "quality_rating,messaging_limit_tier"},
+                # Track 6 (2026-08-22, doc messaging-limits): `messaging_limit_tier`
+                # está DEPRECADO (los límites ya son per-portfolio). Se pide el campo
+                # vigente `whatsapp_business_manager_messaging_limit` con fallback al
+                # viejo — si Graph API rechaza el campo nuevo (Unknown field en esta
+                # versión), se reintenta solo con el legado y así no se rompe el check.
+                params={"fields": "quality_rating,whatsapp_business_manager_messaging_limit,messaging_limit_tier"},
                 headers={"Authorization": f"Bearer {access_token}"},
             )
+            if res.status_code != 200 and "whatsapp_business_manager_messaging_limit" in res.text:
+                res = client.get(
+                    url,
+                    params={"fields": "quality_rating,messaging_limit_tier"},
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
             if res.status_code != 200:
                 return [HealthMetric(
                     provider="whatsapp",
@@ -212,7 +223,12 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         )]
 
     quality = (data.get("quality_rating") or "UNKNOWN").upper()
-    tier = (data.get("messaging_limit_tier") or "UNKNOWN").upper()
+    # Campo vigente primero; el legado queda de fallback mientras Meta lo responda.
+    tier = (
+        data.get("whatsapp_business_manager_messaging_limit")
+        or data.get("messaging_limit_tier")
+        or "UNKNOWN"
+    ).upper()
 
     quality_status = {
         "GREEN": "healthy", "YELLOW": "warning", "RED": "critical",
@@ -232,7 +248,8 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
             metric="messaging_limit_tier",
             value=tier,
             threshold="≥10K para producción seria",
-            status="healthy" if tier in {"1K", "10K", "100K", "UNLIMITED"} else "unknown",
+            # Modelo vigente per-portfolio (2026): 250 → 2K → 10K → 100K → ilimitado.
+            status="healthy" if tier in {"2K", "10K", "100K", "UNLIMITED", "1K"} else "unknown",
         ),
     ]
 

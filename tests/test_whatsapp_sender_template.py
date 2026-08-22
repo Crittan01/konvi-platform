@@ -75,6 +75,12 @@ class _FakeQuery:
         new_filters[col] = val
         return _FakeQuery(self._store, new_filters)
 
+    def in_(self, col, vals):
+        """Track 6: el sender valida templates enviables con .in_ (set de estados)."""
+        new_filters = dict(self._filters)
+        new_filters[col] = ("__in__", list(vals))
+        return _FakeQuery(self._store, new_filters)
+
     def limit(self, n):
         self._limit_n = n
         return self
@@ -91,7 +97,15 @@ class _FakeQuery:
         return self
 
     def execute(self):
-        rows = [r for r in self._store if all(r.get(k) == v for k, v in self._filters.items())]
+        def _match(r):
+            for k, v in self._filters.items():
+                if isinstance(v, tuple) and v[0] == "__in__":
+                    if r.get(k) not in v[1]:
+                        return False
+                elif r.get(k) != v:
+                    return False
+            return True
+        rows = [r for r in self._store if _match(r)]
         if self._limit_n is not None:
             rows = rows[: self._limit_n]
         # `.single()`/`.maybe_single()` retornan dict (no lista).

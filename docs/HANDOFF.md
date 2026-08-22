@@ -66,6 +66,10 @@ Ambientes (dev local podman, guard prelaunch, segregación): `docs/infra/environ
 
 El checklist go-live (B1-B6 + flips founder), el backlog priorizado y los rituales viven en **`docs/PLAN.md`** (§A, §B, §D). No se duplican aquí.
 
+> **⚠️ Deadline Meta 2026-09-30 (Track 6, doc oficial):** cada WABA de tenant necesita **método de pago registrado** antes de esa fecha — desde 2026-10-01 los service messages (free-form en ventana 24h: TODO el tráfico del bot/operadores) se cobran, y una WABA sin método de pago **deja de recibir mensajes**. Acción founder/ops por tenant (WhatsApp Manager → WABA → Payment method). Detalle: `docs/integrations/whatsapp-meta.md` §Alineación doc oficial.
+
+> **Nota CLI Supabase:** la VM quedó pineada a **2.90.0** a propósito (2026-08-22): la 2.115.0 siembra default privileges distintos en el replay local (MAINTAIN-only a roles de cliente) y rompe la homologación STG↔PRD + el formato del dump del baseline. El bump de CLI/imagen PG es un track separado que exige evaluar la versión de prod cloud primero.
+
 ## 7. Fuente de verdad por tema
 
 | Tema | Doc |

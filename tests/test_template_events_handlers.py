@@ -129,6 +129,10 @@ def _setup_modules(fake_sb):
     parser_stub.EVENT_TYPE_TEMPLATE_STATUS_UPDATE = _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE
     parser_stub.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE = _parser.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE
     parser_stub.EVENT_TYPE_PHONE_QUALITY_UPDATE = _parser.EVENT_TYPE_PHONE_QUALITY_UPDATE
+    # Track 6 (2026-08-22): constantes nuevas que handle_event importa (lazy).
+    parser_stub.EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE = _parser.EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE
+    parser_stub.EVENT_TYPE_USER_PREFERENCE = _parser.EVENT_TYPE_USER_PREFERENCE
+    parser_stub.EVENT_TYPE_ACCOUNT_ALERT = _parser.EVENT_TYPE_ACCOUNT_ALERT
     sys.modules["services.parser"] = parser_stub
 
     # Re-load template_events para que use nuestros stubs.
@@ -143,6 +147,31 @@ def _setup_modules(fake_sb):
     assert spec.loader is not None
     spec.loader.exec_module(mod)
     return mod
+
+
+# Track 6 (2026-08-22): restauración xunit de sys.modules — los stubs de este
+# archivo (services/services.parser/services.db_persistence) no deben contaminar
+# a otros archivos de la suite (lección de aislamiento del repo, bitácora M18/G14;
+# la combinación con test_track6_meta_webhook_events.py la hizo visible).
+_STUBBED = (
+    "services", "services.db_persistence", "services.parser",
+    "_test_parser_for_handlers", "_test_template_events",
+)
+_ORIGINAL_MODULES: dict = {}
+
+
+def setUpModule():
+    for _name in _STUBBED:
+        _ORIGINAL_MODULES[_name] = sys.modules.get(_name)
+
+
+def tearDownModule():
+    for _name in _STUBBED:
+        _orig = _ORIGINAL_MODULES.get(_name)
+        if _orig is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _orig
 
 
 def _seed_template(sb, *, meta_template_id="META_T1", tenant_id="tenant-A",
@@ -473,13 +502,19 @@ class HandleEventDispatcherTests(unittest.TestCase):
         self.assertIsNotNone(row.get("delivered_at"))
 
     def test_event_sin_handler_returns_none(self):
-        """account_alert, unknown — sin handler → None."""
+        """unknown — sin handler → None.
+
+        Track 6 (2026-08-22): account_alert YA TIENE handler (persiste en
+        tenant_provider_health) — sin tenant verificado falla cerrado (False, F52),
+        ya no es None. Solo `unknown` sigue sin persistencia.
+        """
         sb = _FakeSupabase()
         te = _setup_modules(sb)
-        for et in (_parser.EVENT_TYPE_ACCOUNT_ALERT,
-                   _parser.EVENT_TYPE_UNKNOWN):
-            result = te.handle_event({"event_type": et, "meta_waba_id": "X"})
-            self.assertIsNone(result, f"Esperado None para {et}")
+        result = te.handle_event({"event_type": _parser.EVENT_TYPE_UNKNOWN, "meta_waba_id": "X"})
+        self.assertIsNone(result, "Esperado None para unknown")
+        # account_alert sin tenant HMAC-verificado → fail-closed False (no None, no crash)
+        result_alert = te.handle_event({"event_type": _parser.EVENT_TYPE_ACCOUNT_ALERT, "raw_value": {}})
+        self.assertFalse(result_alert)
 
     def test_event_no_es_dict_returns_none(self):
         sb = _FakeSupabase()

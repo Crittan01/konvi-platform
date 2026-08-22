@@ -222,6 +222,57 @@ async def send_whatsapp_message(
         return None
 
 
+async def mark_message_read(
+    tenant_id: str,
+    supabase: Client,
+    meta_message_id: str,
+    with_typing: bool = True,
+) -> bool:
+    """Marca un mensaje inbound como leído; opcionalmente muestra "escribiendo…".
+
+    Doc oficial (2026-08-22, mark-message-as-read + typing-indicators):
+    `POST /{phone_number_id}/messages` con `{status:"read", message_id}` — la
+    ventana para marcar es de 30 días desde el inbound; el typing_indicator se
+    descarta solo al responder o a los 25 s. Es la señal de vida del cliente
+    mientras la cascada LLM trabaja (mitigación UX directa de la latencia A5).
+
+    Best-effort: devuelve False si falla — jamás debe romper el procesamiento
+    del turno (el mensaje ya quedó persistido por el inbox durable).
+    """
+    if not meta_message_id:
+        return False
+    phone_id, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
+    if not phone_id or not access_token:
+        return False
+
+    payload: dict = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": meta_message_id,
+    }
+    if with_typing:
+        payload["typing_indicator"] = {"type": "text"}
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    url = f"{META_BASE_URL}/{phone_id}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+            response = await client.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            return True
+        logger.warning(
+            "[META API] mark_read falló | status=%s | body=%s",
+            response.status_code, response.text[:200],
+        )
+        return False
+    except Exception as e:
+        logger.warning("[META API] mark_read error (no crítico): %s", e)
+        return False
+
+
 # ─── HSM Templates (Sem 7 F2 / 2026-05-17) ───────────────────────────────────
 #
 # send_whatsapp_template envía mensajes type=template (HSM) fuera de la ventana
@@ -275,7 +326,10 @@ def _get_approved_template(
             .eq("tenant_id", tenant_id)
             .eq("name", name.strip())
             .eq("language", language.strip())
-            .eq("status", "APPROVED")
+            # Track 6 (2026-08-22): enviables según doc oficial — APPROVED +
+            # REINSTATED (apelación ganada) + UNARCHIVED (restaurado). Antes solo
+            # APPROVED: un template reintegrado por Meta quedaba inutilizable aquí.
+            .in_("status", ["APPROVED", "REINSTATED", "UNARCHIVED"])
             .limit(1)
             .execute()
         )

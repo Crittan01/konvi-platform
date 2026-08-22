@@ -22,6 +22,7 @@ from integrations.aveonline_client import AveonlineAuthError, AveonlineClient
 from whatsapp_sender import (
     send_whatsapp_message,
     send_whatsapp_template,
+    mark_message_read,
     TEMPLATE_ERR_TEMPLATE_NOT_APPROVED,
     TEMPLATE_ERR_TEMPLATE_NOT_FOUND,
 )
@@ -991,7 +992,7 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
         # round-robin filtra a 10 procesables.
         result = (
             self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
-            .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
+            .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at, meta_message_id")
             .eq("direction", "inbound")
             .eq("processing_status", "pending")
             .order("created_at", desc=False)
@@ -1054,6 +1055,15 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                     "Mensaje %s ya fue tomado por otro worker. Saltando.", msg["id"]
                 )
                 continue
+            # Track 6 (2026-08-22): ✓✓ azul + "escribiendo…" al reclamar el mensaje.
+            # Señal de vida del cliente mientras corre la cascada LLM (mitigación UX
+            # de la latencia A5). Best-effort: mark_message_read nunca levanta.
+            try:
+                await mark_message_read(
+                    msg["tenant_id"], self.supabase, msg.get("meta_message_id"),
+                )
+            except Exception as _mr_exc:
+                logger.debug("mark_read no crítico falló para %s: %s", msg["id"], _mr_exc)
             # F5 bot_engine — rate-limit inbound→LLM por conversación (protección
             # de costo Gemini). Si la conversación superó el cap en la ventana, NO
             # despachamos al LLM: marcamos el mensaje procesado con skip_reason y

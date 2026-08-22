@@ -7074,7 +7074,7 @@ CREATE TABLE IF NOT EXISTS "public"."whatsapp_templates" (
     CONSTRAINT "chk_whatsapp_templates_name_format" CHECK (("name" ~ '^[a-z][a-z0-9_]{2,49}$'::"text")),
     CONSTRAINT "chk_whatsapp_templates_parameter_format" CHECK (("parameter_format" = ANY (ARRAY['POSITIONAL'::"text", 'NAMED'::"text"]))),
     CONSTRAINT "chk_whatsapp_templates_quality_rating" CHECK (("quality_rating" = ANY (ARRAY['GREEN'::"text", 'YELLOW'::"text", 'RED'::"text", 'UNKNOWN'::"text"]))),
-    CONSTRAINT "chk_whatsapp_templates_status" CHECK (("status" = ANY (ARRAY['LOCAL_DRAFT'::"text", 'PENDING'::"text", 'APPROVED'::"text", 'REJECTED'::"text", 'PAUSED'::"text", 'DISABLED'::"text", 'FLAGGED'::"text", 'LIMIT_EXCEEDED'::"text"])))
+    CONSTRAINT "chk_whatsapp_templates_status" CHECK (("status" = ANY (ARRAY['LOCAL_DRAFT'::"text", 'PENDING'::"text", 'APPROVED'::"text", 'REJECTED'::"text", 'PAUSED'::"text", 'DISABLED'::"text", 'FLAGGED'::"text", 'LIMIT_EXCEEDED'::"text", 'ARCHIVED'::"text", 'UNARCHIVED'::"text", 'DELETED'::"text", 'IN_APPEAL'::"text", 'LOCKED'::"text", 'REINSTATED'::"text", 'PENDING_DELETION'::"text"])))
 );
 
 

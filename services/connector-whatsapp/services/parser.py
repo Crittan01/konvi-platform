@@ -196,6 +196,10 @@ EVENT_TYPE_TEMPLATE_STATUS_UPDATE = "template_status_update"
 EVENT_TYPE_TEMPLATE_QUALITY_UPDATE = "template_quality_update"
 EVENT_TYPE_PHONE_QUALITY_UPDATE = "phone_quality_update"
 EVENT_TYPE_ACCOUNT_ALERT = "account_alert"
+# Track 6 (2026-08-22, doc oficial webhooks/overview + reference): campos que
+# antes caían en `unknown` o sin persistencia.
+EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE = "template_category_update"
+EVENT_TYPE_USER_PREFERENCE = "user_preference"
 EVENT_TYPE_UNKNOWN = "unknown"
 
 
@@ -218,6 +222,12 @@ def _classify_change(field: str, value: Dict[str, Any]) -> str:
         return EVENT_TYPE_TEMPLATE_QUALITY_UPDATE
     if field == "phone_number_quality_update":
         return EVENT_TYPE_PHONE_QUALITY_UPDATE
+    # Track 6 (2026-08-22): Meta recategoriza templates (MARKETING↔UTILITY —
+    # cambia el PRECIO del template) y reporta el opt-out nativo de marketing.
+    if field == "template_category_update":
+        return EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE
+    if field == "user_preferences":
+        return EVENT_TYPE_USER_PREFERENCE
     if field in ("account_alerts", "account_review_update", "account_update"):
         return EVENT_TYPE_ACCOUNT_ALERT
     return EVENT_TYPE_UNKNOWN
@@ -322,6 +332,68 @@ def _parse_account_alert(
     }
 
 
+def _parse_template_category_update(
+    waba_account_id: str,
+    value: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Field template_category_update — Meta recategoriza un template
+    (MARKETING↔UTILITY↔AUTHENTICATION). Cambia el PRECIO del template:
+    si no lo reflejamos, la consola muestra una categoría/precio stale.
+
+    Schema (doc oficial, reference/template_category_update):
+      {message_template_id, message_template_name, message_template_language,
+       new_category, previous_category}
+    """
+    return {
+        "event_type": EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE,
+        "meta_waba_id": waba_account_id,
+        "meta_template_id": value.get("message_template_id"),
+        "template_name": value.get("message_template_name"),
+        "template_language": value.get("message_template_language"),
+        "new_category": value.get("new_category"),
+        "previous_category": value.get("previous_category"),
+    }
+
+
+def _parse_user_preferences(
+    waba_account_id: str,
+    value: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    """Field user_preferences — el usuario hace stop/resume NATIVO de los
+    mensajes de marketing del número (WhatsApp app, no nuestra keyword STOP).
+
+    Un "stop" nativo que no procesamos = seguir enviando MARKETING a quien
+    pidió que no → riesgo de calidad/bloqueo del WABA y de política Meta
+    (anti-spam). El "resume" nativo NO se traduce en consentimiento comercial
+    (Ley 2300 exige el nuestro) — solo el stop muta estado.
+
+    Schema (reference/user_preferences, vigente 2026-08-13):
+      value.user_preferences[] = {wa_id, category: "marketing_messages",
+      value: "stop"|"resume", detail, timestamp}
+
+    Fail-closed hacia NO marcar: si el shape no trae category/value/wa_id,
+    el handler loguea y no muta nada (un falso opt-out es peor que un skip).
+    """
+    eventos: list[Dict[str, Any]] = []
+    preferencias = value.get("user_preferences") or []
+    if not isinstance(preferencias, list):
+        return eventos
+    for pref in preferencias:
+        if not isinstance(pref, dict):
+            continue
+        eventos.append({
+            "event_type": EVENT_TYPE_USER_PREFERENCE,
+            "meta_waba_id": waba_account_id,
+            "wa_id": pref.get("wa_id"),
+            "category": pref.get("category"),
+            "preference": pref.get("value"),  # "stop" | "resume"
+            "detail": pref.get("detail"),
+            "timestamp": pref.get("timestamp"),
+        })
+    return eventos
+
+
+
 def parse_webhook_events(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
     """Multi-field dispatcher: clasifica TODOS los `change.field` del payload.
 
@@ -384,6 +456,12 @@ def parse_webhook_events(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
 
                 elif event_type == EVENT_TYPE_PHONE_QUALITY_UPDATE:
                     events.append(_parse_phone_quality_update(waba_account_id, value))
+
+                elif event_type == EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE:
+                    events.append(_parse_template_category_update(waba_account_id, value))
+
+                elif event_type == EVENT_TYPE_USER_PREFERENCE:
+                    events.extend(_parse_user_preferences(waba_account_id, value))
 
                 elif event_type == EVENT_TYPE_ACCOUNT_ALERT:
                     events.append(_parse_account_alert(waba_account_id, field, value))

@@ -32,10 +32,19 @@ logger = logging.getLogger(__name__)
 
 
 # Estados/quality canónicos (mismo set que whatsapp_templates.py canonical)
+# Track 6 (2026-08-22, doc oficial message_template_status_update): Meta emite
+# hoy 7 estados adicionales. La columna guarda el valor CRUDO de Meta (forense);
+# la enviabilidad la define SENDABLE_STATUSES.
 VALID_TEMPLATE_STATUSES = frozenset({
     "LOCAL_DRAFT", "PENDING", "APPROVED", "REJECTED",
     "PAUSED", "DISABLED", "FLAGGED", "LIMIT_EXCEEDED",
+    "ARCHIVED", "UNARCHIVED", "DELETED", "IN_APPEAL",
+    "LOCKED", "REINSTATED", "PENDING_DELETION",
 })
+
+# Únicos estados desde los que Meta acepta el envío del template. REINSTATED
+# (apelación ganada) y UNARCHIVED (restaurado) vuelven aptos según la doc oficial.
+SENDABLE_TEMPLATE_STATUSES = frozenset({"APPROVED", "REINSTATED", "UNARCHIVED"})
 
 VALID_QUALITY_RATINGS = frozenset({"GREEN", "YELLOW", "RED", "UNKNOWN"})
 
@@ -458,6 +467,138 @@ def persist_outbound_status(event: Dict[str, Any], tenant_id_verified: Optional[
         return False
 
 
+def persist_template_category_update(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
+    """Track 6 (2026-08-22): Meta recategorizó un template (MARKETING↔UTILITY…).
+    La categoría define el PRECIO del envío — sin este update la consola muestra
+    un precio/category stale. Misma guarda F52: solo el tenant HMAC-verificado.
+    """
+    if not tenant_id_verified:
+        logger.error("[WA_TPL_CATEGORY] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+    meta_template_id = (event or {}).get("meta_template_id")
+    new_category = (event or {}).get("new_category")
+    if not meta_template_id or not new_category:
+        logger.error("[WA_TPL_CATEGORY] evento inválido: %s", event)
+        return False
+    new_category = str(new_category).strip().upper()
+    try:
+        sb = get_supabase()
+        res = (
+            sb.table("whatsapp_templates")
+            .update({"category": new_category})
+            .eq("meta_template_id", meta_template_id)
+            .eq("tenant_id", tenant_id_verified)
+            .execute()
+        )
+        if not res.data:
+            logger.warning(
+                "[WA_TPL_CATEGORY] template no encontrado meta_template_id=%s tenant=%s",
+                meta_template_id, tenant_id_verified,
+            )
+            return False
+        logger.info(
+            "[WA_TPL_CATEGORY] tenant=%s template=%s category → %s (antes %s)",
+            tenant_id_verified, meta_template_id, new_category, event.get("previous_category"),
+        )
+        return True
+    except Exception as exc:
+        logger.error("[WA_TPL_CATEGORY] error persistiendo: %s", exc)
+        return False
+
+
+def persist_user_preference(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
+    """Track 6 (2026-08-22): stop/resume NATIVO de marketing del usuario en WhatsApp.
+
+    stop → `contacts.consent_comercial_revoked_at = now()` (idempotente: solo si
+    aún no tiene revocación). El gate comercial (outbound_gate.py) ya la consulta
+    → el próximo marketing queda bloqueado en la misma barrera que la keyword STOP.
+
+    resume → NO muta: el resume nativo de Meta no es consentimiento comercial
+    (Ley 2300 art. 5 par. 2 exige el nuestro, explícito). Solo se loguea.
+
+    Fail-closed hacia NO marcar: shape incompleto → log + False, sin mutar.
+    """
+    if not tenant_id_verified:
+        logger.error("[WA_USER_PREF] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+    wa_id = (event or {}).get("wa_id")
+    preference = (event or {}).get("preference")
+    category = (event or {}).get("category")
+    if not wa_id or not preference or category != "marketing_messages":
+        logger.warning("[WA_USER_PREF] shape incompleto/inesperado — skip sin mutar: %s", event)
+        return False
+    preference = str(preference).strip().lower()
+    if preference == "resume":
+        logger.info(
+            "[WA_USER_PREF] resume nativo tenant=%s wa_id=***%s — sin mutación "
+            "(el consent comercial Ley 2300 se gana por nuestro flujo, no por Meta)",
+            tenant_id_verified, str(wa_id)[-4:],
+        )
+        return True
+    if preference != "stop":
+        logger.warning("[WA_USER_PREF] preference %r desconocida — skip", preference)
+        return False
+    phone = str(wa_id).lstrip("+").strip()  # misma normalización del repo (db_persistence)
+    if not phone:
+        return False
+    try:
+        sb = get_supabase()
+        res = (
+            sb.table("contacts")
+            .update({"consent_comercial_revoked_at": datetime.now(timezone.utc).isoformat()})
+            .eq("tenant_id", tenant_id_verified)
+            .eq("phone", phone)
+            .is_("consent_comercial_revoked_at", "null")
+            .execute()
+        )
+        logger.info(
+            "[WA_USER_PREF] stop nativo marketing → consent_comercial_revoked_at tenant=%s "
+            "wa_id=***%s filas=%s",
+            tenant_id_verified, phone[-4:], len(res.data or []),
+        )
+        return True
+    except Exception as exc:
+        logger.error("[WA_USER_PREF] error persistiendo stop: %s", exc)
+        return False
+
+
+def persist_account_alert(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
+    """Track 6 (2026-08-22): alertas de Meta sobre la WABA (límites, políticas,
+    desconexión, negaciones de aumento de límite INCREASED_CAPABILITIES_*).
+    Antes caían solo al log y nadie las veía. Se persisten en
+    `tenant_provider_health` (provider='whatsapp', metric='account_alert'):
+    la superficie de salud del provider que la consola ya sabe leer.
+    El raw completo queda en `detail` (forense).
+    """
+    if not tenant_id_verified:
+        logger.error("[WA_ACCOUNT_ALERT] sin tenant HMAC-verificado — rechazado (F52)")
+        return False
+    field = (event or {}).get("field") or "account_alerts"
+    raw = (event or {}).get("raw_value") or {}
+    try:
+        sb = get_supabase()
+        sb.table("tenant_provider_health").upsert(
+            {
+                "tenant_id": tenant_id_verified,
+                "provider": "whatsapp",
+                "metric": "account_alert",
+                "value": str(raw.get("event") or raw.get("alert_type") or field),
+                "status": "alert",
+                "detail": {"field": field, "raw": raw},
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="tenant_id,provider,metric",
+        ).execute()
+        logger.warning(
+            "[WA_ACCOUNT_ALERT] tenant=%s field=%s value=%s (persistido en tenant_provider_health)",
+            tenant_id_verified, field, raw.get("event") or raw.get("alert_type"),
+        )
+        return True
+    except Exception as exc:
+        logger.error("[WA_ACCOUNT_ALERT] error persistiendo: %s", exc)
+        return False
+
+
 def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> Optional[bool]:
     """Dispatcher: rutea un evento al handler correspondiente según event_type.
 
@@ -481,6 +622,9 @@ def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None
         EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
         EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
         EVENT_TYPE_PHONE_QUALITY_UPDATE,
+        EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE,
+        EVENT_TYPE_USER_PREFERENCE,
+        EVENT_TYPE_ACCOUNT_ALERT,
     )
 
     if event_type == EVENT_TYPE_OUTBOUND_STATUS:
@@ -491,6 +635,12 @@ def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None
         return persist_template_quality_update(event, tenant_id_verified)
     if event_type == EVENT_TYPE_PHONE_QUALITY_UPDATE:
         return persist_phone_quality_update(event, tenant_id_verified)
+    # Track 6 (2026-08-22): los 3 campos nuevos ya tienen persistencia.
+    if event_type == EVENT_TYPE_TEMPLATE_CATEGORY_UPDATE:
+        return persist_template_category_update(event, tenant_id_verified)
+    if event_type == EVENT_TYPE_USER_PREFERENCE:
+        return persist_user_preference(event, tenant_id_verified)
+    if event_type == EVENT_TYPE_ACCOUNT_ALERT:
+        return persist_account_alert(event, tenant_id_verified)
 
-    # account_alert, etc. → no persistence todavía (futuro Sem 11)
     return None

@@ -1,6 +1,8 @@
 # WhatsApp — Meta Cloud API, Model B per-tenant (documento canónico)
 
-> Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop
+> Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop · **Revalidación contra doc oficial vigente (Track 6): 2026-08-22** — matriz abajo §"Alineación doc oficial".
+
+> **⚠️ OPS URGENTE (deadline 2026-09-30):** desde **2026-10-01 los service messages (free-form en ventana de servicio) dejan de ser gratis**, y una WABA **sin método de pago registrado al 2026-09-30 deja de recibir TODOS los service messages** (todo el tráfico del bot y operadores). En Model B cada tenant tiene su propia WABA → cada tenant debe registrar su método de pago en su WABA antes de esa fecha. Es acción de ops/founder, no de código. [Doc oficial pricing/non-template-messages](https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages).
 
 ## Estado
 
@@ -124,6 +126,23 @@ Defaults de código del inbox (`inbox.py:24-33`): `WA_INBOX_LEASE_SECONDS=120`, 
 - **Manual de plataforma**: ninguna credencial Meta global que rotar; la app Meta de plataforma solo existió para el modelo viejo (Model B la elimina del path runtime).
 - **Plantillas HSM**: el tenant las crea en su WhatsApp Manager (o vía motor ADR-0016), Meta las aprueba; el estado se sincroniza solo por webhook. Founder-gate pendiente: plantillas por tenant para flujos proactivos (cart abandonment ya tiene `cart_abandoned_24h_v1` MARKETING).
 - **Monitoreo disponible**: `GET /api/v1/whatsapp/health/metrics` del connector (HMAC ok/fail, vault/cache hits, `inbox_depth`, `inbox_dead_lettered` — los dos últimos son los alertables, `webhook.py:34-42`); métricas del worker `wa_outbound_sent/ack_pending`.
+
+## Alineación doc oficial (Track 6 — fetch live 2026-08-22)
+
+Matriz capacidad × doc × código ejecutada el 2026-08-22 (developers.facebook.com vía mirror de lectura — el fetch directo está bloqueado desde esta red; URLs canónicas citadas). **Veredicto: nada de lo que usamos está deprecado.** Graph API v22.0 vive hasta **2027-05-20**; el bump calendarizado Q4-2026 sigue correcto y ya tiene checklist (abajo).
+
+**Adoptado en esta revalidación (código, 2026-08-22):**
+
+| Cambio | Detalle |
+|---|---|
+| Estados de template HSM ampliados | CHECK constraint DB + enums (`template_events.py`, `whatsapp_templates.py`): +ARCHIVED/UNARCHIVED/DELETED/IN_APPEAL/LOCKED/REINSTATED/PENDING_DELETION. Enviabilidad = `SENDABLE_STATUSES` {APPROVED, REINSTATED, UNARCHIVED} (sender actualizado) |
+| Health check sin campo deprecado | `health_metrics.py` pide `whatsapp_business_manager_messaging_limit` (fallback al legado si Graph lo rechaza); umbrales al modelo per-portfolio (250→2K→10K→100K→∞) |
+| `template_category_update` | Parser + persistencia: recategorización de Meta → UPDATE `whatsapp_templates.category` (cambia el PRECIO del template) |
+| `user_preferences` | Parser + persistencia: **stop nativo de marketing** → `contacts.consent_comercial_revoked_at` (misma barrera que la keyword STOP; `outbound_gate` ya la consulta). El **resume nativo NO muta** — el consent comercial Ley 2300 se gana por nuestro flujo, no por Meta |
+| `account_alerts` | Persistidos en `tenant_provider_health` (antes: solo log — un WABA flagged era invisible) |
+| Mark-as-read + typing indicator | `whatsapp_sender.mark_message_read()` cableada al claim del inbound en `worker.py`: ✓✓ azul + "escribiendo…" mientras corre la cascada LLM (mitigación UX de la latencia A5) |
+
+**Diseñado para el futuro (puntos de extensión documentados):** bump v22→v24/v25 (checklist: statuses sin objeto `conversation`, límites por `business_capability_update`, system messages BSUID); mensajes interactivos outbound (reply buttons / CTA URL / listas — el parser inbound ya los lee; el uso en flujos del bot es de B-1); WhatsApp Flows para checkout; media upload + `type:document` (facturas/guías PDF); BSUID como identidad secundaria cuando Meta lo haga obligatorio; MM Lite API si el volumen de marketing lo justifica.
 
 ## Gaps conocidos
 

@@ -45,13 +45,20 @@ VALID_CATEGORIES = frozenset({"MARKETING", "UTILITY", "AUTHENTICATION"})
 VALID_STATUSES = frozenset({
     "LOCAL_DRAFT",     # Konvi-only — aún no submitted a Meta
     "PENDING",         # Submitted, en review Meta
-    "APPROVED",        # Único estado válido para SEND
+    "APPROVED",        # Estado clásico válido para SEND
     "REJECTED",
     "PAUSED",
     "DISABLED",
     "FLAGGED",
     "LIMIT_EXCEEDED",
+    # Track 6 (2026-08-22, doc oficial vigente): estados nuevos de Meta
+    "ARCHIVED", "UNARCHIVED", "DELETED", "IN_APPEAL",
+    "LOCKED", "REINSTATED", "PENDING_DELETION",
 })
+
+# Estados desde los que Meta acepta el envío (doc oficial 2026-08-22:
+# REINSTATED = apelación ganada; UNARCHIVED = restaurado del archivo).
+SENDABLE_STATUSES = frozenset({"APPROVED", "REINSTATED", "UNARCHIVED"})
 
 VALID_PARAMETER_FORMATS = frozenset({"POSITIONAL", "NAMED"})
 VALID_QUALITY_RATINGS = frozenset({"GREEN", "YELLOW", "RED", "UNKNOWN"})
