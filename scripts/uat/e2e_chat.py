@@ -26,7 +26,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-ENV_PATH = os.path.join(REPO_ROOT, ".env")
+# Consolidación de ambientes (2026-08-14): el env real es .env.local (raíz);
+# .env ya no existe. Fallback por orden para no romper usos viejos.
+for _candidate in (".env.local", ".env"):
+    _p = os.path.join(REPO_ROOT, _candidate)
+    if os.path.exists(_p):
+        ENV_PATH = _p
+        break
 
 DEFAULT_PHONE = "+573125835649"
 DEFAULT_TENANT_ID = "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9"
