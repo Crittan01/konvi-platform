@@ -178,6 +178,33 @@ def detect_coupon_intent(text: Optional[str]) -> Optional[CouponIntent]:
     return None
 
 
+# ── B-1 (F3): bare-code exacto contra códigos activos conocidos ───────────────
+
+
+def bare_code_intent(text: str, active_codes: list[str] | None = None) -> CouponIntent | None:
+    """El cliente escribe SOLO el código del cupón (sin la palabra "cupón").
+
+    El detector principal exige el noun "cupón" para el bare-code (regla 4);
+    el prompt del bot instruye "escríbeme el código" — cuando el cliente hace
+    exactamente eso, el mensaje caía al LLM (sin tool de cupón). Match EXACTO
+    case-insensitive contra la lista de códigos activos cara-cliente (ya
+    cargados por el dispatcher desde DB): ningún falso positivo es posible —
+    si el texto no es un código real conocido, retorna None.
+
+    Auditoría bot 2026-08-21 (F3): cupón ofrecido pero inaplicable porque el
+    bot nunca comunicaba el código; al escribirlo, nadie lo aplicaba.
+    """
+    bare = (text or "").strip()
+    if not (2 <= len(bare) <= 40):
+        return None
+    bare_l = bare.lower()
+    for code in active_codes or []:
+        code_s = str(code or "").strip()
+        if code_s and code_s.lower() == bare_l:
+            return CouponIntent(intent=INTENT_APPLY, code=code_s)
+    return None
+
+
 # Tokens uppercase comunes que NO son códigos (evitar false positives en
 # bare-code detection). Lista conservadora — solo lo más obvio.
 _COMMON_TOKENS = frozenset({

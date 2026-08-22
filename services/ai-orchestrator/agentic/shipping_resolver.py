@@ -12,6 +12,12 @@ Solución arquitectónica: cuando el cart tiene items + cliente menciona
 ciudad colombiana inequívoca, bypaseamos Gemini y llamamos
 quote_shipping(city) directo. Mismo patrón que purchase_intent_resolver
 y variant_continuation.
+
+B-1 (F4, auditoría bot 2026-08-21): afirmación a la pregunta de recotización
+pendiente ("¿Te recotizo el envío...?" → "sí por favor") — sintetiza el mismo
+match con la city del cart para que el bypass recotice sin LLM (antes caía al
+LLM, que repreguntaba, y el invariant reescribía con el mismo texto fijo:
+loop idéntico ×2).
 """
 from __future__ import annotations
 
@@ -141,3 +147,67 @@ def try_resolve_shipping_intent(
         return None
     # Capitalize para passing a quote_shipping (tool tolera).
     return {"city": city.title()}
+
+
+# ─── B-1 (F4): afirmación a "¿Te recotizo el envío?" pendiente ───────────────
+
+# La pregunta de recotización del bot (rewrite fijo de
+# RequotePendingSummaryInvariant y sus variantes LLM) siempre habla de
+# recotizar/recalcular el envío.
+_REQUOTE_QUESTION_RE = re.compile(r"recotiz|recalcul\w*\s+(?:el\s+)?env", re.IGNORECASE)
+
+
+def try_resolve_requote_affirmation(
+    *,
+    supabase,
+    tenant_id: str,
+    conversation_id: str,
+    inbound_text: str,
+    history: list | None,
+) -> Optional[dict]:
+    """"sí por favor" a "¿Te recotizo el envío con tu misma dirección?" —
+    sintetiza {"city": <city del cart>} para que el bypass de shipping
+    recotice determinísticamente (misma cota que try_resolve_shipping_intent).
+
+    Condiciones (TODAS fail-closed — cualquier duda → None → flujo normal):
+      1. El inbound es afirmación corta (affirmation.is_affirmative, alta
+         precisión — la misma que gobierna dinero en cancel/FIX5).
+      2. El ÚLTIMO outbound del bot fue una pregunta de recotización.
+      3. El cart open/checkout tiene requires_requote=True y city conocida
+         (sin requires_requote no hay nada que recotizar; sin city no se
+         puede cotizar — la pregunta sería otra).
+    """
+    from agentic.affirmation import is_affirmative
+
+    if not is_affirmative(inbound_text):
+        return None
+
+    last_bot = ""
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").lower() == "outbound":
+            last_bot = str(msg.get("content") or "")
+            break
+    if not last_bot or not _REQUOTE_QUESTION_RE.search(last_bot):
+        return None
+
+    try:
+        cart_res = (
+            supabase.table("conversation_carts")
+            .select("requires_requote, shipping_meta")
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .in_("status", ["open", "checkout"])
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        row = (getattr(cart_res, "data", None) or [None])[0]
+    except Exception:
+        row = None
+    if not row or not row.get("requires_requote"):
+        return None
+
+    city = str((row.get("shipping_meta") or {}).get("city") or "").strip()
+    if not city:
+        return None
+    return {"city": city}

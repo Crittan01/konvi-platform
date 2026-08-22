@@ -161,9 +161,19 @@ es ESTADO PAGO).
 """
 
 
+# B-1 (F6, auditoría bot 2026-08-21): regla universal mid-flow — el cliente
+# puede preguntar en cualquier punto del checkout y el guion NO debe tapar la
+# respuesta ("¿requisitos del cupón?", "¿tienes jabón de lavanda?"). Se inserta
+# como primera regla de los mini-prompts transaccionales.
+_QUESTION_FIRST_RULE = """• Si el cliente hace una PREGUNTA (producto, cupón, política, envío, pago),
+  respóndela PRIMERO con los datos del prompt o tools, y DESPUÉS retoma el
+  paso del flujo donde quedó. El guion nunca tapa una pregunta directa.
+"""
+
+
 def pii_collection_prompt() -> str:
     """PII_COLLECTION — recolectando contact + consent (Habeas Data)."""
-    return """═══════════════════════════════════════════════════════════════════
+    return f"""═══════════════════════════════════════════════════════════════════
 ESTADO ACTUAL: RECOLECTANDO DATOS DEL CLIENTE
 ═══════════════════════════════════════════════════════════════════
 
@@ -172,7 +182,7 @@ o consent para procesar. Tu objetivo: completar PII respetando Habeas
 Data Ley 1581.
 
 REGLAS CRÍTICAS:
-• `consent_given=False` → ANTES de cualquier `save_contact_field`,
+{_QUESTION_FIRST_RULE}• `consent_given=False` → ANTES de cualquier `save_contact_field`,
   pide autorización explícita ("¿Autorizas usar tus datos para procesar
   el pedido?") y registra respuesta con `record_consent(given=True/False)`.
   El tool save_contact_field BLOQUEA si no hay consent.
@@ -204,14 +214,14 @@ preguntando ciudad si aún no se ha definido.
 
 def shipping_quote_prompt() -> str:
     """SHIPPING_QUOTE — cliente cotizando envío."""
-    return """═══════════════════════════════════════════════════════════════════
+    return f"""═══════════════════════════════════════════════════════════════════
 ESTADO ACTUAL: COTIZANDO ENVÍO
 ═══════════════════════════════════════════════════════════════════
 
 Cliente con cart + PII listos, cotizando envío.
 
 REGLAS:
-• Llama `quote_shipping(city=<ciudad>)` y retorna las opciones de UNA.
+{_QUESTION_FIRST_RULE}• Llama `quote_shipping(city=<ciudad>)` y retorna las opciones de UNA.
   NUNCA digas "estoy calculando" o "déjame revisar" sin invocar el tool
   en el mismo turno.
 • Si Aveonline retorna múltiples opciones (carriers distintos), preséntalas
@@ -238,14 +248,14 @@ Cierre: presenta opciones cotizadas y pregunta cuál elige el cliente.
 
 def carrier_selection_prompt() -> str:
     """CARRIER_SELECTION — cliente eligiendo entre opciones cotizadas."""
-    return """═══════════════════════════════════════════════════════════════════
+    return f"""═══════════════════════════════════════════════════════════════════
 ESTADO ACTUAL: SELECCIÓN DE TRANSPORTADORA
 ═══════════════════════════════════════════════════════════════════
 
 Cliente con cotización lista, eligiendo carrier.
 
 REGLAS:
-• Cliente menciona carrier por nombre → `select_carrier(carrier_name=X)`.
+{_QUESTION_FIRST_RULE}• Cliente menciona carrier por nombre → `select_carrier(carrier_name=X)`.
 • Cliente menciona rate_id → `select_carrier(rate_id=X)`.
 • Si cliente pide re-cotizar con otra ciudad → `quote_shipping(city=Y)`.
 • Si el cliente pide AGREGAR/QUITAR un producto: hazlo, AVISA que el envío se
@@ -264,13 +274,15 @@ pago + resumen final.
 
 def payment_prompt() -> str:
     """PAYMENT — modo de pago + link Wompi o COD."""
-    return """═══════════════════════════════════════════════════════════════════
+    return f"""═══════════════════════════════════════════════════════════════════
 ESTADO ACTUAL: PAGO
 ═══════════════════════════════════════════════════════════════════
 
 Cliente con cart + envío + carrier listos. Tu objetivo: definir modo
 de pago, emitir resumen, recibir confirmación, generar link/COD.
 
+REGLA PRIMERA:
+{_QUESTION_FIRST_RULE}
 ⚠️ CAMBIOS AL CARRITO AQUÍ: el cliente PUEDE pedir agregar/quitar un producto.
 Si lo hace: hazlo (`add_to_cart`/`remove_cart_item`). Eso INVALIDA el envío
 cotizado. Entonces AVISA que el envío se recalcula y vuelve a cotizar

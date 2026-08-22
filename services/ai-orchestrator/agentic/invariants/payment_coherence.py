@@ -441,20 +441,43 @@ class PaymentCoherenceInvariant:
             mentioned = _client_mentioned_payment_method(history)
 
             if mentioned is None:
-                # Cliente NO mencionó → REWRITE pregunta adaptada.
+                # Cliente NO mencionó → pregunta adaptada.
                 try:
                     from lib.tenant_payment_methods import list_enabled_methods
                     enabled = list_enabled_methods(supabase, tenant_id=tenant_id)
                 except Exception:
                     enabled = ["cod", "online_wompi"]
 
+                if is_quote and not is_action:
+                    # B-1 (F5, auditoría bot 2026-08-21): el outbound solo MUESTRA
+                    # la cotización/opciones (sin acción de pago) → la pregunta se
+                    # ADJUNTA al contenido del turno en vez de reemplazarlo. Antes
+                    # el rewrite descartaba la confirmación del agregado y las
+                    # opciones de envío (el cliente recibía solo la pregunta de
+                    # pago, dos veces seguidas — el rewrite no mutaba estado).
+                    return InvariantResult(
+                        outcome=InvariantOutcome.REWRITE,
+                        invariant_name=self.name,
+                        replacement_text=(
+                            candidate_text.rstrip()
+                            + "\n\n"
+                            + _build_explicit_question(enabled)
+                        ),
+                        reason=(
+                            "CASE A: cotización sin modo explícito — pregunta "
+                            f"ADJUNTADA (contenido preservado). enabled={enabled}"
+                        ),
+                    )
+
+                # Acción de dinero (link generado / pedido registrado COD): el
+                # rewrite duro se mantiene — entregar un link sin método elegido
+                # es riesgo de dinero y ahí pisar el contenido está justificado.
                 return InvariantResult(
                     outcome=InvariantOutcome.REWRITE,
                     invariant_name=self.name,
                     replacement_text=_build_explicit_question(enabled),
                     reason=(
-                        f"CASE A: outbound implicaría {'cotización' if is_quote else 'acción pago'} "
-                        f"sin modo explícito. enabled={enabled}"
+                        f"CASE A: acción pago sin modo explícito — rewrite duro. enabled={enabled}"
                     ),
                 )
 

@@ -1405,6 +1405,7 @@ async def _run_agentic_full(
     try:
         from lib.coupon_detector import (
             detect_coupon_intent as _detect_coupon_intent,
+            bare_code_intent,
             INTENT_APPLY as _INTENT_APPLY,
             INTENT_REMOVE as _INTENT_REMOVE,
         )
@@ -1414,6 +1415,17 @@ async def _run_agentic_full(
         )
 
         _coupon_intent = _detect_coupon_intent(content)
+        if not _coupon_intent:
+            # B-1 (F3, auditoría bot 2026-08-21): el prompt instruye al cliente
+            # "escribe el código" — pero si escribe SOLO el código (sin la
+            # palabra "cupón"), el detector no lo capturaba y el mensaje caía
+            # al LLM, que no tiene tool de cupón (→ escalación/alucinación).
+            # Fallback: match exacto contra los cupones activos cara-cliente
+            # ya cargados en active_coupons.
+            _coupon_intent = bare_code_intent(
+                content,
+                [str(c.get("code") or "") for c in active_coupons],
+            )
         if _coupon_intent:
             _cart_lookup = (
                 supabase.table("conversation_carts")
@@ -2551,6 +2563,23 @@ async def _run_agentic_full(
         inbound_text=content,
         cart_has_items=cart_has_items,
     )
+    if not shipping_match and cart_has_items:
+        # B-1 (F4): afirmación a "¿Te recotizo el envío?" pendiente → sintetizar
+        # el intent con la city del cart y reutilizar el bypass completo.
+        from agentic.shipping_resolver import try_resolve_requote_affirmation
+        shipping_match = try_resolve_requote_affirmation(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            inbound_text=content,
+            history=history,
+        )
+        if shipping_match:
+            logger.info(
+                "[AGENTIC_PRE_LLM] conv=%s requote_affirmation → recotización "
+                "determinística city=%s",
+                conversation_id, shipping_match["city"],
+            )
     if shipping_match and _agent_permits_tool(_agent, "quote_shipping"):  # A8 #1
         logger.info(
             "[AGENTIC_PRE_LLM] conv=%s shipping_intent matched city=%s "

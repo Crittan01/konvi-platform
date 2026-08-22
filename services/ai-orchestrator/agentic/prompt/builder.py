@@ -122,11 +122,12 @@ _NO_PAYMENT_METHODS_STATES = frozenset({
 
 # Cupones solo donde el cliente puede preguntar o aplicar (founder 2026-05-28).
 # Excluye estados terminales/transaccionales puros donde mencionar promo confunde.
+# B-1 (F6, auditoría bot 2026-08-21): SHIPPING_QUOTE/CARRIER_SELECTION/PAYMENT
+# vuelven a incluir el bloque — el cliente hace preguntas de cupón MID-FLOW
+# ("¿requisitos del cupón?") y sin el dato en el prompt el LLM no podía
+# responder (la KB no tiene cupones). El dato ya viene cargado en dispatcher.
 _NO_COUPONS_STATES = frozenset({
     AgenticState.PII_COLLECTION,
-    AgenticState.SHIPPING_QUOTE,
-    AgenticState.CARRIER_SELECTION,
-    AgenticState.PAYMENT,
     AgenticState.POST_PAYMENT,
     AgenticState.HUMAN_HANDOFF,
 })

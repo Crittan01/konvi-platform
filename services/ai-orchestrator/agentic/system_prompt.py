@@ -418,6 +418,13 @@ def _render_coupons_block(active_coupons: Optional[list]) -> str:
         "responde citando ÚNICAMENTE los cupones de esta lista.",
         "• Para aplicar un cupón al carrito, el cliente debe escribir "
         "el código exactamente como aparece arriba.",
+        # B-1 (F3, auditoría bot 2026-08-21): el bot ofrecía el descuento sin
+        # decir jamás el código → cupón inaplicable y venta perdida. La regla
+        # de comunicación explícita: mencionar cupón = decir su código.
+        "• CUANDO MENCIONES un cupón (ofrecido o preguntado), incluye SIEMPRE "
+        "su código exacto en negrita y la instrucción literal: «si quieres "
+        "usarlo, escríbeme el código y te lo aplico». NUNCA ofrezcas un "
+        "descuento sin decir su código.",
     ])
     return "\n".join(lines)
 
