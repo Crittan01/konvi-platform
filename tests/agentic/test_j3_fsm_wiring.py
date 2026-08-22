@@ -76,7 +76,11 @@ class RuntimeToolEnforcementTest(unittest.TestCase):
 
     def _drive(self, *, allowed_tools, tool_called, get_tool_return=None):
         # Turno 1: el LLM invoca `tool_called`; turno 2: texto final (fin del loop).
-        responses = [_fc_response(tool_called), _text_response("Listo.")]
+        # B-1 (routing): _gemini_generate_async devuelve (response, model_used).
+        responses = [
+            (_fc_response(tool_called), "gemini-test"),
+            (_text_response("Listo."), "gemini-test"),
+        ]
         with patch.object(agent_mod, "_gemini_generate_async",
                           new=AsyncMock(side_effect=responses)), \
              patch.object(agent_mod, "get_tool",

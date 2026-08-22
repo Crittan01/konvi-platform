@@ -2988,6 +2988,12 @@ async def _run_agentic_full(
     conversation_summary = await fetch_summary_text(
         supabase, tenant_id=tenant_id, conversation_id=conversation_id,
     )
+    # B-1 (routing por estado, tras flag AGENTIC_STATE_ROUTING_ENABLED):
+    # pre-cart sigue en lite; checkout/carrito corre con el modelo
+    # transaccional (fallback al lite, nunca al modelo caro). Flag off →
+    # (None, None) → comportamiento idéntico a hoy.
+    from agentic.model_routing import model_for_state
+    _turn_model, _turn_fallback = model_for_state(_resolved_state)
     result = await run_agentic_turn(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -3000,6 +3006,8 @@ async def _run_agentic_full(
         system_prompt=system_prompt,
         allowed_tools=_allowed_tools,
         conversation_summary=conversation_summary,
+        model=_turn_model,
+        fallback_model=_turn_fallback,
     )
     elapsed = time.monotonic() - started_at
 
@@ -3185,12 +3193,13 @@ async def _run_agentic_full(
             if invariant_result.outcome != InvariantOutcome.OK else "ok"
         )
         logger.info(
-            "[AGENTIC_TRACE] conv=%s state=%s tools=%s invariant=%s rewrote=%s",
+            "[AGENTIC_TRACE] conv=%s state=%s tools=%s invariant=%s rewrote=%s model=%s",
             conversation_id[:8],
             getattr(_resolved_state, "value", None) or "fallback",
             _trace_tools,
             _trace_inv,
             invariant_result.outcome != InvariantOutcome.OK,
+            getattr(result, "model_used", None) or "?",
         )
     except Exception:
         pass  # el trace NUNCA debe romper el turno
@@ -3594,6 +3603,10 @@ def _persist_turn_audit(
             "prompt_tokens": int(getattr(result, "prompt_tokens", 0) or 0),
             "cached_tokens": int(getattr(result, "cached_tokens", 0) or 0),
             "thoughts_tokens": int(getattr(result, "thoughts_tokens", 0) or 0),
+            # B-1 (2026-08-22): modelo real que respondió el turno (primary o
+            # fallback) — telemetría del routing por estado (migración
+            # 20260822130500; degrade-safe si aún no está aplicada).
+            "model_used": getattr(result, "model_used", None),
         }
         supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
@@ -3617,6 +3630,14 @@ def _persist_turn_audit(
                 return
             except Exception as exc3:
                 exc = exc3
+        # B-1: mismo degrade para model_used (migración 20260822130500).
+        if "model_used" in str(exc):
+            try:
+                row.pop("model_used", None)
+                supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
+                return
+            except Exception as exc4:
+                exc = exc4
         logger.warning(
             "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
             mode, conversation_id[:8], exc,

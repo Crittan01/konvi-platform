@@ -78,7 +78,7 @@ class GeminiCascadeTests(unittest.TestCase):
 
         # Stub sleep para evitar tests lentos (cascade hace backoff exponencial).
         with patch("llm_invoke.time.sleep", lambda s: None):
-            result = _run(agentic_agent._gemini_generate_async(
+            result, _model_used = _run(agentic_agent._gemini_generate_async(
                 client,
                 model="gemini-3.1-flash-lite",
                 messages=[{"role": "user", "parts": [{"text": "hola"}]}],
@@ -113,7 +113,7 @@ class GeminiCascadeTests(unittest.TestCase):
         client.models.generate_content.side_effect = gen_content
 
         with patch("llm_invoke.time.sleep", lambda s: None):
-            result = _run(agentic_agent._gemini_generate_async(
+            result, _model_used = _run(agentic_agent._gemini_generate_async(
                 client,
                 model="gemini-3.5-flash",
                 messages=[{"role": "user", "parts": [{"text": "x"}]}],

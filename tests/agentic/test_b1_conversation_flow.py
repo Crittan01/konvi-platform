@@ -294,5 +294,44 @@ class F6MidFlowQuestionTests(unittest.TestCase):
             self.assertIn("retoma", text)
 
 
+# ─── C5 — contradicción de longitud + few-shots de objeciones ────────────────
+
+class C5PromptQualityTests(unittest.TestCase):
+
+    def test_style_block_length_exception(self):
+        """La regla de 4 líneas ya NO contradice el resumen real del pedido
+        (~15 líneas): la excepción estructurada está explícita."""
+        from agentic.prompt.blocks import style_block
+        block = style_block("cordial")
+        self.assertIn("Máx 4 líneas", block)
+        self.assertIn("EXCEPTO el resumen del pedido", block)
+
+    def test_objections_block_content(self):
+        """Few-shots de las 3 objeciones universales con las reglas duras."""
+        from agentic.prompt.blocks import objections_block
+        block = objections_block()
+        self.assertIn("Está caro", block)
+        self.assertIn("Lo voy a pensar", block)
+        self.assertIn("llega mal", block)
+        self.assertIn("NUNCA inventes", block)
+        self.assertIn("descuentos", block)
+        self.assertIn("NUNCA inventes políticas", block)
+        self.assertIn("RETOMA el flujo", block)
+
+    def test_objections_in_builder_except_handoff(self):
+        """El bloque viaja en todos los estados con venta activa, no en handoff."""
+        from agentic.prompt import build_prompt_for_state
+        for state in (AgenticState.EXPLORING, AgenticState.PAYMENT):
+            prompt = build_prompt_for_state(
+                state=state, tenant_name="KAIU", catalog=_FAKE_CATALOG,
+            )
+            self.assertIn("OBJECIONES FRECUENTES", prompt, state.value)
+        prompt = build_prompt_for_state(
+            state=AgenticState.HUMAN_HANDOFF, tenant_name="KAIU",
+            catalog=_FAKE_CATALOG,
+        )
+        self.assertNotIn("OBJECIONES FRECUENTES", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

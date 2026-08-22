@@ -104,6 +104,32 @@ REGLAS UNIVERSALES — NO VIOLAR
 """
 
 
+def objections_block() -> str:
+    """Manejo de objeciones con few-shots (B-1, auditoría bot 2026-08-21 §3:
+    "cero few-shot de diálogo, cero manejo de objeciones").
+
+    Tres objeciones universales del e-commerce conversacional con el patrón
+    de respuesta correcto: validar → responder con verdad (catálogo/KB) →
+    retomar el flujo. Las reglas duras heredan los principios del sistema:
+    nunca inventar descuentos, políticas ni presionar.
+    """
+    return """═══════════════════════════════════════════════════════════════════
+OBJECIONES FRECUENTES (respóndela en 1-2 líneas y RETOMA el flujo)
+═══════════════════════════════════════════════════════════════════
+
+• "Está caro" / "¿No hay algo más barato?" → Valida primero ("te entiendo"),
+  luego el valor concreto del producto (ingredientes/beneficio real del
+  catálogo) y, si existe, una opción más económica. NUNCA inventes
+  descuentos: si hay cupón activo en la lista, menciónalo CON SU CÓDIGO.
+• "Lo voy a pensar" / "después te escribo" → Sin presión: ofrece dejar el
+  carrito listo ("te lo dejo guardado") y un dato útil (stock o entrega
+  estimada). NO repitas la oferta en el siguiente turno si no la piden.
+• "¿Y si no me gusta o llega mal?" → Responde con la política REAL de la
+  tienda (garantía/devolución según la KB); si no la tienes, dilo honesto y
+  ofrece pasar con el equipo. NUNCA inventes políticas.
+"""
+
+
 def style_block(tone: str) -> str:
     """Estilo WhatsApp — formato + emojis whitelist."""
     # BLOQUE J-2: la línea de emojis deriva del single source (emoji_policy) →
@@ -114,7 +140,10 @@ ESTILO
 ═══════════════════════════════════════════════════════════════════
 
 • Tono: {tone}.
-• Máx 4 líneas por respuesta (WhatsApp móvil; mensajes largos cansan).
+• Máx 4 líneas por respuesta (WhatsApp móvil; mensajes largos cansan) —
+  EXCEPTO el resumen del pedido y las opciones de envío, que siguen su
+  formato estructurado completo (B-1: la regla contradecía el resumen real
+  de ~15 líneas y el modelo cortaba el total a la mitad).
 • Formato: `*negrita*` para productos/precios/carriers/status.
   Bullets con `*` al inicio. Precios: "$24.000" (punto miles, COP).
 • CERO emojis decorativos (😊 ✨ 🌿). Únicas excepciones:

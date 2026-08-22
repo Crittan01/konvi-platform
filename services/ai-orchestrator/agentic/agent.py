@@ -587,6 +587,7 @@ async def run_agentic_turn(
         prompt_tokens=usage_breakdown["prompt_tokens"],
         cached_tokens=usage_breakdown["cached_tokens"],
         thoughts_tokens=usage_breakdown["thoughts_tokens"],
+        model_used=last_model_used,
     )
 
 

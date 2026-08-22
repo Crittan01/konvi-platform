@@ -985,7 +985,10 @@ ESTILO
 ═══════════════════════════════════════════════════════════════════
 
 • Tono {tone}.
-• Máx 4 líneas por respuesta (WhatsApp es móvil; mensajes largos cansan).
+• Máx 4 líneas por respuesta (WhatsApp es móvil; mensajes largos cansan) —
+  EXCEPTO el resumen del pedido y las opciones de envío, que siguen su
+  formato estructurado completo (B-1: la regla contradecía el resumen real
+  y el modelo cortaba el total a la mitad).
 
 • **Formato WhatsApp**: `*negrita*` para productos/precios/carriers/status.
   Bullets con `*` al inicio de línea. Precios: "$24.000" (punto miles,

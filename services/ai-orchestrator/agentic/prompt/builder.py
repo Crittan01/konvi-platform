@@ -35,6 +35,7 @@ from agentic.prompt.blocks import (
     payment_methods_section,
     coupons_section,
     business_ops_section,
+    objections_block,
 )
 from agentic.prompt.states import (
     greeting_prompt,
@@ -289,6 +290,11 @@ def build_prompt_for_state(
     # Cupones donde aplica (GREETING/EXPLORING/CART_BUILDING).
     if state not in _NO_COUPONS_STATES:
         parts.append(coupons_section(active_coupons))
+
+    # B-1: objeciones con few-shots (todos los estados con venta activa —
+    # fuera de HUMAN_HANDOFF, donde el bot está mudo).
+    if state != AgenticState.HUMAN_HANDOFF:
+        parts.append(objections_block())
 
     parts.append(safety_block())
     parts.append(style_block(tone))
