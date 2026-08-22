@@ -55,42 +55,56 @@ CATALOG = [
      "description": "Aceite esencial puro de aromaterapia, aroma fresco y herbal. Uso tópico diluido o en difusor.",
      "safety_note": "No ingerir. Diluir antes de aplicar en la piel. No reemplaza tratamiento médico.",
      "variations": [
-         {"sku": "ACE-TEA-10", "price": 32000, "stock": 20, "attrs": {"Volumen": "10ml"}},
+         {"sku": "ACE-TEA-10", "price": 32000, "stock": 20, "attrs": {"Volumen": "10ml"},
+          "weight_kg": 0.04, "length_cm": 6, "width_cm": 3, "height_cm": 3},
      ]},
     {"title": "Aceite Esencial de Lavanda",
      "description": "Aceite esencial de lavanda relajante, ideal para aromaterapia y masajes diluido.",
      "safety_note": "No ingerir. Diluir antes de aplicar en la piel.",
      "variations": [
-         {"sku": "ACE-LAV-30", "price": 45000, "stock": 15, "attrs": {"Volumen": "30ml"}},
+         {"sku": "ACE-LAV-30", "price": 45000, "stock": 15, "attrs": {"Volumen": "30ml"},
+          "weight_kg": 0.08, "length_cm": 9, "width_cm": 4, "height_cm": 4},
      ]},
     {"title": "Sérum de Vitamina C",
      "description": "Sérum antioxidante que ilumina y unifica el tono de la piel. Con ácido hialurónico.",
      "safety_note": "Uso tópico. Evitar contacto con los ojos.",
      "variations": [
-         {"sku": "SER-VITC-15", "price": 52000, "stock": 10, "attrs": {"Volumen": "15ml"}},
-         {"sku": "SER-VITC-30", "price": 85000, "stock": 8, "attrs": {"Volumen": "30ml"}},
+         {"sku": "SER-VITC-15", "price": 52000, "stock": 10, "attrs": {"Volumen": "15ml"},
+          "weight_kg": 0.06, "length_cm": 8, "width_cm": 3, "height_cm": 3},
+         {"sku": "SER-VITC-30", "price": 85000, "stock": 8, "attrs": {"Volumen": "30ml"},
+          "weight_kg": 0.09, "length_cm": 10, "width_cm": 4, "height_cm": 4},
      ]},
     {"title": "Jabón Artesanal de Coco",
      "description": "Jabón artesanal de coco hidratante para todo tipo de piel.",
      "variations": [
-         {"sku": "JAB-COCO-100", "price": 24000, "stock": 25, "attrs": {"Peso": "100g"}},
+         {"sku": "JAB-COCO-100", "price": 24000, "stock": 25, "attrs": {"Peso": "100g"},
+          "weight_kg": 0.11, "length_cm": 8, "width_cm": 6, "height_cm": 3},
      ]},
     {"title": "Jabón Artesanal de Lavanda",
      "description": "Jabón artesanal de lavanda relajante, suave con la piel.",
      "variations": [
-         {"sku": "JAB-LAV-100", "price": 24000, "stock": 25, "attrs": {"Peso": "100g"}},
+         {"sku": "JAB-LAV-100", "price": 24000, "stock": 25, "attrs": {"Peso": "100g"},
+          "weight_kg": 0.11, "length_cm": 8, "width_cm": 6, "height_cm": 3},
      ]},
     {"title": "Aceite de Coco Virgen",
      "description": "Aceite de coco virgen prensado en frío, multiusos para piel y cabello.",
      "variations": [
-         {"sku": "ACE-COCO-250", "price": 38000, "stock": 12, "attrs": {"Volumen": "250ml"}},
+         {"sku": "ACE-COCO-250", "price": 38000, "stock": 12, "attrs": {"Volumen": "250ml"},
+          "weight_kg": 0.28, "length_cm": 15, "width_cm": 6, "height_cm": 6},
      ]},
     {"title": "Aceite de Almendras Dulces",
      "description": "Aceite de almendras dulces puro, hidratante para piel y masajes.",
      "variations": [
-         {"sku": "ACE-ALM-100", "price": 28000, "stock": 18, "attrs": {"Volumen": "100ml"}},
+         {"sku": "ACE-ALM-100", "price": 28000, "stock": 18, "attrs": {"Volumen": "100ml"},
+          "weight_kg": 0.12, "length_cm": 12, "width_cm": 5, "height_cm": 5},
      ]},
 ]
+
+# B-1 (2026-08-22): los pesos/dims son OBLIGATORIOS para quote_shipping (el
+# cotizador rechaza productos sin ellos y el harness de cotización falla).
+# El seed los siembra Y los repara en productos existentes (los replays de
+# migraciones los perdieron una vez — ver bitácora PLAN.md §E B-1).
+_WEIGHT_KEYS = ("weight_kg", "length_cm", "width_cm", "height_cm")
 
 existing = {
     (r.get("title") or "").strip().lower()
@@ -98,9 +112,27 @@ existing = {
 }
 
 created = 0
+healed = 0
 for p in CATALOG:
     if p["title"].strip().lower() in existing:
-        print(f"  = ya existe: {p['title']} — skip")
+        print(f"  = ya existe: {p['title']} — reparando pesos si faltan")
+        # Sanación: si las variaciones del producto existente perdieron
+        # peso/dims (replay), re-sembrarlas por SKU (idempotente).
+        for v in p["variations"]:
+            rows = (
+                sb.table("product_variations")
+                .select("id, weight_kg")
+                .eq("tenant_id", TENANT)
+                .eq("sku", v["sku"])
+                .limit(1)
+                .execute()
+                .data or []
+            )
+            if rows and rows[0].get("weight_kg") is None:
+                sb.table("product_variations").update(
+                    {k: v[k] for k in _WEIGHT_KEYS},
+                ).eq("id", rows[0]["id"]).eq("tenant_id", TENANT).execute()
+                healed += 1
         continue
     prod = sb.table("products").insert({
         "tenant_id": TENANT,
@@ -118,8 +150,9 @@ for p in CATALOG:
             "price": v["price"],
             "stock_quantity": v["stock"],
             "attributes": v.get("attrs", {}),
+            **{k: v[k] for k in _WEIGHT_KEYS},
         }).execute()
     created += 1
     print(f"  + {p['title']} ({len(p['variations'])} var.)")
 
-print(f"\nSeed OK: {created} productos nuevos en KAIU Dev (sandbox).")
+print(f"\nSeed OK: {created} productos nuevos, {healed} variaciones reparadas en KAIU Dev (sandbox).")

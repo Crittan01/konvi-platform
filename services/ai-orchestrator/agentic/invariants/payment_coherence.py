@@ -56,6 +56,10 @@ _CREDIT_EXPLICIT_PATTERNS = (
 _LLM_PAYMENT_ACTION_PATTERNS = (
     re.compile(r"checkout\.wompi\.co|paga\s+aqu[ií]|\*paga\s+aqu", re.IGNORECASE),
     re.compile(r"link\s+de\s+pago.*generado|generando.*link\s+de\s+pago", re.IGNORECASE),
+    # B-1 (harness E2E 2026-08-22): el LLM ofrece "generar/genero/genérame el
+    # link de pago" sin haber preguntado el modo — el regex solo cubría
+    # "generado/generando" y la promesa en infinitivo/presente pasaba sin gate.
+    re.compile(r"gener\w*\s+(?:te\s+|le\s+|me\s+|el\s+|tu\s+|su\s+)?link\s+de\s+pago", re.IGNORECASE),
     re.compile(r"pedido.*registrado\s+para\s+contraentrega", re.IGNORECASE),
 )
 

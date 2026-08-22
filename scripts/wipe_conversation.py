@@ -48,15 +48,22 @@ from pathlib import Path
 from typing import Optional
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+# ENV-1 (2026-08-03): el env canónico local es `.env.local` (`.env` ya no
+# existe en el repo). Fallback legacy: si existe `.env`, se respeta primero.
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
+ENV_PATH_LOCAL = os.path.join(REPO_ROOT, ".env.local")
 
 
 def _load_env() -> dict:
     creds: dict = {}
-    if not os.path.exists(ENV_PATH):
-        print(f"ERROR: no encontré {ENV_PATH}", file=sys.stderr)
+    path = ENV_PATH if os.path.exists(ENV_PATH) else ENV_PATH_LOCAL
+    if not os.path.exists(path):
+        print(
+            f"ERROR: no encontré ni {ENV_PATH} ni {ENV_PATH_LOCAL}",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    with open(ENV_PATH, "r") as f:
+    with open(path, "r") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:

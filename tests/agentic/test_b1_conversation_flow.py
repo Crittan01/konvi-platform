@@ -127,6 +127,23 @@ class F5CaseANoDestructivoTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("prefieres", r.replacement_text.lower())
 
     @patch(_ENABLED, return_value=["cod", "online_wompi"])
+    async def test_generar_link_infinitive_triggers_gate(self, _m):
+        """Hallazgo del E2E real 2026-08-22: 'Confirmas el pedido para generar
+        el link de pago seguro?' — el regex solo cubría 'generado/generando'
+        y la promesa en infinitivo pasaba sin el gate de modo de pago."""
+        from agentic.invariants.payment_coherence import _outbound_implies_payment_action
+        self.assertTrue(_outbound_implies_payment_action(
+            "Confirmas el pedido para generar el link de pago seguro?",
+        ))
+        self.assertTrue(_outbound_implies_payment_action(
+            "Dame un momento mientras genero tu link de pago",
+        ))
+        # Texto inocuo NO dispara.
+        self.assertFalse(_outbound_implies_payment_action(
+            "Cuéntame cómo prefieres pagar",
+        ))
+
+    @patch(_ENABLED, return_value=["cod", "online_wompi"])
     async def test_mention_skips_gate_as_before(self, _m):
         """El cliente ya mencionó el modo → el gate no dispara (sin cambio)."""
         r = await self._run(
