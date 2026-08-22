@@ -1,9 +1,9 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-08-22 (**TRACK 6 CERRADO (6/6 — MeLi condicionada a S6)**: Resend `3d41521c` (webhook svix + email_events + suppression local) + Telegram `56f3e31e` (HTML + inline keyboard + callback_query + setup M17) certificados en STG con E2E live · lección vault STG: backup de secretos debe leer `decrypted_secret`, no `secret` · PRD DESCONGELADO y desplegado — Track 9 cerrado en STG + 8 migraciones aplicadas a prod por protocolo + deploy `eec5534f` verificado · auditoría profunda del bot + B-0 + conformidad Aveonline + E2E STG)
+**Última actualización**: 2026-08-22 (**B-1 CERRADA** — calidad conversacional del bot certificada con E2E real espontáneo: memoria rodante fuera de ventana, routing de modelo por estado tras flag, F3-F8 + prompt quality, hallazgos E2E corregidos · antes: **TRACK 6 CERRADO (6/6)** · PRD DESCONGELADO y desplegado — Track 9 cerrado en STG + 8 migraciones aplicadas a prod por protocolo + deploy `eec5534f` verificado · auditoría profunda del bot + B-0 + conformidad Aveonline + E2E STG)
 **Branch activo**: `develop`; `production` = `eec5534f` (deploy 2026-08-22, los 4 servicios live verificados vía Render API + health ×5).
-**Ledger**: 266 migraciones repo / 262 ledger prod — las 4 de Track 6 (`20260822130000` Meta · `…130100` Gemini · `…130200` Resend · `…130300` Telegram) van a PRD por protocolo en el próximo deploy autorizado.
-**Tests**: 4.906 pytest (316 dbharness) + 363 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 24/24.
+**Ledger**: 268 migraciones repo / 262 ledger prod — las 6 nuevas (4 Track 6 + 2 B-1) van a PRD por protocolo en el próximo deploy autorizado.
+**Tests**: 4.974 pytest (316 dbharness) + 363 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 24/24.
 
 > **Guía de continuación para sesiones nuevas:** el plan de trabajo operativo vigente es
 > **`docs/PLAN-CIERRE.md`** (tracks 1-5 por ambiente, con owner y verificación por ítem).
@@ -34,8 +34,8 @@
 **En curso / sigue (en este orden):**
 1. ~~Track 9 — SEGURIDAD DB~~ ✅ CERRADO y aplicado a PRD 2026-08-22 (bitácora PLAN.md §E).
 2. ~~Track 6 — Alineación total con docs oficiales~~ ✅ **CERRADO 2026-08-22 (6/6 — MeLi condicionada a S6)** — bitácora PLAN.md §E por tecnología.
-3. **B-1 calidad conversacional** (la queja original del founder): resumen rodante de conversación, routing de modelo por estado, few-shots, gate de pago no destructivo, convivencia bot↔operador y salida de `human_takeover` (F8), resolvers de afirmación/preguntas mid-flow.
-4. B-3 harness de evaluación serio (incluye Track 8 adversarial) → B-2 re-ingeniería del núcleo del dispatcher → B-4 observabilidad mínima → Track 7 UX/UI → Track 5 (M1-M5 dominios modulares).
+3. ~~**B-1 calidad conversacional**~~ ✅ CERRADA 2026-08-22 (bitácora PLAN.md §E): resumen rodante de conversación (fin de la amnesia estructural), routing de modelo por estado (tras flag canary), few-shots de objeciones, gate de pago no destructivo (F5), resolver afirmación→recotización (F4), cupón con código (F3), preguntas mid-flow (F6), convivencia bot↔operador y salida de `human_takeover` (F7/F8).
+4. **B-3 harness de evaluación serio (SIGUIENTE)** (incluye Track 8 adversarial) → B-2 re-ingeniería del núcleo del dispatcher → B-4 observabilidad mínima → Track 7 UX/UI → Track 5 (M1-M5 dominios modulares).
 5. **PRD descongelado 2026-08-22** (deploy `eec5534f` verificado). **Smoke de dinero real (pago/guía reales PRD) APLAZADO AL FINAL por directiva founder 2026-08-22** — primero se certifica todo el negocio con harness turno a turno en STG.
 6. Pendientes founder registrados: desuscribir apps prod de la WABA de prueba (2.5), M19 (verify_token dev), guía UAT 86732771636 por anular en panel Aveonline, **⚠️ deadline Meta 2026-09-30: método de pago en cada WABA o se cortan los service messages** (docs/integrations/whatsapp-meta.md).
 
