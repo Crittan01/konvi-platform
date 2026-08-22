@@ -298,6 +298,8 @@ async def notify_client_refund_completed(
                 html=html,
                 text=_html_to_text(html),
                 idempotency_key=f"{tenant_id}:{order_id}:refund_completed"[:256],
+                # Track 6: suppression list local — no gastar cuota en suprimidos.
+                supabase=supabase,
             )
             if email_ok:
                 delivered = True

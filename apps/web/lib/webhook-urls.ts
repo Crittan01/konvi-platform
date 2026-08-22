@@ -8,6 +8,8 @@
  *   - Wompi:    prefix "/api/v1/webhooks"      + POST "/wompi"          → /api/v1/webhooks/wompi
  *   - Telegram: prefix "/api/v1/integrations"  + POST "/telegram/webhook" → /api/v1/integrations/telegram/webhook
  *   - MeLi:     prefix "/api/v1/meli"          + POST "/webhook"        → /api/v1/meli/webhook
+ *   - Resend:   prefix "/api/v1/webhooks"      + POST "/resend"         → /api/v1/webhooks/resend
+ *     (Track 6 — plataforma, no per-tenant: se registra una vez por ambiente)
  *
  * Host: la API productiva vive en `konvi-api.onrender.com` (docs/HANDOFF.md —
  * konvi-api ✅ Live). El dominio `api.konvi.co` está pendiente de DNS
@@ -38,6 +40,7 @@ export const WEBHOOK_PATHS = {
   wompi: '/api/v1/webhooks/wompi',
   telegram: '/api/v1/integrations/telegram/webhook',
   mercadolibre: '/api/v1/meli/webhook',
+  resend: '/api/v1/webhooks/resend',
 } as const
 
 export type WebhookProvider = keyof typeof WEBHOOK_PATHS

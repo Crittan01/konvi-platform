@@ -33,6 +33,7 @@ from routers import (
     product_categories,
     products,
     purchases,
+    resend_webhook,
     settings,
     shipping,
     telegram_webhook,
@@ -331,6 +332,10 @@ app.include_router(marketplace.router, prefix="/api/v1", dependencies=_OFFBOARDI
 # eliminado, los webhooks fallarán en otros guards (RLS, FK, etc.).
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
+# Track 6 (2026-08-22) — Resend webhook de eventos de email (bounced/complained/
+# failed/suppressed + suppression.*). Auth: firma svix sobre el raw body
+# (RESEND_WEBHOOK_SECRET), NO JWT → SIN _OFFBOARDING_GATE, igual que wompi/meli.
+app.include_router(resend_webhook.router, prefix="/api/v1/webhooks")
 # Rev. 108 — Aveonline webhook estados de guía (dossier §6.2). Provider único
 # de shipping post-pivote rev. 107 (ver ADR-0019). Envia eliminado en rev. 109.
 app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")

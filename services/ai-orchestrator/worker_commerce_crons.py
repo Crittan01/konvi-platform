@@ -896,6 +896,8 @@ class WorkerCommerceCronsMixin:
                     # Del SNAPSHOT, no del tenant vivo: el comprobante debe apuntar al
                     # correo que el vendedor tenía cuando se emitió.
                     responder_a=((r.get("snapshot") or {}).get("vendedor") or {}).get("email"),
+                    # Track 6: suppression list local (email_events vía webhook Resend).
+                    supabase=self.supabase,
                 )
             except Exception as exc:
                 logger.error("[COMPROBANTE][EMAIL] fallo enviando %s: %s", r.get("numero"), exc)

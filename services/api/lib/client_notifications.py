@@ -445,6 +445,16 @@ def _send_payment_confirmation_email(
         )
         return
 
+    # Track 6 (2026-08-22): suppression list local (email_events vía webhook
+    # Resend) — no gastar cuota ni marcar "enviado" a un destinatario suprimido.
+    from lib.email_suppression import is_email_suppressed  # noqa: PLC0415
+    if is_email_suppressed(supabase, email):
+        logger.info(
+            "[WOMPI][EMAIL] destinatario suprimido to=%s order=%s — skip",
+            _mask_email(email), order_id[:8],
+        )
+        return
+
     name = contact.get("name") or "cliente"
     total = int(float(order.get("total_amount") or 0))
     shipping = int(float(order.get("shipping_cost") or 0))

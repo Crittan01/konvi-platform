@@ -177,6 +177,11 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         value: "Konvi <noreply@konvi.co>"
+      # Track 6 (2026-08-22) — firma svix del webhook de eventos Resend
+      # (POST /api/v1/webhooks/resend). La entrega el dashboard Resend al
+      # registrar el webhook (whsec_...). Sin ella el endpoint responde 503.
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
       # Aveonline generación REAL de guías (true=factura) vs simulado (false=dry-run).
       # ACTIVADO 2026-08-03 (B1): UAT guía real 86732771636 verificada end-to-end
       # (scripts/uat/runs/aveonline_guia_real_2026-08-03.md). Doble compuerta: este

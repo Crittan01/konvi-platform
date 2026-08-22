@@ -326,6 +326,8 @@ async def _send_status_email(
             html=html,
             text=_html_to_text(html),
             idempotency_key=f"{tenant_id}:{order_id}:shipment_status:{internal_status}"[:256],
+            # Track 6: suppression list local — no gastar cuota en suprimidos.
+            supabase=supabase,
         )
         if not ok:
             logger.warning(

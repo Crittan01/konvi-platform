@@ -11,12 +11,14 @@ import { WEBHOOK_PATHS, WEBHOOK_HOST, webhookUrl } from './webhook-urls'
  *   - wompi_webhook:    prefix "/api/v1/webhooks"     + "/wompi"
  *   - telegram_webhook: prefix "/api/v1/integrations" + "/telegram/webhook"
  *   - meli_webhook:     prefix "/api/v1/meli"         + "/webhook"
+ *   - resend_webhook:   prefix "/api/v1/webhooks"     + "/resend" (Track 6)
  */
 describe('webhook-urls', () => {
   it('mantiene los paths exactos que expone el API', () => {
     expect(WEBHOOK_PATHS.wompi).toBe('/api/v1/webhooks/wompi')
     expect(WEBHOOK_PATHS.telegram).toBe('/api/v1/integrations/telegram/webhook')
     expect(WEBHOOK_PATHS.mercadolibre).toBe('/api/v1/meli/webhook')
+    expect(WEBHOOK_PATHS.resend).toBe('/api/v1/webhooks/resend')
   })
 
   it('NO usa las rutas 404 antiguas (regresión F93)', () => {

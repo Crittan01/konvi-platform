@@ -103,7 +103,7 @@ class NotifyTenantEventReturnSemanticsTests(unittest.TestCase):
     def test_all_recipients_fail_returns_false(self):
         self._setup_recipients(["a@x.com", "b@x.com"])
 
-        async def fake_fail(*, to, subject, html, text=None, tags=None):
+        async def fake_fail(*, to, subject, html, text=None, tags=None, supabase=None):
             return False
 
         with patch.object(notifications, "_send_email_via_resend", side_effect=fake_fail):
@@ -119,7 +119,7 @@ class NotifyTenantEventReturnSemanticsTests(unittest.TestCase):
         self._setup_recipients(["a@x.com", "b@x.com"])
         results = iter([True, False])
 
-        async def mixed(*, to, subject, html, text=None, tags=None):
+        async def mixed(*, to, subject, html, text=None, tags=None, supabase=None):
             return next(results)
 
         with patch.object(notifications, "_send_email_via_resend", side_effect=mixed):
@@ -145,7 +145,7 @@ class NotifyTenantEventReturnSemanticsTests(unittest.TestCase):
     def test_all_fail_logs_error_with_recipients(self):
         self._setup_recipients(["a@x.com"])
 
-        async def fail(*, to, subject, html, text=None, tags=None):
+        async def fail(*, to, subject, html, text=None, tags=None, supabase=None):
             return False
 
         with self.assertLogs("orchestrator.notifications", level="ERROR") as cm:

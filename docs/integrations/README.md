@@ -15,7 +15,7 @@ Documentos maestros de las integraciones activas de la plataforma. Cada doc decl
 | **WhatsApp / Meta Cloud API** | `whatsapp-meta.md` | LIVE | Model B per-tenant (ADR-0023), HMAC per-tenant, inbox durable, Graph v22.0, ventana 24h con 131047 sin reintento |
 | **Supabase** (plataforma base: Postgres+RLS+Auth+Realtime+Vault+Storage) | `supabase.md` | LIVE | Alineación doc oficial Track 6 (2026-08-22): realtime select+anti-truncamiento, keys sin fallback legacy, runbook DR vault |
 | **Gemini** (LLM del bot) | `gemini.md` | LIVE | Track 6 (2026-08-22): telemetría caching fase 0, SDK 2.19, VALIDATED tras flag; EOL 3.1-flash-lite 2027-05-07 calendarizado |
-| **Resend** (email transaccional) | — (sin doc maestro) | LIVE | `services/ai-orchestrator/notifications.py:157` (`_send_email_via_resend`), `receipt_email.py`, `refund_notifications.py`; env `RESEND_API_KEY` (sync:false) + `RESEND_FROM_EMAIL`; sin key → fallback a log, no rompe flujos. Cubre Habeas Data, comprobantes y notificaciones post-venta fuera de ventana 24h |
+| **Resend** (email transaccional) | `resend.md` | LIVE | Track 6 (2026-08-22): senders con tags/reply_to/UA + webhook de eventos con firma svix (dedup svix_id en `email_events`, alertas Telegram en bounce/queja/fallo, suppression list local en senders). Cubre Habeas Data, comprobantes y notificaciones post-venta fuera de ventana 24h |
 
 ## Proveedores retirados
 

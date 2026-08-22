@@ -192,6 +192,7 @@ async def send_receipt_email(
     destinatario: str,
     politica: Optional[dict] = None,
     responder_a: Optional[str] = None,
+    supabase=None,
 ) -> bool:
     """Envía el documento. True SOLO si Resend lo aceptó.
 
@@ -230,6 +231,8 @@ async def send_receipt_email(
             # Quien vende es el tenant, aunque el correo salga de la plataforma. Ley 1480
             # art. 50 lit. a): el comprador tiene que poder llegar al vendedor.
             reply_to=responder_a,
+            # Track 6: suppression list local — no gastar cuota en suprimidos.
+            supabase=supabase,
         )
     except Exception as exc:
         logger.error("[COMPROBANTE][EMAIL] fallo enviando %s: %s", numero, exc)

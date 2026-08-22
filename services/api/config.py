@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # ── Email transaccional (Resend) ──────────────────────────────────────
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "Konvi <noreply@commerce-ops.local>"
+    # Track 6: firma svix del webhook de eventos (/api/v1/webhooks/resend).
+    RESEND_WEBHOOK_SECRET: str = ""
 
     # ── Mercado Libre (OAuth plataforma) ──────────────────────────────────
     MELI_CLIENT_ID: str = ""

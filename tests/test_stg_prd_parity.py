@@ -40,7 +40,7 @@ mod = _load_mod()
 EXPECTED_KEY_COUNTS = {
     "konvi-web": 11,
     "konvi-connector": 4,
-    "konvi-api": 34,
+    "konvi-api": 35,
     "konvi-orchestrator": 95,
 }
 

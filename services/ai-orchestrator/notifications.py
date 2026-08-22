@@ -32,6 +32,34 @@ APP_URL = os.getenv("APP_URL", "https://konvi-web.onrender.com").rstrip("/")
 logger = logging.getLogger("orchestrator.notifications")
 
 
+def _mask_email_addr(email: str) -> str:
+    """Enmascara PII para logs: 'ju***@dominio.com' (patrón de client_notifications)."""
+    local, sep, domain = (email or "").partition("@")
+    if not sep:
+        return "***"
+    return f"{local[:2]}***@{domain}"
+
+
+def _is_suppressed(supabase: Any, email: str) -> bool:
+    """True si la dirección está en la suppression list local (Track 6 Resend).
+
+    La verdad vive en services/api/lib/email_suppression.py (compartida con el
+    API) — import perezoso con el patrón canónico orchestrator→api (worker.py).
+    Fail-open: cualquier error = NO suprimido (Resend aplica su propia lista).
+    """
+    try:
+        import sys
+        from pathlib import Path
+        _api_root = Path(__file__).resolve().parents[1] / "api"
+        if str(_api_root) not in sys.path:
+            sys.path.insert(0, str(_api_root))
+        from lib.email_suppression import is_email_suppressed  # noqa: PLC0415
+        return is_email_suppressed(supabase, email)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[EMAIL][SUPPRESSION] check falló (fail-open): %s", exc)
+        return False
+
+
 def _register_telegram_identity(supabase: Client, tenant_id: str, chat_id: Any) -> None:
     """Auto-vincula (tenant_id, telegram, chat_id) en tenant_provider_identity.
 
@@ -157,7 +185,7 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 async def _send_email_via_resend(
     *, to: str, subject: str, html: str, text: str | None = None,
     idempotency_key: str | None = None, reply_to: str | None = None,
-    tags: list[dict] | None = None,
+    tags: list[dict] | None = None, supabase: Any = None,
 ) -> bool:
     """Rev. 94 — Envío real vía Resend API.
 
@@ -172,6 +200,11 @@ async def _send_email_via_resend(
     webhook de eventos — routing por tenant + correlación envío↔evento
     (la doc multi-tenant oficial prescribe tags para esto).
 
+    `supabase` (Track 6, 2026-08-22): si se provee, se consulta la suppression
+    list local (email_events vía webhook Resend) antes de gastar cuota — un
+    destinatario suprimido NO se envía y retorna False (no entregado; el caller
+    decide si reintenta — la supresión típica es permanente hasta removal manual).
+
     Docs: https://resend.com/docs/api-reference/emails/send-email
     """
     if not RESEND_API_KEY:
@@ -180,6 +213,13 @@ async def _send_email_via_resend(
             to, subject,
         )
         return True
+
+    if supabase is not None and _is_suppressed(supabase, to):
+        logger.info(
+            "[EMAIL][SUPPRESSED] envío omitido (suppression list) to=%s subject=%r",
+            _mask_email_addr(to), subject,
+        )
+        return False
 
     payload = {
         "from": RESEND_FROM_EMAIL,
@@ -239,7 +279,9 @@ async def _send_email_via_resend(
         return False
 
 
-async def _dispatch_email_event(config: dict[str, Any], payload: dict[str, Any]) -> bool:
+async def _dispatch_email_event(
+    config: dict[str, Any], payload: dict[str, Any], supabase: Any = None,
+) -> bool:
     """Envía el email de un evento operacional (takeover) vía Resend.
 
     `dispatch_human_takeover_event` usa este path. Para nuevos eventos
@@ -276,6 +318,7 @@ async def _dispatch_email_event(config: dict[str, Any], payload: dict[str, Any])
             {"name": "tenant_id", "value": str(payload.get("tenant_id") or "")},
             {"name": "event_type", "value": str(event_type)},
         ],
+        supabase=supabase,
     )
 
 
@@ -385,6 +428,8 @@ async def _notify_tenant_event(
                 {"name": "tenant_id", "value": str(tenant_id)},
                 {"name": "event_type", "value": str(event_type)},
             ],
+            # Track 6: suppression list local — no gastar cuota en suprimidos.
+            supabase=supabase,
         )
         if ok:
             sent_any = True
@@ -442,7 +487,7 @@ async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any
             _register_telegram_identity(supabase, tenant_id, config.get("chat_id"))
             ok = await _send_telegram_notification(config, text)
         elif channel == "email":
-            ok = await _dispatch_email_event(config, payload)
+            ok = await _dispatch_email_event(config, payload, supabase)
         else:
             logger.info("Canal no soportado aún: %s", channel)
             ok = True

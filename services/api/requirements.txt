@@ -12,3 +12,6 @@ PyJWT==2.13.0
 google-genai==2.11.0
 # Rev. 105 Sem 2 F.10 (MA-2) — bcrypt hashing para webhook secrets rotables per-tenant.
 bcrypt==5.0.0
+# Track 6 (2026-08-22) — verificación de firma svix del webhook Resend
+# (routers/resend_webhook.py). Envuelve standardwebhooks (HMAC-SHA256 + timestamp).
+svix==2.0.0

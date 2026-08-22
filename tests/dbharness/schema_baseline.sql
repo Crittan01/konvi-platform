@@ -5290,6 +5290,27 @@ ALTER SEQUENCE "public"."credential_access_log_id_seq" OWNED BY "public"."creden
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."email_events" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "svix_id" "text" NOT NULL,
+    "tenant_id" "uuid",
+    "order_id" "uuid",
+    "email_id" "text",
+    "event_type" "text" NOT NULL,
+    "recipient" "text",
+    "payload" "jsonb" NOT NULL,
+    "occurred_at" timestamp with time zone,
+    "received_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."email_events" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."email_events" IS 'Track 6: inbox durable de eventos del webhook Resend (firma svix verificada). Dedup por svix_id (entrega at-least-once). Alimenta analítica de entregabilidad/reputación y la supresión local: los senders consultan el último suppression.added/removed del destinatario antes de enviar (lib/email_suppression.py).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."expenses" (
     "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -7331,6 +7352,16 @@ ALTER TABLE ONLY "public"."credential_access_log"
 
 
 
+ALTER TABLE ONLY "public"."email_events"
+    ADD CONSTRAINT "email_events_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."email_events"
+    ADD CONSTRAINT "email_events_svix_id_key" UNIQUE ("svix_id");
+
+
+
 ALTER TABLE ONLY "public"."expenses"
     ADD CONSTRAINT "expenses_pkey" PRIMARY KEY ("id");
 
@@ -8041,6 +8072,18 @@ CREATE INDEX "idx_coupon_redemptions_tenant" ON "public"."coupon_redemptions" US
 
 
 CREATE INDEX "idx_coupons_tenant_active" ON "public"."coupons" USING "btree" ("tenant_id", "is_active");
+
+
+
+CREATE INDEX "idx_email_events_email_id" ON "public"."email_events" USING "btree" ("email_id") WHERE ("email_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_email_events_recipient_occurred" ON "public"."email_events" USING "btree" ("recipient", "occurred_at" DESC);
+
+
+
+CREATE INDEX "idx_email_events_tenant_received" ON "public"."email_events" USING "btree" ("tenant_id", "received_at" DESC);
 
 
 
@@ -8953,6 +8996,11 @@ ALTER TABLE ONLY "public"."credential_access_log"
 
 
 
+ALTER TABLE ONLY "public"."email_events"
+    ADD CONSTRAINT "email_events_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."expenses"
     ADD CONSTRAINT "expenses_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
@@ -9494,6 +9542,10 @@ CREATE POLICY "Tenant Isolation" ON "public"."conversations" USING (("tenant_id"
 
 
 
+CREATE POLICY "Tenant Isolation" ON "public"."email_events" USING (("tenant_id" = "public"."app_current_tenant"())) WITH CHECK (("tenant_id" = "public"."app_current_tenant"()));
+
+
+
 CREATE POLICY "Tenant Isolation" ON "public"."idempotency_keys" USING (("tenant_id" = "public"."app_current_tenant"())) WITH CHECK (("tenant_id" = "public"."app_current_tenant"()));
 
 
@@ -9699,6 +9751,9 @@ ALTER TABLE "public"."credential_access_log" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "credential_access_log_tenant_select" ON "public"."credential_access_log" FOR SELECT USING (("tenant_id" = ("current_setting"('app.current_tenant_id'::"text", true))::"uuid"));
 
+
+
+ALTER TABLE "public"."email_events" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."expenses" ENABLE ROW LEVEL SECURITY;
@@ -11728,6 +11783,10 @@ GRANT ALL ON TABLE "public"."credential_access_log" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."credential_access_log_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."credential_access_log_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."credential_access_log_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."email_events" TO "service_role";
 
 
 
