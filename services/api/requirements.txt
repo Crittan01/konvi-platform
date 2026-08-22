@@ -9,7 +9,9 @@ python-multipart==0.0.32
 httpx==0.28.1
 PyJWT==2.13.0
 # Rev. 72 — embeddings KB en backend (cierra D3: GEMINI_API_KEY ya no expuesta al frontend).
-google-genai==2.11.0
+# Track 6 (2026-08-22): 2.19.0 — paridad con ai-orchestrator (el job py-core de CI
+# instala api+orchestrator en el mismo env; versiones distintas = ResolutionImpossible).
+google-genai==2.19.0
 # Rev. 105 Sem 2 F.10 (MA-2) — bcrypt hashing para webhook secrets rotables per-tenant.
 bcrypt==5.0.0
 # Track 6 (2026-08-22) — verificación de firma svix del webhook Resend
