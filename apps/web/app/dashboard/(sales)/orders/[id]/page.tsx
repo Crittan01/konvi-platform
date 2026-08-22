@@ -76,8 +76,10 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
   if (!order) notFound()
 
   // Cargas asociadas (best-effort; tenant-scoped). Un fallo aquí no oculta el pedido.
+  // Track9/A7: payments quedó owner-only; esta página (cualquier miembro) lee la vista
+  // proyectada payments_safe — mismas columnas operativas, sin raw_webhook (PII del pagador).
   const [{ data: payments }, { data: shipments }, { data: cancellation }] = await Promise.all([
-    supabase.from('payments')
+    supabase.from('payments_safe')
       .select('provider, checkout_url, amount_in_cents, status, wompi_status, created_at')
       .eq('order_id', id).eq('tenant_id', tenantId)
       .order('created_at', { ascending: false }),
