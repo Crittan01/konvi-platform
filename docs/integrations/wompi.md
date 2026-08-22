@@ -1,6 +1,6 @@
 # Wompi — Pagos (documento canónico)
 
-> Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop
+> Estado: VIGENTE · Última verificación contra código: 2026-08-02 @ develop · **Revalidación contra doc oficial vigente (Track 6): 2026-08-22** — matriz abajo §"Alineación doc oficial".
 
 ## Estado
 
@@ -64,11 +64,12 @@ Receptor: `POST /api/v1/webhooks/wompi` (`services/api/main.py:287` + `wompi_web
 ### Por tenant — `tenant_integrations` (`provider='wompi'`)
 
 ```json
-"credentials": { "private_key_secret_id": "…", "events_key_secret_id": "…" },
-"meta": { "environment": "sandbox|production", "private_key_preview": "prv_test_…" }
+"credentials": { "private_key_secret_id": "…", "events_key_secret_id": "…",
+                 "public_key_secret_id": "… (opcional)", "integrity_key_secret_id": "… (opcional)" },
+"meta": { "environment": "sandbox|production", "private_key_preview": "prv_test_…", "public_key_preview": "pub_test_… (opcional)" }
 ```
 
-Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`); en DB solo queda el preview. Se ingresan por UI: Ajustes → Integraciones → Wompi. La `public_key` no se usa server-side en este flujo (los links se crean con la privada). La URL del webhook se registra en el dashboard de Wompi por ambiente: `https://konvi-api.onrender.com/api/v1/webhooks/wompi` (prod) — ver `.env.example:106-111`.
+Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`); en DB solo queda el preview. Se ingresan por UI: Ajustes → Integraciones → Wompi. Las 2 obligatorias (`private` + `events`) sostienen el flujo de payment links; las 2 opcionales (`public` + `integrity`) son el **punto de extensión del checkout embebido** (Track 6, validado contra doc oficial 2026-08-22: el Widget/Web Checkout exige `pub_` client-side + firma `integrity` server-side SHA256 `reference`+`amount`+`currency`+secreto). El runtime actual no las consume; el guardado es merge no-destructivo (dejarlas vacías conserva las existentes). La URL del webhook se registra en el dashboard de Wompi por ambiente: `https://konvi-api.onrender.com/api/v1/webhooks/wompi` (prod) — ver `.env.example:106-111`.
 
 ### Globales (env vars — sin credenciales Wompi, `render.yaml:289-291`)
 
@@ -110,6 +111,25 @@ Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`)
 - **Runbook**: `docs/operations/runbooks/wompi-payment-reconciliation.md` — esperar ≥24 h antes de reconciliar manualmente (los reintentos resuelven lo transitorio).
 - **Monitoreo disponible**: logs estructurados `[WOMPI]` (evento_recibido, monto_mismatch, moneda_invalida, ORPHAN, INBOX re-drive/DEAD_LETTER) filtrables en Render Dashboard.
 
+## Alineación doc oficial (Track 6 — fetch live 2026-08-22)
+
+Matriz capacidad × doc × código completa ejecutada el 2026-08-22 (cada URL fetcheada ese día). **Veredicto: nada de lo que usamos está deprecado ni cambió** — payment links (campos, `sku` máx 36 chars), reintentos de eventos 30min/3h/24h esperando HTTP 200, firma SHA256 de `signature.properties`+`timestamp`+events secret, void con `prv_`. Las decisiones históricas "sin API para invalidar links" y "sin refund público" se sostienen en la guía vigente.
+
+| Capacidad (doc oficial) | Estado en código | Decisión Track 6 |
+|---|---|---|
+| 4 llaves por ambiente (`pub_`, `prv_`, `*_events_`, `*_integrity_`) — [ambientes-y-llaves](https://docs.wompi.co/en/docs/colombia/ambientes-y-llaves/) | Las 4 capturables por UI desde 2026-08-22 (pub/integrity opcionales, validación de prefijos en `apps/web/lib/wompi-keys.ts`) | **Hecho** (punto de extensión) |
+| Widget/Web Checkout: `pub_` + firma integrity + acceptance NO requeridos (el checkout hosted presenta los contratos) — [widget-checkout-web](https://docs.wompi.co/en/docs/colombia/widget-checkout-web/) | Ausente (storefront fuera de alcance); `_build_customer_data` preservado (`wompi_client.py:241-301`) | Diseñado para el futuro: firma server-side + reuso del builder; acceptance tokens solo si se va a `POST /transactions` directo |
+| `taxes` (VAT/CONSUMPTION) en payment links — [links-de-pago](https://docs.wompi.co/en/docs/colombia/links-de-pago/) | Ausente | **Pendiente decisión founder** (amarrado a B6/DIAN: ¿IVA desglosado en el checkout?) — implementación = 1 campo en payload |
+| `redirect_url`, `image_url` en links | Cliente los soporta; ningún caller los pasa | Punto de extensión (decisión de producto: página de "pago recibido" / branding) |
+| Reintentos webhook 30min/3h/24h esperando 200 — [eventos](https://docs.wompi.co/en/docs/colombia/eventos/) | Asumido exactamente así en inbox durable + dedup + reconciliación | Confirmado vigente — sin cambio |
+| Firma de eventos = SHA256 concatenación (NO HMAC); `properties` variable por evento | Código correcto (data-relative + fallback, `compare_digest`); **copy de UI corregido 2026-08-22** (decía "HMAC-SHA256") | Hecho |
+| Eventos de token (`nequi_token.updated`, etc.) — solo aplican a suscripciones | No procesados (modelo one-shot); copy de UI corregido | No aplica hoy |
+| `GET /payment_links/:id` sin auth | Ausente | Punto de extensión (verificar `active` real antes de reusar link) — baja prioridad |
+| Tokenización / payment sources / COF / suscripciones — [fuentes-de-pago](https://docs.wompi.co/docs/colombia/fuentes-de-pago/) | Ausente | No aplica (modelo cobro one-shot por orden) |
+| Datos de prueba sandbox oficiales: tarjeta `4242…`→APPROVED / `4111…`→DECLINED, Nequi `3991111111`/`3992222222`, PSE inst. 1/2 — [datos-de-prueba](https://docs.wompi.co/docs/colombia/datos-de-prueba-en-sandbox/) | Referenciados ahora para la recertificación E2E (B4) | Hecho (insumo UAT) |
+
+**No verificable ese día:** API Reference exhaustivo (HTTP 403) — la conclusión "no hay API para invalidar links" se sostiene en la guía de links (solo documenta POST y GET). Ventana exacta de settlement para void: no publicada (la heurística conservadora de 23h se mantiene).
+
 ## Gaps conocidos
 
 | ID | Severidad | Gap |
@@ -122,4 +142,4 @@ Las llaves viven cifradas en **Supabase Vault** (se referencian por `secret_id`)
 
 ## Referencias oficiales
 
-- https://docs.wompi.co/en/docs/colombia/ (links de pago, eventos, transacciones, ambientes y llaves) — validada 2026-04-24; runbook re-validado 2026-06-26.
+- https://docs.wompi.co/en/docs/colombia/ (links de pago, eventos, transacciones, ambientes y llaves) — validada 2026-04-24; runbook re-validado 2026-06-26; **revalidación completa Track 6 el 2026-08-22** (incl. widget-checkout-web, tokens-de-aceptacion, fuentes-de-pago, datos-de-prueba-en-sandbox).

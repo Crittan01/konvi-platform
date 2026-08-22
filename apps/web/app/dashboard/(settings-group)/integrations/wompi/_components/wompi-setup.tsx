@@ -2,17 +2,18 @@
  * Tab Setup — Wompi.
  *
  * Estructura canónica unificada (Sem 7 F2 cierre):
- *   1. Identidad — 2 API keys (private/events)
+ *   1. Identidad — 2 API keys (private/events) + 2 opcionales (pub/integrity)
  *   2. Webhook & Eventos — URL Wompi → Konvi
  *   3. Cumplimiento — signature + idempotency lifecycle + retry+CB
  *   4. Zona de riesgo — desconectar (deshabilitado hoy)
  *   + Banner migración
  *
- * Fase 0 F6: retirados los campos fantasma public_key / integrity_key. El
- * backend (services/) solo consume private_key + events_key — 0 readers de
- * public_key/integrity_key; se mostraban vacíos y confundían la config. El
- * integrity_key solo aplicaría si Konvi adoptara el Widget client-side de
- * Wompi (VALIDAR EN DOC WOMPI antes de re-introducirlos).
+ * Track 6 (2026-08-22, doc oficial verificada live): las llaves pub/integrity
+ * se capturan opcionales como punto de extensión del checkout embebido — la doc
+ * confirma que el Widget/Web Checkout las exige (pub_ client-side + firma
+ * integrity SHA256 server-side). El runtime de hoy (payment links hosted) no
+ * las consume; el form las marca "opcional" y el guardado las conserva en
+ * Vault con merge no-destructivo.
  */
 import { CreditCard, KeyRound, Webhook } from 'lucide-react'
 import {
@@ -41,6 +42,8 @@ export default function WompiSetup({ connected, credentials, mode }: Props) {
 
   const privateKeySecretId = credentials.private_key_secret_id as string | undefined
   const eventsKeySecretId = credentials.events_key_secret_id as string | undefined
+  const publicKeySecretId = credentials.public_key_secret_id as string | undefined
+  const integrityKeySecretId = credentials.integrity_key_secret_id as string | undefined
 
   return (
     <div className="space-y-5">
@@ -67,10 +70,28 @@ export default function WompiSetup({ connected, credentials, mode }: Props) {
                 : null
             }
           />
+          <SetupField
+            label="Public key (checkout embebido)"
+            value={
+              publicKeySecretId
+                ? `secret_${publicKeySecretId.slice(0, 8)}…`
+                : null
+            }
+          />
+          <SetupField
+            label="Integrity key (firma widget)"
+            value={
+              integrityKeySecretId
+                ? `secret_${integrityKeySecretId.slice(0, 8)}…`
+                : null
+            }
+          />
         </SetupGrid>
         <p className="text-xs text-muted-foreground">
-          La Llave Privada y la Llave de Eventos están almacenadas encriptadas
-          en Vault Supabase.
+          Las llaves están almacenadas encriptadas en Vault Supabase. La Llave
+          Pública y la de Integridad son opcionales: habilitan el futuro checkout
+          embebido (Widget/Web Checkout de Wompi); el flujo actual de links de
+          pago no las requiere.
         </p>
       </SetupSection>
 
@@ -83,14 +104,19 @@ export default function WompiSetup({ connected, credentials, mode }: Props) {
           </code>
         </div>
         <div className="text-xs text-muted-foreground pt-1 border-t border-border">
-          Eventos: <span className="font-mono">transaction.updated · nequi_token.updated</span>
+          Eventos: <span className="font-mono">transaction.updated</span>
+          <span className="block mt-1 text-[11px]">
+            (Wompi también emite eventos de token — nequi_token.updated,
+            bancolombia_transfer_token.updated — que solo aplican a suscripciones;
+            Konvi no las procesa: el modelo es cobro por orden.)
+          </span>
         </div>
       </SetupSection>
 
       {/* 3. Cumplimiento */}
       <ComplianceSection
         gates={[
-          { label: 'Signature webhook', value: 'HMAC-SHA256 enforced' },
+          { label: 'Signature webhook', value: 'SHA256 (properties + timestamp + events key)' },
           { label: 'Idempotency lifecycle', value: 'ADR-0011 activo' },
           { label: 'Retry + Circuit Breaker', value: 'Activo (H.3.2)' },
         ]}

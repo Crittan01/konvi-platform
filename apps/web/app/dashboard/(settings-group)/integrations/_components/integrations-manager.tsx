@@ -781,6 +781,18 @@ export function IntegrationsManager(props: Props) {
                           <Label className="text-xs">Llave de Eventos (Events Key)</Label>
                           <Input type="password" name="events_key" required autoComplete="off" placeholder="test_events_..." className="h-8 text-xs font-mono" />
                         </div>
+                        {/* Track 6 (2026-08-22): captura opcional de las 2 llaves restantes.
+                            El runtime NO las consume hoy — quedan en Vault como punto de
+                            extensión del checkout embebido (Widget/Web Checkout exigen pub_
+                            client-side + firma integrity server-side, doc oficial Wompi). */}
+                        <div className="space-y-1">
+                          <Label className="text-xs">Llave Pública <span className="text-muted-foreground font-normal">(opcional — checkout embebido futuro)</span></Label>
+                          <Input type="password" name="public_key" autoComplete="off" placeholder="pub_test_..." className="h-8 text-xs font-mono" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Llave de Integridad <span className="text-muted-foreground font-normal">(opcional — firma del widget)</span></Label>
+                          <Input type="password" name="integrity_key" autoComplete="off" placeholder="test_integrity_..." className="h-8 text-xs font-mono" />
+                        </div>
                         <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!"
                           className="w-full h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500 text-white">
                           <CreditCard className="h-3.5 w-3.5" /> Conectar Wompi

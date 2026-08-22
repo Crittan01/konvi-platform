@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { CORE_API_URL } from '@/lib/runtime-env'
-import { wompiKeysMatchEnvironment } from '@/lib/wompi-keys'
+import { wompiKeysMatchEnvironment, wompiOptionalKeysMatchEnvironment } from '@/lib/wompi-keys'
 import { IntegrationsManager } from './_components/integrations-manager'
 import {
   connectAveonline as connectAveonlineCore,
@@ -376,6 +376,8 @@ export default async function IntegrationsPage(
 
     const privateKey  = (formData.get('private_key') as string)?.trim()
     const eventsKey   = (formData.get('events_key') as string)?.trim()
+    const publicKey    = (formData.get('public_key') as string)?.trim() || undefined
+    const integrityKey = (formData.get('integrity_key') as string)?.trim() || undefined
     const environment = (formData.get('environment') as string) === 'production' ? 'production' : 'sandbox'
 
     if (!privateKey || !eventsKey) {
@@ -388,6 +390,11 @@ export default async function IntegrationsPage(
     const keyCheck = wompiKeysMatchEnvironment(environment, privateKey, eventsKey)
     if (!keyCheck.ok) {
       redirect(`/dashboard/integrations?error=${encodeURIComponent(keyCheck.error)}`)
+    }
+    // Track 6: la misma regla aplica a las llaves opcionales (pub/integrity) si vienen.
+    const optCheck = wompiOptionalKeysMatchEnvironment(environment, publicKey, integrityKey)
+    if (!optCheck.ok) {
+      redirect(`/dashboard/integrations?error=${encodeURIComponent(optCheck.error)}`)
     }
 
     const { data: existing } = await sb.from('tenant_integrations').select('credentials')
@@ -425,12 +432,44 @@ export default async function IntegrationsPage(
       redirect(`/dashboard/integrations?error=${encodeURIComponent('No se pudieron guardar las llaves de Wompi de forma segura (Vault). Intenta de nuevo.')}`)
     }
 
+    // Track 6: llaves opcionales (pub/integrity). Solo se escriben si vienen en
+    // el formulario; si quedan vacías se conservan las ya guardadas (patrón de
+    // merge no-destructivo — el form no exige re-pegarlas en cada edición).
+    let publicSid: string | null = creds.public_key_secret_id ?? null
+    if (publicKey) {
+      if (publicSid) {
+        await sb.rpc('pgsec_update_secret', { p_id: publicSid, p_secret: publicKey })
+      } else {
+        const { data } = await sb.rpc('pgsec_upsert_secret', {
+          p_secret: publicKey, p_name: `${m.tenant_id}/wompi/public_key`, p_description: 'Wompi public key (widget/checkout embebido)',
+        })
+        publicSid = data as string | null
+      }
+    }
+    let integritySid: string | null = creds.integrity_key_secret_id ?? null
+    if (integrityKey) {
+      if (integritySid) {
+        await sb.rpc('pgsec_update_secret', { p_id: integritySid, p_secret: integrityKey })
+      } else {
+        const { data } = await sb.rpc('pgsec_upsert_secret', {
+          p_secret: integrityKey, p_name: `${m.tenant_id}/wompi/integrity_key`, p_description: 'Wompi integrity key (firma widget, server-side)',
+        })
+        integritySid = data as string | null
+      }
+    }
+
     await sb.from('tenant_integrations').upsert({
       tenant_id: m.tenant_id, provider: 'wompi', status: 'connected',
-      credentials: { private_key_secret_id: privateSid, events_key_secret_id: eventsSid },
+      credentials: {
+        private_key_secret_id: privateSid,
+        events_key_secret_id: eventsSid,
+        ...(publicSid ? { public_key_secret_id: publicSid } : {}),
+        ...(integritySid ? { integrity_key_secret_id: integritySid } : {}),
+      },
       meta: {
         environment,
         private_key_preview: `${privateKey.slice(0, 8)}...${privateKey.slice(-4)}`,
+        ...(publicKey ? { public_key_preview: `${publicKey.slice(0, 8)}...${publicKey.slice(-4)}` } : {}),
       },
     }, { onConflict: 'tenant_id,provider' })
     revalidatePath('/dashboard/integrations')
@@ -448,6 +487,9 @@ export default async function IntegrationsPage(
     const creds = (existing?.credentials as Record<string, string>) ?? {}
     if (creds.private_key_secret_id) await sb.rpc('pgsec_delete_secret', { p_id: creds.private_key_secret_id })
     if (creds.events_key_secret_id)  await sb.rpc('pgsec_delete_secret', { p_id: creds.events_key_secret_id })
+    // Track 6: también las llaves opcionales del punto de extensión, si existen.
+    if (creds.public_key_secret_id)    await sb.rpc('pgsec_delete_secret', { p_id: creds.public_key_secret_id })
+    if (creds.integrity_key_secret_id) await sb.rpc('pgsec_delete_secret', { p_id: creds.integrity_key_secret_id })
 
     await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {}, meta: {} })
       .eq('tenant_id', m.tenant_id).eq('provider', 'wompi')

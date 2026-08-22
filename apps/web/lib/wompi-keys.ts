@@ -20,6 +20,17 @@ const EXPECTED_PREFIXES: Record<WompiEnvironment, { privateKey: string; eventsKe
   production: { privateKey: 'prv_prod_', eventsKey: 'prod_events_' },
 }
 
+// Track 6 (2026-08-22, doc oficial ambientes-y-llaves + widget-checkout-web
+// verificadas live): las otras 2 llaves del ambiente. `pub_` habilita el
+// Widget/Web Checkout (checkout embebido futuro), `GET /transactions` y
+// `POST /tokens/*`; `integrity` firma server-side (SHA256 reference+amount+
+// currency+secreto) que esos canales exigen. El runtime NO las consume hoy —
+// se capturan como punto de extensión para no re-pedirlas al tenant después.
+const OPTIONAL_PREFIXES: Record<WompiEnvironment, { publicKey: string; integrityKey: string }> = {
+  sandbox: { publicKey: 'pub_test_', integrityKey: 'test_integrity_' },
+  production: { publicKey: 'pub_prod_', integrityKey: 'prod_integrity_' },
+}
+
 export type WompiKeyCheck = { ok: true } | { ok: false; error: string }
 
 /**
@@ -44,6 +55,33 @@ export function wompiKeysMatchEnvironment(
     return {
       ok: false,
       error: `La Llave de Eventos no es de ${envLabel} (debe empezar con ${expected.eventsKey}). Revisa el ambiente seleccionado o la llave pegada.`,
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * Valida las llaves OPCIONALES (pub/integrity) contra el ambiente elegido.
+ * Solo se validan las que vienen presentes: vacía = no capturada (válido).
+ * Si viene, debe traer el prefijo de SU ambiente — misma regla anti-mezcla.
+ */
+export function wompiOptionalKeysMatchEnvironment(
+  environment: WompiEnvironment,
+  publicKey?: string,
+  integrityKey?: string,
+): WompiKeyCheck {
+  const expected = OPTIONAL_PREFIXES[environment]
+  const envLabel = environment === 'production' ? 'producción' : 'sandbox'
+  if (publicKey && !publicKey.startsWith(expected.publicKey)) {
+    return {
+      ok: false,
+      error: `La Llave Pública no es de ${envLabel} (debe empezar con ${expected.publicKey}). Revisa el ambiente seleccionado o la llave pegada.`,
+    }
+  }
+  if (integrityKey && !integrityKey.startsWith(expected.integrityKey)) {
+    return {
+      ok: false,
+      error: `La Llave de Integridad no es de ${envLabel} (debe empezar con ${expected.integrityKey}). Revisa el ambiente seleccionado o la llave pegada.`,
     }
   }
   return { ok: true }
