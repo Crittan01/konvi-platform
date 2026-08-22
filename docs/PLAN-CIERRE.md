@@ -52,22 +52,49 @@ La plataforma como UN todo modular para cualquier e-commerce: los dominios (cat�
 
 ---
 
-## Orden recomendado (dependencias reales)
+## Orden de ejecución vigente (consolidado 2026-08-22 — integra Fase A/B, auditoría del bot, conformidad de proveedores y la visión de dominios)
 
-**Decisión founder 2026-08-19 — modelo STG-first:** se trabaja y certifica TODO en STG; PRD solo recibe lo ya probado. El código fluye STG → `develop` → CI verde → `production` (ya es así); la config de terceros no se promueve (vive por ambiente) — la disciplina equivalente es configurar primero en STG, certificar, y replicar en PRD. **Consecuencia aceptada:** mientras dure la Fase A, KAIU en prod sigue con llaves sandbox (sin cobros reales) — inofensivo pre-launch.
+**Reglas vigentes:** STG-first — nada pasa a PRD sin certificar en STG y sin visto bueno founder (PRD está CONGELADO desde 2026-08-21 hasta cerrar los bloques de ajuste). Todo con evidencia, cero suposiciones.
 
 ```
-FASE A — STG total (cero riesgo prod, arranca ya):
-  A1. S2 Meta Test App + número de prueba → webhook al connector STG (ngrok)
-  A2. S5 keys STG (Resend sending-access · bot Telegram · proyecto GCP konvi-stg)
-  A3. [A] Certificación E2E en STG: webhooks reales Meta vía ngrok + email Resend STG
-      + Telegram STG + suite + certify_stg + escenarios conversacionales 15/15
-FASE B — Integración a PRD (solo lo certificado en A):
-  B1. Wompi prod keys en KAIU + URL eventos prod (dinero real) [1.1]
-  B2. Dominio api.konvi.co + migración de webhooks sin corte [3.1]
-  B3. B4 live · G8b · M19 · pin Python 3.13 [1.3, 3.4, 2.4, 3.2]
-  B4. A1 MFA cuando el founder decida [4.1]
-  B5. dev cloud, día del lanzamiento [3.3] · S6 MeLi cuando el marketplace opere [2.3]
+HOY → en curso:
+  1. Conformidad Wompi + Meta contra docs oficiales (checklist liviano — ambos
+     ya endurecidos en S0/S2; solo verificación documental).         [A]
+  2. B-1 — Calidad conversacional (la queja original del founder):    [A]
+     resumen rodante de conversación (amnesia estructural), routing de modelo
+     por estado (lite→flash en transaccional), contradicción de longitud,
+     few-shots + manejo de objeciones, gate de pago NO destructivo (F5),
+     resolvers de afirmación/preguntas mid-flow (F4/F6), instrucción de cupón
+     (F3), convivencia bot↔operador y salida de human_takeover (F7/F8).
+  3. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por    [A]
+     estado FSM, TurnContext único, TurnFinalizer único; strangler por fases,
+     Fase 0 sin riesgo primero: matar V2 eager, resolver estado ANTES de
+     mutaciones, borrar estados/reglas muertos).
+  4. B-3 — Harness de evaluación serio: assertions de outcome en DB           [A]
+     obligatorias, fail por respuesta stale, CI nocturno; luego corpus dorado
+     (conversaciones reales anonimizadas) + LLM-judge + métricas SQL de calidad.
+  5. B-4 — Observabilidad mínima post-Sentry: cron que consuma                 [A]
+     /agentic/metrics + alertas Telegram (error rate, p95, tokens/día),
+     circuit-breaker/alerta de Gemini caído, uptime externo /health.
+
+DESPUÉS (visión de plataforma — Track 5):
+  6. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
+     inventario de capacidades por dominio → contrato de domain services
+     (pilotos: pedidos + reclamos) → tools del bot generadas del contrato →
+     packs de vertical (belleza/moda/tecnología/juguetería) → analítica
+     conversacional para el owner.
+
+DESCONGELAR PRD (cuando 1-2 cierren en STG, mínimo):
+  7. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
+     …120100, …120200) + 20260822020000 (RPC idagente). Antes: SELECT de
+     duplicados legacy para el pre-paso del índice B1.
+  8. Deploy develop→production + verificación Render ×4 + health ×5.
+  9. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
+ 10. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
+     apps prod de la WABA de prueba (2.5) · anular guía UAT 86732771636 ·
+     pin Python 3.13 · A1 MFA (cuando decida).
 ```
+
+**Completado esta semana (base sobre la que se para este plan):** S8 total · B2 paso 10 (P0 muerto) · G23 · Fase A STG (Meta/Resend/Telegram/Gemini E2E) · deploy prod 2026-08-21 · auditoría profunda del bot (6 frentes, evidencia en `.audit/findings/2026-08-21-bot-deep-audit.md`) · B-0 fixes críticos de dinero/verdad · E2E bot STG certificado turno a turno · conformidad Aveonline contra doc oficial (verificada live contra cuenta demo).
 
 **Estado al crear este plan (2026-08-19):** suite 4405 pytest + 353 vitest + tsc 0 + ruff ≤ baseline + CI 5/5 + `certify_stg.sh` 18/18 — todo verde en develop. Cerrados hoy: S8 total (código + Render + sentry.io), B2 paso 10 (legacy Supabase 401), DB password, G23 (fallbacks legacy fuera del código), dashboard Render sin vars legacy/Sentry (verificado vía API).
