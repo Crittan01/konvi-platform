@@ -485,6 +485,7 @@ ALTER FUNCTION "public"."cleanup_expired_meli_webhook_dedup"() OWNER TO "postgre
 
 CREATE OR REPLACE FUNCTION "public"."cleanup_expired_rate_limit_windows"("p_limit" integer DEFAULT 5000) RETURNS integer
     LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
     AS $$
 DECLARE
     v_deleted INTEGER;
@@ -1853,10 +1854,14 @@ BEGIN
 
     -- Verificación tenant_users (solo authenticated del tenant vía API).
     -- service_role bypasa porque maneja todos los tenants.
+    -- Track9/A9: owner/manager + status='active' (antes: cualquier miembro, incluso
+    -- desactivado, leía usuario+password del carrier).
     IF auth.uid() IS NOT NULL THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = p_tenant_id AND user_id = auth.uid()
+              AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RETURN NULL;
         END IF;
@@ -2033,29 +2038,6 @@ COMMENT ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filter
 
 
 
-CREATE OR REPLACE FUNCTION "public"."match_kb_documents"("query_embedding" "extensions"."vector", "match_threshold" double precision, "match_count" integer, "t_id" "uuid") RETURNS TABLE("id" "uuid", "title" "text", "content" "text", "category" "text", "similarity" double precision)
-    LANGUAGE "sql" STABLE
-    AS $$
-  SELECT
-    kb.id,
-    kb.title,
-    kb.content,
-    kb.category,
-    1 - (kb.embedding <=> query_embedding) AS similarity
-  FROM kb_documents kb
-  WHERE
-    kb.tenant_id  = t_id
-    AND kb.embedding IS NOT NULL
-    AND kb.is_active  = true
-    AND 1 - (kb.embedding <=> query_embedding) > match_threshold
-  ORDER BY kb.embedding <=> query_embedding
-  LIMIT match_count;
-$$;
-
-
-ALTER FUNCTION "public"."match_kb_documents"("query_embedding" "extensions"."vector", "match_threshold" double precision, "match_count" integer, "t_id" "uuid") OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."match_kb_documents"("query_embedding" "extensions"."vector", "match_threshold" double precision, "match_count" integer, "t_id" "uuid", "p_model_version" "text") RETURNS TABLE("id" "uuid", "title" "text", "content" "text", "category" "text", "similarity" double precision)
     LANGUAGE "sql" STABLE
     AS $$
@@ -2221,6 +2203,7 @@ COMMENT ON FUNCTION "public"."metrics_orders_timeseries"("p_from" timestamp with
 
 CREATE OR REPLACE FUNCTION "public"."outbound_idempotency_cleanup"() RETURNS integer
     LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
     AS $$
 DECLARE
     v_deleted INTEGER;
@@ -2242,6 +2225,7 @@ COMMENT ON FUNCTION "public"."outbound_idempotency_cleanup"() IS 'Cron daily. Bo
 
 CREATE OR REPLACE FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") RETURNS TABLE("response_status" integer, "response_body" "jsonb", "response_headers" "jsonb", "created_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
     AS $$
 BEGIN
     RETURN QUERY
@@ -2265,6 +2249,7 @@ COMMENT ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", 
 
 CREATE OR REPLACE FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer DEFAULT 86400) RETURNS boolean
     LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
     AS $$
 DECLARE
     v_inserted INTEGER;
@@ -2303,10 +2288,13 @@ BEGIN
         EXCEPTION WHEN others THEN
             v_owner := NULL;
         END;
+        -- Track9/A9: status='active' — un miembro desactivado NO puede crear secretos
+        -- (su JWT sigue vivo vía refresh; el status solo se respeta si se filtra aquí).
         IF v_owner IS NULL OR NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = v_owner AND user_id = auth.uid()
               AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RAISE EXCEPTION 'tenant_ownership_violation: % no autorizado para %', auth.uid(), p_name;
         END IF;
@@ -2337,10 +2325,12 @@ BEGIN
         EXCEPTION WHEN others THEN
             v_owner := NULL;
         END;
+        -- Track9/A9: + status='active'.
         IF v_owner IS NULL OR NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = v_owner AND user_id = auth.uid()
               AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RETURN;
         END IF;
@@ -2373,8 +2363,6 @@ DECLARE
     v_owner uuid;
 BEGIN
     -- Fail-closed: `anon` NUNCA puede leer secretos, aunque alguien re-otorgue el EXECUTE.
-    -- (auth.role() lee el claim `role` del JWT de PostgREST: 'anon' | 'authenticated' | 'service_role'.
-    --  Si es NULL — p. ej. llamada por SQL directo del admin — el comportamiento no cambia.)
     IF auth.role() = 'anon' THEN
         RETURN NULL;
     END IF;
@@ -2389,10 +2377,12 @@ BEGIN
         EXCEPTION WHEN others THEN
             v_owner := NULL;
         END;
+        -- Track9/A9: + status='active' (W1 sigue: NO operator).
         IF v_owner IS NULL OR NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = v_owner AND user_id = auth.uid()
-              AND role IN ('owner', 'manager')   -- W1: NO operator
+              AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RETURN NULL;
         END IF;
@@ -2427,10 +2417,12 @@ BEGIN
         EXCEPTION WHEN others THEN
             v_owner := NULL;
         END;
+        -- Track9/A9: + status='active'.
         IF v_owner IS NULL OR NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = v_owner AND user_id = auth.uid()
               AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RETURN;
         END IF;
@@ -2457,10 +2449,12 @@ BEGIN
         EXCEPTION WHEN others THEN
             v_owner := NULL;
         END;
+        -- Track9/A9: + status='active'.
         IF v_owner IS NULL OR NOT EXISTS (
             SELECT 1 FROM public.tenant_users
             WHERE tenant_id = v_owner AND user_id = auth.uid()
               AND role IN ('owner', 'manager')
+              AND status = 'active'
         ) THEN
             RAISE EXCEPTION 'tenant_ownership_violation: % no autorizado para %', auth.uid(), p_name;
         END IF;
@@ -2483,6 +2477,14 @@ CREATE OR REPLACE FUNCTION "public"."pii_access_log_block_modify"() RETURNS "tri
     LANGUAGE "plpgsql"
     AS $$
 BEGIN
+    -- Track9/M13: la retención y los admins SÍ pueden purgar (la ley MANDA suprimir
+    -- PII vencida); el bloqueo es para roles de cliente vía PostgREST.
+    IF current_user IN ('service_role', 'postgres', 'supabase_admin', 'supabase_storage_admin') THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'pii_access_log es append-only (Ley 1581 Art. 9)';
 END;
 $$;
@@ -3663,43 +3665,6 @@ COMMENT ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_vari
 
 
 
-CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") RETURNS "void"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public'
-    AS $$
-DECLARE
-  r RECORD;
-  v_new_stock INTEGER;
-BEGIN
-  SELECT * INTO r FROM public.stock_reservations
-   WHERE id = p_reservation_id AND status = 'active'
-   FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'rpc_stock_reservation_consume: reservation_not_active_or_missing';
-  END IF;
-
-  -- Decremento real de stock_quantity con bloqueo
-  UPDATE public.product_variations
-     SET stock_quantity = stock_quantity - r.qty,
-         updated_at = NOW()
-   WHERE id = r.variation_id AND tenant_id = r.tenant_id
-   RETURNING stock_quantity INTO v_new_stock;
-
-  -- Auditoría: registrar el movimiento
-  INSERT INTO public.stock_movements (tenant_id, variation_id, delta, new_stock, reason, order_id)
-  VALUES (r.tenant_id, r.variation_id, -r.qty, v_new_stock, 'reservation_consumed', p_order_id);
-
-  UPDATE public.stock_reservations
-     SET status = 'consumed', consumed_at = NOW(), order_id = p_order_id, updated_at = NOW()
-   WHERE id = p_reservation_id;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3747,28 +3712,6 @@ COMMENT ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" 
 
 
 
-CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer DEFAULT 35) RETURNS timestamp with time zone
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public'
-    AS $$
-DECLARE
-  v_new TIMESTAMPTZ := NOW() + make_interval(mins => p_new_ttl_min);
-BEGIN
-  UPDATE public.stock_reservations
-  SET expires_at = v_new, updated_at = NOW()
-  WHERE id = p_reservation_id AND status = 'active';
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'rpc_stock_reservation_extend: reservation_not_active';
-  END IF;
-  RETURN v_new;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") RETURNS timestamp with time zone
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3793,21 +3736,6 @@ ALTER FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid"
 
 COMMENT ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") IS 'A11 IDOR fix: extiende TTL exigiendo tenant del caller. Reemplaza a la firma (UUID,INTEGER) en fase contract.';
 
-
-
-CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") RETURNS "void"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public'
-    AS $$
-BEGIN
-  UPDATE public.stock_reservations
-     SET status = 'released', released_at = NOW(), updated_at = NOW()
-   WHERE id = p_reservation_id AND status = 'active';
-END;
-$$;
-
-
-ALTER FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid", "p_tenant_id" "uuid") RETURNS "void"
@@ -4404,6 +4332,28 @@ $$;
 ALTER FUNCTION "public"."touch_updated_at"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."track9_revoke_public_on_new_function"() RETURNS "event_trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+  v_cmd RECORD;
+BEGIN
+  -- Solo funciones del schema public creadas a partir de esta migración. CREATE OR
+  -- REPLACE preserva los ACL existentes y vuelve a disparar el tag: el REVOKE de
+  -- PUBLIC es idempotente y es exactamente la propiedad que se quiere mantener.
+  FOR v_cmd IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
+    IF v_cmd.schema_name = 'public' AND v_cmd.object_type = 'function' THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', v_cmd.object_identity);
+    END IF;
+  END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."track9_revoke_public_on_new_function"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."trg_void_receipt_on_cancel"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public', 'pg_temp'
@@ -4491,6 +4441,27 @@ $$;
 
 
 ALTER FUNCTION "public"."update_order_tracking_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_aveonline_idagente"("p_tenant_id" "uuid", "p_idagente" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    UPDATE public.tenant_integrations
+    SET credentials = credentials
+        || jsonb_build_object('idagente', p_idagente)
+    WHERE tenant_id = p_tenant_id
+      AND provider = 'aveonline';
+END;
+$$;
+
+
+ALTER FUNCTION "public"."upsert_aveonline_idagente"("p_tenant_id" "uuid", "p_idagente" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."upsert_aveonline_idagente"("p_tenant_id" "uuid", "p_idagente" "text") IS 'Persiste el idagente Aveonline auto-resuelto (listarAgentes → principal) en tenant_integrations.credentials.idagente. Merge jsonb atómico — preserva jwt_token y demás campos. Best-effort desde AveonlineClient.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) RETURNS "void"
@@ -5880,6 +5851,25 @@ CREATE TABLE IF NOT EXISTS "public"."payments" (
 
 
 ALTER TABLE "public"."payments" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."payments_safe" WITH ("security_barrier"='true') AS
+ SELECT "id",
+    "tenant_id",
+    "order_id",
+    "provider",
+    "checkout_url",
+    "amount_in_cents",
+    "currency",
+    "status",
+    "wompi_status",
+    "created_at",
+    "updated_at"
+   FROM "public"."payments"
+  WHERE ("tenant_id" = "public"."app_current_tenant"());
+
+
+ALTER VIEW "public"."payments_safe" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."pii_access_log" (
@@ -9449,19 +9439,19 @@ CREATE POLICY "Authenticated read plan_capabilities" ON "public"."plan_capabilit
 
 
 
-CREATE POLICY "Owners can read their PO items" ON "public"."purchase_order_items" FOR SELECT USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "Owners can read their PO items" ON "public"."purchase_order_items" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
-CREATE POLICY "Owners can read their POs" ON "public"."purchase_orders" FOR SELECT USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "Owners can read their POs" ON "public"."purchase_orders" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
-CREATE POLICY "Owners can read their expenses" ON "public"."expenses" FOR SELECT USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "Owners can read their expenses" ON "public"."expenses" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
-CREATE POLICY "Owners can read their suppliers" ON "public"."suppliers" FOR SELECT USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "Owners can read their suppliers" ON "public"."suppliers" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
@@ -9589,11 +9579,11 @@ CREATE POLICY "Tenant Isolation Coupons" ON "public"."coupons" USING (("tenant_i
 
 
 
-CREATE POLICY "Tenants can manage their own AI agent" ON "public"."ai_agents" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
+CREATE POLICY "Tenants can manage their own AI agent" ON "public"."ai_agents" TO "authenticated" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE ("tu"."user_id" = "auth"."uid"())))) WITH CHECK (("tenant_id" IN ( SELECT "tu"."tenant_id"
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text"))))) WITH CHECK (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE ("tu"."user_id" = "auth"."uid"()))));
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text")))));
 
 
 
@@ -9641,10 +9631,6 @@ ALTER TABLE "public"."billing_plans" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."bot_source_log" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "bot_source_log_tenant_isolation" ON "public"."bot_source_log" USING (("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid")) WITH CHECK (("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid"));
-
-
-
 ALTER TABLE "public"."cart_events" ENABLE ROW LEVEL SECURITY;
 
 
@@ -9677,7 +9663,7 @@ ALTER TABLE "public"."conversation_carts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."conversation_notes" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "conversation_notes_author_update" ON "public"."conversation_notes" FOR UPDATE USING ((("author_user_id" = "auth"."uid"()) OR (("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid") AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"])))));
+CREATE POLICY "conversation_notes_author_update" ON "public"."conversation_notes" FOR UPDATE TO "authenticated" USING ((("author_user_id" = "auth"."uid"()) OR (("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND (("author_user_id" = "auth"."uid"()) OR ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])))));
 
 
 
@@ -9722,13 +9708,13 @@ ALTER TABLE "public"."kb_documents" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "legal_acceptance_tenant_insert" ON "public"."tenant_legal_acceptance" FOR INSERT TO "authenticated" WITH CHECK (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text") AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
 
 
 
 CREATE POLICY "legal_acceptance_tenant_select" ON "public"."tenant_legal_acceptance" FOR SELECT TO "authenticated" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE ("tu"."user_id" = "auth"."uid"()))));
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text")))));
 
 
 
@@ -9744,14 +9730,6 @@ ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."mfa_recovery_codes" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "mfa_recovery_codes_owner_delete" ON "public"."mfa_recovery_codes" FOR DELETE TO "authenticated" USING (("user_id" = "auth"."uid"()));
-
-
-
-CREATE POLICY "mfa_recovery_codes_owner_select" ON "public"."mfa_recovery_codes" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
-
-
-
 ALTER TABLE "public"."notification_settings" ENABLE ROW LEVEL SECURITY;
 
 
@@ -9759,7 +9737,7 @@ CREATE POLICY "notification_settings_select_member" ON "public"."notification_se
 
 
 
-CREATE POLICY "notification_settings_write_privileged" ON "public"."notification_settings" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
+CREATE POLICY "notification_settings_write_privileged" ON "public"."notification_settings" TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
 
 
 
@@ -9833,15 +9811,15 @@ ALTER TABLE "public"."retention_policies" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "retention_policies_tenant_modify" ON "public"."retention_policies" TO "authenticated" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"])))))) WITH CHECK (("tenant_id" IN ( SELECT "tu"."tenant_id"
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text") AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"])))))) WITH CHECK (("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text") AND ("tu"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
 
 
 
 CREATE POLICY "retention_policies_tenant_select" ON "public"."retention_policies" FOR SELECT TO "authenticated" USING ((("tenant_id" IS NULL) OR ("tenant_id" IN ( SELECT "tu"."tenant_id"
    FROM "public"."tenant_users" "tu"
-  WHERE ("tu"."user_id" = "auth"."uid"())))));
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text"))))));
 
 
 
@@ -9903,11 +9881,7 @@ CREATE POLICY "tenant_integrations_select_member" ON "public"."tenant_integratio
 
 
 
-CREATE POLICY "tenant_integrations_write_privileged" ON "public"."tenant_integrations" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
-
-
-
-COMMENT ON POLICY "tenant_integrations_write_privileged" ON "public"."tenant_integrations" IS 'W1 2026-07-13: escrituras owner/manager (USING+WITH CHECK). Cierra reescritura de config por operator vía PostgREST directo.';
+CREATE POLICY "tenant_integrations_write_privileged" ON "public"."tenant_integrations" TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
 
 
 
@@ -9919,9 +9893,9 @@ CREATE POLICY "tenant_isolation_audit_log" ON "public"."audit_log" USING (("tena
 
 
 
-CREATE POLICY "tenant_isolation_consent_audit_log" ON "public"."consent_audit_log" FOR SELECT TO "authenticated" USING (("tenant_id" IN ( SELECT "tenant_users"."tenant_id"
-   FROM "public"."tenant_users"
-  WHERE ("tenant_users"."user_id" = "auth"."uid"()))));
+CREATE POLICY "tenant_isolation_consent_audit_log" ON "public"."consent_audit_log" FOR SELECT TO "authenticated" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
+   FROM "public"."tenant_users" "tu"
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text")))));
 
 
 
@@ -9933,9 +9907,9 @@ CREATE POLICY "tenant_isolation_marketplace" ON "public"."marketplace_listings" 
 
 
 
-CREATE POLICY "tenant_isolation_pii_access_log" ON "public"."pii_access_log" FOR SELECT TO "authenticated" USING (("tenant_id" IN ( SELECT "tenant_users"."tenant_id"
-   FROM "public"."tenant_users"
-  WHERE ("tenant_users"."user_id" = "auth"."uid"()))));
+CREATE POLICY "tenant_isolation_pii_access_log" ON "public"."pii_access_log" FOR SELECT TO "authenticated" USING (("tenant_id" IN ( SELECT "tu"."tenant_id"
+   FROM "public"."tenant_users" "tu"
+  WHERE (("tu"."user_id" = "auth"."uid"()) AND ("tu"."status" = 'active'::"text")))));
 
 
 
@@ -9949,9 +9923,7 @@ ALTER TABLE "public"."tenant_legal_acceptance" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."tenant_offboarding_log" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "tenant_offboarding_log_owner_select" ON "public"."tenant_offboarding_log" FOR SELECT TO "authenticated" USING ((("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid") AND (EXISTS ( SELECT 1
-   FROM "public"."tenant_users" "tu"
-  WHERE (("tu"."tenant_id" = "tenant_offboarding_log"."tenant_id") AND ("tu"."user_id" = "auth"."uid"()) AND ("tu"."role" = 'owner'::"text"))))));
+CREATE POLICY "tenant_offboarding_log_owner_select" ON "public"."tenant_offboarding_log" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
@@ -9962,7 +9934,7 @@ CREATE POLICY "tenant_payment_methods_read_own" ON "public"."tenant_payment_meth
 
 
 
-CREATE POLICY "tenant_payment_methods_write_owner" ON "public"."tenant_payment_methods" TO "authenticated" USING ((("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid") AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text"))) WITH CHECK ((("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid") AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "tenant_payment_methods_write_owner" ON "public"."tenant_payment_methods" TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text"))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
@@ -9988,7 +9960,7 @@ COMMENT ON POLICY "tenant_provider_capabilities_tenant_iud" ON "public"."tenant_
 ALTER TABLE "public"."tenant_provider_health" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "tenant_provider_health_tenant_select" ON "public"."tenant_provider_health" FOR SELECT TO "authenticated" USING ((("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid") AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
+CREATE POLICY "tenant_provider_health_tenant_select" ON "public"."tenant_provider_health" FOR SELECT TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
 
 
 
@@ -10014,11 +9986,11 @@ ALTER TABLE "public"."tenant_usage_events" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."tenant_users" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "tenant_users_delete_owner" ON "public"."tenant_users" FOR DELETE USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "tenant_users_delete_owner" ON "public"."tenant_users" FOR DELETE TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
-CREATE POLICY "tenant_users_insert_owner" ON "public"."tenant_users" FOR INSERT WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
+CREATE POLICY "tenant_users_insert_owner" ON "public"."tenant_users" FOR INSERT TO "authenticated" WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
@@ -10026,11 +9998,7 @@ CREATE POLICY "tenant_users_select_member" ON "public"."tenant_users" FOR SELECT
 
 
 
-CREATE POLICY "tenant_users_update_owner" ON "public"."tenant_users" FOR UPDATE USING ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text"))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = 'owner'::"text")));
-
-
-
-COMMENT ON POLICY "tenant_users_update_owner" ON "public"."tenant_users" IS 'OLA0 2026-07-13: escrituras owner-only (USING+WITH CHECK). Cierra escalada operator/manager->owner por UPDATE directo vía PostgREST (auditoría CRITICAL).';
+CREATE POLICY "tenant_users_update_owner" ON "public"."tenant_users" FOR UPDATE TO "authenticated" USING ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text"))) WITH CHECK ((("tenant_id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = 'owner'::"text")));
 
 
 
@@ -10048,7 +10016,135 @@ CREATE POLICY "tenants_select_member" ON "public"."tenants" FOR SELECT USING (("
 
 
 
-CREATE POLICY "tenants_update_privileged" ON "public"."tenants" FOR UPDATE USING ((("id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("id" = "public"."app_current_tenant"()) AND ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'role'::"text") = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
+CREATE POLICY "tenants_update_privileged" ON "public"."tenants" FOR UPDATE TO "authenticated" USING ((("id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])))) WITH CHECK ((("id" = "public"."app_current_tenant"()) AND ("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))));
+
+
+
+CREATE POLICY "track9_asec_no_delete" ON "public"."api_security_events" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_asec_no_insert" ON "public"."api_security_events" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (false);
+
+
+
+CREATE POLICY "track9_asec_no_update" ON "public"."api_security_events" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_cancellations_no_delete" ON "public"."order_cancellations" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_cancellations_no_update" ON "public"."order_cancellations" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_claims_no_delete" ON "public"."claims" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_claims_update_privileged" ON "public"."claims" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_contacts_no_delete" ON "public"."contacts" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_contacts_no_update" ON "public"."contacts" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_conversations_no_delete" ON "public"."conversations" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_conversations_no_update" ON "public"."conversations" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_marketplace_listings_delete_privileged" ON "public"."marketplace_listings" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_marketplace_listings_update_privileged" ON "public"."marketplace_listings" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_marketplace_listings_write_privileged" ON "public"."marketplace_listings" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_messages_no_delete" ON "public"."messages" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_messages_no_update" ON "public"."messages" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_notification_settings_select_privileged" ON "public"."notification_settings" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_order_tracking_delete_privileged" ON "public"."order_tracking" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_order_tracking_update_privileged" ON "public"."order_tracking" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_order_tracking_write_privileged" ON "public"."order_tracking" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_payments_select_owner" ON "public"."payments" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (("public"."app_current_role"() = 'owner'::"text"));
+
+
+
+CREATE POLICY "track9_rma_no_delete" ON "public"."rma_requests" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (false);
+
+
+
+CREATE POLICY "track9_rma_update_privileged" ON "public"."rma_requests" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_shipments_delete_privileged" ON "public"."shipments" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_shipments_update_privileged" ON "public"."shipments" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_shipments_write_privileged" ON "public"."shipments" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tcp_delete_privileged" ON "public"."tenant_cancellation_policy" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tcp_insert_privileged" ON "public"."tenant_cancellation_policy" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tcp_update_privileged" ON "public"."tenant_cancellation_policy" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tspc_delete_privileged" ON "public"."tenant_shipping_provider_config" AS RESTRICTIVE FOR DELETE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tspc_insert_privileged" ON "public"."tenant_shipping_provider_config" AS RESTRICTIVE FOR INSERT TO "authenticated" WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
+
+
+
+CREATE POLICY "track9_tspc_update_privileged" ON "public"."tenant_shipping_provider_config" AS RESTRICTIVE FOR UPDATE TO "authenticated" USING (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"]))) WITH CHECK (("public"."app_current_role"() = ANY (ARRAY['owner'::"text", 'manager'::"text"])));
 
 
 
@@ -10068,7 +10164,7 @@ CREATE POLICY "user reads own conversation_reads in tenant" ON "public"."convers
 
 
 
-CREATE POLICY "user reads own dismissed alerts" ON "public"."user_dismissed_alerts" FOR SELECT USING ((("user_id" = "auth"."uid"()) AND ("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid")));
+CREATE POLICY "user reads own dismissed alerts" ON "public"."user_dismissed_alerts" FOR SELECT TO "authenticated" USING ((("user_id" = "auth"."uid"()) AND ("tenant_id" = "public"."app_current_tenant"())));
 
 
 
@@ -10076,7 +10172,7 @@ CREATE POLICY "user updates own conversation_reads in tenant" ON "public"."conve
 
 
 
-CREATE POLICY "user updates own dismissed alerts" ON "public"."user_dismissed_alerts" FOR UPDATE USING ((("user_id" = "auth"."uid"()) AND ("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid")));
+CREATE POLICY "user updates own dismissed alerts" ON "public"."user_dismissed_alerts" FOR UPDATE TO "authenticated" USING ((("user_id" = "auth"."uid"()) AND ("tenant_id" = "public"."app_current_tenant"()))) WITH CHECK ((("user_id" = "auth"."uid"()) AND ("tenant_id" = "public"."app_current_tenant"())));
 
 
 
@@ -10084,7 +10180,7 @@ CREATE POLICY "user upserts own conversation_reads in tenant" ON "public"."conve
 
 
 
-CREATE POLICY "user upserts own dismissed alerts" ON "public"."user_dismissed_alerts" FOR INSERT WITH CHECK ((("user_id" = "auth"."uid"()) AND ("tenant_id" = ((("auth"."jwt"() -> 'app_metadata'::"text") ->> 'tenant_id'::"text"))::"uuid")));
+CREATE POLICY "user upserts own dismissed alerts" ON "public"."user_dismissed_alerts" FOR INSERT TO "authenticated" WITH CHECK ((("user_id" = "auth"."uid"()) AND ("tenant_id" = "public"."app_current_tenant"())));
 
 
 
@@ -10807,7 +10903,6 @@ GRANT ALL ON FUNCTION "public"."_touch_conversation_notes_updated_at"() TO "serv
 
 
 REVOKE ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."ack_human_takeover_notification"("p_msg_id" bigint) TO "service_role";
 
 
@@ -10886,7 +10981,6 @@ GRANT ALL ON FUNCTION "public"."consent_audit_log_block_modify"() TO "service_ro
 
 
 REVOKE ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."consume_tenant_capability"("p_tenant_id" "uuid", "p_capability_key" "text", "p_units" integer, "p_metadata" "jsonb") TO "service_role";
 
 
@@ -10908,7 +11002,6 @@ GRANT ALL ON FUNCTION "public"."custom_access_token_hook"("event" "jsonb") TO "s
 
 
 REVOKE ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."dequeue_human_takeover_notifications"("p_vt" integer, "p_qty" integer) TO "service_role";
 
 
@@ -11017,7 +11110,6 @@ GRANT ALL ON FUNCTION "public"."fn_purge_tenant_storage_objects"("p_tenant_id" "
 
 
 REVOKE ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fn_record_shipment_tracking_event"("p_tenant_id" "uuid", "p_shipment_id" "uuid", "p_order_id" "uuid", "p_provider" "text", "p_external_event_id" "text", "p_raw_status" "text", "p_raw_estado_id" integer, "p_internal_status" "text", "p_description" "text", "p_occurred_at" timestamp with time zone, "p_raw" "jsonb") TO "service_role";
 
 
@@ -11055,7 +11147,6 @@ GRANT ALL ON FUNCTION "public"."get_aveonline_credentials"("p_tenant_id" "uuid")
 
 
 REVOKE ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_tenant_plan_capabilities"("p_tenant_id" "uuid") TO "service_role";
 
 
@@ -11069,9 +11160,6 @@ GRANT ALL ON FUNCTION "public"."get_tenant_team"() TO "service_role";
 REVOKE ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."log_audit_export"("p_row_count" integer, "p_filters" "jsonb", "p_ip" "text", "p_user_agent" "text") TO "service_role";
-
-
-
 
 
 
@@ -11101,13 +11189,11 @@ GRANT ALL ON FUNCTION "public"."outbound_idempotency_cleanup"() TO "service_role
 
 
 REVOKE ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_lookup"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."outbound_idempotency_register"("p_provider" "text", "p_tenant_id" "uuid", "p_request_hash" "text", "p_status" integer, "p_body" "jsonb", "p_headers" "jsonb", "p_ttl_seconds" integer) TO "service_role";
 
 
@@ -11168,7 +11254,6 @@ GRANT ALL ON FUNCTION "public"."reject_audit_log_mutation"() TO "service_role";
 
 
 REVOKE ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reversion_procede"("p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
@@ -11251,19 +11336,16 @@ GRANT ALL ON FUNCTION "public"."rpc_mark_receipt_email"("p_receipt_id" "uuid", "
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_note_refresh_failure"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text", "p_max_fails" integer) TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_release_refresh_lease"("p_tenant_id" "uuid", "p_lease_token" "uuid", "p_provider" "text") TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rpc_meli_try_refresh_lease"("p_tenant_id" "uuid", "p_provider" "text", "p_ttl_seconds" integer) TO "service_role";
 
 
@@ -11294,28 +11376,13 @@ GRANT ALL ON FUNCTION "public"."rpc_stock_decrement"("p_tenant_id" "uuid", "p_va
 
 
 
-REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid") TO "service_role";
-
-
-
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_consume"("p_reservation_id" "uuid", "p_order_id" "uuid", "p_tenant_id" "uuid") TO "service_role";
 
 
 
-REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer) TO "service_role";
-
-
-
 REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_extend"("p_reservation_id" "uuid", "p_new_ttl_min" integer, "p_tenant_id" "uuid") TO "service_role";
-
-
-
-REVOKE ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."rpc_stock_reservation_release"("p_reservation_id" "uuid") TO "service_role";
 
 
 
@@ -11436,6 +11503,10 @@ GRANT ALL ON FUNCTION "public"."touch_updated_at"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."track9_revoke_public_on_new_function"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."trg_void_receipt_on_cancel"() TO "service_role";
 
@@ -11466,8 +11537,12 @@ GRANT ALL ON FUNCTION "public"."update_order_tracking_updated_at"() TO "service_
 
 
 
+REVOKE ALL ON FUNCTION "public"."upsert_aveonline_idagente"("p_tenant_id" "uuid", "p_idagente" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."upsert_aveonline_idagente"("p_tenant_id" "uuid", "p_idagente" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."upsert_aveonline_jwt"("p_tenant_id" "uuid", "p_jwt_token" "text", "p_jwt_expires_at" timestamp with time zone) TO "service_role";
 
 
@@ -11509,8 +11584,8 @@ GRANT ALL ON FUNCTION "public"."webhook_event_mark_processed"("p_integration" "t
 
 
 
-GRANT ALL ON TABLE "public"."agentic_shadow_log" TO "anon";
-GRANT ALL ON TABLE "public"."agentic_shadow_log" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."agentic_shadow_log" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."agentic_shadow_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."agentic_shadow_log" TO "service_role";
 
 
@@ -11521,62 +11596,60 @@ GRANT ALL ON SEQUENCE "public"."agentic_shadow_log_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ai_agents" TO "anon";
-GRANT ALL ON TABLE "public"."ai_agents" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."ai_agents" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."ai_agents" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_agents" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ai_insights" TO "anon";
-GRANT ALL ON TABLE "public"."ai_insights" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."ai_insights" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."ai_insights" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_insights" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."api_security_events" TO "anon";
-GRANT ALL ON TABLE "public"."api_security_events" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."api_security_events" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."api_security_events" TO "authenticated";
 GRANT ALL ON TABLE "public"."api_security_events" TO "service_role";
 
 
 
-GRANT SELECT,INSERT,REFERENCES,TRIGGER,MAINTAIN ON TABLE "public"."audit_log" TO "anon";
-GRANT SELECT,INSERT,REFERENCES,TRIGGER,MAINTAIN ON TABLE "public"."audit_log" TO "authenticated";
+GRANT SELECT,INSERT,MAINTAIN ON TABLE "public"."audit_log" TO "anon";
+GRANT SELECT,INSERT,MAINTAIN ON TABLE "public"."audit_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."audit_log" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."aveonline_carrier_capabilities" TO "anon";
-GRANT ALL ON TABLE "public"."aveonline_carrier_capabilities" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."aveonline_carrier_capabilities" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."aveonline_carrier_capabilities" TO "authenticated";
 GRANT ALL ON TABLE "public"."aveonline_carrier_capabilities" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."billing_plans" TO "anon";
-GRANT ALL ON TABLE "public"."billing_plans" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."billing_plans" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."billing_plans" TO "authenticated";
 GRANT ALL ON TABLE "public"."billing_plans" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."bot_source_log" TO "anon";
-GRANT ALL ON TABLE "public"."bot_source_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."bot_source_log" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."cart_events" TO "anon";
-GRANT ALL ON TABLE "public"."cart_events" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."cart_events" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."cart_events" TO "authenticated";
 GRANT ALL ON TABLE "public"."cart_events" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."claims" TO "anon";
-GRANT ALL ON TABLE "public"."claims" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."claims" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."claims" TO "authenticated";
 GRANT ALL ON TABLE "public"."claims" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."compliance_enforcement_log" TO "anon";
-GRANT ALL ON TABLE "public"."compliance_enforcement_log" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."compliance_enforcement_log" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."compliance_enforcement_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."compliance_enforcement_log" TO "service_role";
 
 
@@ -11591,56 +11664,56 @@ GRANT ALL ON TABLE "public"."consent_audit_log" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."contacts" TO "anon";
-GRANT ALL ON TABLE "public"."contacts" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."contacts" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."contacts" TO "authenticated";
 GRANT ALL ON TABLE "public"."contacts" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversation_cart_items" TO "anon";
-GRANT ALL ON TABLE "public"."conversation_cart_items" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_cart_items" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_cart_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_cart_items" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversation_carts" TO "anon";
-GRANT ALL ON TABLE "public"."conversation_carts" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_carts" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_carts" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_carts" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversation_notes" TO "anon";
-GRANT ALL ON TABLE "public"."conversation_notes" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_notes" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_notes" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_notes" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversation_reads" TO "anon";
-GRANT ALL ON TABLE "public"."conversation_reads" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_reads" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversation_reads" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_reads" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversations" TO "anon";
-GRANT ALL ON TABLE "public"."conversations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversations" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."conversations" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."coupon_redemptions" TO "anon";
-GRANT ALL ON TABLE "public"."coupon_redemptions" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."coupon_redemptions" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."coupon_redemptions" TO "authenticated";
 GRANT ALL ON TABLE "public"."coupon_redemptions" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."coupons" TO "anon";
-GRANT ALL ON TABLE "public"."coupons" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."coupons" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."coupons" TO "authenticated";
 GRANT ALL ON TABLE "public"."coupons" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."credential_access_log" TO "anon";
-GRANT ALL ON TABLE "public"."credential_access_log" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."credential_access_log" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."credential_access_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."credential_access_log" TO "service_role";
 
 
@@ -11651,32 +11724,28 @@ GRANT ALL ON SEQUENCE "public"."credential_access_log_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."expenses" TO "anon";
-GRANT ALL ON TABLE "public"."expenses" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."expenses" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."expenses" TO "authenticated";
 GRANT ALL ON TABLE "public"."expenses" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."idempotency_keys" TO "anon";
-GRANT ALL ON TABLE "public"."idempotency_keys" TO "authenticated";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."integration_oauth_states" TO "anon";
-GRANT ALL ON TABLE "public"."integration_oauth_states" TO "authenticated";
 GRANT ALL ON TABLE "public"."integration_oauth_states" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."kb_documents" TO "anon";
-GRANT ALL ON TABLE "public"."kb_documents" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."kb_documents" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."kb_documents" TO "authenticated";
 GRANT ALL ON TABLE "public"."kb_documents" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."marketplace_listings" TO "anon";
-GRANT ALL ON TABLE "public"."marketplace_listings" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."marketplace_listings" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."marketplace_listings" TO "authenticated";
 GRANT ALL ON TABLE "public"."marketplace_listings" TO "service_role";
 
 
@@ -11685,14 +11754,12 @@ GRANT ALL ON TABLE "public"."meli_webhook_dedup" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."messages" TO "anon";
-GRANT ALL ON TABLE "public"."messages" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."messages" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."messages" TO "authenticated";
 GRANT ALL ON TABLE "public"."messages" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."mfa_recovery_codes" TO "anon";
-GRANT ALL ON TABLE "public"."mfa_recovery_codes" TO "authenticated";
 GRANT ALL ON TABLE "public"."mfa_recovery_codes" TO "service_role";
 
 
@@ -11703,43 +11770,41 @@ GRANT ALL ON SEQUENCE "public"."mfa_recovery_codes_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."notification_settings" TO "anon";
-GRANT ALL ON TABLE "public"."notification_settings" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."notification_settings" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."notification_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."notification_settings" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_cancellations" TO "anon";
-GRANT ALL ON TABLE "public"."order_cancellations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_cancellations" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_cancellations" TO "authenticated";
 GRANT ALL ON TABLE "public"."order_cancellations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_items" TO "anon";
-GRANT ALL ON TABLE "public"."order_items" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_items" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."order_items" TO "service_role";
 
 
 
-GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLE "public"."order_receipts" TO "authenticated";
+GRANT SELECT,MAINTAIN ON TABLE "public"."order_receipts" TO "authenticated";
 GRANT ALL ON TABLE "public"."order_receipts" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_tracking" TO "anon";
-GRANT ALL ON TABLE "public"."order_tracking" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_tracking" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."order_tracking" TO "authenticated";
 GRANT ALL ON TABLE "public"."order_tracking" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."orders" TO "anon";
-GRANT ALL ON TABLE "public"."orders" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."orders" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."orders" TO "authenticated";
 GRANT ALL ON TABLE "public"."orders" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."outbound_idempotency_cache" TO "anon";
-GRANT ALL ON TABLE "public"."outbound_idempotency_cache" TO "authenticated";
 GRANT ALL ON TABLE "public"."outbound_idempotency_cache" TO "service_role";
 
 
@@ -11755,9 +11820,14 @@ GRANT SELECT ON TABLE "public"."payment_reversal_requests" TO "authenticated";
 
 
 
-GRANT ALL ON TABLE "public"."payments" TO "anon";
-GRANT ALL ON TABLE "public"."payments" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."payments" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."payments" TO "authenticated";
 GRANT ALL ON TABLE "public"."payments" TO "service_role";
+
+
+
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."payments_safe" TO "authenticated";
+GRANT ALL ON TABLE "public"."payments_safe" TO "service_role";
 
 
 
@@ -11766,38 +11836,38 @@ GRANT SELECT ON TABLE "public"."pii_access_log" TO "authenticated";
 
 
 
-GRANT ALL ON TABLE "public"."plan_capabilities" TO "anon";
-GRANT ALL ON TABLE "public"."plan_capabilities" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."plan_capabilities" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."plan_capabilities" TO "authenticated";
 GRANT ALL ON TABLE "public"."plan_capabilities" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."platform_categories" TO "anon";
-GRANT ALL ON TABLE "public"."platform_categories" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."platform_categories" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."platform_categories" TO "authenticated";
 GRANT ALL ON TABLE "public"."platform_categories" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."product_attribute_definitions" TO "anon";
-GRANT ALL ON TABLE "public"."product_attribute_definitions" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_attribute_definitions" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_attribute_definitions" TO "authenticated";
 GRANT ALL ON TABLE "public"."product_attribute_definitions" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."product_categories" TO "anon";
-GRANT ALL ON TABLE "public"."product_categories" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_categories" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_categories" TO "authenticated";
 GRANT ALL ON TABLE "public"."product_categories" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."product_variations" TO "anon";
-GRANT ALL ON TABLE "public"."product_variations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_variations" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."product_variations" TO "authenticated";
 GRANT ALL ON TABLE "public"."product_variations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."products" TO "anon";
-GRANT ALL ON TABLE "public"."products" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."products" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."products" TO "authenticated";
 GRANT ALL ON TABLE "public"."products" TO "service_role";
 
 
@@ -11806,14 +11876,14 @@ GRANT ALL ON TABLE "public"."provider_health_alert_dedup" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."purchase_order_items" TO "anon";
-GRANT ALL ON TABLE "public"."purchase_order_items" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."purchase_order_items" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."purchase_order_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."purchase_order_items" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."purchase_orders" TO "anon";
-GRANT ALL ON TABLE "public"."purchase_orders" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."purchase_orders" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."purchase_orders" TO "authenticated";
 GRANT ALL ON TABLE "public"."purchase_orders" TO "service_role";
 
 
@@ -11822,62 +11892,62 @@ GRANT ALL ON TABLE "public"."rate_limit_windows" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."retention_policies" TO "anon";
-GRANT ALL ON TABLE "public"."retention_policies" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."retention_policies" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."retention_policies" TO "authenticated";
 GRANT ALL ON TABLE "public"."retention_policies" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."review_queue" TO "anon";
-GRANT ALL ON TABLE "public"."review_queue" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."review_queue" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."review_queue" TO "authenticated";
 GRANT ALL ON TABLE "public"."review_queue" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."rma_requests" TO "anon";
-GRANT ALL ON TABLE "public"."rma_requests" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."rma_requests" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."rma_requests" TO "authenticated";
 GRANT ALL ON TABLE "public"."rma_requests" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."shipment_tracking_events" TO "anon";
-GRANT ALL ON TABLE "public"."shipment_tracking_events" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."shipment_tracking_events" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."shipment_tracking_events" TO "authenticated";
 GRANT ALL ON TABLE "public"."shipment_tracking_events" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."shipments" TO "anon";
-GRANT ALL ON TABLE "public"."shipments" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."shipments" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."shipments" TO "authenticated";
 GRANT ALL ON TABLE "public"."shipments" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."stock_movements" TO "anon";
-GRANT ALL ON TABLE "public"."stock_movements" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."stock_movements" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."stock_movements" TO "authenticated";
 GRANT ALL ON TABLE "public"."stock_movements" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."stock_reservations" TO "anon";
-GRANT ALL ON TABLE "public"."stock_reservations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."stock_reservations" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."stock_reservations" TO "authenticated";
 GRANT ALL ON TABLE "public"."stock_reservations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."suppliers" TO "anon";
-GRANT ALL ON TABLE "public"."suppliers" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."suppliers" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."suppliers" TO "authenticated";
 GRANT ALL ON TABLE "public"."suppliers" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_cancellation_policy" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_cancellation_policy" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_cancellation_policy" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_cancellation_policy" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_cancellation_policy" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_carriers" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_carriers" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_carriers" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_carriers" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_carriers" TO "service_role";
 
 
@@ -11888,20 +11958,20 @@ GRANT ALL ON SEQUENCE "public"."tenant_carriers_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_integrations" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_integrations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_integrations" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_integrations" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_integrations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_legal_acceptance" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_legal_acceptance" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_legal_acceptance" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_legal_acceptance" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_legal_acceptance" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_offboarding_log" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_offboarding_log" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_offboarding_log" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_offboarding_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_offboarding_log" TO "service_role";
 
 
@@ -11912,8 +11982,8 @@ GRANT ALL ON SEQUENCE "public"."tenant_offboarding_log_id_seq" TO "service_role"
 
 
 
-GRANT ALL ON TABLE "public"."tenant_payment_methods" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_payment_methods" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_payment_methods" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_payment_methods" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_payment_methods" TO "service_role";
 
 
@@ -11924,8 +11994,8 @@ GRANT ALL ON SEQUENCE "public"."tenant_payment_methods_id_seq" TO "service_role"
 
 
 
-GRANT ALL ON TABLE "public"."tenant_provider_capabilities" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_provider_capabilities" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_capabilities" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_capabilities" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_provider_capabilities" TO "service_role";
 
 
@@ -11936,14 +12006,14 @@ GRANT ALL ON SEQUENCE "public"."tenant_provider_capabilities_id_seq" TO "service
 
 
 
-GRANT ALL ON TABLE "public"."tenant_provider_health" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_provider_health" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_health" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_health" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_provider_health" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_provider_identity" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_provider_identity" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_identity" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_provider_identity" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_provider_identity" TO "service_role";
 
 
@@ -11954,38 +12024,34 @@ GRANT ALL ON SEQUENCE "public"."tenant_provider_identity_id_seq" TO "service_rol
 
 
 
-GRANT ALL ON TABLE "public"."tenant_shipping_provider_config" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_shipping_provider_config" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_shipping_provider_config" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_shipping_provider_config" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_shipping_provider_config" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_subscriptions" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_subscriptions" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_subscriptions" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_subscriptions" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_subscriptions" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_usage_counters" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_usage_counters" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_usage_counters" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_usage_events" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_usage_events" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_usage_events" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_users" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_users" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_users" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_users" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_users" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tenant_webhook_secrets" TO "anon";
-GRANT ALL ON TABLE "public"."tenant_webhook_secrets" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_webhook_secrets" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenant_webhook_secrets" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenant_webhook_secrets" TO "service_role";
 
 
@@ -11996,26 +12062,24 @@ GRANT ALL ON SEQUENCE "public"."tenant_webhook_secrets_id_seq" TO "service_role"
 
 
 
-GRANT ALL ON TABLE "public"."tenants" TO "anon";
-GRANT ALL ON TABLE "public"."tenants" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenants" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."tenants" TO "authenticated";
 GRANT ALL ON TABLE "public"."tenants" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."user_dismissed_alerts" TO "anon";
-GRANT ALL ON TABLE "public"."user_dismissed_alerts" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."user_dismissed_alerts" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."user_dismissed_alerts" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_dismissed_alerts" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."vw_consent_events_unified" TO "anon";
-GRANT ALL ON TABLE "public"."vw_consent_events_unified" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."vw_consent_events_unified" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."vw_consent_events_unified" TO "authenticated";
 GRANT ALL ON TABLE "public"."vw_consent_events_unified" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."webhook_events_seen" TO "anon";
-GRANT ALL ON TABLE "public"."webhook_events_seen" TO "authenticated";
 GRANT ALL ON TABLE "public"."webhook_events_seen" TO "service_role";
 
 
@@ -12026,8 +12090,8 @@ GRANT ALL ON SEQUENCE "public"."webhook_events_seen_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."whatsapp_templates" TO "anon";
-GRANT ALL ON TABLE "public"."whatsapp_templates" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."whatsapp_templates" TO "anon";
+GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."whatsapp_templates" TO "authenticated";
 GRANT ALL ON TABLE "public"."whatsapp_templates" TO "service_role";
 
 
@@ -12036,8 +12100,6 @@ GRANT ALL ON TABLE "public"."whatsapp_webhook_inbox" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."wompi_events_seen" TO "anon";
-GRANT ALL ON TABLE "public"."wompi_events_seen" TO "authenticated";
 GRANT ALL ON TABLE "public"."wompi_events_seen" TO "service_role";
 
 
@@ -12063,7 +12125,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQ
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
 
 
@@ -12072,9 +12133,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUN
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+
+
 
 
 

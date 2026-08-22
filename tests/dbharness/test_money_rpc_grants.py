@@ -81,32 +81,24 @@ def _puede(cur, rol, sig):
 
 
 def test_todas_las_sobrecargas_quedaron_cerradas(db):
-    """consume/extend/release tienen dos firmas cada una. Dejar una abierta reabre el hueco
-    entero, y es justo el error que un REVOKE escrito a mano comete."""
+    """Track 9 / B-g (2026-08-22): las sobrecargas legacy de consume/extend/release se
+    ELIMINARON (el código usa las firmas con p_tenant_id — ver test_track9_b_bajos.py).
+    Lo que queda de este test es el guard contra el error que motivó la migración
+    original: si alguien vuelve a crear una sobrecarga y nace con el GRANT por defecto,
+    TODAS las firmas deben quedar cerradas a authenticated — dejar una abierta reabre
+    el hueco entero."""
     with db.cursor() as cur:
         cur.execute(
             """
-            SELECT p.proname, count(*)
+            SELECT p.oid::regprocedure::text
             FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'public' AND p.prosecdef AND p.proname ~ %s
-            GROUP BY p.proname HAVING count(*) > 1
+              AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
             """,
             (PATRON_DINERO,),
         )
-        con_sobrecarga = cur.fetchall()
-        assert con_sobrecarga, "se esperaban funciones sobrecargadas (consume/extend/release)"
-        for nombre, _n in con_sobrecarga:
-            cur.execute(
-                """
-                SELECT p.oid::regprocedure::text
-                FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                WHERE n.nspname = 'public' AND p.proname = %s
-                  AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
-                """,
-                (nombre,),
-            )
-            abiertas = [r[0] for r in cur.fetchall()]
-            assert abiertas == [], f"sobrecarga de {nombre} sigue abierta: {abiertas}"
+        abiertas = [r[0] for r in cur.fetchall()]
+        assert abiertas == [], f"firma de dinero abierta a authenticated: {abiertas}"
 
 
 def test_el_precio_de_cart_add_item_sigue_siendo_un_parametro(db):

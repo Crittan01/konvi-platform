@@ -109,11 +109,13 @@ def test_guc_tenant_gana_al_jwt(db, seed):
 
 
 # ── notification_settings: role-aware (W1, espejo de tenant_integrations) ──────
+# Track 9 / M9 (2026-08-22): el SELECT también se cerró para operator — config lleva
+# secret refs de canales (bot_token Vault id, chat_ids). Lectura owner/manager solamente.
 
-def test_operator_lee_pero_no_escribe_notification_settings(db, seed):
+def test_operator_no_lee_ni_escribe_notification_settings(db, seed):
     with as_user(OP_A, TENANT_A, "operator") as cur:
         cur.execute("SELECT count(*) FROM public.notification_settings WHERE tenant_id=%s", (TENANT_A,))
-        assert cur.fetchone()[0] >= 1, "operator no pudo LEER notification_settings de su tenant"
+        assert cur.fetchone()[0] == 0, "operator pudo LEER notification_settings (Track9/M9 roto)"
         cur.execute("UPDATE public.notification_settings SET enabled=false WHERE tenant_id=%s", (TENANT_A,))
         assert cur.rowcount == 0, "operator logró ESCRIBIR notification_settings (RLS role-aware roto)"
 
