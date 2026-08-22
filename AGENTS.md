@@ -64,12 +64,12 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 | Frontend | Next.js **16.2.11** + React ^19 + TypeScript ^5 |
 | UI | TailwindCSS **4.3.3** (tokens en `globals.css`) + shadcn/ui — **20 componentes + empty-state + motion** en `apps/web/components/ui/` |
 | Backend | Python **3.11** + FastAPI **0.139.0** (api + orchestrator; connector-whatsapp va una minor atrás) |
-| DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) — 262 migraciones = ledger prod (descongelamiento 2026-08-22), 79 tablas live |
+| DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) — 266 migraciones repo / 262 ledger prod (4 Track 6 pendientes de deploy), 79 tablas live |
 | IA | `google-genai==2.11.0` — Gemini 3.x (primario prod `gemini-3.1-flash-lite`) |
 | Mensajería | WhatsApp Cloud API (Meta Graph API **v22.0**, Model B per-tenant) |
 | Shipping | **Aveonline** (único provider — Envia eliminado del runtime en rev.109) |
 | Hosting | Render — Free plan (4 servicios live) — ver upgrade path en `docs/deployment/render-upgrade-path.md` |
-| Tests | 4.849 pytest (306 dbharness) + 358 tests Vitest |
+| Tests | 4.906 pytest (316 dbharness) + 363 tests Vitest |
 
 ---
 
