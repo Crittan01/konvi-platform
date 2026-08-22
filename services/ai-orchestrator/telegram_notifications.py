@@ -28,6 +28,7 @@ un tool (path directo + path B sigue activo en paralelo como respaldo).
 """
 from __future__ import annotations
 
+import html
 import logging
 from typing import Any, Optional
 
@@ -129,9 +130,11 @@ async def notify_escalation_async(
         "info": "ℹ️", "warning": "⚠️", "critical": "🚨",
     }.get(severity, "⚠️")
     convo_suffix = (
-        f"\n\n_Conv: {conversation_id[:8]}_" if conversation_id else ""
+        f"\n\n<i>Conv: {html.escape(conversation_id[:8])}</i>" if conversation_id else ""
     )
-    text = f"{prefix} *Escalación*\n\n{reason}{convo_suffix}"
+    # Track 6: parse_mode HTML (con escape del reason — viene del contexto del
+    # bot y puede traer caracteres especiales del cliente).
+    text = f"{prefix} <b>Escalación</b>\n\n{html.escape(str(reason))}{convo_suffix}"
 
     # `_send_telegram_notification` espera keys `bot_token` y `chat_id`
     # (NO `telegram_bot_token` / `telegram_chat_id` — bug histórico de

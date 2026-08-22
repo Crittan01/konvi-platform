@@ -16,6 +16,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -479,6 +480,131 @@ def revoke_telegram_identity(
             status_code=500,
             detail="No se pudo revocar la identidad del operador de Telegram",
         )
+
+
+# ─── Telegram: setup del webhook del bot del tenant (Track 6 — cierra M17) ─────
+
+
+@router.post("/telegram/setup", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
+@audit_log(entity_type="integration", action="telegram_setup")
+async def telegram_setup(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Track 6 (cierra M17): registra el webhook del bot del tenant contra la
+    Bot API oficial — antes era un paso manual con curl por fuera de la UI.
+
+    Cadena (doc oficial core.telegram.org/bots/api, fetch live 2026-08-22):
+      1. getMe — valida el token y entrega el username del bot.
+      2. setWebhook — URL {PUBLIC_WEBHOOK_URL}/api/v1/integrations/telegram/webhook
+         con secret_token=TELEGRAM_WEBHOOK_SECRET (así el inbound queda
+         autenticado) y allowed_updates=["message", "callback_query"] (los
+         comandos + el botón inline "✅ Resolver" de Track 6).
+         drop_pending_updates=True: no se procesan updates viejos encolados.
+      3. setMyCommands — menú de comandos del bot (/resolver /estado /ayuda).
+      4. getWebhookInfo — verificación final (url + last_error_message).
+
+    Solo owner/manager (paridad con save/disconnect Telegram). El token se
+    resuelve desde Vault y NUNCA sale en la respuesta ni en logs.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner/manager pueden configurar el webhook de Telegram",
+        )
+
+    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="TELEGRAM_WEBHOOK_SECRET no configurado en el API",
+        )
+
+    # bot_token del tenant: notification_settings + Vault (fuente única ADR-0021).
+    settings_res = (
+        supabase.table("notification_settings")
+        .select("config")
+        .eq("tenant_id", tenant_id)
+        .eq("channel", "telegram")
+        .eq("enabled", True)
+        .limit(1)
+        .execute()
+    )
+    cfg = (settings_res.data or [{}])[0].get("config") or {}
+    from vault_helper import VaultHelper, resolve_secret
+    token = (resolve_secret(VaultHelper(supabase), dict(cfg), "bot_token") or "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero el bot de Telegram (token + chat_id) en Integraciones",
+        )
+
+    base_url = _public_webhook_base_url()
+    if "YOUR_PUBLIC_HOST" in base_url:
+        raise HTTPException(
+            status_code=503,
+            detail="PUBLIC_WEBHOOK_URL no configurada — no se puede registrar el webhook",
+        )
+    webhook_url = f"{base_url}/api/v1/integrations/telegram/webhook"
+    api = f"https://api.telegram.org/bot{token}"
+
+    async def _post(method: str, payload: dict) -> dict:
+        """POST a la Bot API; 502 con la descripción de Telegram si falla."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{api}/{method}", json=payload)
+            body = resp.json() if resp.content else {}
+        except Exception as exc:
+            logger.error("[TG_SETUP] %s unreachable tenant=%s: %s", method, tenant_id[:8], exc)
+            raise HTTPException(status_code=502, detail=f"Telegram {method} no responde") from exc
+        if not (200 <= resp.status_code < 300 and body.get("ok") is True):
+            desc = body.get("description") or resp.text[:200]
+            logger.warning(
+                "[TG_SETUP] %s rechazado tenant=%s: %s", method, tenant_id[:8], desc,
+            )
+            raise HTTPException(status_code=502, detail=f"Telegram {method}: {desc}")
+        return body.get("result") if body.get("result") is not None else True
+
+    # 1. getMe — valida el token.
+    me = await _post("getMe", {})
+    bot_username = (me or {}).get("username", "")
+
+    # 2. setWebhook — con secret_token (auth del inbound) + los update types que
+    #    este módulo consume (comandos + callback_query del inline keyboard).
+    await _post("setWebhook", {
+        "url": webhook_url,
+        "secret_token": webhook_secret,
+        "allowed_updates": ["message", "callback_query"],
+        "drop_pending_updates": True,
+    })
+
+    # 3. setMyCommands — menú del bot (mismo set que /ayuda del webhook).
+    await _post("setMyCommands", {
+        "commands": [
+            {"command": "resolver", "description": "Restaurar el bot en una conversación"},
+            {"command": "estado", "description": "Consultar el estado de una conversación"},
+            {"command": "ayuda", "description": "Lista de comandos disponibles"},
+        ],
+    })
+
+    # 4. getWebhookInfo — verificación final (criterio de éxito documentado en
+    #    docs/integrations/telegram.md: url registrada + last_error vacío).
+    info = await _post("getWebhookInfo", {})
+    logger.info(
+        "[TG_SETUP] webhook registrado tenant=%s bot=@%s url=%s",
+        tenant_id[:8], bot_username, (info or {}).get("url", ""),
+    )
+    return {
+        "ok": True,
+        "bot_username": bot_username,
+        "webhook": {
+            "url": (info or {}).get("url", ""),
+            "pending_update_count": (info or {}).get("pending_update_count", 0),
+            "last_error_message": (info or {}).get("last_error_message") or None,
+        },
+        "commands_registered": 3,
+    }
 
 
 # ─── Aveonline: listar agentes del tenant ────────────────────────────────────

@@ -709,6 +709,29 @@ def get_conversation_context(
         raise HTTPException(status_code=500, detail="Error al cargar contexto")
 
 
+def _close_takeover_alerts_if_resolved(
+    supabase: Client, tenant_id: str, conversation_id: str, new_status: str,
+) -> None:
+    """Track 6: al restaurar bot_active desde la CONSOLA, cerrar las alertas
+    Telegram de takeover abiertas (editMessageReplyMarkup — el inline keyboard
+    desaparece para todo el grupo de operadores, igual que al resolver por
+    callback_query o /resolver). Best-effort: nunca rompe el cambio de status.
+    """
+    if new_status != "bot_active":
+        return
+    try:
+        from lib.operator_alerts import resolve_takeover_alerts  # noqa: PLC0415
+        resolve_takeover_alerts(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            resolved_via="console",
+        )
+    except Exception as _alert_exc:  # noqa: BLE001
+        logger.info(
+            "[CONV] resolve_takeover_alerts skip conv=%s: %s",
+            conversation_id[:8], _alert_exc,
+        )
+
+
 @router.patch("/{conversation_id}/status", response_model=dict)
 @audit_log(entity_type="conversation", action="status_changed")
 def update_conversation_status(
@@ -763,6 +786,7 @@ def update_conversation_status(
             # El abort de la sesión idempotente lo hace el except HTTPException
             # (patrón unificado con orders.py — sin abort inline duplicado).
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
+        _close_takeover_alerts_if_resolved(supabase, tenant_id, conversation_id, body.status)
         body_payload = {"id": conversation_id, "status": body.status}
         if idem_session is not None:
             finalize_idempotency(

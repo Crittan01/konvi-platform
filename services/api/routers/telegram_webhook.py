@@ -25,13 +25,15 @@ Vinculación chat_id → tenant (RBAC de comandos):
   Un chat sin notificación previa ni fila en notification_settings NO puede
   ejecutar comandos (origen no autorizado).
 
-INTERVENCION HUMANA REQUERIDA — configurar setWebhook (una vez por bot del tenant):
-  RESPONSABLE: founder / operador de plataforma.
-  PASOS:
+INTERVENCION HUMANA REQUERIDA — registrar el webhook (una vez por bot del tenant):
+  Desde Track 6 (2026-08-22) el alta es AUTOMÁTICA vía
+  `POST /api/v1/integrations/telegram/setup` (routers/integrations.py —
+  getMe → setWebhook con allowed_updates=["message","callback_query"] →
+  setMyCommands → getWebhookInfo; cierra M17). El camino manual con curl sigue
+  siendo válido como contingencia:
     curl "https://api.telegram.org/bot{TOKEN}/setWebhook" \
       -d "url=https://konvi-api.onrender.com/api/v1/integrations/telegram/webhook" \
       -d "secret_token={TELEGRAM_WEBHOOK_SECRET}"
-  INSUMOS: {TOKEN} = bot_token del tenant; {TELEGRAM_WEBHOOK_SECRET} = env del API.
   CRITERIO DE EXITO: getWebhookInfo devuelve la URL anterior y last_error_date vacío.
   NOTA: la URL correcta incluye el segmento /integrations (prefijo del router en
   main.py:295). La UI ya muestra la URL completa — fuente única de verdad:
@@ -41,6 +43,7 @@ INTERVENCION HUMANA REQUERIDA — configurar setWebhook (una vez por bot del ten
 Referencia Telegram Bot API: https://core.telegram.org/bots/api#setwebhook
 """
 import hmac
+import html
 import logging
 import os
 
@@ -66,6 +69,13 @@ async def telegram_webhook(
     """
     Recibe updates de Telegram. Telegram espera respuesta 2xx inmediata.
     Autenticación: header X-Telegram-Bot-Api-Secret-Token.
+
+    Updates soportados (allowed_updates del setup):
+      - message / edited_message → comandos /resolver /estado /ayuda
+      - callback_query (Track 6) → botón inline "✅ Resolver" de la alerta de
+        takeover: misma acción del comando + answerCallbackQuery (obligatorio
+        — sin él el botón queda "cargando" para siempre en el cliente) +
+        editMessageReplyMarkup (el teclado desaparece: anti doble-click).
     """
     if not TELEGRAM_WEBHOOK_SECRET:
         logger.warning("[TG_WH] TELEGRAM_WEBHOOK_SECRET no configurado — endpoint deshabilitado")
@@ -79,6 +89,12 @@ async def telegram_webhook(
     try:
         update = await request.json()
     except Exception:
+        return JSONResponse(status_code=200, content={"ok": True})
+
+    # Track 6: callback_query del inline keyboard (hoy se descartaba en silencio).
+    callback_query = update.get("callback_query") or {}
+    if callback_query:
+        await _handle_callback_query(callback_query)
         return JSONResponse(status_code=200, content={"ok": True})
 
     message = update.get("message") or update.get("edited_message") or {}
@@ -136,6 +152,100 @@ async def telegram_webhook(
         _send_telegram_reply(chat_id, reply, tenant_id)
 
     return JSONResponse(status_code=200, content={"ok": True})
+
+
+# ─── Track 6 — callback_query (inline keyboard de la alerta de takeover) ──────
+
+def _resolve_bot_token(supabase, tenant_id: str) -> str:
+    """bot_token del tenant desde notification_settings + Vault (misma fuente
+    única que el resto del módulo). "" si falta — el caller decide."""
+    try:
+        settings_res = (
+            supabase.table("notification_settings")
+            .select("config")
+            .eq("tenant_id", tenant_id)
+            .eq("channel", "telegram")
+            .eq("enabled", True)
+            .limit(1)
+            .execute()
+        )
+        config = (settings_res.data or [{}])[0].get("config") or {}
+        from vault_helper import VaultHelper, resolve_secret
+        token = resolve_secret(VaultHelper(supabase), dict(config), "bot_token") or ""
+        return token.strip()
+    except Exception as exc:
+        logger.warning("[TG_WH] resolve bot_token falló tenant=%s: %s", tenant_id[:8], exc)
+        return ""
+
+
+def _telegram_api_post(token: str, method: str, payload: dict) -> None:
+    """POST fire-and-log a la Bot API (best-effort: nunca lanza)."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(f"https://api.telegram.org/bot{token}/{method}", json=payload)
+        if not (200 <= resp.status_code < 300):
+            logger.warning("[TG_WH] %s http=%s body=%s", method, resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("[TG_WH] %s unreachable: %s", method, exc)
+
+
+async def _handle_callback_query(cq: dict) -> None:
+    """Atiende el callback_query del inline keyboard (Track 6).
+
+    Flujo (doc oficial CallbackQuery/answerCallbackQuery/editMessageReplyMarkup):
+      1. Mismo RBAC que los comandos: chat_id → tenant (identity + self-heal).
+      2. `resolve:{conv_id}` → la MISMA acción de /resolver (que a su vez
+         cierra las alertas abiertas vía resolve_takeover_alerts — incluido el
+         markup de ESTE mensaje: anti doble-click).
+      3. answerCallbackQuery SIEMPRE (obligatorio: si no, el botón queda
+         "cargando" en el cliente; el texto tiene tope de 200 chars).
+    """
+    cq_id = str(cq.get("id") or "")
+    data = str(cq.get("data") or "")
+    message = cq.get("message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    from_user = cq.get("from") or {}
+    author = from_user.get("username") or from_user.get("first_name") or "?"
+
+    if not cq_id:
+        return
+    logger.info(
+        "[TG_WH] callback_query chat=%s author=@%s data=%r",
+        chat_id, author, data[:60],
+    )
+
+    supabase = _get_service_client()
+    from lib.identity_registry import resolve_tenant_id
+    tenant_id = resolve_tenant_id(supabase, "telegram", chat_id)
+    if not tenant_id:
+        tenant_id = _resolve_and_link_via_notification_settings(supabase, chat_id)
+
+    token = _resolve_bot_token(supabase, tenant_id) if tenant_id else ""
+    if not tenant_id or not token:
+        # Sin tenant no hay bot_token con qué responder/editar. Telegram
+        # reintentará un rato y luego mostrará el spinner expirado — mismo
+        # comportamiento seguro que un comando no autorizado.
+        logger.warning(
+            "[TG_WH] callback_query de chat=%s SIN tenant/token — ignorado",
+            chat_id,
+        )
+        return
+
+    if data.startswith("resolve:"):
+        conv_id = data[len("resolve:"):].strip()
+        # _cmd_resolver restaura bot_active + cierra las alertas abiertas
+        # (editMessageReplyMarkup en cada una, incluida esta).
+        reply = await _cmd_resolver(conv_id, tenant_id)
+        # answerCallbackQuery: texto ≤200 chars (límite oficial).
+        _telegram_api_post(token, "answerCallbackQuery", {
+            "callback_query_id": cq_id,
+            "text": reply[:200],
+        })
+    else:
+        _telegram_api_post(token, "answerCallbackQuery", {
+            "callback_query_id": cq_id,
+            "text": "Acción no reconocida.",
+        })
 
 
 def _resolve_and_link_via_notification_settings(supabase, chat_id) -> str:
@@ -225,17 +335,17 @@ async def _handle_command(text: str, chat_id: int, tenant_id: str) -> str:
         return await _cmd_estado(arg, tenant_id)
     if cmd in ("ayuda", "help", "start"):
         return (
-            "📋 *Comandos disponibles:*\n\n"
-            "/resolver `{conv_id}` — restaura el bot en una conversación\n"
-            "/estado `{conv_id}` — consulta el estado actual\n\n"
-            "El `conv_id` es el UUID de la conversación (visible en la URL del Inbox)."
+            "📋 <b>Comandos disponibles:</b>\n\n"
+            "/resolver <code>{conv_id}</code> — restaura el bot en una conversación\n"
+            "/estado <code>{conv_id}</code> — consulta el estado actual\n\n"
+            "El <code>conv_id</code> es el UUID de la conversación (visible en la URL del Inbox)."
         )
     return ""
 
 
 async def _cmd_resolver(conv_id: str, tenant_id: str) -> str:
     if not conv_id:
-        return "⚠️ Uso: `/resolver {conversation_id}`"
+        return "⚠️ Uso: <code>/resolver {conversation_id}</code>"
 
     conv_id = conv_id.strip()
     supabase = _get_service_client()
@@ -254,19 +364,30 @@ async def _cmd_resolver(conv_id: str, tenant_id: str) -> str:
         )
         conv = (res.data or [None])[0]
         if not conv:
-            return f"❌ Conversación `{conv_id[:8]}` no encontrada."
+            return f"❌ Conversación <code>{html.escape(conv_id[:8])}</code> no encontrada."
 
         current_status = conv.get("status", "")
         if current_status == "bot_active":
-            return f"ℹ️ La conversación `{conv_id[:8]}` ya está en modo bot."
+            return f"ℹ️ La conversación <code>{html.escape(conv_id[:8])}</code> ya está en modo bot."
 
         supabase.table("conversations").update({"status": "bot_active"}).eq(
             "id", conv_id
         ).eq("tenant_id", tenant_id).execute()
 
+        # Track 6: cerrar las alertas de takeover abiertas (quita el inline
+        # keyboard vía editMessageReplyMarkup — anti doble-click cross-canal).
+        try:
+            from lib.operator_alerts import resolve_takeover_alerts  # noqa: PLC0415
+            resolve_takeover_alerts(
+                supabase, tenant_id=tenant_id, conversation_id=conv_id,
+                resolved_via="telegram_command",
+            )
+        except Exception as _alert_exc:  # noqa: BLE001 — nunca rompe el resolve
+            logger.info("[TG_WH] resolve_takeover_alerts skip conv=%s: %s", conv_id[:8], _alert_exc)
+
         logger.info("[TG_WH] bot_active restaurado: conv=%s", conv_id)
         return (
-            f"*Bot activado* en conversación `{conv_id[:8]}`.\n"
+            f"<b>Bot activado</b> en conversación <code>{html.escape(conv_id[:8])}</code>.\n"
             f"El bot retomará la atención en el próximo mensaje del cliente."
         )
     except Exception as e:
@@ -276,7 +397,7 @@ async def _cmd_resolver(conv_id: str, tenant_id: str) -> str:
 
 async def _cmd_estado(conv_id: str, tenant_id: str) -> str:
     if not conv_id:
-        return "⚠️ Uso: `/estado {conversation_id}`"
+        return "⚠️ Uso: <code>/estado {conversation_id}</code>"
 
     conv_id = conv_id.strip()
     supabase = _get_service_client()
@@ -294,7 +415,7 @@ async def _cmd_estado(conv_id: str, tenant_id: str) -> str:
         )
         conv = (res.data or [None])[0]
         if not conv:
-            return f"❌ Conversación `{conv_id[:8]}` no encontrada."
+            return f"❌ Conversación <code>{html.escape(conv_id[:8])}</code> no encontrada."
 
         status = conv.get("status", "N/D")
         phone = conv.get("customer_phone", "N/D")
@@ -302,10 +423,10 @@ async def _cmd_estado(conv_id: str, tenant_id: str) -> str:
 
         status_icon = {"bot_active": "🤖", "human_takeover": "👤", "closed": "🔒"}.get(status, "❓")
         return (
-            f"{status_icon} *Conversación* `{conv_id[:8]}`\n"
-            f"Estado: *{status}*\n"
-            f"Cliente: {phone}\n"
-            f"Última interacción: {last_ts} UTC"
+            f"{status_icon} <b>Conversación</b> <code>{html.escape(conv_id[:8])}</code>\n"
+            f"Estado: <b>{html.escape(str(status))}</b>\n"
+            f"Cliente: {html.escape(str(phone))}\n"
+            f"Última interacción: {html.escape(last_ts)} UTC"
         )
     except Exception as e:
         logger.error("[TG_WH] Error en /estado conv=%s: %s", conv_id, e)
@@ -322,24 +443,13 @@ def _send_telegram_reply(chat_id: int, text: str, tenant_id: str) -> None:
     legacy "primer tenant activo" que causaba cross-talk silencioso (MA-10): el
     handler ya rechaza chats no mapeados ANTES de llegar acá, así que siempre
     tenemos el tenant correcto. La config se busca SIEMPRE filtrada por tenant.
+
+    Track 6: parse_mode HTML (los builders escapan el contenido dinámico).
     """
     supabase = _get_service_client()
     try:
         # Camino único: config del tenant resuelto (sin fallback cross-tenant).
-        settings_res = (
-            supabase.table("notification_settings")
-            .select("config")
-            .eq("tenant_id", tenant_id)
-            .eq("channel", "telegram")
-            .eq("enabled", True)
-            .limit(1)
-            .execute()
-        )
-
-        config = (settings_res.data or [{}])[0].get("config") or {}
-        from vault_helper import VaultHelper, resolve_secret
-        token = resolve_secret(VaultHelper(supabase), dict(config), "bot_token") or ""
-        token = token.strip()
+        token = _resolve_bot_token(supabase, tenant_id)
         if not token:
             logger.warning(
                 "[TG_WH] Sin bot_token (tenant=%s, chat=%s)",
@@ -353,7 +463,7 @@ def _send_telegram_reply(chat_id: int, text: str, tenant_id: str) -> None:
                 json={
                     "chat_id": chat_id,
                     "text": text,
-                    "parse_mode": "Markdown",
+                    "parse_mode": "HTML",
                 },
             )
     except Exception as e:

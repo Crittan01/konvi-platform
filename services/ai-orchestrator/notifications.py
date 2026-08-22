@@ -12,6 +12,7 @@ Eventos:
 - sar_received (rev. 94) — solicitud Habeas Data del titular.
 """
 import logging
+import html
 import os
 import re
 from typing import Any
@@ -105,23 +106,49 @@ def _register_telegram_identity(supabase: Client, tenant_id: str, chat_id: Any) 
 
 
 def _build_takeover_text(payload: dict[str, Any]) -> str:
+    """Texto de la alerta de takeover en HTML (Track 6: parse_mode HTML con
+    html.escape en TODO valor dinámico — adiós al "can't parse entities" del
+    Markdown legacy cuando el teléfono/id traía caracteres especiales)."""
     conversation_id = str(payload.get("conversation_id", ""))
     customer_phone = str(payload.get("customer_phone", ""))
 
     inbox_link = f"{APP_URL}/dashboard/inbox"
     return (
-        "🚨 *Escalamiento humano requerido*\n"
-        f"Cliente: `{customer_phone or 'N/A'}`\n"
-        f"Conv ID: `{conversation_id or 'N/A'}`\n\n"
+        "🚨 <b>Escalamiento humano requerido</b>\n"
+        f"Cliente: <code>{html.escape(customer_phone or 'N/A')}</code>\n"
+        f"Conv ID: <code>{html.escape(conversation_id or 'N/A')}</code>\n\n"
         f"Para devolver al bot:\n"
-        f"`/resolver {conversation_id}`\n\n"
+        f"<code>/resolver {html.escape(conversation_id)}</code>\n\n"
         # URL absoluta: un path relativo `/dashboard/inbox` Telegram lo trata
         # como comando `/dashboard` y no es clickeable.
-        f"Inbox: {inbox_link}"
+        f"Inbox: {html.escape(inbox_link)}"
     )
 
 
-async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool:
+def _takeover_reply_markup(conversation_id: str) -> dict[str, Any] | None:
+    """Inline keyboard de la alerta de takeover (Track 6).
+
+    Botón "✅ Resolver": callback_data `resolve:{conv_id}` (44 bytes — el límite
+    oficial es 1-64 bytes, doc InlineKeyboardButton). El webhook
+    (telegram_webhook.py) atiende el callback_query con la MISMA acción del
+    comando /resolver + answerCallbackQuery + editMessageReplyMarkup.
+    """
+    conv = str(conversation_id or "").strip()
+    if not conv:
+        return None
+    return {
+        "inline_keyboard": [[
+            {"text": "✅ Resolver (devolver al bot)", "callback_data": f"resolve:{conv}"},
+        ]],
+    }
+
+
+async def _send_telegram_notification(
+    config: dict[str, Any],
+    text: str,
+    reply_markup: dict[str, Any] | None = None,
+    alert_context: dict[str, Any] | None = None,
+) -> bool:
     token = str(config.get("bot_token") or "").strip()
     chat_id = str(config.get("chat_id") or "").strip()
 
@@ -131,15 +158,21 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    async def _post(use_markdown: bool) -> httpx.Response:
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
-        if use_markdown:
-            payload["parse_mode"] = "Markdown"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            return await client.post(url, json=payload)
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        # Track 6 (2026-08-22): parse_mode HTML — el Markdown legacy rompía con
+        # contenido dinámico sin escapar ("can't parse entities") y la alerta
+        # se perdía. Con html.escape en los builders el fallback ya no hace
+        # falta: se elimina el reintento en texto plano.
+        "parse_mode": "HTML",
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
 
     try:
-        res = await _post(use_markdown=True)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(url, json=payload)
     except Exception as exc:
         logger.error("Telegram unreachable: %s", exc)
         return False
@@ -150,36 +183,47 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
         body = {}
 
     if res.status_code >= 200 and res.status_code < 300 and body.get("ok") is True:
+        # Track 6: persistir message_id de la alerta (editMessageReplyMarkup al
+        # resolver desde cualquier canal). Best-effort — nunca rompe la alerta.
+        message_id = ((body.get("result") or {}).get("message_id"))
+        if alert_context and message_id is not None:
+            _persist_alert_message(alert_context, chat_id, message_id)
         return True
 
     error_code = int(body.get("error_code") or res.status_code)
     description = body.get("description") or res.text
-
-    # Markdown desbalanceado en contenido dinámico (nombre/mensaje del cliente)
-    # rompe el parser legacy con "can't parse entities" y la notificación se
-    # perdía silenciosamente. La escalación es crítica → reintentar en texto
-    # plano para GARANTIZAR entrega (se pierde el negrita, no el aviso).
-    if error_code == 400 and "parse entities" in str(description).lower():
-        logger.warning("Telegram Markdown inválido; reintento en texto plano.")
-        try:
-            res2 = await _post(use_markdown=False)
-            body2 = res2.json() if res2.content else {}
-            if 200 <= res2.status_code < 300 and body2.get("ok") is True:
-                return True
-            logger.error(
-                "Telegram plain-text retry falló [%s]: %s",
-                res2.status_code, body2.get("description") or res2.text,
-            )
-        except Exception as exc:
-            logger.error("Telegram plain-text retry unreachable: %s", exc)
-        return True  # permanente: no re-encolar
-
     logger.error("Telegram error [%s]: %s", error_code, description)
 
     # Errores permanentes de configuración/token/chat => no reintentar.
     if error_code in {400, 401, 403, 404}:
         return True
     return False
+
+
+def _persist_alert_message(
+    alert_context: dict[str, Any], chat_id: str, message_id: int,
+) -> None:
+    """Inserta (tenant, conversación, chat, message_id) en telegram_alert_messages.
+
+    UNIQUE(chat_id, message_id) → la re-entrega del evento pgmq no duplica la
+    fila. Nunca lanza: la alerta ya fue entregada, la persistencia es para el
+    editMessageReplyMarkup posterior (anti doble-click cross-canal).
+    """
+    try:
+        supabase = alert_context.get("supabase")
+        if supabase is None:
+            return
+        supabase.table("telegram_alert_messages").insert({
+            "tenant_id": alert_context.get("tenant_id"),
+            "conversation_id": alert_context.get("conversation_id"),
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "alert_type": "takeover",
+        }).execute()
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "duplicate key" not in msg and "23505" not in msg:
+            logger.warning("[NOTIFY] persist alert message_id falló: %s", exc)
 
 
 async def _send_email_via_resend(
@@ -485,7 +529,18 @@ async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any
             # Auto-vincula el chat destino → tenant ANTES/independiente del envío,
             # para que `/resolver` desde ese chat resuelva su tenant (comandos vivos).
             _register_telegram_identity(supabase, tenant_id, config.get("chat_id"))
-            ok = await _send_telegram_notification(config, text)
+            # Track 6: inline keyboard "✅ Resolver" + persistencia del message_id
+            # (editMessageReplyMarkup al resolver desde cualquier canal).
+            conv_id = str(payload.get("conversation_id") or "")
+            ok = await _send_telegram_notification(
+                config, text,
+                reply_markup=_takeover_reply_markup(conv_id),
+                alert_context={
+                    "supabase": supabase,
+                    "tenant_id": tenant_id,
+                    "conversation_id": conv_id,
+                },
+            )
         elif channel == "email":
             ok = await _dispatch_email_event(config, payload, supabase)
         else:

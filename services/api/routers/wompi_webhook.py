@@ -12,6 +12,7 @@ Política de reintentos de Wompi:
 Referencia oficial: https://docs.wompi.co/en/docs/colombia/eventos/
 Algoritmo de firma validado 2026-04-24 — SHA256 simple, no HMAC.
 """
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -326,13 +327,14 @@ def _alert_paid_without_guide_operator(
             .execute()
         )
         _total = float((getattr(ores, "data", None) or {}).get("total_amount") or 0)
-        total_txt = f" por *${int(round(_total)):,} COP*".replace(",", ".")
+        total_txt = f" por <b>${int(round(_total)):,} COP</b>".replace(",", ".")
     except Exception:
         total_txt = ""
-    detalle = f": `{detail}`" if detail else "."
+    detalle = f": <code>{html.escape(str(detail))}</code>" if detail else "."
+    # Track 6: parse_mode HTML en operator_alerts — todo valor dinámico escapado.
     text = (
-        "🚨 *Pago confirmado SIN guía de envío*\n\n"
-        f"Pedido *#{str(order_id)[:8].upper()}*{total_txt} — la generación "
+        "🚨 <b>Pago confirmado SIN guía de envío</b>\n\n"
+        f"Pedido <b>#{str(order_id)[:8].upper()}</b>{total_txt} — la generación "
         f"automática de la guía Aveonline falló{detalle}\n\n"
         "Acción: genera la guía manual desde Pedidos (el cliente YA pagó)."
     )

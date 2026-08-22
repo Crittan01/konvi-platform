@@ -6359,6 +6359,25 @@ CREATE TABLE IF NOT EXISTS "public"."suppliers" (
 ALTER TABLE "public"."suppliers" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."telegram_alert_messages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "conversation_id" "uuid" NOT NULL,
+    "chat_id" "text" NOT NULL,
+    "message_id" bigint NOT NULL,
+    "alert_type" "text" DEFAULT 'takeover'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "resolved_at" timestamp with time zone
+);
+
+
+ALTER TABLE "public"."telegram_alert_messages" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."telegram_alert_messages" IS 'Track 6: message_id de las alertas Telegram con inline keyboard (takeover). Permite editMessageReplyMarkup al resolver la conversación desde cualquier canal (el callback_query trae message_id, pero /resolver y la consola no). resolved_at NULL = alerta abierta.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."tenant_cancellation_policy" (
     "tenant_id" "uuid" NOT NULL,
     "allow_cancel_after_picked_up" boolean DEFAULT false NOT NULL,
@@ -7627,6 +7646,11 @@ ALTER TABLE ONLY "public"."suppliers"
 
 
 
+ALTER TABLE ONLY "public"."telegram_alert_messages"
+    ADD CONSTRAINT "telegram_alert_messages_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."tenant_cancellation_policy"
     ADD CONSTRAINT "tenant_cancellation_policy_pkey" PRIMARY KEY ("tenant_id");
 
@@ -8359,6 +8383,10 @@ CREATE INDEX "idx_suppliers_tenant_active" ON "public"."suppliers" USING "btree"
 
 
 
+CREATE INDEX "idx_telegram_alert_messages_conv_open" ON "public"."telegram_alert_messages" USING "btree" ("conversation_id") WHERE ("resolved_at" IS NULL);
+
+
+
 CREATE INDEX "idx_tenant_integrations_tenant" ON "public"."tenant_integrations" USING "btree" ("tenant_id");
 
 
@@ -8588,6 +8616,10 @@ CREATE UNIQUE INDEX "uq_purchase_orders_tenant_po_number" ON "public"."purchase_
 
 
 CREATE UNIQUE INDEX "uq_stock_movements_order_variation_reason" ON "public"."stock_movements" USING "btree" ("order_id", "variation_id", "reason") WHERE ("order_id" IS NOT NULL);
+
+
+
+CREATE UNIQUE INDEX "uq_telegram_alert_messages_msg" ON "public"."telegram_alert_messages" USING "btree" ("chat_id", "message_id");
 
 
 
@@ -9371,6 +9403,11 @@ ALTER TABLE ONLY "public"."suppliers"
 
 
 
+ALTER TABLE ONLY "public"."telegram_alert_messages"
+    ADD CONSTRAINT "telegram_alert_messages_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."tenant_cancellation_policy"
     ADD CONSTRAINT "tenant_cancellation_policy_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
@@ -9607,6 +9644,10 @@ CREATE POLICY "Tenant Isolation" ON "public"."shipments" USING (("tenant_id" = "
 
 
 CREATE POLICY "Tenant Isolation" ON "public"."stock_reservations" USING (("tenant_id" = "public"."app_current_tenant"())) WITH CHECK (("tenant_id" = "public"."app_current_tenant"()));
+
+
+
+CREATE POLICY "Tenant Isolation" ON "public"."telegram_alert_messages" USING (("tenant_id" = "public"."app_current_tenant"())) WITH CHECK (("tenant_id" = "public"."app_current_tenant"()));
 
 
 
@@ -9924,6 +9965,9 @@ ALTER TABLE "public"."stock_reservations" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."suppliers" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."telegram_alert_messages" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."tenant_cancellation_policy" ENABLE ROW LEVEL SECURITY;
@@ -12003,6 +12047,10 @@ GRANT ALL ON TABLE "public"."stock_reservations" TO "service_role";
 GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."suppliers" TO "anon";
 GRANT SELECT,INSERT,DELETE,MAINTAIN,UPDATE ON TABLE "public"."suppliers" TO "authenticated";
 GRANT ALL ON TABLE "public"."suppliers" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."telegram_alert_messages" TO "service_role";
 
 
 

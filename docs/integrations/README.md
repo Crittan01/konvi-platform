@@ -10,7 +10,7 @@ Documentos maestros de las integraciones activas de la plataforma. Cada doc decl
 |---|---|---|---|
 | **Wompi** (pagos) | `wompi.md` | LIVE | Payment links reales, webhook firmado SHA256 per-tenant, reconciliación 3 capas + runbook manual |
 | **Aveonline** (shipping) | `aveonline.md` | PARCIAL | Cotización live; guías DRY-RUN por flag global (B1); webhook de estados activo; sin polling de respaldo (A10) |
-| **Telegram** (canal interno) | `telegram.md` | LIVE | Alertas de takeover + comandos `/resolver` `/estado` con RBAC chat_id→tenant; `setWebhook` manual por tenant (M17) |
+| **Telegram** (canal interno) | `telegram.md` | LIVE | Alertas de takeover con inline keyboard (✅ Resolver) + comandos `/resolver` `/estado` con RBAC chat_id→tenant + callback_query con cierre cross-canal de alertas + setup de webhook desde la UI (Track 6 cierra M17) |
 | **Mercado Libre** (marketplace) | `mercadolibre.md` | LIVE | OAuth endurecido, webhook IPN (IP allowlist + dedup + anti-SSRF), sync stock bidireccional |
 | **WhatsApp / Meta Cloud API** | `whatsapp-meta.md` | LIVE | Model B per-tenant (ADR-0023), HMAC per-tenant, inbox durable, Graph v22.0, ventana 24h con 131047 sin reintento |
 | **Supabase** (plataforma base: Postgres+RLS+Auth+Realtime+Vault+Storage) | `supabase.md` | LIVE | Alineación doc oficial Track 6 (2026-08-22): realtime select+anti-truncamiento, keys sin fallback legacy, runbook DR vault |
