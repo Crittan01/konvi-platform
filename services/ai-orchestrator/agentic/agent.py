@@ -97,6 +97,11 @@ class AgenticTurnResult:
     truncated: bool = False
     truncated_reason: Optional[str] = None
     total_tokens: int = 0
+    # Track 6 (2026-08-22): breakdown de uso para medir implicit caching
+    # (fase 0 del ahorro — la doc no garantiza caching en flash-lite; medir).
+    prompt_tokens: int = 0
+    cached_tokens: int = 0
+    thoughts_tokens: int = 0
     error: Optional[str] = None
     finish_reason: Optional[str] = None
     # Rev. 107 founder feedback: cuando el agentic agota todas las recoveries
@@ -198,7 +203,9 @@ async def run_agentic_turn(
     # Se persiste en agentic_shadow_log.total_tokens → costo LLM por tenant,
     # insumo directo de pricing/límites. Best-effort: si el SDK no reporta
     # usage_metadata, queda 0 (nunca rompe el turn).
+    # Track 6 (2026-08-22): + breakdown prompt/cached/thoughts (fase 0 caching).
     total_tokens = 0
+    usage_breakdown = {"prompt_tokens": 0, "cached_tokens": 0, "thoughts_tokens": 0}
 
     try:
         from google import genai
@@ -251,6 +258,9 @@ async def run_agentic_turn(
                 error=f"gemini_error: {exc}",
                 finish_reason=last_finish_reason,
                 total_tokens=total_tokens,
+                prompt_tokens=usage_breakdown["prompt_tokens"],
+                cached_tokens=usage_breakdown["cached_tokens"],
+                thoughts_tokens=usage_breakdown["thoughts_tokens"],
             )
 
         # Extraer parts (text + function_calls) del response.
@@ -258,7 +268,10 @@ async def run_agentic_turn(
         text_part = _extract_text(response)
         # Capturar finish_reason de TODOS los responses (texto/tool/empty).
         last_finish_reason = _extract_finish_reason(response) or last_finish_reason
-        total_tokens += _extract_total_tokens(response)
+        _usage = _extract_usage(response)
+        total_tokens += _usage["total_tokens"]
+        for _k in usage_breakdown:
+            usage_breakdown[_k] += _usage[_k]
 
         # Manejo activo empty_output (rev. 107): si Gemini retorna response
         # sin tools y sin texto, detectar finish_reason y aplicar strategy
@@ -350,6 +363,9 @@ async def run_agentic_turn(
                         or last_finish_reason
                     )
                     total_tokens += _extract_total_tokens(fallback_response)
+                    _fu = _extract_usage(fallback_response)
+                    for _k in usage_breakdown:
+                        usage_breakdown[_k] += _fu[_k]
                     if fallback_text.strip():
                         outbound_text = fallback_text
                         # Marcar como "recovered" — no degraded.
@@ -395,6 +411,9 @@ async def run_agentic_turn(
                 finish_reason=last_finish_reason,
                 requires_silent_escalation=requires_silent_escalation_flag,
                 total_tokens=total_tokens,
+                prompt_tokens=usage_breakdown["prompt_tokens"],
+                cached_tokens=usage_breakdown["cached_tokens"],
+                thoughts_tokens=usage_breakdown["thoughts_tokens"],
             )
 
         if not function_calls:
@@ -531,6 +550,9 @@ async def run_agentic_turn(
         truncated_reason=truncated_reason,
         finish_reason=last_finish_reason,
         total_tokens=total_tokens,
+        prompt_tokens=usage_breakdown["prompt_tokens"],
+        cached_tokens=usage_breakdown["cached_tokens"],
+        thoughts_tokens=usage_breakdown["thoughts_tokens"],
     )
 
 
@@ -623,6 +645,16 @@ async def _gemini_generate_async(
     if AGENTIC_THINKING_BUDGET is not None:
         _cfg_kwargs["thinking_config"] = genai_types.ThinkingConfig(
             thinking_budget=int(AGENTIC_THINKING_BUDGET)
+        )
+    # Track 6 (2026-08-22, doc oficial function-calling): VALIDATED = constrained
+    # decoding de function calls — elimina args malformados POR CONSTRUCCIÓN
+    # (hoy MALFORMED_FUNCTION_CALL se trata con retry: síntoma, no causa).
+    # Flag env para canary STG (medir latencia/calidad antes de volverlo default).
+    if tools_config and os.getenv("AGENTIC_TOOL_VALIDATED_ENABLED", "false").lower() == "true":
+        _cfg_kwargs["tool_config"] = genai_types.ToolConfig(
+            function_calling_config=genai_types.FunctionCallingConfig(
+                mode=genai_types.FunctionCallingConfigMode.VALIDATED
+            )
         )
     config = genai_types.GenerateContentConfig(**_cfg_kwargs)
 
@@ -727,14 +759,34 @@ def _extract_total_tokens(response: Any) -> int:
     retorna 0 — NUNCA rompe el turn. Suma prompt + candidates + tool tokens
     (total_token_count ya los engloba en el SDK google-genai).
     """
+    return _extract_usage(response)["total_tokens"]
+
+
+def _extract_usage(response: Any) -> dict:
+    """Track 6 (2026-08-22): breakdown de usage_metadata para medir caching.
+
+    La auditoría del bot asumió el ahorro por context caching; la doc oficial
+    NO garantiza implicit caching para flash-lite (la tabla de mínimos omite
+    los Lite). Fase 0 = medir: cached_content_token_count > 0 sostenido sería
+    la evidencia de que el prefijo estable está pegando. Best-effort igual que
+    `_extract_total_tokens`: ceros si el SDK no reporta.
+    """
+    base = {"total_tokens": 0, "prompt_tokens": 0, "cached_tokens": 0, "thoughts_tokens": 0}
     try:
         usage = getattr(response, "usage_metadata", None)
         if usage is None:
-            return 0
-        total = getattr(usage, "total_token_count", None)
-        return int(total) if total else 0
+            return base
+        for key, attr in (
+            ("total_tokens", "total_token_count"),
+            ("prompt_tokens", "prompt_token_count"),
+            ("cached_tokens", "cached_content_token_count"),
+            ("thoughts_tokens", "thoughts_token_count"),
+        ):
+            val = getattr(usage, attr, None)
+            base[key] = int(val) if val else 0
+        return base
     except Exception:
-        return 0
+        return base
 
 
 def _extract_finish_reason(response: Any) -> str:

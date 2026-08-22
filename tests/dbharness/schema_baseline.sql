@@ -4564,6 +4564,9 @@ CREATE TABLE IF NOT EXISTS "public"."agentic_shadow_log" (
     "system_prompt_chars" integer,
     "history_turns" integer,
     "total_tokens" integer,
+    "prompt_tokens" integer,
+    "cached_tokens" integer,
+    "thoughts_tokens" integer,
     CONSTRAINT "agentic_shadow_log_mode_check" CHECK (("mode" = ANY (ARRAY['shadow'::"text", 'cutover'::"text"])))
 );
 
@@ -4592,6 +4595,10 @@ COMMENT ON COLUMN "public"."agentic_shadow_log"."final_text" IS 'rev. 107: texto
 
 
 COMMENT ON COLUMN "public"."agentic_shadow_log"."total_tokens" IS 'F5: tokens Gemini consumidos por el turn agentic (prompt + candidates + tools, via usage_metadata.total_token_count sumado sobre el loop multi-tool). NULL en filas previas a esta migración. Insumo de costo LLM por tenant.';
+
+
+
+COMMENT ON COLUMN "public"."agentic_shadow_log"."cached_tokens" IS 'Track 6: usage_metadata.cached_content_token_count acumulado del turn. Si es 0 de forma sostenida con prefijo estable → flash-lite no participa en implicit caching → evaluar explicit caching (CachedContent) con el gate empírico documentado en la matriz Track 6 (mínimo de tokens no publicado en la guía vigente).';
 
 
 

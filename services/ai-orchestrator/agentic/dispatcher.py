@@ -3479,6 +3479,11 @@ def _persist_turn_audit(
             # del turn. La columna la agrega la migración 20260704155000; el
             # código degrada seguro si aún no está aplicada (retry sin columna).
             "total_tokens": int(getattr(result, "total_tokens", 0) or 0),
+            # Track 6 (2026-08-22): breakdown prompt/cached/thoughts — fase 0 de
+            # la medición de implicit caching (migración 20260822130100).
+            "prompt_tokens": int(getattr(result, "prompt_tokens", 0) or 0),
+            "cached_tokens": int(getattr(result, "cached_tokens", 0) or 0),
+            "thoughts_tokens": int(getattr(result, "thoughts_tokens", 0) or 0),
         }
         supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
@@ -3492,6 +3497,16 @@ def _persist_turn_audit(
                 return
             except Exception as exc2:
                 exc = exc2
+        # Track 6: mismo degrade para las columnas del breakdown (migración
+        # 20260822130100 sin aplicar en este ambiente).
+        if any(c in str(exc) for c in ("prompt_tokens", "cached_tokens", "thoughts_tokens")):
+            try:
+                for _c in ("prompt_tokens", "cached_tokens", "thoughts_tokens"):
+                    row.pop(_c, None)
+                supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
+                return
+            except Exception as exc3:
+                exc = exc3
         logger.warning(
             "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
             mode, conversation_id[:8], exc,

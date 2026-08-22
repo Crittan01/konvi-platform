@@ -38,7 +38,9 @@ logger = logging.getLogger("orchestrator.llm")
 # Primario/fallback invertidos (2026-07-07): antes primary=3.5-flash (frontier, caro
 # y hoy saturado 503) / fallback=lite. Ahora primary=3.1-flash-lite (GA, ~3s, "frontier
 # a fracción del costo") para latencia/costo del bot en alto volumen; 3.5-flash queda de
-# fallback de escalación (GA, ninguno en retiro — se evita 2.5-flash que se retira 2026-10-16).
+# fallback de escalación. (Track 6, deprecations oficiales 2026-08-22: 3.1-flash-lite
+# tiene shutdown 2027-05-07 → reemplazo 3.5-flash-lite; 2.5-flash NO tiene fecha de
+# retiro anunciada — corregido el comentario previo que afirmaba 2026-10-16.)
 DEFAULT_PRIMARY_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash"
 DEFAULT_MAX_RETRIES = 8

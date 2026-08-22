@@ -106,10 +106,13 @@ def _embed_query_vector(client: genai.Client, query: str) -> list[float]:
 
     Comportamiento:
       • Cache hit → retorna directo.
-      • 4 intentos primary (gemini-embedding-001) con backoff 1-8s.
-      • 3 intentos fallback (text-embedding-004) con backoff hasta 16s.
-      • "Model unavailable" salta inmediato al fallback (no consume retries).
-      • Errores no-transitorios (400 schema) se re-lanzan.
+      • Modelo por defecto: gemini-embedding-2 (GA 2026-04-22, dim 3072 — los
+        anteriores gemini-embedding-001 / text-embedding-004 están retirados;
+        Track 6 deprecations 2026-08-22). Es el único vigente: el fallback es
+        el mismo modelo (llm_embed.py:55-56).
+      • Reintentos con backoff: EMBEDDING_MAX_RETRIES (default 6), salto al
+        fallback tras EMBEDDING_FALLBACK_AFTER (default 3); "Model unavailable"
+        salta inmediato; errores no-transitorios (400 schema) se re-lanzan.
       • Si todo falla → raise RuntimeError("embed_cascade_exhausted").
 
     Pre-rev. 106 esta función no tenía retries transitorios — 503/429

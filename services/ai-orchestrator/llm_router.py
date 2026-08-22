@@ -22,9 +22,9 @@ Uso:
     cascade = generate_with_cascade(invoke, primary_model=primary,
                                      fallback_model=fallback)
 
-Costos (referencia Gemini 2.5 — reales pueden variar):
-  flash:      ~$0.30 input / $2.50 output por 1M tokens.
-  flash-lite: ~$0.10 input / $0.40 output por 1M tokens (3-6x cheaper).
+Costos (pricing oficial 2026-08-22, Gemini 3.x — corregido Track 6; antes citaba 2.5):
+  3.1-flash-lite: $0.25 input / $1.50 output por 1M tokens (cached input $0.025).
+  3.5-flash:      $1.50 input / $9.00 output por 1M tokens.
 
 Estimación: 70% de turnos en chat-commerce son simples (saludos, FAQ,
 catálogo, info). Routing reduce costos ~50-60% sin perder calidad
