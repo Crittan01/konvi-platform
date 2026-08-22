@@ -13,6 +13,7 @@ Eventos:
 """
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -156,15 +157,20 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 async def _send_email_via_resend(
     *, to: str, subject: str, html: str, text: str | None = None,
     idempotency_key: str | None = None, reply_to: str | None = None,
+    tags: list[dict] | None = None,
 ) -> bool:
     """Rev. 94 — Envío real vía Resend API.
 
     Si `RESEND_API_KEY` no está configurada, fallback a logger (no falla
-    el flujo). Resend free tier: 100 emails/día — suficiente para
+    el flujo). Resend free tier: 100 emails/día y 3.000/mes — suficiente para
     notificaciones críticas operacionales.
 
     `idempotency_key` (BLOQUE H): opcional, para callers con reintento
     (ej. cron backup VOIDED) — Resend dedupe 24h, máx 256 chars.
+
+    `tags` (Track 6, 2026-08-22): pares name/value (≤256 chars) que viajan al
+    webhook de eventos — routing por tenant + correlación envío↔evento
+    (la doc multi-tenant oficial prescribe tags para esto).
 
     Docs: https://resend.com/docs/api-reference/emails/send-email
     """
@@ -180,9 +186,10 @@ async def _send_email_via_resend(
         "to": [to],
         "subject": subject,
         "html": html,
+        # Track 6 (2026-08-22): text/plain SIEMPRE (multipart recomendado por
+        # Resend — mejor scoring anti-spam). Fallback: strip básico del HTML.
+        "text": text or re.sub(r"<[^>]+>", " ", html).strip()[:4000],
     }
-    if text:
-        payload["text"] = text
     if reply_to:
         # Los correos salen de `noreply@` de la PLATAFORMA, pero quien vende es el tenant.
         # Sin esto, el comprador que le da "Responder" a su comprobante escribe a un buzón
@@ -190,10 +197,15 @@ async def _send_email_via_resend(
         # documento traiga impreso el correo del vendedor.
         # Campo verificado en la doc oficial de Resend: `reply_to`, string o array.
         payload["reply_to"] = reply_to
+    if tags:
+        payload["tags"] = tags
 
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY}",
         "Content-Type": "application/json",
+        # Track 6 (2026-08-22): User-Agent explícito — Resend lo exige (403 error
+        # 1010 sin él); el default de httpx funcionaba por accidente, no por diseño.
+        "User-Agent": "konvi-orchestrator/1.0",
     }
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key[:256]
@@ -202,6 +214,11 @@ async def _send_email_via_resend(
             res = await client.post(
                 "https://api.resend.com/emails", json=payload, headers=headers,
             )
+        # Track 6: headers de cuota (free tier 100/día + 3.000/mes).
+        _qd = res.headers.get("x-resend-daily-quota")
+        _qm = res.headers.get("x-resend-monthly-quota")
+        if _qd or _qm:
+            logger.info("[EMAIL] resend quota daily=%s monthly=%s", _qd, _qm)
         if 200 <= res.status_code < 300:
             logger.info("[EMAIL][SENT] to=%s subject=%r", to, subject)
             return True
@@ -253,7 +270,13 @@ async def _dispatch_email_event(config: dict[str, Any], payload: dict[str, Any])
         + (f"<p>Conversación: <code>{conv_id}</code></p>" if conv_id else "")
         + f'<p><a href="{inbox_link}">Abrir Inbox</a></p>'
     )
-    return await _send_email_via_resend(to=recipient, subject=subject, html=html)
+    return await _send_email_via_resend(
+        to=recipient, subject=subject, html=html,
+        tags=[
+            {"name": "tenant_id", "value": str(payload.get("tenant_id") or "")},
+            {"name": "event_type", "value": str(event_type)},
+        ],
+    )
 
 
 async def notify_consent_revoked(
@@ -356,6 +379,12 @@ async def _notify_tenant_event(
         attempted += 1
         ok = await _send_email_via_resend(
             to=recipient, subject=subject, html=html_body,
+            # Track 6 (2026-08-22): tags viajan al webhook de eventos (routing
+            # tenant + correlación envío↔evento de entrega/bounce/queja).
+            tags=[
+                {"name": "tenant_id", "value": str(tenant_id)},
+                {"name": "event_type", "value": str(event_type)},
+            ],
         )
         if ok:
             sent_any = True

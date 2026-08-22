@@ -1012,6 +1012,7 @@ def _resp(status=200, payload=None, text=""):
     r.status_code = status
     r.json = lambda: (payload or {"id": "re_1"})
     r.text = text
+    r.headers = {}  # Track 6: el sender lee headers de cuota x-resend-*
     return r
 
 

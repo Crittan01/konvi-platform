@@ -463,14 +463,17 @@ def _send_payment_confirmation_email(
     except Exception:
         items = []
 
-    # 3. Tenant name.
+    # 3. Tenant name (+ email de contacto para reply_to — Track 6 2026-08-22:
+    # las respuestas del cliente van al tenant, no al noreply de plataforma).
     tenant_name = ""
+    tenant_reply_to = ""
     try:
         ten_res = (
             supabase.table("tenants")
-            .select("name").eq("id", tenant_id).single().execute()
+            .select("name, email_contacto").eq("id", tenant_id).single().execute()
         )
         tenant_name = (ten_res.data or {}).get("name") or ""
+        tenant_reply_to = (ten_res.data or {}).get("email_contacto") or ""
     except Exception:
         pass
 
@@ -594,6 +597,9 @@ def _send_payment_confirmation_email(
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                     "Idempotency-Key": idempotency_key,
+                    # Track 6 (2026-08-22): User-Agent explícito — Resend exige uno
+                    # (403 error 1010 sin él); depender del default de httpx es frágil.
+                    "User-Agent": "konvi-api/1.0",
                 },
                 json={
                     "from": from_email,
@@ -603,6 +609,17 @@ def _send_payment_confirmation_email(
                     # Rev. 112 GAP — parte text/plain (mejor scoring anti-spam;
                     # multipart recomendado por Resend).
                     "text": _html_to_text(html),
+                    # Track 6 (2026-08-22): reply_to al tenant (las respuestas del
+                    # cliente no se pierden en el noreply de plataforma).
+                    **({"reply_to": tenant_reply_to} if tenant_reply_to else {}),
+                    # Track 6 (2026-08-22): tags — viajan al webhook de eventos y
+                    # dan routing tenant + correlación webhook↔pedido (la doc
+                    # multi-tenant oficial prescribe tags para esto).
+                    "tags": [
+                        {"name": "tenant_id", "value": str(tenant_id)},
+                        {"name": "order_id", "value": str(order_id)},
+                        {"name": "template", "value": str(template_mode)},
+                    ],
                 },
             )
         # Parseamos el id de Resend para trazabilidad (antes se descartaba).
@@ -611,6 +628,15 @@ def _send_payment_confirmation_email(
             resend_id = ((resp.json() or {}).get("id") or "")
         except Exception:
             resend_id = ""
+        # Track 6: headers de cuota (free tier: 100/día y 3.000/mes) — visibilidad
+        # de agotamiento antes de que el 429 llegue.
+        _quota_daily = resp.headers.get("x-resend-daily-quota")
+        _quota_monthly = resp.headers.get("x-resend-monthly-quota")
+        if _quota_daily or _quota_monthly:
+            logger.info(
+                "[WOMPI][EMAIL] resend quota daily=%s monthly=%s",
+                _quota_daily, _quota_monthly,
+            )
 
         masked = _mask_email(email)
         if resp.status_code in (200, 202):

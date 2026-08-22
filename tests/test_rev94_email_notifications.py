@@ -167,7 +167,7 @@ class NotifyConsentRevokedTests(unittest.TestCase):
     def test_dispatches_email_to_recipient(self):
         sent = []
 
-        async def fake_send(*, to, subject, html, text=None):
+        async def fake_send(*, to, subject, html, text=None, tags=None, reply_to=None, idempotency_key=None):
             sent.append({"to": to, "subject": subject, "html": html})
             return True
 
@@ -228,7 +228,7 @@ class NotifySarReceivedTests(unittest.TestCase):
     def test_export_sar_subject_mentions_export(self):
         sent = []
 
-        async def fake_send(*, to, subject, html, text=None):
+        async def fake_send(*, to, subject, html, text=None, tags=None, reply_to=None, idempotency_key=None):
             sent.append({"subject": subject, "html": html})
             return True
 
@@ -247,7 +247,7 @@ class NotifySarReceivedTests(unittest.TestCase):
     def test_erase_sar_includes_reason(self):
         sent = []
 
-        async def fake_send(*, to, subject, html, text=None):
+        async def fake_send(*, to, subject, html, text=None, tags=None, reply_to=None, idempotency_key=None):
             sent.append({"html": html})
             return True
 
@@ -299,7 +299,7 @@ class NotifyTenantEventTests(unittest.TestCase):
         ])
         sent_to = []
 
-        async def fake_send(*, to, subject, html, text=None):
+        async def fake_send(*, to, subject, html, text=None, tags=None, reply_to=None, idempotency_key=None):
             sent_to.append(to)
             return True
 
@@ -320,7 +320,7 @@ class NotifyTenantEventTests(unittest.TestCase):
         ])
         sent_count = [0]
 
-        async def fake_send(*, to, subject, html, text=None):
+        async def fake_send(*, to, subject, html, text=None, tags=None, reply_to=None, idempotency_key=None):
             sent_count[0] += 1
             return True
 

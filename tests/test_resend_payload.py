@@ -27,6 +27,7 @@ class _Resp:
     def __init__(self, status=200):
         self.status_code = status
         self.text = "ok"
+        self.headers = {}  # Track 6: el sender lee headers de cuota x-resend-*
 
 
 def _enviar(**kw):
@@ -83,8 +84,11 @@ def test_lo_minimo_indispensable_siempre_va():
     assert p["subject"] and p["html"] and p["from"]
 
 
-def test_el_texto_plano_solo_si_existe():
-    assert "text" not in _enviar(**BASE)["payload"]
+def test_el_texto_plano_siempre_va():
+    """Track 6 (2026-08-22, doc oficial Resend): multipart html+text SIEMPRE
+    (mejor scoring anti-spam). Sin `text` explícito, el sender deriva uno del HTML."""
+    p = _enviar(**BASE)["payload"]
+    assert "text" in p and p["text"], "text siempre presente (fallback del HTML)"
     assert _enviar(**BASE, text="hola")["payload"]["text"] == "hola"
 
 
