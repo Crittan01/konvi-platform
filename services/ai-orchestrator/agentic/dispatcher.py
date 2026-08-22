@@ -3346,6 +3346,25 @@ async def _run_agentic_full(
         history_turns=history_turns,
     )
 
+    # B-1 (memoria): regenerar el resumen rodante si la conversación lo
+    # amerita (>ventana + >=SUMMARY_REGEN_MIN_NEW mensajes nuevos). El
+    # outbound recién enviado ya está persistido (queda dentro de la ventana;
+    # se plegará en futuras regeneraciones). Fire-and-forget.
+    try:
+        from agentic.conversation_summary import maybe_update_conversation_summary
+        from orchestrator import CONVERSATION_HISTORY_LIMIT as _HIST_LIMIT
+        await maybe_update_conversation_summary(
+            supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            history_limit=_HIST_LIMIT,
+        )
+    except Exception as _sum_exc:  # noqa: BLE001 — NUNCA rompe el turno
+        logger.info(
+            "[SUMMARY] update post-turn falló conv=%s: %s (best-effort)",
+            conversation_id[:8], _sum_exc,
+        )
+
 
 # ─── State machine helper unificado (rev. 109) ─────────────────────────────
 

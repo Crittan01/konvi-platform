@@ -5145,6 +5145,7 @@ CREATE TABLE IF NOT EXISTS "public"."conversations" (
     "human_takeover_at" timestamp with time zone,
     "contact_name" "text",
     "pending_cancel_confirmation" "jsonb",
+    "conversation_summary" "jsonb",
     CONSTRAINT "conversations_agentic_state_chk" CHECK ((("agentic_state" IS NULL) OR ("agentic_state" = ANY (ARRAY['GREETING'::"text", 'EXPLORING'::"text", 'CART_BUILDING'::"text", 'PII_COLLECTION'::"text", 'SHIPPING_QUOTE'::"text", 'CARRIER_SELECTION'::"text", 'PAYMENT'::"text", 'POST_PAYMENT'::"text", 'HUMAN_HANDOFF'::"text"])))),
     CONSTRAINT "conversations_status_check" CHECK (("status" = ANY (ARRAY['bot_active'::"text", 'human_takeover'::"text", 'closed'::"text", 'opted_out'::"text"])))
 );
@@ -5180,6 +5181,10 @@ COMMENT ON COLUMN "public"."conversations"."contact_name" IS 'Denormalizado sól
 
 
 COMMENT ON COLUMN "public"."conversations"."pending_cancel_confirmation" IS 'B6: cancelación de orden PAGADA pendiente de confirmación (dos turnos). JSONB {order_id, short_id, total_amount, created_at} o NULL. Lo gestiona services/ai-orchestrator/agentic/cancel_intent_resolver.py + dispatcher.';
+
+
+
+COMMENT ON COLUMN "public"."conversations"."conversation_summary" IS 'B-1: resumen rodante de la conversación para el LLM (memoria fuera de la ventana de 25 mensajes). Shape: {text, covers_until_created_at, updated_at, message_count}. Se regenera post-turn con histeresis y se inyecta como primer content de la ventana Gemini.';
 
 
 

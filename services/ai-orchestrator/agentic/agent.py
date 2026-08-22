@@ -111,6 +111,25 @@ class AgenticTurnResult:
     # como "mudo" o "atorado". Mensaje natural ("ya te respondo") +
     # operador toma el control en el Inbox.
     requires_silent_escalation: bool = False
+    # B-1 (routing por estado): modelo real que respondió el turno (primary o
+    # fallback de la cascada) — telemetría por turno hacia agentic_shadow_log.
+    model_used: Optional[str] = None
+
+
+def _trim_messages_for_retry(messages: list[dict], retry_history_limit: int) -> list[dict]:
+    """Corte de historia para el retry por empty_output: preserva el bloque
+    de resumen rodante (primer content) + los N mensajes más recientes.
+
+    B-1: antes `messages[-N:]` — si el primer content era el resumen, se
+    perdía y el bot quedaba con amnesia total en el retry (auditoría
+    2026-08-21: "el retry por empty_output corta history a 5 mensajes").
+    Función pura testeable.
+    """
+    if retry_history_limit <= 0 or len(messages) <= retry_history_limit:
+        return messages
+    from agentic.conversation_summary import is_summary_message
+    head = messages[:1] if messages and is_summary_message(messages[0]) else []
+    return head + messages[-retry_history_limit:]
 
 
 async def run_agentic_turn(
@@ -125,6 +144,9 @@ async def run_agentic_turn(
     supabase: Any,
     system_prompt: str,
     allowed_tools: Optional[set[str]] = None,
+    conversation_summary: Optional[str] = None,
+    model: Optional[str] = None,
+    fallback_model: Optional[str] = None,
 ) -> AgenticTurnResult:
     """Ejecuta UN turn del agente.
 
@@ -139,6 +161,12 @@ async def run_agentic_turn(
       allowed_tools: rev. 109 — set de tool names expuestos al LLM.
         None → todos los tools registrados (legacy/fallback). Per-state
         subset reduce carga cognitiva del modelo.
+      conversation_summary: B-1 — resumen rodante de la conversación
+        (memoria fuera de ventana); se inyecta como primer content de
+        `contents`, nunca en el system prompt.
+      model / fallback_model: B-1 (routing por estado, tras flag) — primary y
+        fallback de ESTE turno. None → defaults de siempre (AGENTIC_MODEL +
+        GEMINI_FALLBACK_MODEL de llm_invoke).
 
     Returns:
       AgenticTurnResult con outbound_text + audit del tool_call_log.
@@ -185,7 +213,7 @@ async def run_agentic_turn(
     )
 
     # Construir messages para Gemini.
-    messages = _build_gemini_messages(history, inbound_text)
+    messages = _build_gemini_messages(history, inbound_text, conversation_summary)
 
     # Llamar Gemini con tools.
     tool_call_log: list[dict] = []
@@ -239,16 +267,22 @@ async def run_agentic_turn(
     # Loop multi-turn de tool calling.
     # Tracking de recovery empty_output (1 retry max por turn).
     empty_recovery_attempt = 0
+    # B-1 (routing por estado): primary/fallback del turno (None = defaults).
+    _turn_model = model or AGENTIC_MODEL
+    _turn_fallback = fallback_model
+    last_model_used: Optional[str] = None
     for turn_idx in range(MAX_TOOL_TURNS):
         try:
-            response = await _gemini_generate_async(
+            response, _mu = await _gemini_generate_async(
                 client,
-                model=AGENTIC_MODEL,
+                model=_turn_model,
                 messages=messages,
                 system_prompt=system_prompt,
                 tools_config=tools_config,
                 temperature=AGENTIC_TEMPERATURE,
+                fallback_model=_turn_fallback,
             )
+            last_model_used = _mu or last_model_used
         except Exception as exc:
             logger.warning("[AGENTIC] gemini call falló: %s", exc)
             return AgenticTurnResult(
@@ -330,9 +364,7 @@ async def run_agentic_turn(
             if should_retry:
                 empty_recovery_attempt += 1
                 # Reducir history para retry (estrategia depende del finish_reason).
-                if retry_history_limit > 0 and len(messages) > retry_history_limit:
-                    # Preservar el último user message + los N más recientes.
-                    messages = messages[-retry_history_limit:]
+                messages = _trim_messages_for_retry(messages, retry_history_limit)
                 # Re-loop con history ajustado (vuelve al try).
                 continue
 
@@ -349,14 +381,16 @@ async def run_agentic_turn(
                     conversation_id,
                 )
                 try:
-                    fallback_response = await _gemini_generate_async(
+                    fallback_response, _mu2 = await _gemini_generate_async(
                         client,
-                        model=AGENTIC_MODEL,
+                        model=_turn_model,
                         messages=messages,
                         system_prompt=system_prompt,
                         tools_config=None,  # ← key: sin tools
                         temperature=AGENTIC_TEMPERATURE,
+                        fallback_model=_turn_fallback,
                     )
+                    last_model_used = _mu2 or last_model_used
                     fallback_text = _extract_text(fallback_response) or ""
                     last_finish_reason = (
                         _extract_finish_reason(fallback_response)
@@ -562,6 +596,7 @@ async def run_agentic_turn(
 def _build_gemini_messages(
     history: Optional[list],
     inbound_text: str,
+    conversation_summary: Optional[str] = None,
 ) -> list[dict]:
     """Construye el array `messages` para Gemini desde history + inbound.
 
@@ -575,7 +610,14 @@ def _build_gemini_messages(
 
     Fix: dedupe — si el último inbound del history coincide (case+strip)
     con `inbound_text`, omitirlo. Función pura testeable.
+
+    B-1 (memoria): `conversation_summary` se inyecta como PRIMER content
+    (role user, prefijo SUMMARY_PROMPT_PREFIX) — la memoria fuera de la
+    ventana viaja en `contents` y NO en el system prompt (preserva el
+    prefijo estable de implicit caching, decisión Track 6).
     """
+    from agentic.conversation_summary import build_summary_message
+
     history_list = list(history or [])
     if history_list:
         last = history_list[-1]
@@ -588,6 +630,8 @@ def _build_gemini_messages(
             history_list = history_list[:-1]
 
     messages: list[dict] = []
+    if conversation_summary:
+        messages.append(build_summary_message(conversation_summary))
     for msg in history_list:
         direction = str(msg.get("direction") or "").lower()
         content = str(msg.get("content") or "").strip()
@@ -609,6 +653,7 @@ async def _gemini_generate_async(
     system_prompt: str,
     tools_config: list,
     temperature: float,
+    fallback_model: Optional[str] = None,
 ):
     """Wrapper async sobre client.models.generate_content con cascada.
 
@@ -617,12 +662,16 @@ async def _gemini_generate_async(
       • Intentos en `model` (primary) con backoff exponencial 1-16s
         (GEMINI_FALLBACK_AFTER, default 2) y presupuesto total por turno
         (LLM_CASCADE_DEADLINE_SECONDS, default 100s — A5 2026-08-02).
-      • Resto de intentos en `GEMINI_FALLBACK_MODEL` (default gemini-3.5-flash)
-        si el primary mantiene 503/429.
+      • Resto de intentos en `fallback_model` si se pasa (B-1 routing por
+        estado: el tier transaccional cae al lite, no al modelo caro), o en
+        `GEMINI_FALLBACK_MODEL` (default gemini-3.5-flash) si no.
       • Errores no-transitorios (bug schema/prompt) se re-lanzan inmediato.
       • Si TODOS los intentos transitorios fallan → raise
         `gemini_cascade_exhausted` para que el dispatcher responda degraded
         + escale (V1 legacy retirado, BLOQUE K-2).
+
+    Devuelve (response, model_used) — el modelo real que respondió (primary o
+    fallback) para telemetría por turno (B-1 routing por estado).
 
     Previo a rev. 106: 1 intento, sin retry, 503 colapsaba directamente.
     """
@@ -673,6 +722,7 @@ async def _gemini_generate_async(
         lambda: generate_with_cascade(
             _invoke_with_model,
             primary_model=model,
+            fallback_model=fallback_model,
         ),
     )
 
@@ -689,7 +739,7 @@ async def _gemini_generate_async(
         "[AGENTIC_CASCADE] model_used=%s attempts=%d",
         cascade_result.model_used, cascade_result.attempts,
     )
-    return cascade_result.response
+    return cascade_result.response, cascade_result.model_used
 
 
 def _part_from_dict(part_dict: dict):
