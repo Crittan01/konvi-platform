@@ -1,9 +1,9 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-08-22 (auditoría profunda del bot + B-0 + conformidad Aveonline + E2E STG — ver primera sección)
+**Última actualización**: 2026-08-22 (**Track 9 CERRADO EN STG** — hardening RLS/grants: 4 migraciones + 99 tests de ataque + guard CI; pendiente aplicar a PRD en descongelamiento · auditoría profunda del bot + B-0 + conformidad Aveonline + E2E STG)
 **Branch activo**: `develop`; `production` = `1e9d54c0` (deploy 2026-08-21). **Nada pasa a PRD hasta cerrar los ajustes en curso (decisión founder).**
-**Ledger**: 254 migraciones en repo = ledger prod (interlock migrate-before-deploy vigente).
-**Tests**: 4.495 pytest + 358 vitest · ruff ≤197 · CI 5/5 · `certify_stg.sh` 18/18.
+**Ledger**: 262 migraciones en repo (258 = ledger prod + 4 Track 9 pendientes de aplicar en el descongelamiento — interlock migrate-before-deploy vigente).
+**Tests**: 4.543 pytest + 306 dbharness + 358 vitest · ruff ≤197 · CI 5/5 · `certify_stg.sh` 18/18.
 
 > **Guía de continuación para sesiones nuevas:** el plan de trabajo operativo vigente es
 > **`docs/PLAN-CIERRE.md`** (tracks 1-5 por ambiente, con owner y verificación por ítem).
@@ -32,11 +32,11 @@
 - Makefile local auditado (auto-recovery DB post-reboot, linger habilitado, Node 22 forzado, `make db`).
 
 **En curso / sigue (en este orden):**
-1. Cierre del commit de conformidad Aveonline (suite corriendo al escribir esto) + checklist Wompi/Meta.
-2. **B-1 calidad conversacional** (la queja original del founder): resumen rodante de conversación, routing de modelo por estado, few-shots, gate de pago no destructivo, convivencia bot↔operador y salida de `human_takeover` (F8), resolvers de afirmación/preguntas mid-flow.
-3. B-2 re-ingeniería del núcleo del dispatcher (state handlers, strangler) → luego Track 5 (M1-M5 dominios modulares).
-4. B-3 harness de evaluación serio · B-4 observabilidad mínima post-Sentry.
-5. **PRD (congelado hasta lo anterior):** aplicar migraciones B-0 ×3 + `20260822020000` por protocolo → deploy → smoke delgado (pago real mínimo). Detalle en PLAN-CIERRE §Paso 4.
+1. ~~Track 9 — SEGURIDAD DB~~ ✅ **CERRADO EN STG 2026-08-22** (C1 + A1-A9 + M1-M14 + bajos + causa raíz con event trigger + guard CI; 4 migraciones `20260822120000`/`…120100`/`…120200`/`…120300` listas para PRD en descongelamiento — detalle y evidencia en bitácora PLAN.md §E).
+2. **Track 6 — Alineación total con docs oficiales** (Wompi 4 llaves, Meta, Supabase, Gemini context caching, Resend webhooks, Telegram; Aveonline ya cerrado). Sigue en el orden.
+3. **B-1 calidad conversacional** (la queja original del founder): resumen rodante de conversación, routing de modelo por estado, few-shots, gate de pago no destructivo, convivencia bot↔operador y salida de `human_takeover` (F8), resolvers de afirmación/preguntas mid-flow.
+4. B-3 harness de evaluación serio (incluye Track 8 adversarial) → B-2 re-ingeniería del núcleo del dispatcher → B-4 observabilidad mínima → Track 7 UX/UI → Track 5 (M1-M5 dominios modulares).
+5. **PRD (congelado hasta Track 9 + migraciones):** aplicar migraciones B-0 ×3 + `20260822020000` + **Track 9 ×4** por protocolo → deploy → smoke delgado (pago real mínimo). Detalle en PLAN-CIERRE §Orden pasos 9-12.
 6. Pendientes founder registrados: desuscribir apps prod de la WABA de prueba (2.5), M19 (verify_token dev), Wompi prod smoke, guía UAT 86732771636 por anular en panel Aveonline.
 
 **Config STG vivo (para re-armado):** tenant `d0000000-…-0001` (KAIU Dev sandbox) con: WhatsApp Test App (`912826941411258`, WABA `2159052118202272`, phone `990364080831295`, verify token + app secret + System User token `commerce-ops` en Vault local), Wompi sandbox (environment=sandbox), Aveonline demo pública (`demointegracion`, empresa `15289`, agente `6135`, dry-run), Resend key `konvi-stg` + sender `Konvi STG <onboarding@resend.dev>`, Telegram `@konvi_stg_bot` + grupo `-5381900925`, Gemini proyecto `konvi-stg`. Usuarios: `dev-owner@konvi.test` / `visual-qa@konvi-qa.test` (owner, password doc en `docs/infra/environments.md` §2.1). Catálogo: 7 productos con pesos/dims. Arranque: `make -C .local db && make -C .local up` (auto-recupera la DB tras reboots).
