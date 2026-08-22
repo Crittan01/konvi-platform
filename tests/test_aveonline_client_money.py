@@ -136,6 +136,9 @@ def _creds(**over):
         "usuario": "user@test.com",
         "password": "secret",
         "empresa_id": "12345",
+        # Tenant configurado: idagente presente → los tests de quote/guía no
+        # disparan la auto-resolución (se testea aparte en ResolveIdagenteTests).
+        "idagente": "6135",
         "jwt_token": "JWT-OLD",
         "jwt_expires_at": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
         "tiempo_token": 100000,
@@ -248,7 +251,12 @@ class JwtExpiredTests(unittest.TestCase):
 class RefreshJwtTests(unittest.TestCase):
     def test_refresh_ok_persiste_y_capea_ttl(self):
         client, sb = _client()
-        queue = [_Resp(200, {"status": "ok", "token": "JWT-NEW"})]
+        queue = [_Resp(200, {
+            "status": "ok", "token": "JWT-NEW",
+            # Response real incluye cuentas[] no vacío (doc oficial auth) —
+            # sin él el cliente lo rechaza como token hueco (password mala).
+            "cuentas": [{"usuarios": [{"id": 12345}]}],
+        })]
         record = _patched_http(self, queue)
 
         token = _run(client._refresh_jwt())
@@ -293,6 +301,17 @@ class RefreshJwtTests(unittest.TestCase):
         with self.assertRaises(ave.AveonlineAuthError):
             _run(client._refresh_jwt())
 
+    def test_status_ok_pero_cuentas_vacias_auth_error(self):
+        """Doc oficial auth: password mala → status ok + token hueco con
+        `cuentas: []`. Debe tratarse como auth error, no cachear el token."""
+        client, _ = _client()
+        _patched_http(self, [_Resp(200, {
+            "status": "ok", "message": "usuario encontrado",
+            "token": "JWT-HUECO", "cuentas": [],
+        })])
+        with self.assertRaises(ave.AveonlineAuthError):
+            _run(client._refresh_jwt())
+
     def test_network_error_transient(self):
         client, _ = _client()
         _patched_http(self, [httpx.ConnectTimeout("boom")])
@@ -309,7 +328,10 @@ class GetValidJwtTests(unittest.TestCase):
     def test_jwt_expirado_refresca(self):
         past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
         client, _ = _client(jwt_expires_at=past)
-        _patched_http(self, [_Resp(200, {"status": "ok", "token": "JWT-NEW"})])
+        _patched_http(self, [_Resp(200, {
+            "status": "ok", "token": "JWT-NEW",
+            "cuentas": [{"usuarios": [{"id": 12345}]}],
+        })])
         self.assertEqual(_run(client._get_valid_jwt()), "JWT-NEW")
 
 
@@ -420,12 +442,22 @@ class QuoteTests(unittest.TestCase):
             _run(client.quote(ORIGIN, DEST, PACKAGE))
 
     def test_quote_numbererror_mapea_excepciones_tipadas(self):
+        # Tabla OFICIAL vigente (doc cotización, fetch 2026-08-22):
+        #   -1 origen no existe / -2 destino no existe / -3 peso ≤0 /
+        #   -4 unidades ≤0 / -5 valor declarado <10k → permanentes (dato inválido)
+        #   -6 unidades>máx / -7 kilos>máx / -1000 trayecto con límites → package limit
+        #   999/-999 servicio no configurado → permanente
+        #   token expirado NO usa numbererror: se detecta por message.
         casos = [
-            ("-1", ave.AveonlineTransientError),
-            ("-2", ave.AveonlineAuthError),
-            ("-3", ave.AveonlineNoCarriersError),
-            ("-7", ave.AveonlinePackageLimitError),
-            ("999", ave.AveonlinePermanentError),  # bug cotizar2 — no debería pasar
+            ("-1", ave.AveonlinePermanentError),   # origen no existe
+            ("-2", ave.AveonlinePermanentError),   # destino no existe
+            ("-3", ave.AveonlinePermanentError),   # peso ≤ 0
+            ("-5", ave.AveonlinePermanentError),   # valor declarado < 10k
+            ("-6", ave.AveonlinePackageLimitError),  # unidades > máx
+            ("-7", ave.AveonlinePackageLimitError),  # kilos > máx
+            ("-1000", ave.AveonlinePackageLimitError),  # trayecto con límites
+            ("999", ave.AveonlinePermanentError),  # servicio no configurado
+            ("-999", ave.AveonlinePermanentError),  # idem con signo
             ("-9", ave.AveonlinePermanentError),   # desconocido → permanente
         ]
         for code, exc_type in casos:
@@ -436,6 +468,26 @@ class QuoteTests(unittest.TestCase):
                 })])
                 with self.assertRaises(exc_type):
                     _run(client.quote(ORIGIN, DEST, PACKAGE))
+
+    def test_quote_auth_error_detectado_por_mensaje(self):
+        """Token expirado llega como message "credenciales incorrectas"
+        (doc oficial + live 2026-08-22), sin numbererror → AuthError."""
+        client, _ = _client()
+        _patched_http(self, [_Resp(200, {
+            "status": "error", "message": "credenciales incorrectas",
+        })])
+        with self.assertRaises(ave.AveonlineAuthError):
+            _run(client.quote(ORIGIN, DEST, PACKAGE))
+
+    def test_quote_status_error_cotizaciones_no_encontradas(self):
+        """Caso documentado "cotizaciones no encontradas" → NoCarriers."""
+        client, _ = _client()
+        _patched_http(self, [_Resp(200, {
+            "status": "error", "message": "cotizaciones no encontradas",
+            "cotizaciones": [],
+        })])
+        with self.assertRaises(ave.AveonlineNoCarriersError):
+            _run(client.quote(ORIGIN, DEST, PACKAGE))
 
     def test_quote_http_5xx_transient(self):
         client, _ = _client()
@@ -471,19 +523,31 @@ class RaiseForNumbererrorTests(unittest.TestCase):
         self.client, _ = _client()
 
     def test_todos_los_codigos(self):
+        # Alineado a la tabla oficial vigente (doc cotización 2026-08-22).
         casos = [
-            ("-1", ave.AveonlineTransientError),
-            ("-2", ave.AveonlineAuthError),
-            ("-3", ave.AveonlineNoCarriersError),
+            ("-1", ave.AveonlinePermanentError),
+            ("-2", ave.AveonlinePermanentError),
+            ("-3", ave.AveonlinePermanentError),
+            ("-4", ave.AveonlinePermanentError),
+            ("-5", ave.AveonlinePermanentError),
+            ("-6", ave.AveonlinePackageLimitError),
             ("-7", ave.AveonlinePackageLimitError),
+            ("-1000", ave.AveonlinePackageLimitError),
             ("999", ave.AveonlinePermanentError),
+            ("-999", ave.AveonlinePermanentError),
             (None, ave.AveonlinePermanentError),
             ("cualquier-otra", ave.AveonlinePermanentError),
         ]
         for code, exc_type in casos:
             with self.subTest(code=code):
                 with self.assertRaises(exc_type):
-                    self.client._raise_for_numbererror(code, "msg")
+                    self.client._raise_for_numbererror(code, "fallo genérico")
+
+    def test_auth_detectada_por_mensaje_aun_sin_code(self):
+        for msg in ("credenciales incorrectas", "autenticacion fallida"):
+            with self.subTest(msg=msg):
+                with self.assertRaises(ave.AveonlineAuthError):
+                    self.client._raise_for_numbererror(None, msg)
 
 
 # ─── generate_guide (generarGuia2) ───────────────────────────────────────────
@@ -728,6 +792,197 @@ class GetEstadoTests(unittest.TestCase):
         result = _run(client.get_estado(tracking_number="GU123"))
         self.assertFalse(result["ok"])
         self.assertEqual(result["guias"], [])
+
+
+# ─── Auto-resolución de idagente (listarAgentes → principal, cache 24h) ──────
+
+_AGENTS_PAYLOAD = {
+    "status": "ok",
+    "agentes": [
+        {"id": 20362, "nombre": "Aveonline", "principal": "NO",
+         "idciudad": "MEDELLIN(ANTIOQUIA)"},
+        {"id": 6135, "nombre": "Demo- Integracion", "principal": "SI",
+         "idciudad": "MEDELLIN(ANTIOQUIA)"},
+    ],
+}
+
+
+class ResolveIdagenteTests(unittest.TestCase):
+    """Conformidad 2026-08-22: sin idagente Aveonline auto-calcula pero con
+    MENOS carriers (live: la demo pierde INTERRAPIDISIMO). El cliente lo
+    auto-resuelve: credentials.idagente → listarAgentes principal (cache 24h,
+    persistencia best-effort vía RPC)."""
+
+    def test_manual_en_credentials_gana_sin_http(self):
+        client, _ = _client()  # _creds base trae idagente="6135"
+        record = _patched_http(self, [])
+        self.assertEqual(_run(client._resolve_idagente(_creds())), "6135")
+        self.assertEqual(record, [], "override manual NO debe llamar la red")
+
+    def test_auto_resuelve_principal_y_persiste(self):
+        client, sb = _client(idagente=None)
+        record = _patched_http(self, [_Resp(200, dict(_AGENTS_PAYLOAD))])
+
+        resolved = _run(client._resolve_idagente(_creds(idagente=None)))
+
+        self.assertEqual(resolved, "6135", "elige el agente principal=SI")
+        self.assertEqual(record[0]["url"], ave.AVEONLINE_AGENTES_URL)
+        self.assertEqual(record[0]["json"]["tipo"], "listarAgentesPorEmpresaAuth")
+        upserts = [p for n, p in sb._rpc_calls if n == "upsert_aveonline_idagente"]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(upserts[0]["p_idagente"], "6135")
+
+    def test_sin_principal_usa_el_primero(self):
+        payload = {"status": "ok", "agentes": [
+            {"id": 111, "nombre": "A", "principal": "NO"},
+            {"id": 222, "nombre": "B", "principal": "NO"},
+        ]}
+        client, _ = _client(idagente=None)
+        _patched_http(self, [_Resp(200, payload)])
+        self.assertEqual(
+            _run(client._resolve_idagente(_creds(idagente=None))), "111",
+        )
+
+    def test_principal_formato_doc_S_tambien_cuenta(self):
+        # La doc de ejemplo usa "S"/"N"; el live usa "SI"/"NO". Ambos valen.
+        payload = {"status": "ok", "agentes": [
+            {"id": 111, "nombre": "A", "principal": "N"},
+            {"id": 222, "nombre": "B", "principal": "S"},
+        ]}
+        client, _ = _client(idagente=None)
+        _patched_http(self, [_Resp(200, payload)])
+        self.assertEqual(
+            _run(client._resolve_idagente(_creds(idagente=None))), "222",
+        )
+
+    def test_cache_24h_evita_segundo_http(self):
+        client, _ = _client(idagente=None)
+        record = _patched_http(self, [_Resp(200, dict(_AGENTS_PAYLOAD))])
+        creds = _creds(idagente=None)
+
+        first = _run(client._resolve_idagente(creds))
+        # Segunda resolución con creds FRESCAS sin idagente: debe usar cache.
+        second = _run(client._resolve_idagente(_creds(idagente=None)))
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(record), 1, "2ª resolución <24h NO debe ir a la red")
+
+    def test_falla_listado_retorna_vacio_sin_romper(self):
+        client, _ = _client(idagente=None)
+        _patched_http(self, [httpx.ConnectError("sin red")])
+        self.assertEqual(_run(client._resolve_idagente(_creds(idagente=None))), "")
+
+    def test_quote_usa_idagente_autoresuelto_en_body(self):
+        client, _ = _client(idagente=None)
+        record = _patched_http(self, [
+            _Resp(200, dict(_AGENTS_PAYLOAD)),               # list_agents
+            _Resp(200, {"cotizaciones": [dict(_QUOTE_ROW)]}),  # cotizarDoble
+        ])
+        result = _run(client.quote(ORIGIN, DEST, PACKAGE))
+        self.assertEqual(len(result.options), 1)
+        self.assertEqual(record[1]["json"]["idagente"], "6135")
+
+
+# ─── Registro webhook OFICIAL (webhookPersonalizadoApi) ──────────────────────
+
+
+class RegisterCustomWebhookTests(unittest.TestCase):
+    """Doc `webhookPersonalizadoApi` (fetch 2026-08-22): upsert por empresa,
+    JWT en header Authorization SIN Bearer, response data.token."""
+
+    def test_created_201_devuelve_token_y_header_sin_bearer(self):
+        client, _ = _client()
+        record = _patched_http(self, [_Resp(201, {
+            "success": True,
+            "data": {"id": 45, "token": "AVE-TOKEN-123", "type": "CUSTOM"},
+            "message": "Custom webhook created successfully",
+        })])
+
+        result = _run(client.register_custom_webhook(
+            name="Konvi tracking t1", webhook_url="https://api.konvi.app/wh",
+        ))
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["token"], "AVE-TOKEN-123")
+        self.assertFalse(result["updated"])
+        self.assertEqual(record[0]["url"], ave.AVEONLINE_CUSTOM_WEBHOOK_URL)
+        self.assertEqual(record[0]["headers"], {"Authorization": "JWT-OLD"})
+        self.assertEqual(record[0]["json"]["webhookUrl"], "https://api.konvi.app/wh")
+
+    def test_updated_200_marca_updated(self):
+        client, _ = _client()
+        _patched_http(self, [_Resp(200, {
+            "success": True,
+            "data": {"id": 45, "token": "AVE-TOKEN-123"},
+            "message": "Custom webhook updated successfully",
+        })])
+        result = _run(client.register_custom_webhook(
+            name="n", webhook_url="https://x",
+        ))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["updated"])
+
+    def test_403_token_invalido_auth_error(self):
+        client, _ = _client()
+        _patched_http(self, [_Resp(403, {"success": False, "error": "Invalid token provided"})])
+        with self.assertRaises(ave.AveonlineAuthError):
+            _run(client.register_custom_webhook(name="n", webhook_url="https://x"))
+
+    def test_422_payload_invalido_permanent(self):
+        client, _ = _client()
+        _patched_http(self, [_Resp(422, {"success": False, "error": "Validation failed"})])
+        with self.assertRaises(ave.AveonlinePermanentError):
+            _run(client.register_custom_webhook(name="n", webhook_url="no-es-url"))
+
+    def test_network_transient(self):
+        client, _ = _client()
+        _patched_http(self, [httpx.ConnectError("sin red")])
+        with self.assertRaises(ave.AveonlineTransientError):
+            _run(client.register_custom_webhook(name="n", webhook_url="https://x"))
+
+
+# ─── Quote COD con valorrecaudo (doc cotización: valorOtrosRecaudos) ─────────
+
+
+class QuoteCodRecaudoTests(unittest.TestCase):
+    def test_quote_cod_envia_valorrecaudo_y_combo_pago(self):
+        """COD: contraentrega=1 + idasumecosto=1 + valorrecaudo>0 — combo
+        "destinatario paga todo" de la tabla oficial, espejo de generate_guide."""
+        client, _ = _client()
+        record = _patched_http(self, [_Resp(200, {"cotizaciones": [dict(_QUOTE_ROW)]})])
+        package = dict(PACKAGE, cod_enabled=True, valorrecaudo=50000)
+
+        _run(client.quote(ORIGIN, DEST, package))
+
+        body = record[0]["json"]
+        self.assertEqual(body["contraentrega"], 1)
+        self.assertEqual(body["idasumecosto"], 1)
+        self.assertEqual(body["valorrecaudo"], 50000)
+
+    def test_quote_sin_cod_recaudo_cero(self):
+        client, _ = _client()
+        record = _patched_http(self, [_Resp(200, {"cotizaciones": [dict(_QUOTE_ROW)]})])
+        package = dict(PACKAGE, cod_enabled=True, valorrecaudo=50000)
+        # cod_enabled False aunque venga valorrecaudo → recaudo 0 (defensivo).
+        package["cod_enabled"] = False
+
+        _run(client.quote(ORIGIN, DEST, package))
+
+        body = record[0]["json"]
+        self.assertEqual(body["contraentrega"], 0)
+        self.assertEqual(body["idasumecosto"], 0)
+        self.assertEqual(body["valorrecaudo"], 0)
+
+    def test_recaudo_es_parte_de_la_llave_de_cache(self):
+        """Dos quotes COD con distinto recaudo NO deben compartir cache."""
+        client, _ = _client()
+        record = _patched_http(self, [
+            _Resp(200, {"cotizaciones": [dict(_QUOTE_ROW)]}),
+            _Resp(200, {"cotizaciones": [dict(_QUOTE_ROW)]}),
+        ])
+        _run(client.quote(ORIGIN, DEST, dict(PACKAGE, cod_enabled=True, valorrecaudo=50000)))
+        _run(client.quote(ORIGIN, DEST, dict(PACKAGE, cod_enabled=True, valorrecaudo=90000)))
+        self.assertEqual(len(record), 2, "distinto recaudo = distinta llave de cache")
 
 
 if __name__ == "__main__":

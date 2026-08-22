@@ -493,27 +493,27 @@ async def list_aveonline_agents(
     """Lista los agentes (puntos de despacho) registrados en la cuenta
     Aveonline del tenant.
 
-    Endpoint Aveonline:
-      `POST https://app.aveonline.co/api/comunes/v1.0/agentes.php`
-      body: `{tipo: 'listarAgentesPorEmpresaAuth', token, idempresa}`
+    Delega en `AveonlineClient.list_agents()` (endpoint oficial
+    `listarAgentesPorEmpresaAuth`, doc
+    `integraciones.aveonline.co/docs/nacional/agentes/listadoAgentes`).
 
     UX: tenant elige un agente del dropdown (en lugar de buscar el ID
-    manualmente en el panel Aveonline). El `principal: 'SI'` se sugiere
+    manualmente en el panel Aveonline). El `principal` se sugiere
     por default. Se persiste en `tenant_integrations.credentials.idagente`.
+    Si el tenant nunca elige, el cliente auto-resuelve al principal en
+    runtime (cache 24h) — ver `_resolve_idagente`.
 
     Permite a `owner` y `manager` — config operacional, no destructiva.
     """
     if role not in ("owner", "manager"):
         raise HTTPException(403, "Solo owner/manager pueden ver agentes")
 
-    import httpx
-
     from integrations.aveonline_client import AveonlineClient
 
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
     try:
-        jwt = await client._get_valid_jwt()
         creds = await client._load_credentials()
+        result = await client.list_agents()
     except Exception as exc:
         raise HTTPException(
             502,
@@ -521,47 +521,16 @@ async def list_aveonline_agents(
             f"Verifica que la integración esté conectada.",
         )
 
-    empresa_id = creds.get("empresa_id")
-    if not empresa_id:
-        raise HTTPException(422, "Aveonline no retornó empresa_id en auth")
-
-    body = {
-        "tipo": "listarAgentesPorEmpresaAuth",
-        "token": jwt,
-        "idempresa": empresa_id,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
-            resp = await c.post(
-                "https://app.aveonline.co/api/comunes/v1.0/agentes.php",
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Aveonline HTTP error: {exc}")
-
-    if data.get("status") != "ok":
+    if not result.get("ok"):
         return {
             "agents": [],
-            "warning": data.get("message") or "sin agentes",
+            "warning": result.get("message") or "sin agentes",
         }
 
-    agents_raw = data.get("agentes") or []
-    agents = [
-        {
-            "id": str(a.get("id") or ""),
-            "nombre": str(a.get("nombre") or ""),
-            "direccion": str(a.get("direccion") or ""),
-            "idciudad": str(a.get("idciudad") or ""),
-            "telefono": str(a.get("telefono") or ""),
-            "email": str(a.get("email") or ""),
-            "principal": (a.get("principal") or "").upper() in ("S", "SI"),
-        }
-        for a in agents_raw
-        if a.get("id")
-    ]
-    agents.sort(key=lambda x: (not x["principal"], x["nombre"]))
+    agents = sorted(
+        result.get("agents") or [],
+        key=lambda x: (not x["principal"], x["nombre"]),
+    )
     return {
         "agents": agents,
         "current_idagente": creds.get("idagente") or None,
@@ -697,14 +666,16 @@ async def aveonline_guide_dry_run(
     from lib.dane_resolver import resolve_dane_from_city
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
     # `idagente` (dirección de despacho Aveonline) NO vive en tenants: se lee
-    # de las credenciales de la integración (mismo patrón que
-    # aveonline_client.generate_guide). Aquí solo para diagnostics — el
-    # cliente lo re-lee internamente al generar (cache compartido).
+    # de las credenciales de la integración. Aquí solo para diagnostics — el
+    # cliente lo auto-resuelve internamente al generar (credentials.idagente →
+    # listarAgentes principal con cache 24h, ver `_resolve_idagente`). El
+    # fallback histórico a `asesor_logistico` se eliminó 2026-08-22: es el
+    # asesor COMERCIAL de la cuenta, no un agente de despacho.
     try:
         _creds = await client._load_credentials()
     except Exception:
         _creds = {}
-    idagente = _creds.get("idagente") or _creds.get("asesor_logistico") or ""
+    idagente = str(_creds.get("idagente") or "")
 
     # Bug fix rev. 109 (2026-05-31): Aveonline `generarGuia2` rechaza destino
     # sin DANE. Precedencia: shipping_meta.dane_code (resuelto al cotizar) →
@@ -835,21 +806,22 @@ async def aveonline_guide_dry_run(
 # Endpoints para configurar / rotar / consultar / eliminar el webhook
 # `webhookEstadosGuias` de Aveonline para este tenant.
 #
-# Flujo configure (primera vez):
-#   1. Backend genera UUIDv4 plaintext, lo hashea con bcrypt (F.10).
-#   2. Persiste hash en `tenant_webhook_secrets` (integration='aveonline').
-#   3. Llama `AveonlineClient.create_webhook` con URL pública + plaintext.
-#   4. Retorna URL + plaintext UNA VEZ (UI lo muestra al tenant para
-#      copiar si Aveonline lo pide después; después se descarta).
+# Flujo configure (2026-08-22 — oficial primero, legacy fallback):
+#   1. OFICIAL (`webhookPersonalizadoApi`): `register_custom_webhook` hace
+#      upsert por empresa (única URL de tracking por cuenta); Aveonline
+#      devuelve `data.token` y lo reenvía top-level en cada POST → su hash
+#      bcrypt se persiste vía `store_external_secret` (con grace period).
+#   2. FALLBACK legacy AveCRM: backend genera UUIDv4 plaintext, lo hashea
+#      (F.10), lo persiste en `tenant_webhook_secrets` y llama
+#      `AveonlineClient.create_webhook` (avestock) con URL + plaintext como
+#      param1. Retorna URL + plaintext UNA VEZ.
+#   En ambos casos el response incluye `mechanism` para diagnóstico.
 #
 # Flujo rotate:
-#   1. Genera nuevo plaintext + nuevo hash.
-#   2. Mueve hash actual a `previous_secret_hash` con `grace_period_until`
-#      = now+7d (permite que Aveonline siga enviando con el viejo durante
-#      la migración del panel).
-#   3. Llama Aveonline `delete_webhook` (vieja URL si cambió) + `create_webhook`
-#      con nuevo plaintext.
-#   4. Retorna nuevo plaintext UNA VEZ.
+#   1. Mismo doble camino (rotate = configure).
+#   2. El hash anterior pasa a `previous_secret_hash` con `grace_period_until`
+#      = now+7d (Aveonline puede seguir enviando con el viejo durante la
+#      migración del panel).
 
 
 def _public_webhook_base_url() -> str:
@@ -929,15 +901,19 @@ async def aveonline_webhook_configure(
     """Configura webhook por primera vez (o lo rota si ya existía).
 
     Pasos:
-      1. Genera secret plaintext + hash (F.10).
-      2. Persiste en `tenant_webhook_secrets`.
-      3. Intenta eliminar webhook viejo en Aveonline (si existe).
-      4. Registra webhook nuevo en Aveonline con URL + secret.
+      1. Intenta el mecanismo OFICIAL vigente (`webhookPersonalizadoApi`):
+         upsert por empresa vía `register_custom_webhook` — Aveonline genera
+         el token y lo reenvía top-level en cada POST; su hash se persiste
+         via `store_external_secret` (grace period igual que una rotación).
+      2. Fallback LEGACY AveCRM (`createWebhook.php` con param1 secret
+         generado localmente) si el oficial no está disponible para la
+         cuenta — comportamiento previo a 2026-08-22.
 
     Response:
       {
         "ok": bool,
         "url": str,
+        "mechanism": "custom-webhook" | "legacy-avestock" | None,
         "plaintext_secret": str,   # SOLO UNA VEZ
         "aveonline_registered": bool,
         "aveonline_message": str,
@@ -948,70 +924,124 @@ async def aveonline_webhook_configure(
             403, "Solo el owner puede configurar webhooks de integraciones",
         )
 
-    from lib.webhook_secret_manager import rotate_secret
+    from lib.webhook_secret_manager import rotate_secret, store_external_secret
 
     url = _build_aveonline_webhook_url(tenant_id)
-    rotation = rotate_secret(
-        supabase, tenant_id=tenant_id, integration="aveonline",
-        actor_id=None,  # FastAPI Depends de user no se incluyó — futuro F2.
-        reason="aveonline_webhook_configure",
-    )
-    plaintext = rotation.plaintext_secret
 
-    # Intentar registrar en Aveonline (best-effort — si falla, el secret
-    # ya quedó en DB y el tenant puede invocar registro manual).
     aveonline_registered = False
     aveonline_message = ""
+    mechanism: str | None = None
+    rotation = None
+    plaintext = ""
+
+    from integrations.aveonline_client import AveonlineClient
+    client = AveonlineClient(tenant_id=tenant_id, supabase=supabase)
+
+    # 1) OFICIAL: custom-webhook (upsert por empresa; token generado por
+    #    Aveonline). Si responde OK con token → persistir hash de ESE token.
     try:
-        from integrations.aveonline_client import AveonlineClient
-        client = AveonlineClient(tenant_id=tenant_id, supabase=supabase)
-
-        # Defensive: borrar webhook viejo con misma URL si existe.
-        try:
-            await client.delete_webhook(url=url)
-        except Exception as exc:
-            logger.info(
-                "[AVEONLINE_WH_CFG] delete_webhook previo falló (esperable "
-                "si era primera config): %s",
-                exc,
+        official = await client.register_custom_webhook(
+            name=f"Konvi tracking {tenant_id[:8]}",
+            webhook_url=url,
+        )
+        if official.get("ok") and official.get("token"):
+            rotation = store_external_secret(
+                supabase, tenant_id=tenant_id, integration="aveonline",
+                plaintext=official["token"],
+                actor_id=None,  # FastAPI Depends de user no se incluyó — futuro F2.
+                reason="aveonline_webhook_configure_official",
             )
-
-        result = await client.create_webhook(
-            url=url,
-            secret=plaintext,
-            extra_params={"tenant_id": tenant_id, "source": "konvi"},
-        )
-        aveonline_registered = bool(result.get("ok"))
-        aveonline_message = result.get("message") or ""
-        logger.info(
-            "[AVEONLINE_WH_CFG] register tenant=%s ok=%s msg=%s",
-            tenant_id, aveonline_registered, aveonline_message,
-        )
+            plaintext = official["token"]
+            aveonline_registered = True
+            mechanism = "custom-webhook"
+            aveonline_message = official.get("message") or ""
+            logger.info(
+                "[AVEONLINE_WH_CFG] official register tenant=%s updated=%s msg=%s",
+                tenant_id, official.get("updated"), aveonline_message,
+            )
+        else:
+            aveonline_message = (
+                official.get("message") or "custom-webhook sin token en response"
+            )
+            logger.warning(
+                "[AVEONLINE_WH_CFG] official register not-ok tenant=%s: %s — "
+                "fallback legacy",
+                tenant_id, aveonline_message,
+            )
     except Exception as exc:
         logger.warning(
-            "[AVEONLINE_WH_CFG] aveonline register err tenant=%s: %s",
+            "[AVEONLINE_WH_CFG] official register err tenant=%s: %s — "
+            "fallback legacy",
             tenant_id, exc,
         )
-        aveonline_message = f"error registrando en Aveonline: {exc}"
+        aveonline_message = f"custom-webhook: {exc}"
+
+    # 2) FALLBACK LEGACY (AveCRM avestock con secret local en param1).
+    if not aveonline_registered:
+        rotation = rotate_secret(
+            supabase, tenant_id=tenant_id, integration="aveonline",
+            actor_id=None,  # FastAPI Depends de user no se incluyó — futuro F2.
+            reason="aveonline_webhook_configure",
+        )
+        plaintext = rotation.plaintext_secret
+        try:
+            # Defensive: borrar webhook viejo con misma URL si existe.
+            try:
+                await client.delete_webhook(url=url)
+            except Exception as exc:
+                logger.info(
+                    "[AVEONLINE_WH_CFG] delete_webhook previo falló (esperable "
+                    "si era primera config): %s",
+                    exc,
+                )
+
+            result = await client.create_webhook(
+                url=url,
+                secret=plaintext,
+                extra_params={"tenant_id": tenant_id, "source": "konvi"},
+            )
+            aveonline_registered = bool(result.get("ok"))
+            if aveonline_registered:
+                mechanism = "legacy-avestock"
+            legacy_msg = result.get("message") or ""
+            aveonline_message = (
+                f"{aveonline_message} | legacy: {legacy_msg}"
+                if aveonline_message else legacy_msg
+            )
+            logger.info(
+                "[AVEONLINE_WH_CFG] legacy register tenant=%s ok=%s msg=%s",
+                tenant_id, aveonline_registered, legacy_msg,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[AVEONLINE_WH_CFG] legacy register err tenant=%s: %s",
+                tenant_id, exc,
+            )
+            aveonline_message = (
+                f"{aveonline_message} | legacy error: {exc}"
+                if aveonline_message else f"error registrando en Aveonline: {exc}"
+            )
 
     # Audit nota: `audit_log` en este repo es un decorador FastAPI (opt-in
     # via @audit_log(...) sobre handlers). Para auditoría imperativa el
     # registro queda implícito en `tenant_webhook_secrets.audit_log` JSONB
-    # via `rotate_secret()` arriba — esa fila lleva el historial de
-    # eventos (created|rotated|revoked, actor_id, reason, timestamp).
+    # via `rotate_secret()`/`store_external_secret()` arriba — esa fila
+    # lleva el historial de eventos (created|rotated|revoked, actor_id,
+    # reason, timestamp).
     logger.info(
-        "[AVEONLINE_WH_CFG] tenant=%s configured url=%s aveonline_ok=%s",
-        tenant_id, url, aveonline_registered,
+        "[AVEONLINE_WH_CFG] tenant=%s configured url=%s mechanism=%s aveonline_ok=%s",
+        tenant_id, url, mechanism, aveonline_registered,
     )
 
     return {
         "ok": True,
         "url": url,
+        "mechanism": mechanism,
         "plaintext_secret": plaintext,
         "aveonline_registered": aveonline_registered,
         "aveonline_message": aveonline_message,
-        "rotated_at": rotation.record.rotated_at,
-        "expires_at": rotation.record.expires_at,
+        "rotated_at": rotation.record.rotated_at if rotation else None,
+        "expires_at": rotation.record.expires_at if rotation else None,
     }
 
 

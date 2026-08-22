@@ -59,6 +59,9 @@ _VALID_CREDS = {
     "usuario": "demointegracion",
     "password": "demointegra2021",
     "empresa_id": 15289,
+    # Tenant ya configurado: idagente presente → quote() NO auto-resuelve
+    # (la auto-resolución se testea aparte en test_aveonline_client_money.py).
+    "idagente": "6135",
     "jwt_token": "fake-jwt-token",
     "jwt_expires_at": (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat(),
     "tiempo_token": 100000,
@@ -192,14 +195,31 @@ class AveonlineClientQuoteTests(unittest.TestCase):
                     self.origin, self.destination, self.package,
                 ))
 
-    def test_quote_numbererror_3_sin_carriers(self):
+    def test_quote_status_error_cotizaciones_no_encontradas_es_no_carriers(self):
+        """Doc oficial cotización: `status:error` + "cotizaciones no
+        encontradas" = sin cobertura → NoCarriers (no permanente genérico)."""
         response = {
             "status": "error",
-            "numbererror": "-3",
-            "message": "Sin transportadoras para ruta",
+            "message": "cotizaciones no encontradas",
+            "cotizaciones": [],
         }
         with self._mock_httpx(200, response):
             with self.assertRaises(AveonlineNoCarriersError):
+                _run(self.client.quote(
+                    self.origin, self.destination, self.package,
+                ))
+
+    def test_quote_numbererror_3_es_permanente_tabla_oficial(self):
+        """Tabla oficial vigente (fetch 2026-08-22): -3 = "peso no puede ser
+        negativo o menor a cero" → PERMANENTE (bug del caller), NO "sin
+        carriers" como decía el mapeo histórico."""
+        response = {
+            "status": "error",
+            "numbererror": "-3",
+            "message": "El peso no puede ser negativo o menor a cero",
+        }
+        with self._mock_httpx(200, response):
+            with self.assertRaises(AveonlinePermanentError):
                 _run(self.client.quote(
                     self.origin, self.destination, self.package,
                 ))

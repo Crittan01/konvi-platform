@@ -224,6 +224,14 @@ async def quote_shipping_for_cart_aveonline(
                 # Rev. 108 Fase B — Aveonline cotizarDoble debe saber si es
                 # COD para retornar la tarifa correcta. Antes hardcoded False.
                 "cod_enabled": quote_cod_enabled,
+                # Conformidad doc cotización 2026-08-22: la comisión de recaudo
+                # (`valorOtrosRecaudos`) solo entra al `total` si se envía el
+                # monto a recaudar. Aproximación: total del cart en COP (el
+                # recaudo real incluye el envío, aún desconocido al cotizar —
+                # misma aproximación conservadora del filtro min-recaudo).
+                "valorrecaudo": (
+                    int(cart_total_cents) // 100 if quote_cod_enabled else 0
+                ),
             },
         )
     except AveonlineAuthError as exc:

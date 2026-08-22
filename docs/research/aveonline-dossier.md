@@ -2078,6 +2078,50 @@ Producción-ready Aveonline si **todos** estos cumplen 30 días post-cutover ofi
 
 ---
 
-**Fin del dossier (versión 101% — 2026-05-21).**
+## 26. Addendum 2026-08-22 — conformidad contra doc oficial vigente + probes live (cuenta demo)
+
+> **Alcance.** Re-verificación completa acción × doc × código: fetch directo del devsite (`integraciones.aveonline.co`, sitemap incluido) + probes live contra la cuenta demo pública `demointegracion` (idempresa 15289). Todo lo afirmado aquí fue visto hoy; lo que no se pudo verificar queda marcado GAP.
+
+### 26.1 Doc oficial vigente — páginas verificadas hoy
+
+Fetch OK: `nacional/autenticacion`, `nacional/cotizacion` (documenta `cotizar2` con tabla numbererror oficial -0-/-1/-2/-3/-4/-5/-6/-7/-999/-1000 + tabla "Formas de pago de la guía"), `nacional/generacionGuia`, `nacional/solicitudRecogida`, `nacional/estadoGuia`, `nacional/agentes/listadoAgentes`, `webhookEstadosGuias`, **`webhookPersonalizadoApi`** (registro oficial del webhook — upsert por empresa), **`sandbox/sandbox-introduccion` + `sandbox-avanzarEstado` + `sandbox-obtenerEstadoAuth`** (API Sandbox, empresas 6077/25505), `tiposEstadosEnvios`/`tiposEstadosNovedades` (catálogos homologados vía `envios.api.aveonline.co`). Páginas nuevas no evaluadas (fuera del flujo actual): `reimpresionGuiasV1`, `listadoDestinatarios`, `listadoOficinasTransportadoras*`, `Ordenesdecompra/*`, `registro-clientes-api/*`, AveCRM suite.
+
+**Confirmaciones negativas vía sitemap (inventario completo del sitio):**
+- **NO existe página de cancelación de guía individual** (`cancelarGuia`) — se mantiene la conclusión §8.2 + UAT 2026-08-03 ("parametro incorrecto"). La única primitiva documentada sigue siendo `eliminarRelacionEnvios` (batch v2).
+- **NO existe página de `cotizarDoble`** — la doc oficial solo documenta `cotizar2`. `cotizarDoble` sigue respaldado por el plugin WooCommerce oficial + probes live (hoy: 5 carriers reales Bogotá→Bogotá). GAP-DOC persistente, sin riesgo operativo.
+
+### 26.2 Hallazgos live (cuenta demo, 2026-08-22 UTC)
+
+| # | Probe | Resultado | Implicación |
+|---|---|---|---|
+| L1 | Auth v1 con `tiempoToken: 3600` | JWT con `exp = now + 12.960.000 s` (= 3600 **horas** ≈ 150 días) | El server interpreta `tiempoToken` en **HORAS** y lo estampa en `exp`. La doc ("vigencia 1 hora") describe el default. Se MANTIENE el cap de cache 3600 s (doc-conforme, conservador) |
+| L2 | `cotizarDoble` Bogotá→Bogotá con `idagente=6135` | 5 carriers `-0-`: COORDINADORA $7.530 / SERVIENTREGA $8.700 / ENVIA $8.950 / INTERRAPIDISIMO $9.500 / TCC $16.600; filas 999 filtradas | Cotización sana; filtro por `numbererror != "-0-"` correcto |
+| L3 | `cotizarDoble` SIN `idagente` | Solo 4 carriers `-0-` — **pierde INTERRAPIDISIMO** | La doc dice "si no se pasa, se calcula el agente" pero el cálculo server-side cubre MENOS carriers → auto-resolución client-side justificada (implementada: `listarAgentes` → principal, cache 24 h) |
+| L4 | `listarAgentesPorEmpresaAuth` | 4 agentes; `principal` viene `"SI"/"NO"` (el ejemplo de la doc usa `"S"/"N"`) — principal = id **6135** "Demo- Integracion" | Parser tolera ambos formatos |
+| L5 | `cotizarDoble` con `valorDeclarado=5000` (<10 k) | `status:"ok"` + `cotizaciones: []` + message "No hay cotizaciones encontradas…" | El mínimo de $10.000 NO llega como numbererror -5 por fila en cotizarDoble: llega como 0 opciones → `NoCarriers`. El floor client-side (10 k) previene el caso |
+| L6 | `cotizarDoble` COD (`contraentrega=1`, `valorrecaudo=50000`) | Carriers devuelven `valorOtrosRecaudos=0`, `contraentrega=false` | La cuenta demo NO tiene recaudo activo → el pricing COD (comisión) no es verificable con ella. GAP de verificación de tercero |
+| L7 | `generarGuia2` dry-run (`bloquegenerarguia="0"`) con `dsnit="00000"` y con `dsnit=""` | `status:"error"`: "El campo dsnit es inválido. Debe ser numérico, tener al menos 5 dígitos y ser mayor a 10000." | El server exige documento del destinatario SIEMPRE (la doc solo lo exige si `valorrecaudo>0`; el ejemplo de la doc usa `"00000"` → **doc desactualizada vs server**). Guard client-side implementado (skip fail-visible antes del claim) |
+| L8 | `generarGuia2` dry-run con `dsnit=12345678` | `status:"ok"`, `guia.codigo:"0"`, `numguia:2178931773` (simulada, NO factura) | Schema `resultado.guia.{codigo,mensaje,numguia,rutaguia,rotulo,rutasticker,transportadora}` conforme al parseo del cliente |
+| L9 | Sandbox `avanzarEstado` con id=15289 (no sandbox) | HTTP 403 `{"status":"error","message":"avanzarEstado solo está habilitado para las empresas sandbox (6077, 25505)"}` (vía `app.aveonline.co`; el host `aveonline.co` bloquea curl por Cloudflare) | Endpoint sandbox EXISTE y la restricción de empresas es real |
+| L10 | Sandbox `obtenerEstadoAuth` con token de la demo pidiendo id=25505 | HTTP 401 `{"status":"error","message":"autenticacion fallida"}` | El sandbox exige el token de la empresa sandbox — segregación por empresa confirmada |
+| L11 | `POST api-integrations/.../custom-webhook` SIN token | HTTP 403 `{"success":false,"error":"Token not provided"}` | El endpoint oficial de registro de webhook EXISTE y responde como la doc |
+| L12 | `GET envios.api.aveonline.co/api/v1/states/types` con JWT v1 | HTTP 400 `Incorrect key for this algorithm` (firebase JWT) | El catálogo homologado de estados existe pero NO acepta el JWT v1 de la demo (¿requiere token v2/marca blanca?). GAP de verificación de tercero — sin impacto: el flujo de estados del sandbox ya está cubierto en el mapping |
+
+### 26.3 Flujo de estados canónico (doc sandbox, fetch hoy)
+
+`GENERADA → PRODUCIDA → EN DESPACHO → EN REPARTO → ENTREGADA`, forzable a `EN NOVEDAD` desde cualquier estado; terminales `ENTREGADA` y `ANULADA`. El payload oficial del webhook (`webhookEstadosGuias`) incluye `token` top-level, `numeropedidoExterno`, `guiadigitalizada`, `fechaentrega` y por estado `fechacreacion`/`fechanovedad`/`comentarionovedad`/`tiponovedad`. Mapping RAW→interno del repo actualizado para cubrir el flujo completo (incl. `ANULADA` → `cancelled`).
+
+### 26.4 Cambios aplicados al código con esta evidencia (2026-08-22)
+
+1. **Auto-resolución de `idagente`** en `AveonlineClient._resolve_idagente` (credentials → listarAgentes principal, cache 24 h, persistencia vía RPC `upsert_aveonline_idagente`); eliminado el fallback incorrecto a `asesorlogistico` (es el asesor comercial, no un agente).
+2. **Tabla `numbererror` alineada a la doc oficial**: `-1/-2` (origen/destino no existe) y `-3/-4/-5` (peso/unidades/valor declarado inválidos) → permanentes; `-6/-7/-1000` → package-limit; `999/-999` → permanente. El mapeo histórico (-1 transient, -2 auth, -3 "sin carriers") contradecía la doc. Auth se detecta por MENSAJE ("credenciales incorrectas"/"autenticacion fallida").
+3. **Auth**: `status:"ok"` + `cuentas: []` (password mala, doc oficial) → `AveonlineAuthError` (antes cacheaba un token hueco).
+4. **Webhook**: registro por endpoint oficial `webhookPersonalizadoApi` (upsert por empresa; `data.token` generado por Aveonline se persiste bcrypt vía `store_external_secret`) con fallback al legacy AveCRM `createWebhook.php`. `comentarionovedad` se persiste como `description` del evento.
+5. **Cotización COD**: se envía `valorrecaudo` (antes 0 → sub-preciaba la comisión de recaudo) + combo `contraentrega=1/idasumecosto=1` coherente con `generarGuia2` (tabla oficial "Formas de pago").
+6. **Guía**: guard `dsnit` (numérico ≥5 dígitos >10000, saneado a dígitos) antes del claim — el server lo exige siempre (L7).
+
+---
+
+**Fin del dossier (versión 101% — 2026-05-21; addenda 2026-08-16 API Sandbox + 2026-08-22 conformidad doc vigente).**
 
 > **Estado**: 8/8 brechas "NO ENCONTRADO" cerradas con evidencia oficial verificada o procedimiento de escalación documentado. 5 secciones nuevas (§21-§25) agregadas: comparativa Aveonline vs Envia con scoring, plan de migración 8 días-dev, resolución bug conv `5cef2503`, diseño integración tool agentic provider-agnostic, runbook operacional con SLOs + procedimientos por incidente. Total: 1700+ líneas, 23+ fuentes oficiales citadas (Aveonline docs + plugin GitHub + sitios carrier directos + LinkedIn empresa). Sin suposiciones — cada hallazgo cita URL o reporta "Confirmado NO documentado" con acción de escalación específica.

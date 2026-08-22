@@ -206,6 +206,12 @@ class _FakeAveClient:
     webhook_result = {"ok": True, "message": "registered"}
     webhook_exc = None
     delete_webhook_exc = None
+    agents_result = {"ok": True, "agents": [], "message": ""}
+    agents_exc = None
+    custom_webhook_result = {
+        "ok": True, "token": "AVE-TOKEN-1", "message": "created", "updated": False,
+    }
+    custom_webhook_exc = None
     last = None
 
     def __init__(self, supabase=None, tenant_id=None):
@@ -218,6 +224,8 @@ class _FakeAveClient:
         return self.jwt
 
     async def _load_credentials(self, force_refresh=False):
+        if self.auth_exc is not None:
+            raise self.auth_exc
         return dict(self.creds)
 
     async def generate_guide(self, **kwargs):
@@ -230,6 +238,17 @@ class _FakeAveClient:
         if self.carriers_exc is not None:
             raise self.carriers_exc
         return dict(self.carriers_result)
+
+    async def list_agents(self):
+        if self.agents_exc is not None:
+            raise self.agents_exc
+        return dict(self.agents_result)
+
+    async def register_custom_webhook(self, **kwargs):
+        self.calls["register_custom_webhook"] = kwargs
+        if self.custom_webhook_exc is not None:
+            raise self.custom_webhook_exc
+        return dict(self.custom_webhook_result)
 
     async def create_webhook(self, **kwargs):
         self.calls["create_webhook"] = kwargs
@@ -255,6 +274,12 @@ def _reset_ave():
     _FakeAveClient.webhook_result = {"ok": True, "message": "registered"}
     _FakeAveClient.webhook_exc = None
     _FakeAveClient.delete_webhook_exc = None
+    _FakeAveClient.agents_result = {"ok": True, "agents": [], "message": ""}
+    _FakeAveClient.agents_exc = None
+    _FakeAveClient.custom_webhook_result = {
+        "ok": True, "token": "AVE-TOKEN-1", "message": "created", "updated": False,
+    }
+    _FakeAveClient.custom_webhook_exc = None
     _FakeAveClient.last = None
     _FakeHTTPX.next_response = None
     _FakeHTTPX.next_exc = None
@@ -584,7 +609,9 @@ class AveonlineAgentsTests(unittest.IsolatedAsyncioTestCase):
         _reset_ave()
 
     async def _call(self, sb=None, role="owner"):
-        with _patch_ave_client(), patch("httpx.AsyncClient", _FakeHTTPX):
+        # El endpoint delega en `AveonlineClient.list_agents()` (2026-08-22) —
+        # el fake ya devuelve agentes normalizados (principal como bool).
+        with _patch_ave_client():
             return await list_aveonline_agents(tenant_id=TID, role=role, supabase=sb or _Sb())
 
     async def test_no_owner_ni_manager_403(self):
@@ -598,45 +625,35 @@ class AveonlineAgentsTests(unittest.IsolatedAsyncioTestCase):
             await self._call()
         self.assertEqual(cm.exception.status_code, 502)
 
-    async def test_sin_empresa_id_422(self):
-        _FakeAveClient.creds = {"idagente": "AG-1"}  # sin empresa_id
-        with self.assertRaises(HTTPException) as cm:
-            await self._call()
-        self.assertEqual(cm.exception.status_code, 422)
-
-    async def test_http_error_502(self):
-        _FakeHTTPX.next_exc = httpx.HTTPError("timeout")
+    async def test_list_agents_lanza_502(self):
+        _FakeAveClient.agents_exc = Exception("red caída")
         with self.assertRaises(HTTPException) as cm:
             await self._call()
         self.assertEqual(cm.exception.status_code, 502)
 
     async def test_status_no_ok_devuelve_warning(self):
-        _FakeHTTPX.next_response = _http_response(
-            {"status": "error", "message": "sin agentes"})
+        _FakeAveClient.agents_result = {
+            "ok": False, "agents": [], "message": "sin agentes",
+        }
         r = await self._call()
         self.assertEqual(r, {"agents": [], "warning": "sin agentes"})
 
-    async def test_happy_normaliza_y_ordena_principal_primero(self):
-        _FakeHTTPX.next_response = _http_response({
-            "status": "ok",
-            "agentes": [
-                {"id": "1", "nombre": "Zeta", "principal": "NO",
+    async def test_happy_ordena_principal_primero(self):
+        _FakeAveClient.agents_result = {
+            "ok": True,
+            "agents": [
+                {"id": "1", "nombre": "Zeta", "principal": False,
                  "direccion": "d1", "idciudad": "c1", "telefono": "t1",
                  "email": "e1"},
-                {"id": "2", "nombre": "Alpha", "principal": "SI"},
-                {"id": None, "nombre": "sin-id"},  # se descarta
+                {"id": "2", "nombre": "Alpha", "principal": True},
             ],
-        })
+            "message": "registros encontrados",
+        }
         r = await self._call()
         self.assertEqual([a["id"] for a in r["agents"]], ["2", "1"])
         self.assertTrue(r["agents"][0]["principal"])
         self.assertFalse(r["agents"][1]["principal"])
         self.assertEqual(r["current_idagente"], "AG-1")
-        # request a Aveonline lleva token JWT + empresa
-        url, body = _FakeHTTPX.last_request
-        self.assertIn("agentes.php", url)
-        self.assertEqual(body["token"], "jwt-123")
-        self.assertEqual(body["idempresa"], "E-1")
 
 
 # ─── POST /aveonline/guide-dry-run — ramas restantes ─────────────────────────
@@ -807,35 +824,76 @@ class WebhookConfigureTests(unittest.IsolatedAsyncioTestCase):
             await aveonline_webhook_configure(tenant_id=TID, role="manager", supabase=_Sb())
         self.assertEqual(cm.exception.status_code, 403)
 
-    async def test_happy_rota_secret_y_registra_en_aveonline(self):
+    async def test_happy_oficial_persiste_token_aveonline(self):
+        """Camino OFICIAL (webhookPersonalizadoApi, 2026-08-22): upsert por
+        empresa → Aveonline devuelve data.token → su hash se persiste vía
+        `store_external_secret`. NO se invoca el legacy createWebhook."""
         import lib.webhook_secret_manager as wsm
-        # primera config: delete previo falla (no había webhook) → tolerado
-        _FakeAveClient.delete_webhook_exc = Exception("no existía")
         with (
+            patch.object(wsm, "store_external_secret", return_value=_rotation_fake()) as store_ext,
             patch.object(wsm, "rotate_secret", return_value=_rotation_fake()) as rotate,
             _patch_ave_client(),
         ):
             r = await aveonline_webhook_configure(tenant_id=TID, role="owner", supabase=_Sb())
         self.assertTrue(r["ok"])
-        self.assertEqual(r["plaintext_secret"], "plaintext-una-vez")  # solo una vez
+        self.assertEqual(r["mechanism"], "custom-webhook")
         self.assertTrue(r["aveonline_registered"])
-        self.assertEqual(r["aveonline_message"], "registered")
+        self.assertEqual(r["plaintext_secret"], "AVE-TOKEN-1")  # token de Aveonline
         self.assertEqual(r["rotated_at"], "2026-01-01")
+        store_ext.assert_called_once()
+        self.assertEqual(store_ext.call_args.kwargs["plaintext"], "AVE-TOKEN-1")
+        rotate.assert_not_called()  # el secret local solo se genera en fallback
+        rcw = _FakeAveClient.last.calls["register_custom_webhook"]
+        self.assertIn(TID, rcw["webhook_url"])
+        self.assertNotIn("create_webhook", _FakeAveClient.last.calls)
+
+    async def test_fallback_legacy_cuando_oficial_falla(self):
+        """Oficial cae → rotate_secret local + create_webhook legacy (param1)."""
+        import lib.webhook_secret_manager as wsm
+        _FakeAveClient.custom_webhook_exc = Exception("endpoint oficial 500")
+        _FakeAveClient.delete_webhook_exc = Exception("no existía")  # tolerado
+        with (
+            patch.object(wsm, "store_external_secret", return_value=_rotation_fake()) as store_ext,
+            patch.object(wsm, "rotate_secret", return_value=_rotation_fake()) as rotate,
+            _patch_ave_client(),
+        ):
+            r = await aveonline_webhook_configure(tenant_id=TID, role="owner", supabase=_Sb())
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["mechanism"], "legacy-avestock")
+        self.assertTrue(r["aveonline_registered"])
+        self.assertEqual(r["plaintext_secret"], "plaintext-una-vez")
+        store_ext.assert_not_called()
         rotate.assert_called_once()
-        # create_webhook recibió URL del tenant + plaintext
         cw = _FakeAveClient.last.calls["create_webhook"]
         self.assertIn(TID, cw["url"])
         self.assertEqual(cw["secret"], "plaintext-una-vez")
 
+    async def test_oficial_sin_token_cae_a_legacy(self):
+        """Oficial responde ok pero SIN data.token → no hay secret que
+        persistir → fallback legacy."""
+        import lib.webhook_secret_manager as wsm
+        _FakeAveClient.custom_webhook_result = {
+            "ok": True, "token": None, "message": "sin token", "updated": False,
+        }
+        with (
+            patch.object(wsm, "rotate_secret", return_value=_rotation_fake()) as rotate,
+            _patch_ave_client(),
+        ):
+            r = await aveonline_webhook_configure(tenant_id=TID, role="owner", supabase=_Sb())
+        self.assertEqual(r["mechanism"], "legacy-avestock")
+        rotate.assert_called_once()
+
     async def test_error_registro_aveonline_no_rompe(self):
         import lib.webhook_secret_manager as wsm
+        _FakeAveClient.custom_webhook_exc = Exception("oficial 500")
         _FakeAveClient.webhook_exc = Exception("aveonline 500")
         with patch.object(wsm, "rotate_secret", return_value=_rotation_fake()), \
                 _patch_ave_client():
             r = await aveonline_webhook_configure(tenant_id=TID, role="owner", supabase=_Sb())
         self.assertTrue(r["ok"])  # secret ya quedó en DB; registro es best-effort
         self.assertFalse(r["aveonline_registered"])
-        self.assertIn("error registrando en Aveonline", r["aveonline_message"])
+        self.assertIsNone(r["mechanism"])
+        self.assertIn("legacy error", r["aveonline_message"])
 
     async def test_rotate_no_owner_403(self):
         with self.assertRaises(HTTPException) as cm:
@@ -844,11 +902,12 @@ class WebhookConfigureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rotate_delega_en_configure(self):
         import lib.webhook_secret_manager as wsm
-        with patch.object(wsm, "rotate_secret", return_value=_rotation_fake()), \
+        with patch.object(wsm, "store_external_secret", return_value=_rotation_fake()), \
                 _patch_ave_client():
             r = await aveonline_webhook_rotate(tenant_id=TID, role="owner", supabase=_Sb())
         self.assertTrue(r["ok"])
-        self.assertEqual(r["plaintext_secret"], "plaintext-una-vez")
+        self.assertEqual(r["mechanism"], "custom-webhook")
+        self.assertEqual(r["plaintext_secret"], "AVE-TOKEN-1")
 
 
 # ─── DELETE /aveonline/webhook ───────────────────────────────────────────────

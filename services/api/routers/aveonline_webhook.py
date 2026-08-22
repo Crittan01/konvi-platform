@@ -80,12 +80,18 @@ def _ack(outcome: str, **extra: Any) -> JSONResponse:
 
 # `estado_id` numéricos vistos en muestras (plugin oficial WooCommerce
 # `action-update-guia.php`): 12=ENTREGADA. El resto se mapea por nombre.
+# Cobertura del flujo oficial del API Sandbox (doc `sandbox-avanzarEstado`,
+# fetch 2026-08-22): GENERADA → PRODUCIDA → EN DESPACHO → EN REPARTO →
+# ENTREGADA, forzable a EN NOVEDAD; terminales ENTREGADA y ANULADA.
 RAW_STATE_TO_INTERNAL = {
-    # Pre-recogida / recogida.
+    # Generada / pre-recogida / recogida.
+    "GENERADA": "pending",
+    "PRODUCIDA": "pending",
     "EN OFICINA": "pending",
     "EN RECOGIDA": "pending",
     "RECOGIDA": "pending",
     # En tránsito físico.
+    "EN DESPACHO": "in_transit",
     "EN BODEGA": "in_transit",
     "EN TRANSITO": "in_transit",
     "EN TRÁNSITO": "in_transit",
@@ -114,6 +120,11 @@ RAW_STATE_TO_INTERNAL = {
     "DEVOLUCIÓN": "returned",
     "DEVUELTA": "returned",
     "DEVUELTO": "returned",
+    # Anulación / cancelación (terminal — doc sandbox: ANULADA es terminal).
+    "ANULADA": "cancelled",
+    "ANULADO": "cancelled",
+    "CANCELADA": "cancelled",
+    "CANCELADO": "cancelled",
 }
 
 TERMINAL_STATUSES = frozenset({"delivered", "returned", "cancelled"})
@@ -246,8 +257,12 @@ def _process_estado_event(
     nombre_estado: str,
     fecha: str,
     raw_payload: dict,
+    description: Optional[str] = None,
 ) -> dict:
     """Registra un evento individual (dedup atómico) + actualiza shipment.
+
+    `description`: texto libre del evento (oficial: `comentarionovedad` del
+    estado[] — doc webhookEstadosGuias). Se persiste tal cual para forensics.
 
     Retorna {"inserted": bool, "internal_status": str, "raw_status": str}.
     """
@@ -278,7 +293,7 @@ def _process_estado_event(
                 "p_raw_status": nombre_estado,
                 "p_raw_estado_id": raw_estado_id,
                 "p_internal_status": internal_status,
-                "p_description": None,
+                "p_description": (str(description)[:500]) if description else None,
                 "p_occurred_at": occurred_at,
                 "p_raw": raw_payload,
             },
@@ -674,6 +689,7 @@ async def _handle_aveonline_webhook(
                     nombre_estado=str(e.get("nombre_estado") or ""),
                     fecha=_event_fecha(e),
                     raw_payload=parsed,
+                    description=e.get("comentarionovedad"),
                 )
                 events.append(ev)
         return _ack("captured_no_shipment", guia=guia, events=events)
@@ -702,6 +718,7 @@ async def _handle_aveonline_webhook(
             nombre_estado=str(e.get("nombre_estado") or ""),
             fecha=_event_fecha(e),
             raw_payload=parsed,
+            description=e.get("comentarionovedad"),
         )
         events_processed.append(ev)
 

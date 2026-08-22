@@ -1,34 +1,55 @@
-"""Cliente HTTP Aveonline — auth v1.0 + cotización + tracking + label.
+"""Cliente HTTP Aveonline — auth v1.0 + cotización + guía + tracking + webhook.
 
-Rev. 107 M.1 — primer release del cliente. Cubre el subset crítico para
-que el agentic orchestrator pueda cotizar con Aveonline cuando
-`tenant_shipping_provider_config.active_provider = 'aveonline'`.
+Rev. 107 M.1 — primer release del cliente. Conformidad doc oficial verificada
+2026-08-22 (fetch devsite + probes live cuenta demo — dossier §26).
 
 Auth: usuario+password POR TENANT (Vault) → JWT cacheado en
 `tenant_integrations.credentials.jwt_token`. Refresh automático si
 expira_at < now + buffer 10min.
 
-Endpoints implementados (M.1.a):
-  • `auth.aveonline.co/api/comunes/v1.0/autenticarusuario.php` (refresh JWT).
-  • `webservices.aveonline.co/cotizar/cotizar.php` (cotizarDoble — multi-carrier).
+Endpoints implementados:
+  • `app.aveonline.co/api/comunes/v1.0/autenticarusuario.php` (refresh JWT).
+  • `app.aveonline.co/api/nal/v1.0/generarGuiaTransporteNacional.php`
+    (tipos `cotizarDoble` multi-carrier + `generarGuia2` label).
+  • `app.aveonline.co/api/comunes/v1.0/agentes.php`
+    (`listarAgentesPorEmpresaAuth` — auto-resolución de idagente).
+  • `app.aveonline.co/api/box/v1.0/transportadora.php` (carriers por empresa).
+  • `app.aveonline.co/api/nal/v1.0/guia.php` (`obtenerEstadoAuth` — tracking pull).
+  • `api.aveonline.co/api-integrations/.../custom-webhook` (registro OFICIAL
+    del webhook — upsert por empresa; doc `webhookPersonalizadoApi`).
+  • `app.aveonline.co/avestock/api/{create,list,delete}Webhook.php` (LEGACY AveCRM).
 
-Pendientes M.1.b (próximas sesiones):
-  • `generarGuiaTransporteNacional` (label).
-  • `consultarGuias` (tracking).
-  • `cancelarGuia` (cancel).
-  • `solicitudRecogida` (pickup).
+NO implementados (decisión documentada en dossier §26 / docs/integrations):
+  • `generarRecogida2` (recogida programada) — doc existe; feature pendiente (P1.3).
+  • `eliminarRelacionEnvios` (batch v2) — no usamos relaciones hoy.
+  • Cancelación de guía individual — NO existe por API (reconfirmado 2026-08-22);
+    `cancel_guide` queda best-effort no documentado + escalación a operador.
 
-Referencia: docs/research/aveonline-dossier.md (versión 101%).
+Referencia: docs/research/aveonline-dossier.md (versión 101% + addendum
+2026-08-16 API Sandbox + addendum 2026-08-22 conformidad doc vigente).
 
-Manejo de errores (mapeo numbererror per §14 dossier):
-  • -1 generic → ErrorAveonlineTransient (retry).
-  • -2 credenciales → ErrorAveonlineAuth (refresh JWT + retry 1 vez).
-  • -3 sin carriers → ErrorAveonlineNoCarriers (mensaje al cliente).
-  • -5 valor declarado < 10k → auto-corrección a 10k mínimo.
-  • -7 peso máx excedido → ErrorAveonlinePackageLimit.
-  • 999 bug `cotizar2` → IGNORADO (usamos `cotizarDoble` siempre).
-  • HTTP 5xx → ErrorAveonlineTransient (retry).
-  • HTTP 4xx ≠ 429 → ErrorAveonlinePermanent (no retry).
+Manejo de errores (numbererror según tabla OFICIAL vigente — fetch
+2026-08-22 de `integraciones.aveonline.co/docs/nacional/cotizacion/`):
+  • -1 origen no existe → AveonlinePermanentError (dato inválido, retry inútil).
+  • -2 destino no existe → AveonlinePermanentError (idem).
+  • -3 peso ≤ 0 → AveonlinePermanentError (bug del caller).
+  • -4 unidades ≤ 0 → AveonlinePermanentError (bug del caller).
+  • -5 valor declarado < 10k → AveonlinePermanentError (pre-corregido a 10k
+    en quote/generate_guide; si aún llega, es bug del caller).
+  • -6 unidades > máx → AveonlinePackageLimitError (dividir bultos).
+  • -7 kilos > máx → AveonlinePackageLimitError (dividir bultos).
+  • 999/-999 servicio no configurado/trayecto inválido → AveonlinePermanentError
+    (con `cotizarDoble` llega POR FILA y se filtra; global es bug `cotizar2`).
+  • -1000 trayecto con límites (mensaje trae kilosMaximos/unidadesMaximas)
+    → AveonlinePackageLimitError.
+  • message "credenciales incorrectas"/"autenticacion fallida" →
+    AveonlineAuthError (mecanismo REAL de token expirado — verificado live
+    2026-08-22; NO usa numbererror).
+  • "Sin carriers para la ruta" NO es un numbererror: `cotizarDoble` responde
+    `status:"ok"` con `cotizaciones: []` o todas las filas en 999 (verificado
+    live) → quote() levanta AveonlineNoCarriersError por 0 opciones.
+  • HTTP 5xx → AveonlineTransientError (retry).
+  • HTTP 4xx ≠ 429 → AveonlinePermanentError (no retry).
 """
 from __future__ import annotations
 
@@ -59,6 +80,18 @@ AVEONLINE_AUTH_URL = (
 AVEONLINE_NAL_URL = (
     "https://app.aveonline.co/api/nal/v1.0/generarGuiaTransporteNacional.php"
 )
+# Listado de agentes de despacho (doc oficial
+# `integraciones.aveonline.co/docs/nacional/agentes/listadoAgentes`).
+AVEONLINE_AGENTES_URL = (
+    "https://app.aveonline.co/api/comunes/v1.0/agentes.php"
+)
+# Registro del "Webhook personalizado" (doc oficial
+# `integraciones.aveonline.co/docs/webhookPersonalizadoApi`): upsert por
+# empresa (la empresa se identifica del JWT en `Authorization`, SIN prefijo
+# Bearer). Aveonline genera `data.token` y lo reenvía en cada notificación.
+AVEONLINE_CUSTOM_WEBHOOK_URL = (
+    "https://api.aveonline.co/api-integrations/public/api/integrations/custom-webhook"
+)
 
 # Timeouts (dossier §15.5: plugin oficial usa CURLOPT_TIMEOUT=0; nosotros
 # preferimos 25s — Envia tiene mismo orden de magnitud).
@@ -69,6 +102,11 @@ JWT_REFRESH_BUFFER_SECONDS = 600
 
 # Cache idempotency local cotización (replica plugin oficial 60s).
 QUOTE_CACHE_TTL_SECONDS = 60
+
+# Cache in-memory del idagente auto-resuelto (24h — el agente principal de
+# una cuenta casi nunca cambia; mismo patrón que usa el otro proyecto del
+# founder. La copia persistida en credentials.idagente es la SoT cross-proceso).
+IDAGENTE_CACHE_TTL_SECONDS = 24 * 3600
 
 
 # ─── Helpers de geo (formato Aveonline) ────────────────────────────────────
@@ -208,6 +246,8 @@ class AveonlineClient:
         self._credentials_cache: Optional[dict] = None
         # In-memory idempotency cache (key=hash, value=(QuoteResult, ts)).
         self._quote_cache: dict[str, tuple[QuoteResult, float]] = {}
+        # In-memory cache del idagente auto-resuelto (24h).
+        self._idagente_cache: Optional[tuple[str, float]] = None
 
     # ─── Auth + credentials ───────────────────────────────────────────────
 
@@ -297,6 +337,16 @@ class AveonlineClient:
             raise AveonlineAuthError(
                 f"Aveonline rechazó credenciales: {data.get('message', 'unknown')}"
             )
+        # Doc oficial autenticación (fetch 2026-08-22): password mala devuelve
+        # `status:"ok"` + token HUECO con `cuentas: []` (JWT con `aprobados:[]`
+        # que falla después en cada endpoint). Detectarlo aquí como auth error
+        # en vez de cachear un token inútil.
+        if not data.get("cuentas"):
+            raise AveonlineAuthError(
+                "Aveonline auth OK pero sin cuentas asociadas (password "
+                "inválida o cuenta sin servicios) — revisar credenciales del "
+                "tenant."
+            )
 
         new_jwt = data["token"]
         # F-doc (Fase 6): la doc oficial de auth Aveonline dice vigencia de 1 HORA y NO
@@ -306,6 +356,10 @@ class AveonlineClient:
         # sí extiende la vigencia, solo refrescamos un poco más seguido (inofensivo); si no
         # (la doc es correcta), evitamos usar un token stale. Confirmar con Aveonline para
         # subir el cap si aplica.
+        # Addendum live 2026-08-22 (cuenta demo): el server SÍ honra `tiempoToken` y lo
+        # interpreta en HORAS estampándolo en el `exp` del JWT (pedido 3600 → exp = now +
+        # 3600h ≈ 150 días). Mantenemos el cap de 1h (doc-conforme, conservador): peor caso
+        # refrescamos más seguido; nunca usamos un token que la doc declara vencido.
         cache_ttl = min(int(tiempo_token), 3600)
         new_expires = (
             datetime.now(timezone.utc) + timedelta(seconds=cache_ttl)
@@ -339,6 +393,145 @@ class AveonlineClient:
             return await self._refresh_jwt()
         return creds["jwt_token"]
 
+    # ─── Agentes de despacho (listadoAgentes) + auto-resolución idagente ─────
+
+    async def list_agents(self) -> dict:
+        """Lista los agentes (puntos de despacho) de la cuenta Aveonline.
+
+        Endpoint oficial `listarAgentesPorEmpresaAuth` (doc
+        `integraciones.aveonline.co/docs/nacional/agentes/listadoAgentes`,
+        verificado live 2026-08-22 contra cuenta demo).
+
+        Returns:
+            dict {"ok": bool, "agents": [{id, nombre, direccion, idciudad,
+            telefono, email, principal: bool}], "raw": ..., "message": str}.
+            `principal` tolera los formatos "SI"/"NO" (live) y "S"/"N"
+            (ejemplo de la doc).
+        """
+        jwt = await self._get_valid_jwt()
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+
+        body = {
+            "tipo": "listarAgentesPorEmpresaAuth",
+            "token": jwt,
+            "idempresa": empresa_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as cx:
+                resp = await cx.post(AVEONLINE_AGENTES_URL, json=body)
+        except httpx.HTTPError as exc:
+            return {"ok": False, "agents": [], "raw": {}, "message": str(exc)}
+
+        if resp.status_code >= 500:
+            return {
+                "ok": False, "agents": [], "raw": {},
+                "message": f"HTTP {resp.status_code}",
+            }
+        try:
+            data = resp.json()
+        except ValueError:
+            return {"ok": False, "agents": [], "raw": {}, "message": "bad json"}
+
+        agents = [
+            {
+                "id": str(a.get("id") or ""),
+                "nombre": str(a.get("nombre") or ""),
+                "direccion": str(a.get("direccion") or ""),
+                "idciudad": str(a.get("idciudad") or ""),
+                "telefono": str(a.get("telefono") or ""),
+                "email": str(a.get("email") or ""),
+                "principal": str(a.get("principal") or "").strip().upper()
+                in ("S", "SI", "Y", "YES", "1", "TRUE"),
+            }
+            for a in (data.get("agentes") or [])
+            if isinstance(a, dict) and a.get("id")
+        ]
+        return {
+            "ok": data.get("status") == "ok",
+            "agents": agents,
+            "raw": data,
+            "message": data.get("message") or "",
+        }
+
+    async def _resolve_idagente(self, creds: dict) -> str:
+        """Resuelve el `idagente` (dirección de despacho Aveonline) del tenant.
+
+        Precedencia:
+          1. `credentials.idagente` — override manual del tenant (lo persiste
+             la UI desde `GET /aveonline/agents`).
+          2. Cache in-memory 24h (mismo patrón que el otro proyecto del
+             founder: listarAgentes → agente principal).
+          3. `listarAgentesPorEmpresaAuth` → agente con `principal=SI` (o el
+             primero si ninguno es principal). Se persiste best-effort en
+             `credentials.idagente` vía RPC `upsert_aveonline_idagente` para
+             que los demás procesos (api/orchestrator/worker) lo reusan.
+          4. "" — Aveonline auto-calcula el agente de la ciudad origen, pero
+             con MENOS carriers (verificado live 2026-08-22: sin idagente la
+             cuenta demo pierde INTERRAPIDISIMO en la cotización).
+
+        NUNCA usar `asesorlogistico` como fallback: es el asesor COMERCIAL
+        de la cuenta (en la demo vale "0"), no un agente de despacho.
+        """
+        manual = str(creds.get("idagente") or "").strip()
+        if manual:
+            return manual
+
+        if self._idagente_cache:
+            cached_id, ts = self._idagente_cache
+            if time.time() - ts < IDAGENTE_CACHE_TTL_SECONDS:
+                return cached_id
+
+        try:
+            result = await self.list_agents()
+        except Exception as exc:  # noqa: BLE001 — resolución best-effort
+            logger.warning(
+                "[aveonline.idagente] tenant=%s list_agents err: %s",
+                self.tenant_id[:8], exc,
+            )
+            return ""
+        agents = result.get("agents") or []
+        if not result.get("ok") or not agents:
+            logger.warning(
+                "[aveonline.idagente] tenant=%s sin agentes (ok=%s msg=%s)",
+                self.tenant_id[:8], result.get("ok"), result.get("message"),
+            )
+            return ""
+
+        principal = next(
+            (a for a in agents if a.get("principal")), agents[0],
+        )
+        resolved = str(principal.get("id") or "").strip()
+        if not resolved:
+            return ""
+
+        self._idagente_cache = (resolved, time.time())
+
+        # Persistir best-effort (SoT cross-proceso). El RPC hace merge jsonb
+        # atómico — no pisa jwt_token ni otros campos de credentials.
+        try:
+            self.supabase.rpc(
+                "upsert_aveonline_idagente",
+                {"p_tenant_id": self.tenant_id, "p_idagente": resolved},
+            ).execute()
+        except Exception as exc:  # noqa: BLE001 — no romper la cotización
+            logger.warning(
+                "[aveonline.idagente] tenant=%s persist err (cache local OK): %s",
+                self.tenant_id[:8], exc,
+            )
+            # Cachear igual: el valor resuelto es válido aunque la DB falle.
+        else:
+            creds["idagente"] = resolved
+            self._credentials_cache = creds
+
+        logger.info(
+            "[aveonline.idagente] tenant=%s auto-resuelto idagente=%s "
+            "(agente=%r principal=%s)",
+            self.tenant_id[:8], resolved, principal.get("nombre"),
+            principal.get("principal"),
+        )
+        return resolved
+
     # ─── Quote (cotizarDoble) ─────────────────────────────────────────────
 
     def _hash_quote_request(
@@ -355,6 +548,10 @@ class AveonlineClient:
             "v": package.get("declared_value_cop"),
             "u": package.get("units", 1),
             "c": package.get("cod_enabled", False),
+            # El recaudo COD cambia la tarifa (valorOtrosRecaudos) → debe
+            # ser parte de la llave de cache o dos carts COD con distinto
+            # total colisionarían.
+            "r": package.get("valorrecaudo", 0),
         }
         return hashlib.sha256(
             json.dumps(canonical, sort_keys=True).encode()
@@ -379,6 +576,10 @@ class AveonlineClient:
                 "declared_value_cop": int (min 10000),
                 "units": int (default 1),
                 "cod_enabled": bool (default False),
+                "valorrecaudo": int COP a recaudar si COD (default 0) — la
+                    comisión de recaudo entra al `total` vía
+                    `valorOtrosRecaudos` (doc oficial cotización); cotizar
+                    COD con valorrecaudo=0 SUB-PRECÍA la guía.
             }
 
         Returns:
@@ -415,11 +616,17 @@ class AveonlineClient:
         jwt = await self._get_valid_jwt()
         creds = await self._load_credentials()
         empresa_id = creds.get("empresa_id")
-        # `idagente` (dirección de despacho) es REQUERIDO según §3.5 del
-        # dossier — sin él algunas transportadoras retornan 999. Se intenta
-        # leer de credentials.idagente (poblar en O.3 si Aveonline lo retorna
-        # en auth response, o config manual desde panel tenant).
-        idagente = creds.get("idagente") or creds.get("asesor_logistico") or ""
+        # `idagente` (dirección de despacho) es REQUERIDO según la doc oficial
+        # de cotización — sin él Aveonline auto-calcula pero con MENOS carriers
+        # (live 2026-08-22: la demo pierde INTERRAPIDISIMO). Auto-resolución:
+        # credentials.idagente → listarAgentes (principal, cache 24h).
+        idagente = await self._resolve_idagente(creds)
+        # Recaudo COD: el courier cobra productos + envío; la comisión de
+        # recaudo (`valorOtrosRecaudos`) solo aparece si se envía el monto.
+        cod_enabled = bool(package.get("cod_enabled"))
+        valorrecaudo = (
+            max(0, int(package.get("valorrecaudo") or 0)) if cod_enabled else 0
+        )
 
         # Body canónico §3.3 dossier — campos en lugar correcto:
         #   • `idempresa` (no `empresa`).
@@ -444,10 +651,15 @@ class AveonlineClient:
                 or destination.get("city")
                 or ""
             ),
-            "idasumecosto": 0,
-            "contraentrega": 1 if package.get("cod_enabled") else 0,
+            # Combo de pago (tabla oficial "Formas de pago de la guía"):
+            # sin recaudo → contraentrega=0/idasumecosto=0 (remitente paga
+            # transporte). Con recaudo → contraentrega=1/idasumecosto=1
+            # (destinatario paga recaudo + transporte + servicio recaudo) —
+            # espejo del combo que usa generate_guide.
+            "idasumecosto": 1 if cod_enabled else 0,
+            "contraentrega": 1 if cod_enabled else 0,
             "contraentregaPayment": 0,
-            "valorrecaudo": 0,
+            "valorrecaudo": valorrecaudo,
             "valorMinimo": 0,
             "productos": [{
                 "alto": float(package.get("height_cm") or 10),
@@ -481,6 +693,15 @@ class AveonlineClient:
         # Aveonline puede retornar HTTP 200 con `status="error"` global o por
         # carrier (numbererror per fila).
         if isinstance(data, dict) and data.get("status") == "error":
+            # Caso documentado "cotizaciones no encontradas" (doc oficial
+            # cotización): sin cobertura para la ruta → NoCarriers, no
+            # permanente genérico (el bot lo traduce a mensaje útil).
+            _msg_l = str(data.get("message") or "").lower()
+            if "cotizaciones no encontradas" in _msg_l:
+                raise AveonlineNoCarriersError(
+                    f"Aveonline sin cotizaciones para "
+                    f"{origin.get('city')} → {destination.get('city')}."
+                )
             self._raise_for_numbererror(data.get("numbererror"), data.get("message"))
 
         # Parsear opciones. cotizarDoble retorna array `cotizaciones` (campo
@@ -619,22 +840,43 @@ class AveonlineClient:
     def _raise_for_numbererror(
         self, code: Any, message: Optional[str] = None,
     ) -> None:
-        """Mapea numbererror → excepción tipada (dossier §14.2)."""
-        c = str(code or "").strip()
-        msg = message or f"Aveonline numbererror={c}"
-        if c in ("-1",):
-            raise AveonlineTransientError(msg)
-        if c in ("-2",):
+        """Mapea numbererror → excepción tipada.
+
+        Tabla OFICIAL vigente (fetch 2026-08-22 de
+        `integraciones.aveonline.co/docs/nacional/cotizacion/` — misma tabla
+        en dossier §14.2). OJO con dos correcciones al mapeo histórico:
+          • -1/-2 NO son "genérico"/"credenciales": son origen/destino
+            inexistente → error PERMANENTE de dato (retry inútil).
+          • -3 NO es "sin carriers": es peso ≤ 0. El caso "sin carriers" en
+            `cotizarDoble` llega como `cotizaciones: []` o filas 999
+            (verificado live 2026-08-22) → AveonlineNoCarriersError por 0
+            opciones en quote(), no por este mapeo.
+        El token expirado NO usa numbererror: llega como message
+        "credenciales incorrectas" / "autenticacion fallida" (doc oficial +
+        live 2026-08-22) → se detecta por mensaje → AveonlineAuthError.
+        """
+        msg = message or f"Aveonline numbererror={code}"
+        # Detección de auth por MENSAJE (mecanismo real documentado).
+        msg_l = msg.lower()
+        if "credenciales incorrectas" in msg_l or "autenticacion fallida" in msg_l:
             raise AveonlineAuthError(msg)
-        if c in ("-3",):
-            raise AveonlineNoCarriersError(msg)
-        if c in ("-7",):
+
+        c = str(code or "").strip().lstrip("+")
+        # Datos inválidos del request (origen/destino/peso/unidades/valor
+        # declarado): permanentes — reintentar no cambia el resultado. -5 está
+        # pre-corregido client-side (floor 10k); si llega, es bug del caller.
+        if c in ("-1", "-2", "-3", "-4", "-5"):
+            raise AveonlinePermanentError(msg)
+        # Límites del paquete para el carrier/ruta (-6 unidades, -7 kilos,
+        # -1000 trayecto con límites — su mensaje trae kilosMaximos /
+        # unidadesMaximas). El cliente debe dividir el envío.
+        if c in ("-6", "-7", "-1000"):
             raise AveonlinePackageLimitError(msg)
-        if c in ("999",):
-            # Bug `cotizar2` — no debería pasar con cotizarDoble.
-            raise AveonlinePermanentError(
-                f"Bug 999 inesperado en cotizarDoble: {msg}"
-            )
+        if c in ("999", "-999"):
+            # Servicio no configurado / trayecto inválido. Con cotizarDoble
+            # llega POR FILA (se filtra en quote); global = bug `cotizar2`
+            # (dossier §0.1) o cuenta sin setup.
+            raise AveonlinePermanentError(msg)
         # Default: tratar como permanente.
         raise AveonlinePermanentError(msg)
 
@@ -709,7 +951,11 @@ class AveonlineClient:
         jwt = await self._get_valid_jwt()
         creds = await self._load_credentials()
         empresa_id = creds.get("empresa_id")
-        idagente = creds.get("idagente") or creds.get("asesor_logistico") or ""
+        # Auto-resolución idagente (misma regla que quote): credentials →
+        # listarAgentes principal (cache 24h). Sin él la guía puede salir con
+        # el agente equivocado o ser rechazada por carriers con código de
+        # agente (INTERRAPIDISIMO).
+        idagente = await self._resolve_idagente(creds)
 
         declared = max(10000, int(package.get("declared_value_cop") or 10000))
         weight_kg = float(package.get("weight_kg") or 0.5)
@@ -935,20 +1181,105 @@ class AveonlineClient:
         }
 
     # ─── Webhook management (Rev. 108) ─────────────────────────────────────
-    # Aveonline `crearWebhook` permite hasta 4 pares param1..param4 que viajan
-    # en cada POST hacia nuestro endpoint. Usamos `param1_name="secret"` +
-    # `param1_value=<UUID>` como pseudo-HMAC documentado (dossier §6.2).
-    # NO es HMAC criptográfico — el secret va en plaintext en el body — pero
-    # un atacante necesita la URL+secret para spoofear. Rotación trimestral
-    # vía `tenant_webhook_secrets` mitiga ventana de exposición.
+    # DOS mecanismos de registro coexisten:
     #
-    # Referencia: https://integraciones.aveonline.co/docs/avecrm/crearWebhook/
+    #  A) OFICIAL vigente — `register_custom_webhook` (doc
+    #     `integraciones.aveonline.co/docs/webhookPersonalizadoApi`, verificado
+    #     2026-08-22): POST api-integrations/.../custom-webhook con el JWT en
+    #     `Authorization` (SIN Bearer). UPSERT por empresa (una sola URL de
+    #     tracking por cuenta — addendum dossier 2026-08-16). Aveonline genera
+    #     `data.token` y lo reenvía TOP-LEVEL en cada notificación → ese token
+    #     es el secret que persiste Konvi (bcrypt) para verificar eventos.
+    #
+    #  B) LEGACY AveCRM — `create_webhook` (avestock/api/createWebhook.php):
+    #     hasta 4 pares param1..param4 que viajan en cada POST. Usamos
+    #     `param1_name="secret"` + `param1_value=<UUID>` como pseudo-HMAC
+    #     (dossier §6.2). NO es HMAC criptográfico — el secret va en plaintext
+    #     en el body — pero un atacante necesita la URL+secret para spoofear.
+    #     Rotación trimestral vía `tenant_webhook_secrets` mitiga exposición.
+    #
+    # El receiver (`routers/aveonline_webhook.py`) acepta AMBOS formatos.
+    # Referencias: /docs/webhookPersonalizadoApi + /docs/avecrm/crearWebhook/
+
+    async def register_custom_webhook(self, *, name: str, webhook_url: str) -> dict:
+        """Registra (o actualiza) el Webhook personalizado — endpoint OFICIAL.
+
+        Doc `webhookPersonalizadoApi`: la operación es IDEMPOTENTE por empresa
+        (si ya existe webhook, se actualiza con los datos enviados). La empresa
+        se identifica del JWT — no va en el payload.
+
+        Args:
+            name: nombre visible de la integración (panel "Mis integraciones").
+            webhook_url: URL pública que recibirá la trama de estados.
+
+        Returns:
+            dict {"ok": bool, "token": str|None, "raw": <response>,
+                  "message": str, "updated": bool}.
+            `token` es el que Aveonline reenvía en cada POST (data.token) —
+            persistir su hash como secret de verificación. `updated=True` si
+            Aveonline actualizó uno existente (HTTP 200) vs creado (201).
+
+        Raises:
+            AveonlineAuthError: JWT ausente/inválido (403 documentado).
+            AveonlinePermanentError: payload inválido (422 documentado) u
+                otro 4xx.
+            AveonlineTransientError: red/5xx.
+        """
+        jwt = await self._get_valid_jwt()
+        body = {"name": name[:120], "webhookUrl": webhook_url[:500]}
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    AVEONLINE_CUSTOM_WEBHOOK_URL,
+                    json=body,
+                    # Doc: "se envía en el header Authorization sin el prefijo
+                    # Bearer" (misma convención que tiposEstadosEnvios).
+                    headers={"Authorization": jwt},
+                )
+        except httpx.HTTPError as exc:
+            raise AveonlineTransientError(f"custom-webhook network: {exc}") from exc
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+
+        if resp.status_code in (401, 403):
+            raise AveonlineAuthError(
+                f"custom-webhook auth HTTP {resp.status_code}: "
+                f"{data.get('error') or resp.text[:200]}"
+            )
+        if resp.status_code == 422:
+            raise AveonlinePermanentError(
+                f"custom-webhook payload inválido: {str(data)[:300]}"
+            )
+        if resp.status_code >= 500:
+            raise AveonlineTransientError(
+                f"custom-webhook HTTP {resp.status_code}"
+            )
+        if resp.status_code not in (200, 201):
+            raise AveonlinePermanentError(
+                f"custom-webhook HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+
+        token = ((data.get("data") or {}).get("token") or "") or None
+        return {
+            "ok": bool(data.get("success", True)),
+            "token": token,
+            "raw": data,
+            "message": data.get("message") or "",
+            "updated": resp.status_code == 200,
+        }
 
     async def create_webhook(
         self, *, url: str, secret: str,
         extra_params: Optional[dict] = None,
     ) -> dict:
-        """Registra un webhook en Aveonline para esta cuenta tenant.
+        """Registra un webhook en Aveonline para esta cuenta tenant (LEGACY AveCRM).
+
+        Preferir `register_custom_webhook` (endpoint oficial vigente, upsert
+        por empresa). Este queda como fallback para cuentas donde el endpoint
+        oficial falle.
 
         Args:
             url: URL pública donde Aveonline hará POST con estados de guía.

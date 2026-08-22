@@ -131,6 +131,23 @@ async def _generate_shipping_guide_async(
         )
         return False
 
+    # dsnit (documento destinatario): verificado live 2026-08-22 contra la
+    # cuenta demo — el server RECHAZA "" y "00000" siempre (aunque la doc lo
+    # exija solo para COD): "El campo dsnit es inválido. Debe ser numérico,
+    # tener al menos 5 dígitos y ser mayor a 10000." Sin documento válido la
+    # guía NUNCA se genera → skip fail-visible ANTES del claim (el operador
+    # completa el dato del contacto y genera manual desde Inbox).
+    _doc = "".join(
+        ch for ch in str(contact.get("document_number") or "") if ch.isdigit()
+    )
+    if not _doc or len(_doc) < 5 or int(_doc) <= 10000:
+        logger.info(
+            "[WOMPI][AVEONLINE] order=%s contact sin document_number válido "
+            "para dsnit — skip guía (operador completa el dato)",
+            order_id[:8],
+        )
+        return False
+
     # 3. Tenant shipping_origin (sender).
     try:
         ten = (
@@ -201,7 +218,8 @@ async def _generate_shipping_guide_async(
             "email": tenant.get("email_contacto") or "",
         }
         recipient = {
-            "doc": contact.get("document_number") or "",
+            # dsnit saneado a solo dígitos (validado arriba — regla server).
+            "doc": _doc,
             "nombre": contact.get("name") or "",
             "direccion": addr_full or addr.get("street") or "",
             "barrio": addr.get("neighborhood") or "",

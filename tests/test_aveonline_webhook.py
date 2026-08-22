@@ -91,6 +91,26 @@ class MapRawStatusTests(unittest.TestCase):
         self.assertEqual(webhook_mod._map_raw_status("EN OFICINA"), "pending")
         self.assertEqual(webhook_mod._map_raw_status("RECOGIDA"), "pending")
 
+    def test_flujo_sandbox_oficial(self):
+        """Estados del API Sandbox oficial (doc sandbox-avanzarEstado, fetch
+        2026-08-22): GENERADA → PRODUCIDA → EN DESPACHO → EN REPARTO →
+        ENTREGADA, forzable EN NOVEDAD; terminales ENTREGADA y ANULADA."""
+        self.assertEqual(webhook_mod._map_raw_status("GENERADA"), "pending")
+        self.assertEqual(webhook_mod._map_raw_status("PRODUCIDA"), "pending")
+        self.assertEqual(webhook_mod._map_raw_status("EN DESPACHO"), "in_transit")
+        self.assertEqual(webhook_mod._map_raw_status("EN REPARTO"), "in_transit")
+        self.assertEqual(webhook_mod._map_raw_status("ENTREGADA"), "delivered")
+        self.assertEqual(webhook_mod._map_raw_status("EN NOVEDAD"), "exception")
+        self.assertEqual(webhook_mod._map_raw_status("ANULADA"), "cancelled")
+
+    def test_anulacion_to_cancelled_terminal(self):
+        self.assertEqual(webhook_mod._map_raw_status("ANULADA"), "cancelled")
+        self.assertEqual(webhook_mod._map_raw_status("ANULADO"), "cancelled")
+        self.assertEqual(webhook_mod._map_raw_status("CANCELADA"), "cancelled")
+        self.assertEqual(webhook_mod._map_raw_status("CANCELADO"), "cancelled")
+        # cancelled es terminal (no retrocede ni notifica avance).
+        self.assertIn("cancelled", webhook_mod.TERMINAL_STATUSES)
+
     def test_unknown_defaults_to_pending(self):
         # Importante: NO asumir entrega para estados desconocidos.
         self.assertEqual(webhook_mod._map_raw_status("UNKNOWN_STATE"), "pending")
@@ -248,6 +268,55 @@ class SelectLatestEstadoTests(unittest.TestCase):
     def test_empty_returns_none(self):
         self.assertIsNone(webhook_mod._select_latest_estado([]))
         self.assertIsNone(webhook_mod._select_latest_estado(None))
+
+
+class ProcessEstadoEventTests(unittest.TestCase):
+    """_process_estado_event: RPC params (dedup id, estado_id str→int,
+    description desde comentarionovedad)."""
+
+    def _sb_capture(self):
+        sb = MagicMock()
+        captured = {}
+
+        class _Exec:
+            def execute(self_inner):
+                return SimpleNamespace(data=True)
+
+        def _rpc(name, params=None):
+            captured["name"] = name
+            captured["params"] = params
+            return _Exec()
+
+        sb.rpc.side_effect = _rpc
+        return sb, captured
+
+    def test_comentarionovedad_va_a_description(self):
+        """Doc oficial webhookEstadosGuias: estado[].comentarionovedad se
+        persiste como description del evento (forensics de novedades)."""
+        sb, captured = self._sb_capture()
+        ev = webhook_mod._process_estado_event(
+            sb,
+            tenant_id="t1", shipment_id="s1", order_id="o1", guia="G1",
+            estado_id="12", nombre_estado="EN NOVEDAD",
+            fecha="2026-08-22 10:00:00", raw_payload={},
+            description="DESTINATARIO SE TRASLADO",
+        )
+        params = captured["params"]
+        self.assertEqual(params["p_description"], "DESTINATARIO SE TRASLADO")
+        self.assertEqual(params["p_internal_status"], "exception")
+        self.assertEqual(params["p_raw_estado_id"], 12, "estado_id str → int")
+        self.assertEqual(params["p_external_event_id"], "G1|12|2026-08-22 10:00:00")
+        self.assertTrue(ev["inserted"])
+
+    def test_sin_comentario_description_none(self):
+        sb, captured = self._sb_capture()
+        webhook_mod._process_estado_event(
+            sb,
+            tenant_id="t1", shipment_id="s1", order_id="o1", guia="G1",
+            estado_id="3", nombre_estado="EN REPARTO",
+            fecha="2026-08-22 10:00:00", raw_payload={},
+        )
+        self.assertIsNone(captured["params"]["p_description"])
 
 
 if __name__ == "__main__":

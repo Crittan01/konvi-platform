@@ -245,6 +245,101 @@ def rotate_secret(
     )
 
 
+def store_external_secret(
+    supabase_client: Any,
+    tenant_id: str,
+    integration: str,
+    plaintext: str,
+    actor_id: Optional[str] = None,
+    reason: str = "external_secret_store",
+    grace_days: int = GRACE_PERIOD_DAYS,
+) -> RotationResult:
+    """Persiste un secret generado por el PROVEEDOR (no por Konvi).
+
+    Caso: Aveonline `webhookPersonalizadoApi` (oficial, 2026-08-22) — el
+    registro del custom-webhook es upsert por empresa y Aveonline devuelve
+    `data.token`, que reenvía top-level en cada notificación. Ese token ES el
+    secret a verificar; Konvi no lo genera, solo lo persiste (bcrypt).
+
+    Misma semántica que `rotate_secret`: el actual pasa a previous con grace
+    (los eventos firmados con el token viejo siguen válidos durante la
+    ventana) y audit_log registra el evento. Si el plaintext entrante es
+    idéntico al actual, igual se re-hashea (no-op funcional, audit queda).
+    """
+    if not plaintext or not str(plaintext).strip():
+        raise WebhookSecretError("plaintext externo vacío — nada que persistir")
+    i = _validate_integration(integration)
+    plaintext = str(plaintext).strip()
+    new_hash = _hash_secret(plaintext)
+
+    now = datetime.now(timezone.utc)
+    rotated_at = now.isoformat()
+    expires_at = (now + timedelta(days=ROTATION_PERIOD_DAYS)).isoformat()
+
+    existing = get_record(supabase_client, tenant_id, integration)
+
+    if existing is None:
+        audit_entry = {
+            "event": "created",
+            "actor_id": actor_id,
+            "reason": reason,
+            "at": rotated_at,
+        }
+        payload = {
+            "tenant_id": tenant_id,
+            "integration": i,
+            "secret_hash": new_hash,
+            "previous_secret_hash": None,
+            "grace_period_until": None,
+            "rotated_at": rotated_at,
+            "expires_at": expires_at,
+            "audit_log": [audit_entry],
+        }
+        res = supabase_client.table("tenant_webhook_secrets").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
+        rows = res.data or []
+        if not rows:
+            raise WebhookSecretError(
+                f"Insert vacío al crear secret externo ({tenant_id}, {i})"
+            )
+        return RotationResult(
+            record=WebhookSecretRecord.from_row(rows[0]),
+            plaintext_secret=plaintext,
+        )
+
+    grace_until = (now + timedelta(days=grace_days)).isoformat()
+    audit_entry = {
+        "event": "rotated",
+        "actor_id": actor_id,
+        "reason": reason,
+        "at": rotated_at,
+    }
+    new_audit_log = list(existing.audit_log) + [audit_entry]
+
+    update_payload = {
+        "secret_hash": new_hash,
+        "previous_secret_hash": existing.secret_hash,
+        "grace_period_until": grace_until,
+        "rotated_at": rotated_at,
+        "expires_at": expires_at,
+        "audit_log": new_audit_log,
+    }
+    res = (
+        supabase_client.table("tenant_webhook_secrets")  # tenant_filter:exempt:payload_includes_tenant_id
+        .update(update_payload)
+        .eq("id", existing.id)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise WebhookSecretError(
+            f"Update vacío al persistir secret externo ({tenant_id}, {i})"
+        )
+    return RotationResult(
+        record=WebhookSecretRecord.from_row(rows[0]),
+        plaintext_secret=plaintext,
+    )
+
+
 def cleanup_expired_grace_periods(supabase_client: Any) -> int:
     """Limpieza Python (utility/fallback) — borra previous_secret_hash de filas
     con grace expirado. Retorna número de filas actualizadas.

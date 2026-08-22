@@ -46,6 +46,12 @@
 
 ---
 
+## Track 5 — Arquitectura de dominios modulares (visión founder 2026-08-22)
+
+La plataforma como UN todo modular para cualquier e-commerce: los dominios (catálogo, pedidos, contactos, envíos, promociones, reclamos, comprobantes, compras, finanzas, analítica, stock) son la única fuente de verdad; la consola y el bot son canales sobre ellos; packs de vertical por tipo de tienda. Documento de arquitectura: [`architecture/modular-domains-vision.md`](architecture/modular-domains-vision.md). Fases M1-M5 (inventario de capacidades → contrato de domain services → tooling generativo del bot → packs de vertical → analítica conversacional), se insertan después de B-2. Nada toca PRD sin certificar en STG.
+
+---
+
 ## Orden recomendado (dependencias reales)
 
 **Decisión founder 2026-08-19 — modelo STG-first:** se trabaja y certifica TODO en STG; PRD solo recibe lo ya probado. El código fluye STG → `develop` → CI verde → `production` (ya es así); la config de terceros no se promueve (vive por ambiente) — la disciplina equivalente es configurar primero en STG, certificar, y replicar en PRD. **Consecuencia aceptada:** mientras dure la Fase A, KAIU en prod sigue con llaves sandbox (sin cobros reales) — inofensivo pre-launch.

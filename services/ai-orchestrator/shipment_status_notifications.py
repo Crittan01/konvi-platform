@@ -42,12 +42,18 @@ logger = logging.getLogger("shipment_status_notifications")
 # ── Mapping de estados Aveonline → canónico interno ──────────────────────────
 # ESPEJO de RAW_STATE_TO_INTERNAL en services/api/routers/aveonline_webhook.py
 # (mantener alineados — el poll y el webhook escriben en la misma tabla).
+# Cobertura del flujo oficial del API Sandbox (doc `sandbox-avanzarEstado`,
+# fetch 2026-08-22): GENERADA → PRODUCIDA → EN DESPACHO → EN REPARTO →
+# ENTREGADA, forzable a EN NOVEDAD; terminales ENTREGADA y ANULADA.
 RAW_STATE_TO_INTERNAL = {
-    # Pre-recogida / recogida.
+    # Generada / pre-recogida / recogida.
+    "GENERADA": "pending",
+    "PRODUCIDA": "pending",
     "EN OFICINA": "pending",
     "EN RECOGIDA": "pending",
     "RECOGIDA": "pending",
     # En tránsito físico.
+    "EN DESPACHO": "in_transit",
     "EN BODEGA": "in_transit",
     "EN TRANSITO": "in_transit",
     "EN TRÁNSITO": "in_transit",
@@ -76,6 +82,11 @@ RAW_STATE_TO_INTERNAL = {
     "DEVOLUCIÓN": "returned",
     "DEVUELTA": "returned",
     "DEVUELTO": "returned",
+    # Anulación / cancelación (terminal — doc sandbox: ANULADA es terminal).
+    "ANULADA": "cancelled",
+    "ANULADO": "cancelled",
+    "CANCELADA": "cancelled",
+    "CANCELADO": "cancelled",
 }
 
 TERMINAL_STATUSES = frozenset({"delivered", "returned", "cancelled"})

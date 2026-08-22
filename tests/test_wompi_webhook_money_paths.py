@@ -767,7 +767,9 @@ def _guide_tables(**over):
             "shipping_cost": 8000, "payment_method": "credit",
             "contacts": {
                 "name": "Ana Ruiz", "phone": "573001112233", "email": "ana@x.co",
-                "document_number": "1000",
+                # dsnit válido según la regla real del server (live 2026-08-22:
+                # numérico, ≥5 dígitos, >10000 — "" y "00000" son rechazados).
+                "document_number": "1020304050",
                 "address": {
                     "city": "Medellín", "state": "Antioquia",
                     "street": "Cra 10 # 20-30", "dane_code": "05001",
@@ -835,6 +837,31 @@ class GenerateGuideTests(unittest.TestCase):
         tables["orders"][0]["contacts"]["address"] = {}
         sb = _Sb(tables)
         self.assertFalse(self._run_guide(sb, _fake_ave_module(_GUIDE_OK)))
+
+    def test_documento_destinatario_invalido_skip_antes_del_claim(self):
+        """dsnit es OBLIGATORIO server-side (live 2026-08-22: "" y "00000" son
+        rechazados aunque la doc lo exija solo para COD). Sin documento válido
+        → skip ANTES del claim (operador completa el dato del contacto)."""
+        for doc_malo in (None, "", "00000", "1000", "1234"):
+            with self.subTest(document_number=doc_malo):
+                tables = _guide_tables()
+                tables["orders"][0]["contacts"]["document_number"] = doc_malo
+                sb = _Sb(tables)
+                fake = _fake_ave_module(dict(_GUIDE_OK))
+                self.assertFalse(self._run_guide(sb, fake))
+                self.assertEqual(fake._client.calls, [],
+                                 "skip antes de llamar a Aveonline")
+                self.assertEqual(_inserts_for(sb, "shipments"), [],
+                                 "skip antes del claim-before-bill")
+
+    def test_documento_con_formato_se_sanea_a_digitos(self):
+        """'CC 1.020.304.050' → dsnit '1020304050' (solo dígitos)."""
+        tables = _guide_tables()
+        tables["orders"][0]["contacts"]["document_number"] = "CC 1.020.304.050"
+        sb = _Sb(tables)
+        fake = _fake_ave_module(dict(_GUIDE_OK))
+        self.assertTrue(self._run_guide(sb, fake))
+        self.assertEqual(fake._client.calls[0]["recipient"]["doc"], "1020304050")
 
     def test_tenant_sin_shipping_origin_skip(self):
         tables = _guide_tables()
