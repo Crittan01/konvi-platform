@@ -52,14 +52,47 @@ La plataforma como UN todo modular para cualquier e-commerce: los dominios (cat�
 
 ---
 
+## Track 6 — Alineación total con docs oficiales de TODAS las tecnologías embebidas (directiva founder 2026-08-22)
+
+No solo conformidad: **explotación máxima de cada plataforma según su documentación oficial vigente** (fetch live, cero suposiciones), evolucionando lo actual con mirada al futuro. Patrón de trabajo = el aplicado a Aveonline 2026-08-22 (matriz acción × doc × código, verificación live, dossier actualizado).
+
+| Tecnología | Qué se revisa/evoluciona (ejemplos ya detectados) |
+|---|---|
+| **Wompi** (docs.wompi.co/docs/colombia/…) | Hoy usamos 2 de 4 llaves (prv + events, pagos por link). Registrar las 4 por tenant (**pub + integrity**) para habilitar el futuro checkout embebido/widget en una tienda online propia (Konvi Studio / custom store Fase 13) — el guard de prefijos S0.2 ya soporta validarlas. Revisar: widget-checkout-web, tokens de aceptación, presignado, reintentos de eventos, ambientes. |
+| **Aveonline** | Hecho 2026-08-22 (conformidad + webhook oficial + mapping estados). Evolución: recogida programada (`generarRecogida2` — gap REC-1 registrado), sandbox oficial `avanzarEstado` para UAT de estados, catálogo homologado `tiposEstadosEnvios` cuando el token v2 esté disponible. |
+| **Meta WhatsApp** | Webhook fields que hoy no consumimos, versión de API (v22 soportada hasta 2027-05-20; plan de bump), templates por tenant, calidad/messaging limits por WABA, flows interactivos (listas/botones nativos) si la doc los soporta para nuestro caso. |
+| **Supabase** | Realtime (publicaciones, Authorization), Vault, branching/local, signing keys — maximizar lo que ya pagamos. |
+| **Gemini** | Context caching (ahorro real de tokens por turno — gap identificado en la auditoría), structured output, grounding, rate limits por tier. |
+| **Resend** | Webhooks de eventos de email (entregado/rebotado/queja) por ambiente con signing svix — alimenta analítica y reputación. |
+| **Telegram** | Comandos operativos ya viven; revisar capacidades no usadas (botones inline para acciones de operador, etc.). |
+| **MeLi** | Cuando el marketplace opere (S6): docs de ítems, preguntas, ventas, usuarios de prueba. |
+
+**Salida por tecnología:** matriz capacidad × doc × estado actual → qué se adopta ahora vs qué queda diseñado para el futuro (con el punto de extensión ya preparado, p.ej. las 4 llaves Wompi en el modelo de datos).
+
+## Track 7 — UX/UI de clase mundial (directiva founder 2026-08-22)
+
+Mejorar ABSOLUTAMENTE la experiencia: no solo corregir bugs visuales sino elevar el estándar — login animado y memorable, módulos completos y pulidos, micro-interacciones con propósito (framer-motion ya instalado), estados vacíos/errores/cargas con diseño, móvil de primera. Referencia de sistema de diseño: `docs/ux/UX-UI.md` (Kaiu DS). Se mide contra lo que un founder esperaría de un producto SaaS top, no contra "funciona".
+
+## Track 8 — Bot a presión (adversarial conversation suite) (directiva founder 2026-08-22)
+
+Cuando B-1/B-2 dejen el bot versátil: batería de conversaciones DIFÍCILES en STG — cliente grosero/de mal humor, el que intenta "corchar" (descuentos inventados, "ya pagué" falso, prompt injection, pedir datos de otro cliente), lenguaje coloquial extremo/escritura rota, estrés/urgencia, cambios de tema abruptos, multi-intención en un mensaje, arrepentimientos a mitad de checkout. Cada caso: assertions de comportamiento correcto (no cede plata, no pierde la calma, no alucina, escala cuando debe). Vive dentro del harness serio (B-3) como corpus adversarial.
+
+## Nota Platform Console (transversal a todo)
+
+Todo lo que se construye ahora se diseña pensando en la futura **Platform Console (Fase 12)**: las métricas del bot (`/agentic/metrics`), la observabilidad mínima (B-4), los domain services (Track 5) y las capacidades de proveedores (Track 6) son la API que la consola plataforma consumirá — decisiones de diseño deben dejar ese punto de extensión abierto (nada de lógica cross-tenant hardcoded en canales).
+
+---
+
 ## Orden de ejecución vigente (consolidado 2026-08-22 — integra Fase A/B, auditoría del bot, conformidad de proveedores y la visión de dominios)
 
 **Reglas vigentes:** STG-first — nada pasa a PRD sin certificar en STG y sin visto bueno founder (PRD está CONGELADO desde 2026-08-21 hasta cerrar los bloques de ajuste). Todo con evidencia, cero suposiciones.
 
 ```
 HOY → en curso:
-  1. Conformidad Wompi + Meta contra docs oficiales (checklist liviano — ambos
-     ya endurecidos en S0/S2; solo verificación documental).         [A]
+  1. Track 6 — Alineación total con docs oficiales de TODAS las          [A]
+     tecnologías (Wompi 4 llaves + widget futuro, Meta, Supabase, Gemini
+     context caching, Resend webhooks, Telegram, MeLi). Aveonline ya
+     cerrado 2026-08-22. Matriz capacidad×doc×código por tecnología.
   2. B-1 — Calidad conversacional (la queja original del founder):    [A]
      resumen rodante de conversación (amnesia estructural), routing de modelo
      por estado (lite→flash en transaccional), contradicción de longitud,
@@ -70,27 +103,33 @@ HOY → en curso:
      estado FSM, TurnContext único, TurnFinalizer único; strangler por fases,
      Fase 0 sin riesgo primero: matar V2 eager, resolver estado ANTES de
      mutaciones, borrar estados/reglas muertos).
-  4. B-3 — Harness de evaluación serio: assertions de outcome en DB           [A]
-     obligatorias, fail por respuesta stale, CI nocturno; luego corpus dorado
-     (conversaciones reales anonimizadas) + LLM-judge + métricas SQL de calidad.
-  5. B-4 — Observabilidad mínima post-Sentry: cron que consuma                 [A]
-     /agentic/metrics + alertas Telegram (error rate, p95, tokens/día),
-     circuit-breaker/alerta de Gemini caído, uptime externo /health.
+  4. B-3 — Harness de evaluación serio: assertions de outcome en DB       [A]
+     obligatorias, fail por respuesta stale, CI nocturno; corpus dorado
+     (conversaciones reales anonimizadas) + LLM-judge + métricas SQL.
+     INCLUYE Track 8: corpus adversarial (cliente grosero, "corchar",
+     lenguaje roto, estrés, multi-intención, arrepentimientos).
+  5. B-4 — Observabilidad mínima post-Sentry: cron /agentic/metrics +     [A]
+     alertas Telegram (error rate, p95, tokens/día), señal Gemini caído,
+     uptime externo /health. Diseñado como base de la futura Platform Console.
+  6. Track 7 — UX/UI de clase mundial (login animado, módulos             [A]
+     completos y pulidos, micro-interacciones framer-motion, estados
+     vacíos/errores/cargas con diseño, móvil primero — contra Kaiu DS).
 
 DESPUÉS (visión de plataforma — Track 5):
-  6. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
+  7. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
      inventario de capacidades por dominio → contrato de domain services
      (pilotos: pedidos + reclamos) → tools del bot generadas del contrato →
      packs de vertical (belleza/moda/tecnología/juguetería) → analítica
-     conversacional para el owner.
+     conversacional para el owner. Todo deja el punto de extensión para
+     la futura Platform Console (Fase 12).
 
 DESCONGELAR PRD (cuando 1-2 cierren en STG, mínimo):
-  7. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
+  8. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
      …120100, …120200) + 20260822020000 (RPC idagente). Antes: SELECT de
      duplicados legacy para el pre-paso del índice B1.
-  8. Deploy develop→production + verificación Render ×4 + health ×5.
-  9. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
- 10. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
+  9. Deploy develop→production + verificación Render ×4 + health ×5.
+ 10. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
+ 11. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
      apps prod de la WABA de prueba (2.5) · anular guía UAT 86732771636 ·
      pin Python 3.13 · A1 MFA (cuando decida).
 ```
