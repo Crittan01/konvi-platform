@@ -13,6 +13,7 @@ Documentos maestros de las integraciones activas de la plataforma. Cada doc decl
 | **Telegram** (canal interno) | `telegram.md` | LIVE | Alertas de takeover + comandos `/resolver` `/estado` con RBAC chat_id→tenant; `setWebhook` manual por tenant (M17) |
 | **Mercado Libre** (marketplace) | `mercadolibre.md` | LIVE | OAuth endurecido, webhook IPN (IP allowlist + dedup + anti-SSRF), sync stock bidireccional |
 | **WhatsApp / Meta Cloud API** | `whatsapp-meta.md` | LIVE | Model B per-tenant (ADR-0023), HMAC per-tenant, inbox durable, Graph v22.0, ventana 24h con 131047 sin reintento |
+| **Supabase** (plataforma base: Postgres+RLS+Auth+Realtime+Vault+Storage) | `supabase.md` | LIVE | Alineación doc oficial Track 6 (2026-08-22): realtime select+anti-truncamiento, keys sin fallback legacy, runbook DR vault |
 | **Resend** (email transaccional) | — (sin doc maestro) | LIVE | `services/ai-orchestrator/notifications.py:157` (`_send_email_via_resend`), `receipt_email.py`, `refund_notifications.py`; env `RESEND_API_KEY` (sync:false) + `RESEND_FROM_EMAIL`; sin key → fallback a log, no rompe flujos. Cubre Habeas Data, comprobantes y notificaciones post-venta fuera de ventana 24h |
 
 ## Proveedores retirados

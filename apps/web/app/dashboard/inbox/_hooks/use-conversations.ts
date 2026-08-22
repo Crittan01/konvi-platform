@@ -275,7 +275,14 @@ export function useConversations({ supabase }: Options): Result {
   useEffect(() => {
     const channel = supabase
       .channel('conversations:all')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'conversations',
+        // Track 6 (2026-08-22): select explícito — la fila completa arrastra
+        // agentic_state (jsonb) y demás columnas que el listado no renderiza;
+        // Realtime trunca silencioso >1KB. La PK viaja siempre.
+        select: ['id', 'tenant_id', 'customer_phone', 'contact_name', 'status',
+                 'agentic_state', 'created_at', 'last_interaction_at', 'archived_at'],
+      }, (payload) => {
         lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
           const newConv = payload.new as Conversation

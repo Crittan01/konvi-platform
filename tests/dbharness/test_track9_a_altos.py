@@ -255,6 +255,19 @@ def test_vista_payments_safe_no_expone_columnas_crudas(db):
     )
 
 
+def test_vista_payments_safe_no_cruza_tenants(ctx):
+    """La barrera de la vista es su WHERE tenant_id = app_current_tenant(): aunque el
+    caller filtre explícitamente por OTRO tenant, la vista solo devuelve el suyo.
+    (La vista es security-definer a propósito — de la RLS de la tabla base ya se
+    encarga la RESTRICTIVE owner-only; la vista es la proyección segura para members.)"""
+    with as_user(OP_A, ctx["tenant_a"], "operator") as cur:
+        cur.execute(
+            "SELECT count(*) FROM public.payments_safe WHERE tenant_id = %s",
+            (ctx["tenant_b"],),
+        )
+        assert cur.fetchone()[0] == 0, "payments_safe devolvió filas de OTRO tenant"
+
+
 # ── A8 api_security_events: append-only ───────────────────────────────────────
 
 def test_authenticated_no_inserta_security_events(ctx):

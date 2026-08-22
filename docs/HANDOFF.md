@@ -70,6 +70,8 @@ El checklist go-live (B1-B6 + flips founder), el backlog priorizado y los ritual
 
 > **Nota CLI Supabase:** la VM quedó pineada a **2.90.0** a propósito (2026-08-22): la 2.115.0 siembra default privileges distintos en el replay local (MAINTAIN-only a roles de cliente) y rompe la homologación STG↔PRD + el formato del dump del baseline. El bump de CLI/imagen PG es un track separado que exige evaluar la versión de prod cloud primero.
 
+> **DR — root key de Vault (Track 6, 2026-08-22):** un restore manual de la DB a un proyecto Supabase NUEVO (pg_dump o clonado) **NO porta la root key de pgsodium** → todos los secretos de tenants en Vault quedan ilegibles. Antes de un restore a proyecto nuevo, portar la root key vía Management API: `GET /v1/projects/{ref}/pgsodium` (origen) → `PUT /v1/projects/{ref}/pgsodium` (destino) ([doc oficial](https://supabase.com/docs/guides/database/vault) §key-portability). Después, re-verificar con un `SELECT count(*) FROM vault.decrypted_secrets` (si descifra, la key viajó).
+
 ## 7. Fuente de verdad por tema
 
 | Tema | Doc |

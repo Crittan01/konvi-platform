@@ -125,10 +125,33 @@ export function useMessages(
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'messages',
         filter: `conversation_id=eq.${conversationId}`,
+        // Track 6 (2026-08-22, doc oficial postgres-changes §selecting-columns):
+        // select explícito — la fila completa arrastra columnas de auditoría y
+        // Realtime TRUNCA silencioso >1.024 KB (campos >64 B se omiten del
+        // payload). La PK viaja siempre; lo omitido se re-fetchea por id abajo.
+        select: MESSAGE_COLUMNS.split(',').map(c => c.trim()),
       }, (payload) => {
         lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
           const newMsg = payload.new as Message & { content_type?: string }
+          // Anti-truncamiento: si `content` no viajó (payload >1KB), la fila
+          // llega incompleta — re-fetch por id con las columnas completas.
+          if ((newMsg as unknown as Record<string, unknown>).content === undefined) {
+            supabase
+              .from('messages')
+              .select(MESSAGE_COLUMNS)
+              .eq('id', newMsg.id)
+              .single()
+              .then(({ data }) => {
+                if (!data) return
+                if (data.content_type &&
+                    (NON_RENDERABLE_CONTENT_TYPES as readonly string[]).includes(data.content_type)) return
+                setMessages(prev =>
+                  prev.some(m => m.id === data.id) ? prev : [...prev, data as Message],
+                )
+              })
+            return
+          }
           // R-13 + F7: snapshots internos y filas de auditoría (escalation_audit,
           // sla_breach_audit) NO se renderizan como burbuja.
           if (
@@ -144,7 +167,10 @@ export function useMessages(
           const ts = newMsg.created_at || new Date().toISOString()
           onMessageInsertedRef.current?.(conversationId, ts)
         } else if (payload.eventType === 'UPDATE') {
-          setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m))
+          // Merge (no reemplazo): si el payload vino truncado, los campos
+          // omitidos (undefined) no deben pisar los valores ya renderizados.
+          const upd = payload.new as Partial<Message> & { id: string }
+          setMessages(prev => prev.map(m => m.id === upd.id ? { ...m, ...upd } as Message : m))
         }
       })
       .subscribe((status) => {
