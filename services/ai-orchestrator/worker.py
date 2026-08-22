@@ -1932,8 +1932,12 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
         min_age = (_now - timedelta(minutes=PAID_NO_GUIDE_MIN_AGE_MINUTES)).isoformat()
         window = (_now - timedelta(hours=PAID_NO_GUIDE_WINDOW_HOURS)).isoformat()
         try:
+            # Barrido cross-tenant deliberado: cron de plataforma que detecta órdenes
+            # pagadas sin guía en TODOS los tenants (mismo patrón que los demás
+            # reconciliadores del worker); el tenant_id viaja en cada fila leída y la
+            # alerta se emite por tenant (notification_settings del tenant dueño).
             res = (
-                self.supabase.table("orders")
+                self.supabase.table("orders")  # tenant_filter:exempt:platform_cron_sweep_alerts_per_tenant
                 .select("id, tenant_id, total_amount, payment_method, created_at")
                 .eq("status", "confirmed")
                 .lt("created_at", min_age)
