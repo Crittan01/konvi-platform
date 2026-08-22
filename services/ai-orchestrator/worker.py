@@ -88,6 +88,11 @@ STALE_PROCESSING_RECLAIM_MINUTES = int(os.getenv("STALE_PROCESSING_RECLAIM_MINUT
 STALE_PROCESSING_SWEEP_INTERVAL_SECONDS = int(
     os.getenv("STALE_PROCESSING_SWEEP_INTERVAL_SECONDS", "60")
 )
+# B-1 (F7): segundos tras los cuales un inbound diferido por la ventana de
+# cortesía del operador se re-encola a 'pending' (el gate vuelve a decidir).
+OPERATOR_COURTESY_RECLAIM_SECONDS = int(
+    os.getenv("OPERATOR_COURTESY_RECLAIM_SECONDS", "120")
+)
 HUMAN_TAKEOVER_QUEUE_ENABLED = os.getenv("HUMAN_TAKEOVER_QUEUE_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -266,6 +271,30 @@ HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS = int(
 HUMAN_TAKEOVER_SLA_HOURS = int(
     os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
 )
+# B-1 (F8): horas tras las cuales una breach ya alertada vuelve a notificarse
+# si la conv sigue sin respuesta humana (antes: silencio permanente → zombi).
+SLA_REALERT_HOURS = int(
+    os.getenv("SLA_REALERT_HOURS", "24")
+)
+
+# B-1 (F8): auto-exit de escaladas TÉCNICAS (silent detector / invariant_block)
+# cuando el operador nunca respondió y el cliente sigue escribiendo. Nunca
+# aplica a escaladas pedidas por el cliente, gates legales ni takeover manual.
+TAKEOVER_TECH_AUTOEXIT_ENABLED = os.getenv(
+    "TAKEOVER_TECH_AUTOEXIT_ENABLED", "true",
+).lower() in {"1", "true", "yes", "on"}
+TAKEOVER_TECH_AUTOEXIT_HOURS = int(
+    os.getenv("TAKEOVER_TECH_AUTOEXIT_HOURS", "4")
+)
+TAKEOVER_TECH_AUTOEXIT_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("TAKEOVER_TECH_AUTOEXIT_CHECK_INTERVAL_SECONDS", "600")
+)
+# Fuentes de escalación TÉCNICA (falla de envío / guard de dinero caído) —
+# las únicas elegibles para auto-exit. Las demás rutas (cliente pidió humano,
+# gates legales DSR/menor/retracto, consola manual) exigen salida humana.
+_TAKEOVER_TECH_AUTOEXIT_SOURCES = frozenset({
+    "invariant_block", "worker_silent_detector",
+})
 
 # Detector de "cliente mudo" — el cliente escribió y no le llegó respuesta.
 # Red de seguridad transversal: vigila el SÍNTOMA (silencio) en vez de cada
@@ -447,6 +476,10 @@ _INBOUND_JOBS = (
     # (carrera de coalescing/claim). ANTES del poll inbound para que un mensaje
     # re-encolado entre de inmediato al ciclo.
     ("sweep_stale_processing", "_sweep_stale_processing_if_due"),
+    # B-1 (F7): re-encola los defers de la ventana de cortesía del operador
+    # (skip_reason='operator_courtesy') para que el bot retome cuando el
+    # operador guarda silencio.
+    ("operator_courtesy_reclaim", "_reclaim_operator_courtesy_if_due"),
     ("poll_inbound", "_poll_inbound_messages"),
     ("human_takeover_notif", "_poll_human_takeover_notifications"),
     ("whatsapp_outbound", "_poll_whatsapp_outbound_messages"),
@@ -462,6 +495,8 @@ _MAINTENANCE_JOBS = (
     ("meli_token_refresh", "_meli_token_refresh_if_due"),
     ("anti_hibernation", "_anti_hibernation_ping_if_due"),
     ("takeover_sla", "_check_human_takeover_sla_if_due"),
+    # B-1 (F8): salida automática de escaladas TÉCNICAS abandonadas (zombi).
+    ("takeover_autoexit", "_autoexit_technical_takeovers_if_due"),
     ("silent_conversations", "_detect_silent_conversations_if_due"),
     ("order_coherence", "_check_order_coherence_if_due"),
     ("paid_no_guide_reconcile", "_reconcile_paid_without_guide_if_due"),
@@ -541,6 +576,10 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
         self._last_silent_conv_check_at = 0.0
         # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
         self._last_stale_sweep_at = 0.0
+        # B-1 (F7): sweeper de cortesía del operador (re-encola defers).
+        self._last_courtesy_sweep_at = 0.0
+        # B-1 (F8): auto-exit de escaladas técnicas.
+        self._last_autoexit_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron timestamps.
@@ -1671,37 +1710,74 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                     )
 
                 # 2. ¿Ya alertamos previamente esta breach?
+                # B-1 (F8, auditoría bot 2026-08-21): la alerta ya NO es one-shot
+                # permanente — si la ÚLTIMA breach notificada tiene >SLA_REALERT_HOURS
+                # (default 24h) y la conv sigue sin respuesta humana, vuelve a sonar.
+                # Antes: una sola alerta y silencio eterno → conversación zombi.
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
                 breach_audit = (
                     self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
-                    .select("id")
+                    .select("id, created_at")
                     .eq("conversation_id", conv_id)
                     .eq("content_type", "sla_breach_audit")
                     .gt("created_at", escalated_at_iso)
+                    .order("created_at", desc=True)
                     .limit(1)
                     .execute()
                 )
                 if breach_audit.data:
-                    # Ya notificada — skip idempotencia.
-                    continue
+                    realert_cutoff = (
+                        datetime.now(timezone.utc)
+                        - timedelta(hours=SLA_REALERT_HOURS)
+                    ).isoformat()
+                    last_breach_at = str(breach_audit.data[0].get("created_at") or "")
+                    if last_breach_at and last_breach_at > realert_cutoff:
+                        # Alerta reciente — skip idempotencia.
+                        continue
+                    logger.info(
+                        "[SLA] conv=%s sin respuesta humana >%dh desde la última "
+                        "alerta — RE-ALERTA (antes era silencio permanente)",
+                        str(conv_id)[:8], SLA_REALERT_HOURS,
+                    )
 
                 # 3. ¿Hubo respuesta del OPERADOR post-escalación? F6: solo cuentan outbound marcados
                 # sent_by='operator' (los que envía send_agent_message/image desde el Inbox), NO cualquier
                 # outbound text. Antes contaba cualquiera → la DESPEDIDA que el LLM genera al escalar (outbound
                 # text, sin marca) se contaba como "operador respondió" → el SLA NUNCA disparaba (falso-negativo).
+                # B-1 (F8): la respuesta del operador debe ser POSTERIOR AL ÚLTIMO INBOUND
+                # del cliente — si el operador respondió al inicio y abandonó la conv,
+                # los mensajes nuevos del cliente SÍ son breach (cierra el segundo
+                # agujero zombi: "operador respondió una vez y se fue").
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
+                last_inbound_res = (
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
+                    .select("created_at")
+                    .eq("conversation_id", conv_id)
+                    .eq("direction", "inbound")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                last_inbound_at = str(
+                    (last_inbound_res.data or [{}])[0].get("created_at")
+                    or escalated_at_iso
+                )
+                # El cliente debe llevar ≥ SLA_HOURS esperando tras su último
+                # mensaje (no alertar por un inbound recién llegado).
+                if last_inbound_at > sla_cutoff:
+                    continue
                 human_response = (
                     self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                     .select("id")
                     .eq("conversation_id", conv_id)
                     .eq("direction", "outbound")
                     .eq("payload->>sent_by", "operator")
-                    .gt("created_at", escalated_at_iso)
+                    .gt("created_at", last_inbound_at)
                     .limit(1)
                     .execute()
                 )
                 if human_response.data:
-                    # Operador respondió — no es breach.
+                    # Operador respondió tras el último mensaje del cliente — no es breach.
                     continue
 
                 # 4. SLA breach. Enviar notif Telegram + audit row.
@@ -1764,6 +1840,157 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
 
             except Exception as exc:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
+                continue
+
+    async def _autoexit_technical_takeovers_if_due(self) -> None:
+        """B-1 (F8, auditoría bot 2026-08-21) — salida automática de la trampa
+        zombi para escaladas TÉCNICAS abandonadas.
+
+        Las escaladas por falla técnica (envío fallido → worker_silent_detector,
+        guard de dinero/verdad caído → invariant_block) ponen la conv en
+        human_takeover SIN que el cliente pidiera un humano. Si el operador
+        NUNCA respondió y el cliente siguió escribiendo, la conv quedaba zombi
+        para siempre (todo inbound skipeado en silencio). Tras
+        TAKEOVER_TECH_AUTOEXIT_HOURS (default 4h) la conv vuelve a bot_active,
+        el cliente recibe aviso y el operador una nota Telegram.
+
+        NUNCA aplica a: escaladas pedidas por el cliente (agentic_tool), gates
+        legales (DSR/menor/retracto/cancelación), takeover manual de consola,
+        ni rutas sin escalation_audit con fuente técnica explícita (conservador:
+        ante la duda, se queda en takeover y el SLA la re-alertará cada 24h).
+        """
+        if not TAKEOVER_TECH_AUTOEXIT_ENABLED:
+            return
+        now = time.time()
+        if now - self._last_autoexit_at < max(
+            60, TAKEOVER_TECH_AUTOEXIT_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        self._last_autoexit_at = now
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=TAKEOVER_TECH_AUTOEXIT_HOURS)
+        ).isoformat()
+        try:
+            convs_res = (
+                self.supabase.table("conversations")  # tenant_filter:exempt:cron_cross_tenant_takeover_autoexit
+                .select("id, tenant_id, human_takeover_at")
+                .eq("status", "human_takeover")
+                .lt("human_takeover_at", cutoff)
+                .limit(50)
+                .execute()
+            )
+            convs = convs_res.data or []
+        except Exception as exc:
+            logger.warning("[AUTOEXIT] error consultando convs takeover: %s", exc)
+            return
+
+        for conv in convs:
+            conv_id = conv.get("id")
+            tenant_id = conv.get("tenant_id")
+            anchor = conv.get("human_takeover_at")
+            if not (conv_id and tenant_id and anchor):
+                continue
+            try:
+                # 1. Fuente TÉCNICA explícita (última escalation_audit de la conv).
+                audit_res = (
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_takeover_autoexit
+                    .select("payload, created_at")
+                    .eq("conversation_id", conv_id)
+                    .eq("content_type", "escalation_audit")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                audit = (audit_res.data or [None])[0]
+                if not audit:
+                    continue
+                source = str((audit.get("payload") or {}).get("source") or "")
+                if source not in _TAKEOVER_TECH_AUTOEXIT_SOURCES:
+                    continue
+
+                # 2. El operador NUNCA respondió desde la escalación.
+                op_res = (
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_takeover_autoexit
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("direction", "outbound")
+                    .eq("payload->>sent_by", "operator")
+                    .gt("created_at", anchor)
+                    .limit(1)
+                    .execute()
+                )
+                if op_res.data:
+                    continue
+
+                # 3. El cliente SIGUIÓ escribiendo tras la escalación (si no,
+                #    reactivar solo añadiría ruido a una conv abandonada).
+                inbound_res = (
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_takeover_autoexit
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("direction", "inbound")
+                    .gt("created_at", anchor)
+                    .limit(1)
+                    .execute()
+                )
+                if not inbound_res.data:
+                    continue
+
+                # 4. Auto-exit: bot_active + aviso al cliente + nota al operador.
+                upd = (
+                    self.supabase.table("conversations")
+                    .update({"status": "bot_active"})
+                    .eq("id", conv_id).eq("tenant_id", tenant_id)
+                    .eq("status", "human_takeover")  # CAS: no pisar un cambio manual
+                    .execute()
+                )
+                if not upd.data:
+                    continue
+                logger.warning(
+                    "[AUTOEXIT] conv=%s tenant=%s sale de takeover técnico "
+                    "(source=%s, operador sin responder ≥%dh) → bot_active",
+                    str(conv_id)[:8], str(tenant_id)[:8], source,
+                    TAKEOVER_TECH_AUTOEXIT_HOURS,
+                )
+                try:
+                    from orchestrator import _send_outbound_text
+                    await _send_outbound_text(
+                        supabase=self.supabase,
+                        conversation_id=conv_id,
+                        tenant_id=tenant_id,
+                        text=(
+                            "Ya estoy de vuelta por aquí 🙌 Gracias por tu "
+                            "paciencia — ¿en qué te ayudo?"
+                        ),
+                    )
+                except Exception as send_exc:
+                    logger.info(
+                        "[AUTOEXIT] aviso al cliente falló conv=%s: %s",
+                        str(conv_id)[:8], send_exc,
+                    )
+                try:
+                    from telegram_notifications import notify_escalation_async
+                    await notify_escalation_async(
+                        self.supabase,
+                        tenant_id=tenant_id,
+                        conversation_id=conv_id,
+                        reason=(
+                            f"🤖 La conversación volvió al bot automáticamente: "
+                            f"escalación técnica ({source}) sin respuesta del "
+                            f"equipo en ≥{TAKEOVER_TECH_AUTOEXIT_HOURS}h y el "
+                            f"cliente seguía escribiendo. Si necesitas retomarla "
+                            f"tú, tómala desde el Inbox."
+                        ),
+                        severity="info",
+                    )
+                except Exception as tg_exc:
+                    logger.info(
+                        "[AUTOEXIT] nota Telegram falló conv=%s: %s",
+                        str(conv_id)[:8], tg_exc,
+                    )
+            except Exception as exc:
+                logger.error("[AUTOEXIT] error procesando conv=%s: %s", conv_id, exc)
                 continue
 
     async def _stamp_acceptances_if_due(self) -> None:
@@ -2304,6 +2531,58 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
             threshold_minutes=STALE_PROCESSING_RECLAIM_MINUTES,
             statuses=["processing"], label="PERIODIC",
         )
+
+    async def _reclaim_operator_courtesy_if_due(self) -> None:
+        """B-1 (F7): re-encola inbounds diferidos por la ventana de cortesía del
+        operador (skip_reason='operator_courtesy', processed=False) tras
+        OPERATOR_COURTESY_RECLAIM_SECONDS (default 120s, chequeo cada 60s).
+
+        Al reprocesarse, el gate decide de nuevo: si el operador sigue activo
+        se re-difiere (vuelve a 'skipped'/'operator_courtesy'); si guardó
+        silencio >TAKEOVER_OPERATOR_COURTESY_SECONDS, el bot retoma. Defer con
+        salida garantizada — el mensaje del cliente NUNCA muere en el limbo.
+        """
+        now = time.time()
+        if self._last_courtesy_sweep_at and (now - self._last_courtesy_sweep_at) < 60:
+            return
+        self._last_courtesy_sweep_at = now
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=OPERATOR_COURTESY_RECLAIM_SECONDS)
+        ).isoformat()
+        try:
+            res = (
+                self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_courtesy_reclaim
+                .select("id, tenant_id")
+                .eq("direction", "inbound")
+                .eq("processing_status", "skipped")
+                .eq("skip_reason", "operator_courtesy")
+                .lt("created_at", cutoff)
+                .limit(100)
+                .execute()
+            )
+            rows = res.data or []
+            recovered = 0
+            for msg in rows:
+                # CAS-guard: solo re-encolar si SIGUE en 'skipped' (no pisar un
+                # mensaje que otro path completó).
+                upd = (
+                    self.supabase.table("messages")
+                    .update({"processing_status": "pending"})
+                    .eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"])
+                    .eq("processing_status", "skipped")
+                    .execute()
+                )
+                if upd.data:
+                    recovered += 1
+            if recovered:
+                logger.warning(
+                    "[COURTESY_SWEEP] %d inbounds de cortesía re-encolados "
+                    "(operador en silencio — el bot retoma)",
+                    recovered,
+                )
+        except Exception as exc:
+            logger.error("[COURTESY_SWEEP] error: %s", exc)
 
 
     # ── Sem 7 F2 item 6.b — HSM payment_reminder fuera CSW ──────────────────

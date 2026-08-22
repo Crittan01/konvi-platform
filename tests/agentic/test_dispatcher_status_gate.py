@@ -35,6 +35,12 @@ def _make_sb(conv_status: str):
     chain.execute.return_value = MagicMock(
         data=[{"status": conv_status}] if conv_status else [],
     )
+    # B-1 (F7): con status=bot_active el gate consulta la ventana de cortesía
+    # del operador (…gt("created_at", …).execute() con head=count) → aquí sin
+    # operador reciente (count=0).
+    chain.gt.return_value = MagicMock(
+        execute=MagicMock(return_value=MagicMock(count=0, data=[])),
+    )
     sb.table.return_value = chain
     return sb
 

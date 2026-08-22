@@ -20,8 +20,11 @@ NO usa numpy/pandas — agregaciones a mano para mantener dependencias mínimas.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _percentile(sorted_values: list[float], p: float) -> Optional[float]:
@@ -147,6 +150,28 @@ def compute_agentic_metrics(
         sorted(by_tool_name.items(), key=lambda kv: kv[1], reverse=True)[:20],
     )
 
+    # B-1 (F8c): inbounds skipeados por gates de conversación en la ventana —
+    # el síntoma "bot mudo por takeover/zombi" era invisible en métricas (solo
+    # una línea de log). Conteo por skip_reason: conv_status_no_bot
+    # (takeover/closed/opted_out), operator_courtesy (ventana del operador).
+    skipped_by_reason: dict[str, int] = {}
+    try:
+        sk_query = (
+            supabase.table("messages")  # tenant_filter:exempt:analytics_optional_tenant_filter
+            .select("skip_reason, tenant_id")
+            .eq("direction", "inbound")
+            .eq("processing_status", "skipped")
+            .gte("created_at", since_iso)
+            .limit(limit)
+        )
+        if tenant_id:
+            sk_query = sk_query.eq("tenant_id", tenant_id)
+        for sk in (sk_query.execute().data or []):
+            reason = sk.get("skip_reason") or "unknown"
+            skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
+    except Exception as exc:
+        logger.info("[METRICS] skipped section falló (fail-open): %s", exc)
+
     def _rate(num: int) -> float:
         return round(num / row_count, 4) if row_count else 0.0
 
@@ -171,6 +196,7 @@ def compute_agentic_metrics(
         "truncated_reasons": truncated_reasons,
         "finish_reasons": finish_reasons,
         "invariant_outcomes": invariant_outcomes,
+        "skipped_inbound_by_reason": skipped_by_reason,
         "tool_usage": {
             "total_calls": total_tool_calls,
             "avg_calls_per_turn": round(total_tool_calls / row_count, 3)

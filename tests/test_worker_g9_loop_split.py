@@ -1,7 +1,7 @@
 """G9 — split del worker en dos loops asyncio + métrica inbound_lag_seconds.
 
 Cubre:
-  • Compat de `_poll_cycle` (contrato legado de test_ola0): los 22 jobs corren
+  • Compat de `_poll_cycle` (contrato legado de test_ola0): los 24 jobs corren
     aislados y en el ORDEN histórico (inbound primero).
   • `_loop`: contador por grupo, heartbeat por loop, salida con stop().
   • `run()`: lanza los dos loops (inbound + maintenance) vía gather.
@@ -42,8 +42,8 @@ def _stub() -> MagicMock:
 
 class PollCycleCompatTests(unittest.TestCase):
     def test_grupos_suman_los_22_jobs_sin_solape(self):
-        self.assertEqual(len(worker_mod._INBOUND_JOBS), 4)
-        self.assertEqual(len(worker_mod._MAINTENANCE_JOBS), 18)
+        self.assertEqual(len(worker_mod._INBOUND_JOBS), 5)
+        self.assertEqual(len(worker_mod._MAINTENANCE_JOBS), 19)
         attrs_inbound = {a for _, a in worker_mod._INBOUND_JOBS}
         attrs_maint = {a for _, a in worker_mod._MAINTENANCE_JOBS}
         self.assertFalse(attrs_inbound & attrs_maint)
@@ -112,7 +112,7 @@ class RunSplitTests(unittest.TestCase):
 
         stub._loop = fake_loop
         asyncio.run(asyncio.wait_for(OrchestratorWorker.run(stub), timeout=5))
-        self.assertEqual(loop_calls, [("inbound", 4), ("maintenance", 18)])
+        self.assertEqual(loop_calls, [("inbound", 5), ("maintenance", 19)])
         stub._sweep_stale_messages_on_startup.assert_awaited_once()
 
 

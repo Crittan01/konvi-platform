@@ -234,8 +234,17 @@ async def dispatch_message(
     # agentic dispatcher saltaba al `_run_agentic_full` SIN verificar.
     # Resultado: bot respondía a mensajes en conv human_takeover/closed
     # sobre-escribiendo la intervención del operador.
-    if _should_skip_for_conv_status(supabase, tenant_id, conversation_id):
-        _mark_message_skipped(supabase, tenant_id, message_id)
+    # B-1 (F7): el gate ahora devuelve la RAZÓN del skip — 'operator_courtesy'
+    # (ventana del operador post-resolve) se marca con processed=False para que
+    # el sweeper de cortesía la re-encole cuando el operador guarde silencio
+    # (defer, no drop — el mensaje del cliente nunca se pierde).
+    _skip_reason = _skip_reason_for_conv(supabase, tenant_id, conversation_id)
+    if _skip_reason:
+        _mark_message_skipped(
+            supabase, tenant_id, message_id,
+            reason=_skip_reason,
+            processed=(_skip_reason != "operator_courtesy"),
+        )
         return
 
     # Rev. 109 founder 2026-05-29 — Opt-out STOP gate (Habeas Data Ley 1581 ART. 9 +
@@ -899,6 +908,7 @@ async def _run_agentic_full(
         PaymentTruthInvariant,
         PIICoherenceInvariant,
         PIISaveTruthfulnessInvariant,
+        PostEscalationCoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         RequotePendingSummaryInvariant,
         ToolCodeLeakInvariant,
@@ -2968,6 +2978,16 @@ async def _run_agentic_full(
 
     # Ejecutar agente.
     started_at = time.monotonic()
+    from datetime import timezone as _tz_race
+    from datetime import datetime as _dt_race
+    started_iso = _dt_race.now(_tz_race.utc).isoformat()  # B-1 F7: ancla race gate
+    # B-1 (memoria): leer el resumen rodante de la conversación para
+    # inyectarlo como primer content de la ventana Gemini (fuera del system
+    # prompt — preserva el prefijo estable de caching).
+    from agentic.conversation_summary import fetch_summary_text
+    conversation_summary = await fetch_summary_text(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+    )
     result = await run_agentic_turn(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -2979,6 +2999,7 @@ async def _run_agentic_full(
         supabase=supabase,
         system_prompt=system_prompt,
         allowed_tools=_allowed_tools,
+        conversation_summary=conversation_summary,
     )
     elapsed = time.monotonic() - started_at
 
@@ -3113,6 +3134,12 @@ async def _run_agentic_full(
             # FUERZA el side-effect real para garantizar atención humana.
             FakeEscalationInvariant(),
             PassiveClosingInvariant(),
+            # B-1 (F7, auditoría bot 2026-08-21): si la conv quedó en
+            # human_takeover ESTE turno (tool o side-effect FakeEscalation),
+            # el outbound debe ser una despedida limpia — sin CTA transaccional
+            # mezclado ("te paso con un especialista Y confirma tu pago").
+            # Después de PassiveClosing (que no debe re-añadir CTA aquí).
+            PostEscalationCoherenceInvariant(),
             # ADR-0027 2026-06-29 — RETIRADO CanonicalCategoriesInvariant (hardcode KAIU:
             # "Sérums Faciales"→"Sérums" etc.). Las etiquetas de categoría ahora son
             # data-driven: el catálogo embebido muestra los encabezados reales del tenant
@@ -3169,6 +3196,41 @@ async def _run_agentic_full(
         pass  # el trace NUNCA debe romper el turno
 
     # Enviar outbound al cliente.
+    # B-1 (F7, auditoría bot 2026-08-21): race operador↔bot — si el operador
+    # tomó la conversación Y ya habló mientras este turno se procesaba
+    # (outbound sent_by='operator' posterior al inicio del turno LLM), el
+    # outbound compuesto se descarta: la palabra la tiene el humano (antes el
+    # bot vendía ENCIMA del operador — gate de status solo se chequeaba al
+    # inicio del turno). Las escalaciones propias del turno (tool / FakeEsc /
+    # silent) no escriben sent_by='operator' → su despedida sí sale.
+    try:
+        _op_msgs = (
+            supabase.table("messages")
+            .select("id", count="exact", head=True)
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .eq("direction", "outbound")
+            .eq("payload->>sent_by", "operator")
+            .gt("created_at", started_iso)
+            .execute()
+        )
+        if getattr(_op_msgs, "count", 0) or 0:
+            logger.warning(
+                "[AGENTIC_DISPATCH] operador activo mid-turn conv=%s — "
+                "outbound descartado (la palabra la tiene el humano)",
+                conversation_id[:8],
+            )
+            _mark_message_processing(
+                supabase, tenant_id, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+    except Exception as _race_exc:  # noqa: BLE001 — fail-open: no dropear por un check
+        logger.info(
+            "[AGENTIC_DISPATCH] race-check operador falló (fail-open): %s",
+            _race_exc,
+        )
+
     await _send_outbound_text(
         supabase=supabase,
         conversation_id=conversation_id,
@@ -3549,9 +3611,59 @@ def _persist_turn_audit(
 
 _SKIP_STATUSES = frozenset({"human_takeover", "closed", "opted_out"})
 
+# B-1 (F7): ventana de cortesía del operador post-resolve — si el operador
+# habló hace menos de N segundos, el bot no retoma todavía (el humano sigue
+# escribiendo y cada /send renueva la ventana). Tunable por env.
+import os as _os
+
+_TAKEOVER_OPERATOR_COURTESY_SECONDS = int(
+    _os.getenv("TAKEOVER_OPERATOR_COURTESY_SECONDS", "300")
+)
+
+
+def _operator_spoke_recently(supabase: Any, tenant_id: str, conversation_id: str) -> bool:
+    """True si el operador envió un mensaje en la ventana de cortesía.
+
+    Best-effort (fail-open): si la lectura falla, NO se skipea — el bot
+    responde normal (la cortesía es mejora, no barrera de seguridad).
+    """
+    if _TAKEOVER_OPERATOR_COURTESY_SECONDS <= 0:
+        return False
+    try:
+        from datetime import datetime, timedelta, timezone
+        threshold = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=_TAKEOVER_OPERATOR_COURTESY_SECONDS)
+        ).isoformat()
+        res = (
+            supabase.table("messages")
+            .select("id", count="exact", head=True)
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .eq("direction", "outbound")
+            .eq("payload->>sent_by", "operator")
+            .gt("created_at", threshold)
+            .execute()
+        )
+        recent = bool(getattr(res, "count", 0) or 0)
+        if recent:
+            logger.info(
+                "[AGENTIC_DISPATCH] conv=%s en ventana de cortesía del operador "
+                "(%ds) — bot en espera",
+                conversation_id[:8], _TAKEOVER_OPERATOR_COURTESY_SECONDS,
+            )
+        return recent
+    except Exception as exc:
+        logger.info(
+            "[AGENTIC_DISPATCH] courtesy-check falló conv=%s: %s — no-skip",
+            conversation_id[:8], exc,
+        )
+        return False
+
 
 def _should_skip_for_conv_status(supabase: Any, tenant_id: str, conversation_id: str) -> bool:
-    """True si la conv está en estado donde el bot NO debe responder.
+    """True si la conv está en estado donde el bot NO debe responder (wrapper
+    de compatibilidad — el dispatcher usa `_skip_reason_for_conv`).
 
     Estados de skip:
       • human_takeover — el operador tomó la conv (rev. 107).
@@ -3562,9 +3674,22 @@ def _should_skip_for_conv_status(supabase: Any, tenant_id: str, conversation_id:
         connector (db_persistence._upsert_conversation), garantiza que un
         cliente revocado nunca recibe respuesta auto del bot — solo humano
         puede re-engagement manual desde Inbox.
+      • B-1 (F7) — ventana de cortesía: bot_active pero el operador habló
+        hace <TAKEOVER_OPERATOR_COURTESY_SECONDS (sigue escribiendo tras
+        resolver; el bot no le pisa la palabra).
 
     Best-effort lectura — si falla, NO skipea (default: dejar pasar para
     que el legacy aplique su propio gate como segunda defensa).
+    """
+    return _skip_reason_for_conv(supabase, tenant_id, conversation_id) is not None
+
+
+def _skip_reason_for_conv(supabase: Any, tenant_id: str, conversation_id: str) -> str | None:
+    """Razón del skip ('conv_status_no_bot' | 'operator_courtesy') o None.
+
+    La distinción importa para el lifecycle del mensaje: la cortesía es un
+    DEFER (processed=False, re-encolable por el sweeper de cortesía), el resto
+    es un drop terminal (processed=True).
     """
     try:
         res = (
@@ -3577,29 +3702,44 @@ def _should_skip_for_conv_status(supabase: Any, tenant_id: str, conversation_id:
         )
         rows = res.data or []
         if not rows:
-            return False
+            return None
         status = (rows[0].get("status") or "").lower()
-        return status in _SKIP_STATUSES
+        if status in _SKIP_STATUSES:
+            return "conv_status_no_bot"
+        if status == "bot_active" and _operator_spoke_recently(
+            supabase, tenant_id, conversation_id,
+        ):
+            return "operator_courtesy"
+        return None
     except Exception as exc:
         logger.warning(
             "[AGENTIC_DISPATCH] error leyendo conv status %s: %s — default no-skip",
             conversation_id[:8], exc,
         )
-        return False
+        return None
 
 
-def _mark_message_skipped(supabase: Any, tenant_id: str, message_id: str) -> None:
+def _mark_message_skipped(
+    supabase: Any, tenant_id: str, message_id: str,
+    *, reason: str = "conv_status_no_bot", processed: bool = True,
+) -> None:
     """Marca el message como skipped por status conv (human_takeover /
-    closed / opted_out). Mismo behavior que el path legacy."""
+    closed / opted_out). Mismo behavior que el path legacy.
+
+    B-1 (F7): `reason` distingue la ventana de cortesía del operador
+    ('operator_courtesy', processed=False → el sweeper la re-encola cuando el
+    operador guarda silencio: defer, no drop) del skip terminal
+    ('conv_status_no_bot', processed=True).
+    """
     try:
         supabase.table("messages").update({
             "processing_status": "skipped",
-            "skip_reason": "conv_status_no_bot",
-            "processed": True,
+            "skip_reason": reason,
+            "processed": processed,
         }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
         logger.info(
-            "[AGENTIC_DISPATCH] msg=%s skipped (conv status no-bot)",
-            message_id[:8],
+            "[AGENTIC_DISPATCH] msg=%s skipped (%s, processed=%s)",
+            message_id[:8], reason, processed,
         )
     except Exception as exc:
         logger.warning(

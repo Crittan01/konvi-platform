@@ -189,7 +189,10 @@ def test_el_audit_row_sigue_teniendo_prioridad():
 
 
 def test_no_realerta_una_breach_ya_notificada():
-    sb = _FakeSB([_conv()], msgs={"sla_breach_audit": [{"id": "ya"}]})
+    """Idempotencia vigente: si la alerta es RECIENTE (< SLA_REALERT_HOURS),
+    no se re-notifica. (B-1 F8: pasadas SLA_REALERT_HOURS sí vuelve a sonar —
+    ver tests/agentic/test_b1_human_takeover.py)."""
+    sb = _FakeSB([_conv()], msgs={"sla_breach_audit": [{"id": "ya", "created_at": _hace(1)}]})
     _, inst = _build_worker(sb)
     notify = _correr_sla(inst)
     assert notify.await_count == 0
