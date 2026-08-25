@@ -153,6 +153,15 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 ### Track 7 — brief de implementación (gap analysis verificado contra `develop` 2026-08-25)
 
 > Derivado con auditoría completa de la consola contra `docs/ux/UX-UI.md` (Kaiu DS).
+> **Directiva founder 2026-08-25 (ampliación):** el tratamiento del login NO es una
+> referencia aislada — es el **lenguaje de diseño diferencial que debe impregnar TODO
+> el front**: logout, cambio de contraseña, módulos y submódulos. La meta no es solo
+> "llamativo": es que sea **diferencial frente a cualquier desarrollo genérico**.
+> La firma (Kaiu Organic Differential — solo tokens Kaiu, reduced-motion siempre):
+> canvas con grano + aurora ambiental (nada de fondos planos en momentos de marca) ·
+> brand tile degradado primary→amber + glow como marca de la casa · coreografía de
+> entrada (stagger/reveal) en cada superficie · motion físico con propósito
+> (layout/pill/celebraciones) · estados con diseño en TODO módulo.
 > **Hallazgo central:** gran parte de la Spec WOW §4 YA está implementada (commit
 > `894b7357`, 2026-08-02: wrappers `ui/motion.tsx` + command palette ⌘K + drawers vaul
 > + carrusel embla + StaggerList en inbox/orders + EmptyState en 14 módulos + 7 error
@@ -188,6 +197,17 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 - **T7.8 — Cobertura de render del DS**: vitest para empty-state, carousel, drawer,
   responsive-dialog, confirm-dialog, skeleton (hoy 5 tests .tsx sobre 27 primitivos).
 - **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
+- **T7.10 — Logout con despedida de marca** (directiva founder 2026-08-25): hoy el logout
+  es una acción muda. Pantalla `/logout` con la escena de auth (AuthScene/AuthBrand) +
+  momento "Hasta pronto" + signOut server-side (con la limpieza de cookie AAL2 del patrón
+  G7, `login/page.tsx` switch-user) + redirect a `/login`.
+- **T7.11 — Settings/Security con la firma** (directiva): cambio de contraseña, MFA TOTP,
+  recovery codes — mismo lenguaje de superficie (cabecera de módulo con identidad,
+  revelado stagger, cards con diseño) dentro del canvas dashboard.
+- **T7.12 — Cabeceras de módulo con identidad** (directiva "módulos y submódulos"):
+  patrón de header de página (título + contexto + micro-motion de entrada) aplicado
+  transversal a los 37 `page.tsx` — hoy cada módulo encabeza a su manera; la firma
+  exige UN patrón (hermano de lo que T7.5 hace en la topbar móvil).
 - **También**: BUG-105-02 del tracker (inbox "no refresca sin F5") — probablemente obsoleto
   (Realtime+polling ya viven en `inbox-manager.tsx:152,180`): verificar live y cerrar entrada.
 

@@ -116,11 +116,13 @@ Cinco, todas en `globals.css`:
 - `<html suppressHydrationWarning>` (`layout.tsx:54`) por la mutación de clase pre-hidratación.
 - `theme-color` por esquema en viewport (`layout.tsx:42-45`): `#F8F5F1` claro / `#1A211F` oscuro.
 
-### 1.9 Inventario real de componentes (`components/ui/` — 20)
+### 1.9 Inventario real de componentes (`components/ui/` — 26)
 
-Verificado con `ls apps/web/components/ui/` (21 archivos; `badge.test.tsx` es test, no componente):
+Verificado con `ls apps/web/components/ui/` (2026-08-25; 28 archivos: 26 componentes + `badge.test.tsx` + `motion.test.tsx`):
 
-`alert` · `badge` · `button` · `card` · `checkbox` · `confirm-dialog` · `dialog` · `dropdown-menu` · `input` · `label` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
+`alert` · `badge` · `button` · `card` · `carousel` · `checkbox` · `command` · `confirm-dialog` · `dialog` · `drawer` · `dropdown-menu` · `empty-state` · `input` · `label` · `motion` · `responsive-dialog` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
+
+Fuera de `ui/` pero parte del DS aplicado: `components/command-palette.tsx` (⌘K, §4.3) · `components/auth/auth-scene.tsx` (escena de auth T7.1: `AuthScene`/`AuthBrand`/`AuthCardReveal` — grano inline + aurora estática + brand tile degradado + coreografía stagger, usada por login/mfa/forgot/set-password/logout) · `components/pwa/` · `components/theme/`.
 
 Primitivos Radix instalados (`package.json`): accordion, checkbox, dialog, dropdown-menu, select, slot, switch, tabs, tooltip. Nota: `@radix-ui/react-accordion` es dependencia y sus keyframes viven en `globals.css:48-66`, pero **no existe `ui/accordion.tsx`** — primitive instalado sin wrapper del DS.
 
@@ -221,7 +223,11 @@ sonner montado una vez en root (`app/layout.tsx:60`). **95 llamadas** `toast.suc
 
 > **Principio rector**: el *wow* viene de **motion + command palette + polish móvil** — NO de más tokens ni de cambiar el DS. Todo lo de esta sección consume los tokens Kaiu existentes (§1) y respeta el dark mode (§1.8) sin excepción.
 >
+> **Directiva founder 2026-08-25 (ampliación, Track 7):** el lenguaje de diseño de auth (escena con grano + aurora + brand tile + coreografía) NO es una referencia aislada — es la **firma diferencial que debe impregnar TODO el front** (logout, cambio de contraseña, módulos y submódulos): no solo "llamativo", sino **diferencial frente a cualquier desarrollo genérico**. Track 7 ejecuta esta ampliación (breakdown T7.1-T7.12 en `.context/04-next-steps.md`).
+>
 > Estado de dependencias (verificado en `apps/web/package.json`): **las 6 ya están instaladas** — `tw-animate-css` ^1.4.0 y, agregadas el 2026-08-02 (WIP sin commit al cierre de esta verificación): `framer-motion` ^12.43.0, `cmdk` ^1.1.1, `vaul` ^1.1.2, `embla-carousel-react` ^8.6.0, `@tanstack/react-virtual` ^3.14.9. Ya existe además `components/ui/motion.tsx` (wrappers DS sobre framer-motion con `useReducedMotion` uniforme; "aún no aplicado a pantallas — fundación", según su propio encabezado). Las secciones 4.2-4.6 quedan como guía de dónde y cómo aplicar cada una.
+>
+> **Estado de implementación (2026-08-25):** §4.2 parcial (StaggerList en inbox/orders, `useCountUp` + Pressable en home; pendientes chat motion, pill bottom-nav, layout en cards de pedidos, micro-celebraciones) · §4.3 ✅ command palette ⌘K con búsqueda federada · §4.4 parcial (drawers en stock móvil y confirmación de pedido) · §4.5 parcial (carrusel OpsCards/KpiCards del home) · §4.6 pendiente (react-virtual instalado, sin consumidor aún). **Auth con firma propia (T7.1+T7.10 ✅):** `components/auth/auth-scene.tsx` — escena compartida (grano SVG inline sin terceros, aurora estática de tokens, brand tile degradado primary→amber + `glow-primary`, coreografía stagger vía wrappers §4.1) en login/mfa/forgot/set-password + **logout con despedida de marca** (`/logout`, signOut con limpieza G7 de la cookie AAL2); el "Logo mock / Brand" del login murió.
 
 ### 4.1 Reglas transversales de motion (obligatorias)
 
