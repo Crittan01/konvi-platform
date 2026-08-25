@@ -100,12 +100,139 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   el `_check` del Makefile lo exige. Render: buildCommand `pip install -e ../../packages/shared-py`
   (pip resuelve `-e` relativo al CWD, NO al requirements.txt — verificado empíricamente 2026-08-25).
 
-### M2.4 y resto del Track 5 (vista rápida)
+### M2.4 — brief de implementación (ClaimsService) — LEER ANTES DE ESCRIBIR
 
-- **M2.4 — ClaimsService** (diseño §5 del contrato): UN writer (`reason` cerrado + `reason_detail`
-  libre — decisión founder #3), dedup idempotente, titularidad por actor, FSM formalizada
-  (`refunded` final, write-once), reversión delega a RPCs SQL existentes, enums compartidos (mata el
-  vocabulario extinto del bot cuando lo adopte). Misma barra de certificación + paridad bot↔paquete.
+> Derivado y verificado contra código vivo 2026-08-25 (sesión M2.3). Diseño: contrato §5
+> (`docs/architecture/domain-services-contract.md`) + drift medido M1 §3.8. Decisiones founder:
+> #3 (reason cerrado + `reason_detail` libre opcional) y #4 (lecturas consola → REST).
+
+**Scope:** 7 operaciones del piloto reclamos → nuevo subpaquete `konvi_domain/claims/`
+(espejo de `orders/`): UN writer create (reason cerrado + reason_detail + dedup + titularidad
+por actor + unión de eventos), get/list/list_by_contact, transition (FSM formalizada),
+register_reversion + register_reversion_movement (delegan RPCs SQL existentes — R2). El bot
+NO se toca (sus writers congelados se adoptan en B-2/M3); la duplicación queda con alarma de
+paridad. Consola migra su LISTADO a REST (decisión #4 — las mutaciones YA van por REST vía
+`claims/actions.ts`).
+
+**Archivos a crear/tocar:**
+- CREAR migración `supabase/migrations/20260825HHMMSS_claims_reason_detail.sql`:
+  `ALTER TABLE public.claims ADD COLUMN IF NOT EXISTS reason_detail TEXT;` (nullable, sin
+  backfill). **PROTOCOLO OBLIGATORIO (reglas vigentes):** backup secretos ANTES
+  (`scratch/track9_backup_secrets.py` — leer `decrypted_secret`, NO `secret`) → aplicar/replay →
+  `bash scripts/schema_drift_check.sh --update` (regenera baseline — lección CI 2026-08-03) →
+  restaurar STG (`track9_restore_stg.sh` + `track9_restore_stg.py`) → destruir el backup →
+  dbharness. Ledger pasa 268→269 repo (queda pendiente de PRD como las 6 anteriores).
+- CREAR `packages/shared-py/src/konvi_domain/claims/__init__.py` + `models.py` +
+  `service.py` + `reversion.py` + `contract.py` (`CLAIMS_CONTRACT`).
+- `models.py`: **enums canónicos únicos** — `CLAIM_STATUSES`/`CLAIM_TERMINAL_STATUSES`/
+  `CLAIM_REOPENABLE_STATUSES` (hoy `claims.py:47,51,58` del router; el set del bot
+  `agentic/tools/claims.py:52` queda defendido por alarma de paridad) + `CLAIM_REASONS`
+  (`claims.py:66`, espejo de REASON_MAP de la UI `claims-manager.tsx:61-67`) +
+  `CAUSALES_REVERSION`/`VIAS_REVERSION` (`claims.py:460-470`) + DTOs
+  (`ClaimCreateInput/ClaimCreateResult(created: bool)`, `ClaimTransitionInput`, `ClaimPage`).
+- `service.py`: `create_claim` (UN writer) · `get_claim` · `list_claims` (con embeds) ·
+  `list_claims_by_contact` (NUEVO — hueco M1 §3.8; service-only, sin endpoint REST, igual que
+  `orders.list_by_contact` en M2.1) · `transition_claim` (absorbe patch Y /resolve — ver
+  constraint 4) · `ClaimPorts` (puertos de notificación — ver constraint 3).
+- `reversion.py`: `register_reversion` / `register_reversion_movement` / `read_reversion` —
+  wrappers delgados sobre `rpc_registrar_reversion` / `rpc_registrar_movimiento_reversion`
+  (params EXACTOS del router `claims.py:551-565,611-616`) + mapeo `motivo` → DomainError con
+  `http_status` (la tabla `_MOTIVO_HTTP` `claims.py:475-493` migra al servicio).
+- `services/api/routers/claims.py`: los 8 endpoints quedan adaptadores (deps JWT + RBAC +
+  audit decorator + rate-limit INTACTOS — constraint 1) que delegan al servicio. `VALID_STATUSES`
+  etc. quedan como alias del paquete (patrón FSM de M2.1).
+- CREAR `services/api/lib/claim_ports.py`: `build_api_claim_ports(supabase)` — Telegram operador
+  (`lib/operator_alerts.notify_operator_telegram`, firma verificada `:76`) + WhatsApp cliente F-5
+  (la lógica de `_notify_client_claim_outcome` se MUEVE aquí — ver constraint 3).
+- Consola: `claims/page.tsx` migra el listado a REST (patrón M2.1 de orders/page.tsx:91-93 —
+  `fetch(CORE_API_URL…, Bearer, cache:'no-store')`, timeout 15s) — requiere el endpoint con
+  embeds (constraint 2). `claims/actions.ts` pasa `reason_detail` cuando el dialog lo capture
+  (campo opcional en el dialog "Nuevo Reclamo" — textarea libre, Kaiu DS).
+- `tests/test_domain_contract_structural.py`: `CONTRACTS += [CLAIMS_CONTRACT]` y
+  `SERVICE_MODULES["claims"] = ("konvi_domain.claims.service", "konvi_domain.claims.reversion")`.
+- CREAR `tests/test_konvi_domain_claims.py` (unit) + `tests/test_claims_policy_parity.py`
+  (paridad bot↔paquete — ver abajo).
+
+**Constraints de compatibilidad DESCUBIERTAS (no re-derivar):**
+1. **RBAC/audit asimétricos — NO cambian**: create es owner/manager/**operator** SIN
+   `require_write_role` (G-4, `claims.py:209-216`; el test `test_claim_create_rbac.py` lo
+   defiende); patch/resolve/reversion SÍ llevan `require_write_role` (owner/manager). Auth =
+   JWT-only (`get_current_tenant` — NO dual-auth; el bot escribe directo a DB y sigue así
+   congelado). Los `@audit_log` (created/updated/status_changed + payment_reversion created/
+   updated) se quedan en el router.
+2. **`GET /claims/` no tiene consumidores hoy** (verificado: consola lee directo; actions.ts solo
+   POST/PATCH/reversion) → seguro extenderlo con embeds PostgREST
+   `orders(id, total_amount, payment_method), contacts(id, name, phone)` (lo que page.tsx:32-41
+   necesita) + `reason_detail`. Filtros heredados: status (validado 422), customer_id, order_id,
+   limit ≤200, order created_at desc.
+3. **F-5 es puerto, no servicio directo**: `test_claim_customer_notification.py` llama
+   `claims._notify_client_claim_outcome` DIRECTO y pachea
+   `routers.wompi_webhook._enqueue_whatsapp_outbound` → la lógica se mueve a
+   `lib/claim_ports.py` (misma lógica: solo resolved/rejected + order.conversation_id + textos
+   exactos `:293-304` + lazy import + best-effort) y el test se ACTUALIZA deliberadamente al
+   puerto. El servicio dispara el puerto SOLO en transición real a outcome (reglas `:344-348,438-441`).
+4. **FSM exacta heredada** (`_refund_ledger_fields` `:124-159` + guards `:344-389` +
+   `/resolve` `:415-441`): transición a `refunded` exige `refunded_amount` (422) y sella
+   `refunded_at`; `refunded` es FINAL (409 por patch Y por /resolve); corrección de monto sin
+   cambio de status solo si refunded con monto NULL (422/409); reopen terminal→no-terminal solo
+   owner (403) y solo desde rejected/cancelled (409); mismo-status no-op permitido (notify se
+   salta); "Sin campos a actualizar" → 422. `test_claim_refund_capture.py` (8 tests vía
+   TestClient con fake que devuelve `store` para CUALQUIER tabla) exige la MISMA secuencia:
+   fetch (select id,status,refunded_amount,refunded_at + maybe_single) → update → res.data[0].
+5. **Dedup del UN writer (gana la consola)**: la query del bot (`agentic/tools/claims.py:163-176`)
+   — claims abiertos (`in_ status [open, investigating]`) por (tenant_id, order_id, customer_id)
+   limit 1; lookup defensivo (falla → None, se crea). Si existe → NO insertar: retornar el
+   existente. Contrato HTTP nuevo (decisión de diseño documentada): el servicio retorna
+   `ClaimCreateResult(claim, created=False)` → el adaptador responde **200 + body del claim
+   existente + `"deduplicated": true`** (201 si creó — patrón adopt-winner de orders.create).
+   La consola (actions.ts) acepta ambos (toast "Reclamo registrado" / ya existía).
+6. **Titularidad por actor**: `customer` (bot, M3) exige `order.contact_id == actor.contact_id`
+   (query scoped tenant+contact, `claims.py:133-141` del tool); staff consola solo tenant
+   (`_ensure_order_belongs_to_tenant` `:162-173` del router — 404 "Pedido no encontrado para este
+   tenant"). `customer_id` del claim = body.customer_id o order.contact_id (heredado).
+7. **Unión de eventos en create** (§5.1): `audit_log` (decorator, router) + `messages.claim_audit`
+   (servicio, directo — payload del bot `:232-248`) + Telegram operador (puerto). OJO:
+   `messages.conversation_id` es **NOT NULL** (migración 20260406181237:14) → el claim_audit del
+   canal consola usa el `conversation_id` de la ORDEN si existe; si no hay (pedido MeLi/manual),
+   se OMITE el mensaje (queda el audit_log) — documentar en el servicio. El texto Telegram del
+   operador replica el del bot (`:260-266`: "Nuevo reclamo #ticket\nPedido: …\nMotivo: …" +
+   monto opcional).
+8. **Reason cerrado + detail**: el servicio valida `reason ∈ CLAIM_REASONS` (422 con el mensaje
+   heredado `:101-106`) y persiste `reason_detail` (trim, max 500 — mismo límite que el free-text
+   del bot) solo si viene. El bot congelado sigue escribiendo free-text en `reason` (sin CHECK en
+   DB — deliberado `:60-66`); el enum del paquete es la referencia que la paridad defiende.
+9. **Reversión = delegación RPC**: NO reimplementar (R2). `_leer_reversion` (`:624-639`) → 404
+   "Este reclamo no tiene una solicitud de reversión radicada". Causal inválida → 422 con el
+   mensaje que enumera las 5 (`:544-549`); vía inválida → 422 (`:604-608`); motivo de la RPC →
+   `_MOTIVO_HTTP` (404/409/422) — usar `DomainError.http_status` (M2.3) para el mapeo.
+   `test_claim_reversion_api.py` (13 tests) aserta params RPC exactos y traducción de motivos.
+10. **Ticket number**: lo computa el trigger DB (`set_claim_ticket_number`, 20260417000003) —
+    el servicio NO lo calcula; lo lee del insert response (`res.data[0]`).
+
+**Paridad con el espejo del bot (`tests/test_claims_policy_parity.py`):**
+- **Alarma de enums**: `_VALID_STATUSES` del bot == `CLAIM_STATUSES` del paquete (frozenset).
+  Drift vivo conocido (NO se arregla aquí — es deuda del bot para M3): el `status_human` del tool
+  (`:358-364`) usa el set extinto {in_progress, closed} — registrarlo como comentario del test.
+- **create**: mismo estado staged (fake `_Sb` con eq/in/limit — extenderlo con `in_` ya lo tiene)
+  → bot `CreateClaimTool.execute` vs paquete `create_claim(actor=customer)`: misma decisión de
+  dedup (existente → sin insert, mismo claim devuelto), mismas claves del insert compartidas
+  (tenant_id/order_id/customer_id/status=open/requested_amount), claim_audit insertado en ambos,
+  notificación operador disparada en ambos (bot: `notify_escalation_async` severity=info; paquete:
+  puerto). La DIFERENCIA deliberada se aserta explícita: bot escribe free-text en `reason`;
+  paquete escribe `reason` cerrado + `reason_detail`.
+- **get**: mismo claim staged → bot `GetClaimStatusTool` por ticket (scoped customer) == paquete
+  `get_claim`/by-ticket con actor customer (mismas filas visibles; customer ajeno → no encuentra).
+
+**Certificación M2.4 (misma barra M2.1-M2.3 + protocolo de migración):** tests focales → suite
+completa xdist → dbharness 316 (tras replay + restore track9 + baseline regenerado) → harness B-3
+`s19_reclamo` (el bot crea reclamos — su path NO cambia, certifica que sigue verde) +
+`money_full_flow` → live STG (crear reclamo vía REST con reason_detail, dedup 200 sin duplicar,
+transition a investigating + resolved con WhatsApp F-5 encolado, refunded con monto write-once,
+reversión RPC end-to-end; listado consola por REST renderiza) → `validate --ci` con web DETENIDO →
+commits temáticos + push + CI 5/5 + bitácora PLAN.md §E + 01-state.
+
+### Resto del Track 5 (vista rápida)
+
 - Después: **M3** (tooling generativo del bot desde los `contract.py` — dentro del BLOQUE BOT),
   M4 (packs de vertical, con founder), M5 (analítica conversacional owner — requiere contexto tenant
   explícito en RPCs de métricas, M1 §H5). Backlog completo de 11 domain services: inventario M1 §4.
