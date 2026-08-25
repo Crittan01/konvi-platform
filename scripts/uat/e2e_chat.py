@@ -7,12 +7,18 @@ Uso:
   python3.11 scripts/uat/e2e_chat.py wait 12                # espera N seg + tail
   python3.11 scripts/uat/e2e_chat.py reset --hard           # wipe conv + delete contact + orders
 
-Default: número +573125835649, tenant KAIU. Override con --phone / --tenant-id.
+Default: número +573125835649, tenant KAIU Dev sandbox STG (d0000000-…-0001).
+Override con --phone / --tenant-id.
 
 Model B Direct Provider per-tenant (ADR-0023):
   - Webhook URL incluye tenant_id en path: /api/v1/whatsapp/webhook/{tenant_id}
   - Firma HMAC se calcula con app_secret per-tenant resuelto via Vault
     (tenant_integrations.credentials.app_secret_secret_id → pgsec_read_secret).
+
+B-3 (2026-08-23): el tenant default es el sandbox STG LOCAL (d0000000-…-0001) —
+el default anterior (0fb0777e, KAIU cloud) no existe en la DB local y el send
+fallaba al resolver el app_secret del Vault. STG-first: el driver por defecto
+apunta al ambiente certificable; para PRD se pasa --tenant-id explícito.
 """
 import argparse
 import hashlib
@@ -35,7 +41,9 @@ for _candidate in (".env.local", ".env"):
         break
 
 DEFAULT_PHONE = "+573125835649"
-DEFAULT_TENANT_ID = "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9"
+# Sandbox STG local (KAIU Dev) — el único tenant con WhatsApp cableado en el
+# Supabase local (Vault con app_secret + Test App). Override: --tenant-id.
+DEFAULT_TENANT_ID = "d0000000-0000-0000-0000-000000000001"
 DEFAULT_META_WABA_ID = "2159052118202272"
 DEFAULT_DEST_PHONE_ID = "990364080831295"
 WEBHOOK_BASE = "http://localhost:8000/api/v1/whatsapp/webhook"

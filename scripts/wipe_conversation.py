@@ -361,6 +361,66 @@ def _wipe_one(supabase, conv: dict, *, keep_conversation: bool) -> dict:
     return summary
 
 
+def _purge_contact_hard(supabase, tenant_id: str, contact_id: str) -> dict:
+    """HARD DELETE testing-only (B-3, 2026-08-23) — borra TODO rastro del contact
+    UAT: payments + shipments + order_items + orders + cart_events + cart_items
+    + carts + conversations (+ messages/reads) + la fila contact. A DIFERENCIA
+    de `purge_contact_completely` NO aplica retención legal ni el guard de links
+    Wompi: los datos del teléfono UAT son sintéticos y la retención rompería el
+    aislamiento entre escenarios del harness (un contact anonimizado CON orders
+    pending_payment contamina el siguiente escenario).
+
+    Por qué no reusar purge_contact_completely: su contrato (Sem 7 F2, BLOQUE A)
+    es legal/producción (Cód. Comercio Art. 60); este path es la escoba del
+    harness — testing-only, ya protegido por _env_guard (aborta contra prod).
+    """
+    phone = None
+    row = (
+        supabase.table("contacts").select("phone")
+        .eq("tenant_id", tenant_id).eq("id", contact_id).limit(1).execute()
+    )
+    if row.data:
+        phone = row.data[0].get("phone")
+
+    # Recursos por contact_id directo (orders/carts) y por phone (conversations).
+    orders = (
+        supabase.table("orders").select("id, conversation_id")
+        .eq("tenant_id", tenant_id).eq("contact_id", contact_id).execute().data or []
+    )
+    order_ids = [o["id"] for o in orders]
+    carts = (
+        supabase.table("conversation_carts").select("id")
+        .eq("tenant_id", tenant_id).eq("contact_id", contact_id).execute().data or []
+    )
+    cart_ids = [c["id"] for c in carts]
+    conv_ids: set[str] = {o["conversation_id"] for o in orders if o.get("conversation_id")}
+    if phone:
+        for v in _phone_variants(phone):
+            rows = (
+                supabase.table("conversations").select("id")
+                .eq("tenant_id", tenant_id).eq("customer_phone", v).execute().data or []
+            )
+            conv_ids.update(r["id"] for r in rows)
+
+    summary: dict = {"contact_id": contact_id}
+    summary["payments_deleted"] = _safe_delete(supabase, "payments", "order_id", order_ids, in_list=True)
+    summary["shipments_deleted"] = _safe_delete(supabase, "shipments", "order_id", order_ids, in_list=True)
+    summary["cart_events_deleted"] = _safe_delete(supabase, "cart_events", "cart_id", cart_ids, in_list=True)
+    summary["cart_items_deleted"] = _safe_delete(supabase, "conversation_cart_items", "cart_id", cart_ids, in_list=True)
+    summary["carts_deleted"] = _safe_delete(supabase, "conversation_carts", "contact_id", contact_id)
+    summary["order_items_deleted"] = _safe_delete(supabase, "order_items", "order_id", order_ids, in_list=True)
+    summary["orders_deleted"] = _safe_delete(supabase, "orders", "contact_id", contact_id)
+    ids = list(conv_ids)
+    summary["messages_deleted"] = _safe_delete(supabase, "messages", "conversation_id", ids, in_list=True)
+    summary["reads_deleted"] = _safe_delete(supabase, "conversation_reads", "conversation_id", ids, in_list=True)
+    if ids:
+        summary["conversations_deleted"] = _safe_delete(supabase, "conversations", "id", ids, in_list=True)
+    else:
+        summary["conversations_deleted"] = 0
+    summary["contact_deleted"] = _safe_delete(supabase, "contacts", "id", contact_id)
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser(description="Vacía la conversación de un teléfono coherentemente.")
     ap.add_argument("--phone", default="+573125835649")
@@ -372,6 +432,12 @@ def main():
                           "carts + orders + payments + shipments + messages. "
                           "Usa el helper compartido `lib.contact_cleanup.purge_contact_completely`. "
                           "Para reset total durante testing."))
+    ap.add_argument("--hard", action="store_true",
+                    help=("Con --purge-contact: borrado FÍSICO total del contact "
+                          "(incluye orders/payments y la fila contact), sin retención "
+                          "legal ni guard de links Wompi. TESTING-ONLY (harness B-3): "
+                          "los datos del teléfono UAT son sintéticos. Combinado con el "
+                          "env_guard, nunca corre contra prod."))
     ap.add_argument("--yes", action="store_true", help="Salta confirmación interactiva.")
     args = ap.parse_args()
 
@@ -393,13 +459,26 @@ def main():
     supabase = create_client(url, key)
 
     convs = _find_conversations(supabase, args.phone, args.tenant_id)
-    if not convs:
+
+    # B-3 (2026-08-23): con --purge-contact el CONTACT se resuelve por teléfono
+    # AUNQUE no queden conversaciones. Antes el early-return dejaba vivo un
+    # contact sin conv (p.ej. tras un wipe parcial o un purge bloqueado por el
+    # guard de links Wompi) → el harness arrancaba el siguiente escenario con
+    # PII/historial del anterior (aislamiento roto en silencio).
+    contact_id_direct: Optional[str] = None
+    if args.purge_contact and args.tenant_id:
+        contact_id_direct = _resolve_contact_id_for_phone(
+            supabase, args.tenant_id, args.phone,
+        )
+
+    if not convs and not contact_id_direct:
         scope = f"tenant {args.tenant_id}" if args.tenant_id else "todos los tenants"
         print(f"No hay conversaciones para {args.phone} en {scope}. Nada que hacer.")
         return
 
-    print(f"\nConversaciones encontradas para {args.phone}"
-          f"{' (tenant ' + args.tenant_id + ')' if args.tenant_id else ''}:\n")
+    if convs:
+        print(f"\nConversaciones encontradas para {args.phone}"
+              f"{' (tenant ' + args.tenant_id + ')' if args.tenant_id else ''}:\n")
     rows = []
     for c in convs:
         msgs = _count_table(supabase, "messages", "conversation_id", c["id"])
@@ -415,6 +494,8 @@ def main():
             f"    msgs={msgs} reads={reads} carts={carts} orders={orders} "
             f"last_interaction={c.get('last_interaction_at')}"
         )
+    if contact_id_direct and not convs:
+        print(f"\nSin conversaciones; contact directo por teléfono: {contact_id_direct[:8]}")
 
     mode = "keep_conversation" if args.keep_conversation else "full_delete"
     print(f"\nModo: {mode}")
@@ -439,32 +520,64 @@ def main():
             return
 
     print("\nEjecutando...")
+    errors = 0
     if args.purge_contact:
-        # Sem 7 F2 cierre 2026-05-19 — usar helper compartido para purge total
-        # del contact (lo mismo que invoca el endpoint API y, vía éste, el UI
-        # delete físico desde el Tenant Console).
-        # Path setup para import desde services/api/lib.
-        sys.path.insert(
-            0,
-            str(Path(__file__).resolve().parents[1] / "services/api"),
-        )
-        from lib.contact_cleanup import purge_contact_completely
-
-        # Resolver contact_ids únicos desde las conversations encontradas.
-        contact_ids_done: set[str] = set()
-        for c, _, _, _, _ in rows:
-            tenant_id = c["tenant_id"]
-            contact_id = _resolve_contact_id_for_phone(
-                supabase, tenant_id, c.get("customer_phone"),
+        if args.hard:
+            # B-3 (testing-only): borrado físico TOTAL — sin retención legal ni
+            # guard de links Wompi. El contact se resuelve por teléfono aunque no
+            # haya conversaciones (contact_id_direct).
+            targets: list[tuple[str, str]] = []
+            if contact_id_direct:
+                targets.append((args.tenant_id, contact_id_direct))
+            for c, _, _, _, _ in rows:
+                cid = _resolve_contact_id_for_phone(
+                    supabase, c["tenant_id"], c.get("customer_phone"),
+                )
+                if cid and (c["tenant_id"], cid) not in targets:
+                    targets.append((c["tenant_id"], cid))
+            if not targets:
+                print("  (sin contacts que purgar)")
+            for tenant_id, contact_id in targets:
+                r = _purge_contact_hard(supabase, tenant_id, contact_id)
+                print(f"  OK HARD contact={contact_id[:8]} tenant={tenant_id[:8]} → {r}")
+                if not r.get("contact_deleted"):
+                    errors += 1
+        else:
+            # Sem 7 F2 cierre 2026-05-19 — usar helper compartido para purge total
+            # del contact (lo mismo que invoca el endpoint API y, vía éste, el UI
+            # delete físico desde el Tenant Console).
+            # Path setup para import desde services/api/lib.
+            sys.path.insert(
+                0,
+                str(Path(__file__).resolve().parents[1] / "services/api"),
             )
-            if not contact_id or contact_id in contact_ids_done:
-                continue
-            try:
-                r = purge_contact_completely(supabase, tenant_id, contact_id)
-                print(f"  OK contact={contact_id[:8]} tenant={tenant_id[:8]} → {r}")
-                contact_ids_done.add(contact_id)
-            except Exception as exc:
-                print(f"  ERROR contact={contact_id[:8]}: {exc}", file=sys.stderr)
+            from lib.contact_cleanup import purge_contact_completely
+
+            # Resolver contact_ids únicos: por teléfono directo (aunque no haya
+            # conversaciones) + desde las conversations encontradas.
+            contact_ids_done: set[str] = set()
+            pending: list[tuple[str, str]] = []
+            if contact_id_direct:
+                pending.append((args.tenant_id, contact_id_direct))
+            for c, _, _, _, _ in rows:
+                tenant_id = c["tenant_id"]
+                contact_id = _resolve_contact_id_for_phone(
+                    supabase, tenant_id, c.get("customer_phone"),
+                )
+                if contact_id:
+                    pending.append((tenant_id, contact_id))
+            for tenant_id, contact_id in pending:
+                if contact_id in contact_ids_done:
+                    continue
+                try:
+                    r = purge_contact_completely(supabase, tenant_id, contact_id)
+                    print(f"  OK contact={contact_id[:8]} tenant={tenant_id[:8]} → {r}")
+                    contact_ids_done.add(contact_id)
+                except Exception as exc:
+                    # B-3: un purge bloqueado/fallido NO puede morir en silencio
+                    # (rc=0 con error en stderr = aislamiento roto invisible).
+                    print(f"  ERROR contact={contact_id[:8]}: {exc}", file=sys.stderr)
+                    errors += 1
     else:
         for c, _, _, _, _ in rows:
             try:
@@ -472,6 +585,12 @@ def main():
                 print(f"  OK conv={r['conversation_id'][:8]} → {r}")
             except Exception as exc:
                 print(f"  ERROR conv={c['id'][:8]}: {exc}", file=sys.stderr)
+                errors += 1
+    if errors:
+        # FAIL LOUD — el harness (y cualquier operador) debe enterarse de que el
+        # wipe no completó; antes el rc era 0 y el residuo se tragaba escenarios.
+        print(f"\nWIPE INCOMPLETO: {errors} error(es).", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

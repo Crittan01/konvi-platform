@@ -46,6 +46,11 @@ now = datetime.now(timezone.utc)
 
 COUPONS = [
     # --- camino feliz ---
+    # KAIU15: el cupón que el PROMPT del bot anuncia proactivamente (F3, B-1) y
+    # el que ejercita money_full_flow del harness (descuento 15% exacto). Sin él
+    # en STG el bot ofrece un cupón que no existe — alucinación inducida.
+    {"code": "KAIU15", "description": "15% de descuento en toda la tienda",
+     "discount_type": "percent", "discount_value": 15, "min_subtotal_cents": 0},
     {"code": "KAIU10", "description": "10% de descuento en toda la tienda",
      "discount_type": "percent", "discount_value": 10, "min_subtotal_cents": 0},
     {"code": "AHORRA20K", "description": "$20.000 de descuento en compras desde $100.000",
@@ -86,5 +91,5 @@ for c in COUPONS:
         print(f"+ {c['code']:12s} {c['discount_type']}")
 
 print(f"\nOK {len(COUPONS)} cupones en el tenant DEV.")
-print("Anunciables por el bot: KAIU10, AHORRA20K, ENVIOGRATIS "
+print("Anunciables por el bot: KAIU15, KAIU10, AHORRA20K, ENVIOGRATIS "
       "(VIP15 es targeted; INACTIVO/VENCIDO/FUTURO/AGOTADO no deben listarse).")
