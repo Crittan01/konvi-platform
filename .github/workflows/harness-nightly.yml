@@ -1,0 +1,196 @@
+name: Harness conversacional nocturno (B-3)
+
+# B-3 (2026-08-23) — CI nocturno del harness de evaluación serio contra un STG
+# local efímero levantado EN el runner (supabase start + los 3 servicios Python
+# homologados a PRD vía scripts/dev_env_for_service.py + seeds del sandbox).
+# Corre los escenarios de coherence_scenarios.py contra el bot LIVE (Gemini real)
+# con assertions de outcome en DB. NO bloquea PRs: es la red de regresión
+# conversacional — un fallo aquí = drift de calidad del bot detectado en la noche.
+#
+# Secrets requeridos (registrarlos en Settings → Secrets → Actions):
+#   HARNESS_GEMINI_API_KEY   — key del proyecto GCP konvi-stg (LLM real del bot)
+#   WOMPI_PRIVATE_KEY_SANDBOX / WOMPI_EVENTS_KEY_SANDBOX — llaves sandbox Wompi
+#   AVEONLINE_DEMO_PASSWORD  — password de la cuenta demo PÚBLICA demointegracion
+# El token de WhatsApp se siembra dummy a propósito: el harness lee las respuestas
+# del bot desde la DB (el orchestrator persiste el outbound antes del envío a
+# Meta), así que el CI no envía WhatsApps reales ni gasta el número de prueba.
+
+on:
+  schedule:
+    # 07:23 UTC = 02:23 America/Bogota. Minuto no-redondo (anti-herd).
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: harness-nightly
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  SUPABASE_CLI_VERSION: "2.90.0"  # PINEADA — NO actualizar (docs/HANDOFF.md §6)
+
+jobs:
+  harness:
+    name: Coherencia conversacional (bot live + outcome DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            services/api/requirements.txt
+            services/ai-orchestrator/requirements.txt
+            services/connector-whatsapp/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/api/requirements.txt
+          pip install -r services/ai-orchestrator/requirements.txt
+          pip install -r services/connector-whatsapp/requirements.txt
+          pip install pyyaml
+
+      - name: Setup Supabase CLI (pineada ${{ env.SUPABASE_CLI_VERSION }})
+        run: |
+          VER="${{ env.SUPABASE_CLI_VERSION }}"
+          for attempt in 1 2 3; do
+            if curl -sL --fail -m 120 \
+              "https://github.com/supabase/cli/releases/download/v${VER}/supabase_linux_amd64.tar.gz" \
+              -o /tmp/supabase.tar.gz; then break; fi
+            echo "retry $attempt…"; sleep 5
+          done
+          tar -xzf /tmp/supabase.tar.gz -C /tmp
+          sudo mv /tmp/supabase /usr/local/bin/supabase
+          supabase --version
+
+      - name: Supabase start (stack completo + replay de migraciones)
+        run: |
+          set -e
+          for attempt in 1 2 3; do
+            if supabase start; then break; fi
+            echo "intento $attempt falló — limpio y reintento…"
+            supabase stop --no-backup || true
+            sleep 5
+            if [ "$attempt" = "3" ]; then exit 1; fi
+          done
+          supabase status -o json > /tmp/sb_status.json
+          cat /tmp/sb_status.json
+
+      - name: Construir .env.local del STG efímero (secrets + keys locales)
+        env:
+          HARNESS_GEMINI_API_KEY: ${{ secrets.HARNESS_GEMINI_API_KEY }}
+          WOMPI_PRIVATE_KEY_SANDBOX: ${{ secrets.WOMPI_PRIVATE_KEY_SANDBOX }}
+          WOMPI_EVENTS_KEY_SANDBOX: ${{ secrets.WOMPI_EVENTS_KEY_SANDBOX }}
+          AVEONLINE_DEMO_PASSWORD: ${{ secrets.AVEONLINE_DEMO_PASSWORD }}
+        run: |
+          python - <<'PY'
+          import json, secrets, sys
+          st = json.load(open("/tmp/sb_status.json"))
+          # CLI 2.90 emite SECRET_KEY/PUBLISHABLE_KEY (sb_*); fallback a legacy.
+          def get(*keys):
+              for k in keys:
+                  if st.get(k):
+                      return st[k]
+              sys.exit(f"supabase status no expone {keys}: {sorted(st)}")
+          api_url = get("API_URL")
+          secret_key = get("SECRET_KEY", "SERVICE_ROLE_KEY")
+          publishable = get("PUBLISHABLE_KEY", "ANON_KEY")
+          jwt_secret = get("JWT_SECRET")
+          import os
+          required = {
+              "HARNESS_GEMINI_API_KEY": os.environ.get("HARNESS_GEMINI_API_KEY", ""),
+              "WOMPI_PRIVATE_KEY_SANDBOX": os.environ.get("WOMPI_PRIVATE_KEY_SANDBOX", ""),
+              "WOMPI_EVENTS_KEY_SANDBOX": os.environ.get("WOMPI_EVENTS_KEY_SANDBOX", ""),
+              "AVEONLINE_DEMO_PASSWORD": os.environ.get("AVEONLINE_DEMO_PASSWORD", ""),
+          }
+          missing = [k for k, v in required.items() if not v]
+          if missing:
+              sys.exit("Faltan secrets en GH Actions: " + ", ".join(missing))
+          internal = secrets.token_hex(32)
+          lines = {
+              "NEXT_PUBLIC_SUPABASE_URL": api_url,
+              "SUPABASE_SECRET_KEY": secret_key,
+              "SUPABASE_PUBLISHABLE_KEY": publishable,
+              "SUPABASE_JWT_SECRET": jwt_secret,
+              "INTERNAL_SERVICE_SECRET": internal,
+              "GEMINI_API_KEY": required["HARNESS_GEMINI_API_KEY"],
+              "WOMPI_PRIVATE_KEY_SANDBOX": required["WOMPI_PRIVATE_KEY_SANDBOX"],
+              "WOMPI_EVENTS_KEY_SANDBOX": required["WOMPI_EVENTS_KEY_SANDBOX"],
+              "AVEONLINE_DEMO_PASSWORD": required["AVEONLINE_DEMO_PASSWORD"],
+              # Ancladas de ambiente (dev_env_for_service las exige — fail-closed):
+              "APP_ENV": "stg-ci",
+              "APP_URL": "http://localhost:3000",
+              "NEXT_PUBLIC_APP_URL": "http://localhost:3000",
+              "API_URL": "http://localhost:8001",
+              "PUBLIC_WEBHOOK_URL": "http://localhost:8000",
+              "ALLOWED_ORIGINS": "http://localhost:3000",
+              "AVEONLINE_GENERATE_REAL_GUIDES": "false",
+              # sync:false que el filtro exige presentes y el harness no ejerce:
+              "RESEND_API_KEY": "re_ci_dummy_no_email",
+              "RESEND_WEBHOOK_SECRET": "ci_dummy_no_webhook",
+          }
+          with open(".env.local", "w") as f:
+              for k, v in lines.items():
+                  f.write(f"{k}={v}\n")
+          print(".env.local construido:", len(lines), "vars")
+          PY
+
+      - name: Seeds del sandbox STG (tenant + integraciones + catálogo)
+        run: |
+          python scripts/db/bootstrap_dev_sandbox.py
+          python scripts/uat/_setup_dev_kaiu_whatsapp.py
+          python scripts/uat/_setup_dev_wompi.py
+          python scripts/uat/_setup_dev_aveonline.py
+          python scripts/uat/_setup_dev_coupons.py
+          python scripts/uat/_seed_uat_catalog.py
+
+      - name: Arrancar servicios (env filtrado = homologación PRD)
+        run: |
+          mkdir -p .local/env .local/logs
+          for svc in api connector orchestrator; do
+            python scripts/dev_env_for_service.py "$svc" --out ".local/env/$svc.env"
+          done
+          nohup env -i PATH="$PATH" HOME="$HOME" bash -c \
+            'cd services/api && set -a && source ../../.local/env/api.env && set +a && exec uvicorn main:app --host 0.0.0.0 --port 8001' \
+            > .local/logs/api.log 2>&1 &
+          nohup env -i PATH="$PATH" HOME="$HOME" bash -c \
+            'cd services/connector-whatsapp && set -a && source ../../.local/env/connector.env && set +a && exec uvicorn main:app --host 0.0.0.0 --port 8000' \
+            > .local/logs/connector.log 2>&1 &
+          nohup env -i PATH="$PATH" HOME="$HOME" bash -c \
+            'cd services/ai-orchestrator && set -a && source ../../.local/env/orchestrator.env && set +a && exec uvicorn server:app --host 0.0.0.0 --port 8002' \
+            > .local/logs/orchestrator.log 2>&1 &
+          # Espera activa de health (hasta 120s c/u).
+          for url in http://localhost:8001/health http://localhost:8000/health http://localhost:8002/health; do
+            ok=""
+            for i in $(seq 1 60); do
+              if curl -fsS --max-time 2 -o /dev/null "$url"; then ok=1; break; fi
+              sleep 2
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::$url no levantó — logs:"
+              tail -40 .local/logs/*.log
+              exit 1
+            fi
+            echo "$url OK"
+          done
+
+      - name: Correr harness conversacional (27 escenarios, bot live)
+        run: |
+          set -o pipefail
+          python scripts/uat/coherence_scenarios.py 2>&1 | tee harness_run.log
+
+      - name: Upload harness log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harness-nightly-log
+          path: |
+            harness_run.log
+            .local/logs/
+          if-no-files-found: ignore
+          retention-days: 14

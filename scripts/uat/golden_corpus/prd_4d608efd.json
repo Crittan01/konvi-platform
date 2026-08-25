@@ -1,0 +1,384 @@
+{
+ "id": "prd_4d608efd",
+ "fuente": "PRD conversación real 2026-08-09→20 (audit 2026-08-21: 9 fallos, 2 críticos de dinero)",
+ "anonimizada": true,
+ "fallos_conocidos": [
+  {
+   "id": "F1",
+   "severidad": "CRÍTICO",
+   "desc": "Descuento y total alucinados enviados al cliente; el invariant no parseó el formato y el link cobró $17.100 de más"
+  },
+  {
+   "id": "F2",
+   "severidad": "CRÍTICO",
+   "desc": "Link de pago sandbox (checkout.wompi.co/l/test_*) entregado en producción (resuelto por B1 2026-08-21)"
+  },
+  {
+   "id": "F3",
+   "severidad": "ALTO",
+   "desc": "Cupón ofrecido proactivamente pero inaplicable sin código escrito; el bot nunca dijo 'escribe KAIU15' → venta perdida + escalación"
+  },
+  {
+   "id": "F4",
+   "severidad": "ALTO",
+   "desc": "Loop de repetición exacta ('¿Te recotizo…?' ×2 idéntico); ningún resolver captura 'sí por favor'"
+  },
+  {
+   "id": "F5",
+   "severidad": "ALTO",
+   "desc": "Gate de método de pago pisa el contenido del turno (rewrite descarta la confirmación del agregado, ×2)"
+  },
+  {
+   "id": "F6",
+   "severidad": "MEDIO-ALTO",
+   "desc": "Preguntas directas ignoradas mid-flow ('requisitos del cupón?', 'tienes jabón de lavanda?')"
+  },
+  {
+   "id": "F7",
+   "severidad": "ALTO",
+   "desc": "Escalación contradictoria (promete especialista y pide confirmar pago en la misma burbuja); operador habla y el bot sigue vendiendo encima"
+  },
+  {
+   "id": "F8",
+   "severidad": "ALTO",
+   "desc": "Envío fallido → auto-escalación → conversación zombi en human_takeover permanente (inbounds futuros skipeados en silencio)"
+  },
+  {
+   "id": "F9",
+   "severidad": "MEDIO",
+   "desc": "Sin traza FSM persistida (agentic_state={}) → inauditable qué estado produjo cada respuesta"
+  }
+ ],
+ "turns": [
+  {
+   "ts": "2026-08-09T00:19:30.126918+00:00",
+   "dir": "inbound",
+   "text": "Hola"
+  },
+  {
+   "ts": "2026-08-09T00:19:47.32416+00:00",
+   "dir": "outbound",
+   "text": "Buenas noches, [CLIENTE] [CLIENTE]. Es un gusto saludarte nuevamente en KAIU Living Natural.\n\nEn qué puedo ayudarte hoy? Tenemos disponibles *Aceites Esenciales*, *Aceites Vegetales*, *Jabones Artesanales*, *Kits* y *Sérums*. Cuéntame qué buscas o si prefieres explorar alguna de estas categorías."
+  },
+  {
+   "ts": "2026-08-09T00:20:11.02618+00:00",
+   "dir": "inbound",
+   "text": "Que Aveites esenciales tienen?"
+  },
+  {
+   "ts": "2026-08-09T00:20:26.864388+00:00",
+   "dir": "outbound",
+   "text": "Contamos con los siguientes aceites esenciales:\n\n* *Aceite Esencial de Árbol de Té* (10ml, 30ml)\n* *Aceite Esencial de Eucalipto* (10ml, 30ml)\n* *Aceite Esencial de Lavanda* (10ml, 30ml)\n* *Aceite Esencial de Menta Piperita* (10ml, 30ml)\n\nBuscas alguno en particular para tu rutina o te gustaría conocer los precios de alguna presentación?"
+  },
+  {
+   "ts": "2026-08-09T00:20:47.263504+00:00",
+   "dir": "inbound",
+   "text": "Y qie costo tiene el de Árbol de Te"
+  },
+  {
+   "ts": "2026-08-09T00:21:00.089892+00:00",
+   "dir": "outbound",
+   "text": "El *Aceite Esencial de Árbol de Té* tiene los siguientes precios:\n\n* 10ml: $32.000 COP\n* 30ml: $72.000 COP\n\nTe gustaría agregar alguno de estos al carrito o necesitas información sobre otro producto?"
+  },
+  {
+   "ts": "2026-08-09T00:21:19.06372+00:00",
+   "dir": "inbound",
+   "text": "Uy están caros, son de buena calidad?"
+  },
+  {
+   "ts": "2026-08-09T00:22:41.032177+00:00",
+   "dir": "outbound",
+   "text": "En KAIU Living Natural, todos nuestros productos están elaborados con ingredientes de alta calidad y son inspeccionados cuidadosamente antes de cada despacho.\n\nNuestros aceites esenciales son puros y vienen en envases de vidrio ámbar para conservar todas sus propiedades naturales. Entiendo que buscas lo mejor para tu cuidado personal y, por eso, nos aseguramos de ofrecerte productos que cumplen con estándares de pureza y bienestar.\n\nSi tienes alguna condición de piel sensible o alergias, te recomiendo revisar siempre los ingredientes antes de usar.\n\nTe gustaría probar alguna de nuestras presentaciones o tienes alguna otra duda sobre cómo usarlos?"
+  },
+  {
+   "ts": "2026-08-09T00:23:56.65287+00:00",
+   "dir": "inbound",
+   "text": "Pero están como caros, no?"
+  },
+  {
+   "ts": "2026-08-09T00:24:09.04422+00:00",
+   "dir": "outbound",
+   "text": "Entiendo perfectamente que busques la mejor relación calidad-precio. Nuestros aceites son 100% puros y artesanales, lo que garantiza que recibas un producto concentrado y efectivo para tu bienestar.\n\nPara ayudarte a que tu compra sea más accesible, te recuerdo que tenemos activo el cupón *KAIU15*, que te brinda un 15% de descuento en compras superiores a $40.000 COP.\n\nTe gustaría que revisemos alguna otra opción o prefieres que te cuente sobre nuestros *Kits*, que suelen ser una excelente forma de probar varios productos a un mejor precio?"
+  },
+  {
+   "ts": "2026-08-09T00:24:49.135235+00:00",
+   "dir": "inbound",
+   "text": "Uy que bien, que requisitos para usar el Cupón?"
+  },
+  {
+   "ts": "2026-08-09T00:25:00.966761+00:00",
+   "dir": "outbound",
+   "text": "El *Aceite Esencial de Árbol de Té* lo tenemos disponible en: 30ml ($72.000), 10ml ($32.000).\n\nCuál presentación prefieres?"
+  },
+  {
+   "ts": "2026-08-09T00:25:24.479069+00:00",
+   "dir": "inbound",
+   "text": "El de 10ml"
+  },
+  {
+   "ts": "2026-08-09T00:25:37.226181+00:00",
+   "dir": "outbound",
+   "text": "Listo, agregué 1 *Aceite Esencial de Árbol de Té* de 10ml por *$32.000 COP* a tu carrito.\n\nSumamos algo más al pedido o ya coordinamos el envío? Dime a qué ciudad lo enviamos."
+  },
+  {
+   "ts": "2026-08-09T00:25:53.279815+00:00",
+   "dir": "inbound",
+   "text": "Me dijiste que me dabas un cupon"
+  },
+  {
+   "ts": "2026-08-09T00:26:04.163558+00:00",
+   "dir": "outbound",
+   "text": "Tienes razón, disculpa la confusión. El cupón *KAIU15* aplica para compras superiores a *$40.000 COP*.\n\nComo tu carrito actual es de *$32.000 COP*, te faltarían *$8.000 COP* para poder usarlo.\n\nTe gustaría agregar un *Jabón Artesanal* (desde *$18.000 COP*) para completar el monto y aprovechar el descuento?"
+  },
+  {
+   "ts": "2026-08-09T00:26:29.739044+00:00",
+   "dir": "inbound",
+   "text": "Si, tienes jabon de lavanda?"
+  },
+  {
+   "ts": "2026-08-09T00:26:41.470261+00:00",
+   "dir": "outbound",
+   "text": "Cuéntame de nuevo qué producto y presentación quieres y te lo agrego al carrito enseguida."
+  },
+  {
+   "ts": "2026-08-09T00:26:53.40919+00:00",
+   "dir": "inbound",
+   "text": "Jabon de lavanda"
+  },
+  {
+   "ts": "2026-08-09T00:27:37.394737+00:00",
+   "dir": "outbound",
+   "text": "Tenemos *Jabón Artesanal de Lavanda* en estas presentaciones:\n\n* 60g: *$18.000 COP*\n* 100g: *$24.000 COP*\n* 150g: *$32.000 COP*\n\nCuál prefieres para agregar a tu pedido y así aplicar el cupón *KAIU15*?"
+  },
+  {
+   "ts": "2026-08-09T00:28:02.960095+00:00",
+   "dir": "inbound",
+   "text": "1 de 60gr y 2 de 150gr"
+  },
+  {
+   "ts": "2026-08-09T00:28:42.930853+00:00",
+   "dir": "outbound",
+   "text": "Antes de continuar con tu pedido, cuéntame cómo prefieres pagar:\n\n🏦 *Pago online* (tarjeta, PSE, Nequi o transferencia Bancolombia) — recibes el link al confirmar.\n\n💵 *Contra entrega* — pagas en efectivo cuando el courier te entregue el paquete.\n\nCuál prefieres?"
+  },
+  {
+   "ts": "2026-08-09T00:29:04.557793+00:00",
+   "dir": "inbound",
+   "text": "Pero deseo saber cuanto va mis productos"
+  },
+  {
+   "ts": "2026-08-09T00:29:19.120037+00:00",
+   "dir": "outbound",
+   "text": "Claro, [CLIENTE]. Aquí tienes el detalle de tu pedido actual:\n\n* 1x *Aceite Esencial de Árbol de Té* (10ml): $32.000\n* 1x *Jabón Artesanal de Lavanda* (60g): $18.000\n* 2x *Jabón Artesanal de Lavanda* (150g): $64.000\n\nTu *subtotal* es de *$114.000 COP*. Al superar los $40.000, ya puedes aplicar el cupón *KAIU15* para obtener el 15% de descuento.\n\nDeseas que aplique el cupón y procedamos a elegir el método de envío para tu dirección en *Bogotá*?"
+  },
+  {
+   "ts": "2026-08-09T00:29:41.797104+00:00",
+   "dir": "inbound",
+   "text": "Si para Bogota"
+  },
+  {
+   "ts": "2026-08-09T00:30:18.308252+00:00",
+   "dir": "outbound",
+   "text": "Antes de continuar con tu pedido, cuéntame cómo prefieres pagar:\n\n🏦 *Pago online* (tarjeta, PSE, Nequi o transferencia Bancolombia) — recibes el link al confirmar.\n\n💵 *Contra entrega* — pagas en efectivo cuando el courier te entregue el paquete.\n\nCuál prefieres?"
+  },
+  {
+   "ts": "2026-08-09T00:30:26.803305+00:00",
+   "dir": "inbound",
+   "text": "Online"
+  },
+  {
+   "ts": "2026-08-09T00:31:00.332189+00:00",
+   "dir": "outbound",
+   "text": "Perfecto, [CLIENTE]. He confirmado los productos en tu carrito y cotizado el envío a *Bogotá D.C.*. Estas son las opciones disponibles para tu entrega:\n\n* *COORDINADORA MERCANTIL*: $8.090 (2 días)\n* *ENVIA*: $9.740 (1 día)\n* *SERVIENTREGA*: $10.280 (1 día)\n* *INTERRAPIDISIMO*: $10.880 (3 días)\n* *TCC SA*: $18.180 (1 día)\n\nCuál de estas transportadoras prefieres para tu envío? Una vez elijas, procederé con el resumen final y el link de pago."
+  },
+  {
+   "ts": "2026-08-09T00:31:26.734766+00:00",
+   "dir": "inbound",
+   "text": "Por Coordinadora"
+  },
+  {
+   "ts": "2026-08-09T00:31:43.437101+00:00",
+   "dir": "outbound",
+   "text": "Excelente elección, [CLIENTE]. He seleccionado *COORDINADORA MERCANTIL* para tu envío.\n\nAquí tienes el resumen de tu pedido 📋:\n\n* 1x *Aceite Esencial de Árbol de Té* (10ml): $32.000\n* 1x *Jabón Artesanal de Lavanda* (60g): $18.000\n* 2x *Jabón Artesanal de Lavanda* (150g): $64.000\n* *Subtotal*: $114.000\n* *Descuento (KAIU15)*: -$17.100\n* *Envío (Bogotá)*: $8.090\n* *Total a pagar*: *$104.990 COP*\n\n*Dirección de entrega*: [DIR], Bogotá.\n*Celular*: [TEL].\n\nConfirmas que todo está correcto para generarte el link de pago?"
+  },
+  {
+   "ts": "2026-08-09T00:32:36.026643+00:00",
+   "dir": "inbound",
+   "text": "Me das detalle de la entrega por favor"
+  },
+  {
+   "ts": "2026-08-09T00:32:48.942219+00:00",
+   "dir": "outbound",
+   "text": "Claro, [CLIENTE]. Aquí tienes los detalles de envío registrados para tu pedido:\n\n* *Nombre*: [CLIENTE] [CLIENTE]\n* *Celular*: [TEL]\n* *Documento*: [DOC]\n* *Dirección*: [DIR]\n\nConfirmas que estos datos son correctos para proceder con el pago?"
+  },
+  {
+   "ts": "2026-08-09T00:33:06.575257+00:00",
+   "dir": "inbound",
+   "text": "Que tienes registrado? Casa o apartamento?"
+  },
+  {
+   "ts": "2026-08-09T00:33:20.708895+00:00",
+   "dir": "outbound",
+   "text": "En este momento, tu dirección está registrada como *casa*.\n\nEs correcto o necesitas que lo actualice a *apartamento* (o conjunto/oficina) para que el envío llegue sin inconvenientes?"
+  },
+  {
+   "ts": "2026-08-09T00:33:40.670177+00:00",
+   "dir": "inbound",
+   "text": "Es correcto casa"
+  },
+  {
+   "ts": "2026-08-09T00:33:54.494499+00:00",
+   "dir": "outbound",
+   "text": "Perfecto, [CLIENTE]. Todo está listo entonces.\n\nConfirmas el pedido para generarte el link de pago?"
+  },
+  {
+   "ts": "2026-08-09T00:34:00.821651+00:00",
+   "dir": "inbound",
+   "text": "Si"
+  },
+  {
+   "ts": "2026-08-09T00:34:21.164346+00:00",
+   "dir": "outbound",
+   "text": "Excelente, [CLIENTE]! Pedido confirmado.\n\n*Paga aquí:* https://checkout.wompi.co/l/test_qLTKl3\n\nEl link es válido por 30 minutos. Una vez realices el pago, recibirás la confirmación y procederemos con el despacho de tus productos. Gracias por elegir KAIU Living Natural!"
+  },
+  {
+   "ts": "2026-08-09T00:34:44.5535+00:00",
+   "dir": "inbound",
+   "text": "Espera,  puedo agregar un Serum de vitamina C?"
+  },
+  {
+   "ts": "2026-08-09T00:34:58.162549+00:00",
+   "dir": "outbound",
+   "text": "Claro, [CLIENTE]. Tenemos el *Sérum de Vitamina C* en estas presentaciones:\n\n* 15ml: *$52.000 COP*\n* 30ml: *$85.000 COP*\n\nCuál prefieres para agregar a tu pedido? Ten en cuenta que al modificar los productos, el envío se recalculará y te presentaré el nuevo resumen con el descuento aplicado."
+  },
+  {
+   "ts": "2026-08-09T00:35:14.265894+00:00",
+   "dir": "inbound",
+   "text": "1 de 15ml"
+  },
+  {
+   "ts": "2026-08-09T00:35:43.063331+00:00",
+   "dir": "outbound",
+   "text": "Actualicé tu pedido con el nuevo producto. Como cambió el contenido, debo recalcular el costo de envío para darte el total exacto.\n\nTe recotizo el envío con tu misma dirección de entrega?"
+  },
+  {
+   "ts": "2026-08-09T00:35:54.550399+00:00",
+   "dir": "inbound",
+   "text": "Si por favor"
+  },
+  {
+   "ts": "2026-08-09T00:36:20.153781+00:00",
+   "dir": "outbound",
+   "text": "Actualicé tu pedido con el nuevo producto. Como cambió el contenido, debo recalcular el costo de envío para darte el total exacto.\n\nTe recotizo el envío con tu misma dirección de entrega?"
+  },
+  {
+   "ts": "2026-08-09T00:36:40.429449+00:00",
+   "dir": "inbound",
+   "text": "Ya te había dicho que si"
+  },
+  {
+   "ts": "2026-08-09T00:37:08.839831+00:00",
+   "dir": "outbound",
+   "text": "Disculpa la demora, [CLIENTE]. He agregado el *Sérum de Vitamina C (15ml)* a tu pedido y recalculado el envío a *Bogotá*.\n\nAquí tienes las nuevas opciones de transportadora:\n\n* *COORDINADORA MERCANTIL*: $8.610 (2 días)\n* *ENVIA*: $10.260 (1 día)\n* *SERVIENTREGA*: $11.320 (1 día)\n* *INTERRAPIDISIMO*: $11.920 (3 días)\n* *TCC SA*: $19.220 (1 día)\n\nCuál prefieres para continuar?"
+  },
+  {
+   "ts": "2026-08-09T00:37:58.514953+00:00",
+   "dir": "inbound",
+   "text": "Mejor deseo que sea enviado por Envia"
+  },
+  {
+   "ts": "2026-08-09T00:38:16.664571+00:00",
+   "dir": "outbound",
+   "text": "Excelente elección, [CLIENTE]. He seleccionado *ENVIA* para tu envío.\n\nAquí tienes el resumen actualizado de tu pedido 📋:\n\n*Productos:*\n* 1x *Aceite Esencial de Árbol de Té* (10ml): $32.000\n* 1x *Jabón Artesanal de Lavanda* (60g): $18.000\n* 2x *Jabón Artesanal de Lavanda* (150g): $64.000\n* 1x *Sérum de Vitamina C* (15ml): $52.000\n\nSubtotal: $166.000\nEnvío (ENVIA): $10.260\n*TOTAL: $176.260*\nModo: Online\n\n*Datos de envío:*\n* Nombre: [CLIENTE] [CLIENTE]\n* Correo: [EMAIL]\n* Celular: [TEL]\n* Documento: [DOC]\n* Dirección: [DIR]\n\nConfirmas el pedido?"
+  },
+  {
+   "ts": "2026-08-09T00:38:45.314596+00:00",
+   "dir": "inbound",
+   "text": "Y El Cupón?"
+  },
+  {
+   "ts": "2026-08-09T00:39:27.186448+00:00",
+   "dir": "outbound",
+   "text": "📋 *Resumen de tu pedido:*\n\n* 1 *Aceite Esencial de Árbol de Té* de 10ml: *$32.000 COP*\n* 1 *Jabón Artesanal de Lavanda* de 60g: *$18.000 COP*\n* 2 *Jabón Artesanal de Lavanda* de 150g: *$64.000 COP*\n* 1 *Sérum de Vitamina C* de 15ml: *$52.000 COP*\n\n* Subtotal: *$166.000 COP*\n* Envío ENVIA a Bogotá D.C.: *$10.260 COP*\n* *Total: $176.260 COP*\n\n*Datos de envío:*\n* Nombre: [CLIENTE] [CLIENTE]\n* Correo: [EMAIL]\n* Celular: [TEL]\n* Documento: [DOC]\n* Dirección: [DIR]\n\nConfirmas el pedido para generar el link de pago?"
+  },
+  {
+   "ts": "2026-08-09T00:39:55.718807+00:00",
+   "dir": "inbound",
+   "text": "Porque bo me aplicas el Cupón que tenia aplicado?"
+  },
+  {
+   "ts": "2026-08-09T00:40:09.115252+00:00",
+   "dir": "outbound",
+   "text": "Tienes toda la razón, [CLIENTE], te ofrezco una disculpa. Al modificar los productos, el sistema requiere que el cupón se aplique nuevamente.\n\nLamentablemente, en este momento no tengo habilitada la opción para aplicar cupones manualmente a través de este chat.\n\nDeseas que te comunique con un especialista de mi equipo para que te ayude a aplicar el descuento y finalizar tu pedido?"
+  },
+  {
+   "ts": "2026-08-09T00:41:05.828903+00:00",
+   "dir": "inbound",
+   "text": "Pero si no compre aún,  el cupón debería estar disponible no?"
+  },
+  {
+   "ts": "2026-08-09T00:41:23.195645+00:00",
+   "dir": "outbound",
+   "text": "Entiendo perfectamente tu punto, [CLIENTE], y tienes razón en que el beneficio debería mantenerse.\n\nComo el sistema no me permite gestionar el cupón manualmente tras la actualización, he solicitado a un especialista de mi equipo que revise tu caso y te ayude a finalizar la compra con el descuento aplicado.\n\nUn especialista te contactará en breve para apoyarte. Gracias por tu paciencia."
+  },
+  {
+   "ts": "2026-08-09T00:43:30.369687+00:00",
+   "dir": "inbound",
+   "text": "Ok gracias"
+  },
+  {
+   "ts": "2026-08-09T00:43:47.039987+00:00",
+   "dir": "outbound",
+   "text": "Gracias por tu comprensión, [CLIENTE]. Ya he notificado a mi equipo sobre tu caso y el detalle del jabón de cortesía para que te contacten a la mayor brevedad y finalicen tu pedido con el descuento aplicado.\n\nQuedo atenta a cualquier otra cosa en la que pueda apoyarte. Feliz día!"
+  },
+  {
+   "ts": "2026-08-15T16:07:51.662331+00:00",
+   "dir": "inbound",
+   "text": "Hola"
+  },
+  {
+   "ts": "2026-08-15T16:24:12.878575+00:00",
+   "dir": "inbound",
+   "text": "Hola"
+  },
+  {
+   "ts": "2026-08-15T16:24:57.145391+00:00",
+   "dir": "inbound",
+   "text": "Hola"
+  },
+  {
+   "ts": "2026-08-15T16:25:11.473536+00:00",
+   "dir": "outbound",
+   "text": "[CLIENTE]. Sigo aquí contigo.\n\nComo te comenté, ya escalé tu caso a mi equipo para que puedan aplicarte el cupón y gestionar el detalle del jabón de cortesía. Un especialista te contactará muy pronto para finalizar tu pedido.\n\nConfirmas el pedido para generar el link de pago seguro?"
+  },
+  {
+   "ts": "2026-08-15T18:23:18.489281+00:00",
+   "dir": "inbound",
+   "text": "Gracias, no seria mas, hasta luego"
+  },
+  {
+   "ts": "2026-08-15T18:23:34.217742+00:00",
+   "dir": "outbound",
+   "text": "Entendido, [CLIENTE]. Estaremos atentos a tu caso para contactarte y finalizar todo con el descuento y el detalle que acordamos.\n\nMuchas gracias por tu paciencia y confianza en KAIU Living Natural. Hasta luego!"
+  },
+  {
+   "ts": "2026-08-15T18:24:13.420352+00:00",
+   "dir": "inbound",
+   "text": "Pregunta adicional, desde donde despachan?"
+  },
+  {
+   "ts": "2026-08-15T18:24:25.966222+00:00",
+   "dir": "outbound",
+   "text": "Despachamos todos nuestros pedidos desde la ciudad de Bogotá.\n\nDesde allí, realizamos los envíos a todo Colombia a través de operadores logísticos certificados para que recibas tus productos en los tiempos estimados que te comenté anteriormente.\n\nConfirmas el pedido para generar el link de pago seguro?"
+  },
+  {
+   "ts": "2026-08-20T01:29:25.350077+00:00",
+   "dir": "inbound",
+   "text": "Hola,  que productos tienen?"
+  },
+  {
+   "ts": "2026-08-20T01:29:42.161683+00:00",
+   "dir": "outbound",
+   "text": "[CLIENTE]. Es un gusto saludarte de nuevo.\n\nEn KAIU Living Natural contamos con una selección de productos 100% naturales para tu bienestar. Aquí tienes nuestras categorías:\n\n* *Aceites Esenciales*\n* *Aceites Vegetales*\n* *Jabones Artesanales*\n* *Kits*\n* *Sérums*\n\nHay alguna categoría en particular que te interese explorar o buscas algo específico para tu rutina de cuidado?"
+  }
+ ]
+}
