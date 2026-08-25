@@ -17,9 +17,9 @@ en este orden antes de actuar:
 3. `.context/04-next-steps.md` — lo que queda pendiente + briefs de
    implementación + lecciones de entorno (léelas ANTES de certificar: ahorran
    horas — validator.ts, xdist, enums DB, reinicio de servicios, make deps).
-4. Los documentos del trabajo en curso que el estado señale (hoy Track 5:
-   `docs/architecture/modular-domains-vision.md` +
-   `domain-capabilities-inventory.md` + `domain-services-contract.md`).
+4. Los documentos del trabajo en curso que el estado señale (hoy Track 7 —
+   UX/UI de la consola contra Kaiu DS: `docs/ux/UX-UI.md`; brief T7.1-T7.12 en
+   `.context/04-next-steps.md` §"Track 7 — brief de implementación").
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).
 
