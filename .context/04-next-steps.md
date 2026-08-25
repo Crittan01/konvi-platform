@@ -122,6 +122,23 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   huérfanas. Regenerar contra la DB local con el mismo template SQL (`_format_sql(CORE_TABLES)`)
   vía podman psql + `json.dump(indent=2, sort_keys=True)` — quedó más fiel al código bajo test
   (ganó las 7 columnas de las 6 migraciones pendientes + `reason_detail`).
+- **Verificación visual live con navegador real (T7.2)**: hay chromium para Playwright cacheado en
+  `~/.cache/ms-playwright` (chromium-1234) pero el paquete NO está instalado — crear venv aislado
+  (`python3.11 -m venv scratch/venv-visual && pip install playwright psycopg[binary]`; el venv está
+  gitignored y calza con el browser cacheado, cero descarga). Patrón de sonda en
+  `scratch/t7_02_visual_verify.py`: login dev-owner → `?conv=<id>` → MutationObserver registra el
+  `style` inline al MONTAR cada burbuja (entrada animada = `opacity: 0` presente) + inserts/updates
+  SQL directos para disparar realtime. Tres trampas resueltas: (1) **usar `localhost`, NO
+  `127.0.0.1`** — Next 16 dev bloquea `/_next/*` desde orígenes no listados en `allowedDevOrigins`
+  (solo la IP LAN está) → la página carga pero NUNCA hidrata (forms hacen submit nativo GET);
+  (2) `add_init_script` corre antes de parsear el documento (`document.body` null → instalar el
+  observer en DOMContentLoaded); (3) tap pre-hidratación en móvil no dispara onClick de React —
+  esperar networkidle + ~1.5s o una señal post-tap (`?conv=` en URL).
+- **Reduced-motion + SSR = hydration mismatch (fix DS, T7.2)**: framer-motion `useReducedMotion()`
+  lee la media query REAL en la primera pintura cliente, pero el SSR no puede conocerla → las
+  ramas con estilo de entrada (opacity:0/translateY) no coinciden y React loguea mismatch para
+  usuarios con reduce (chromium headless con `reduced_motion='reduce'` lo expone). Fix en el
+  wrapper: `useReducedMotionDS` (motion.tsx) — false en SSR/hidratación, valor real tras montar.
 
 ### M2.4 ✅ CERRADO (2026-08-25) — M2 COMPLETO — brief ejecutado
 
@@ -173,9 +190,15 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   `components/auth/auth-scene.tsx` (grano inline sin terceros + aurora estática + brand
   tile degradado + glow + coreografía stagger/reveal vía wrappers DS) aplicada a las 4
   páginas auth; el mock murió (wordmark K en tile degradado).
-- **T7.2 — Motion del chat del inbox** (donde vive el operador). `chat-panel.tsx`:
-  `AnimatePresence` + `layout` en burbujas nuevas (slide-up 200ms, fade en reduced-motion),
-  keys por message id, SIN re-animación en polling/realtime dedupe.
+- **T7.2 — Motion del chat del inbox** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  Ejecutado: `BubbleIn`+`AnimatePresence` (wrappers DS) en `chat-panel.tsx` —
+  slide-up 200ms SOLO en burbujas nuevas; hook `useAnimatableMessageIds` (id +
+  created_at >= max visto) + `loadedConvId` en `use-messages` (guard de stale
+  paint al cambiar de conversación). Verificado live con navegador real
+  (`scratch/t7_02_visual_verify.py`): carga sin cascada, dedupe UPDATE sin
+  re-mount, reduced-motion fade-only, móvil 390px, ambos temas, 0 errores
+  consola. Efecto colateral (fix arquitectónico DS): `useReducedMotionDS`
+  hidratación-seguro mata el mismatch SSR/CSR pre-existente de T7.1.
 - **T7.3 — Física de navegación y pedidos**: pill `layoutId` en `bottom-nav.tsx`
   (respetando `aria-current` y el badge) + `layout` en cards de `orders-manager.tsx` al
   reordenar por chips de filtro (la carga inicial ya la cubre StaggerList).
