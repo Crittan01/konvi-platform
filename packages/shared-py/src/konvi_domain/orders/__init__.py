@@ -20,6 +20,17 @@ from konvi_domain.orders.service import (
     list_orders,
     list_orders_by_contact,
 )
+from konvi_domain.orders.cancellation import (
+    CancellationItem,
+    CancellationPorts,
+    CancellationRequest,
+    CancellationResult,
+    TenantPolicy,
+    cancel_order,
+    detect_escalation_reasons,
+    is_void_eligible,
+    load_policy,
+)
 
 __all__ = [
     "ORDERS_CONTRACT",
@@ -39,4 +50,14 @@ __all__ = [
     "list_orders",
     "list_orders_by_contact",
     "is_allowed_order_transition",
+    # Cancelación unificada (M2.2)
+    "CancellationItem",
+    "CancellationPorts",
+    "CancellationRequest",
+    "CancellationResult",
+    "TenantPolicy",
+    "cancel_order",
+    "detect_escalation_reasons",
+    "is_void_eligible",
+    "load_policy",
 ]

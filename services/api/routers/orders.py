@@ -26,6 +26,7 @@ from dependencies.auth import (
     enforce_mfa,
     get_current_role,
     get_current_tenant,
+    get_current_user_id,
     get_service_client,
 )
 from dependencies.idempotency import (
@@ -353,6 +354,7 @@ def patch_order(
     # dinero → exige AAL2 si el operador tiene MFA. Step-up 1×/sesión (aal2 pasa directo).
     _mfa: None = Depends(enforce_mfa),
     _rl: None = Depends(RL_WRITE_DEFAULT),
+    _user_id: Optional[str] = Depends(get_current_user_id),
 ):
     """
     Cambia estado y/o notas del pedido. owner/manager/operator (cancelar: solo
@@ -361,6 +363,10 @@ def patch_order(
     Lógica especial:
     - pending → confirmed: decrementa stock de cada variante de los ítems del pedido
       e inserta registros en stock_movements con reason='sale'.
+    - → cancelled (M2.2): delega al pipeline legal unificado
+      `konvi_domain.orders.cancellation` — misma semántica que el bot (triage,
+      audit order_cancellations, void Wompi, cancel guía, restock idempotente,
+      notificaciones). Antes la consola hacía flip + restock "a medias".
     """
     if role not in {"owner", "manager", "operator"}:
         raise HTTPException(status_code=403, detail="Permiso insuficiente")
@@ -405,6 +411,27 @@ def patch_order(
                 detail=f"Transición de estado inválida: {current_status} → {new_status}",
             )
 
+        # ── M2.2: cancelar delega al pipeline legal unificado ────────────────
+        # (konvi_domain.orders.cancellation) — UNA semántica para consola y bot:
+        # triage de riesgo (registrado en auditoría para staff), audit SIC
+        # order_cancellations, void Wompi automático en ventana, cancel de guía
+        # Aveonline, restock idempotente (reservas + movements), notificación al
+        # cliente por WhatsApp y al operador por Telegram si el refund es manual.
+        if new_status == "cancelled":
+            # Notas del operador (si vienen) quedan en la orden antes de cancelar.
+            if "notes" in data:
+                (
+                    supabase.table("orders")
+                    .update({"notes": data["notes"]})
+                    .eq("id", order_id)
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+            return _cancel_via_domain_pipeline(
+                supabase, order_id=order_id, tenant_id=tenant_id,
+                user_id=_user_id, request=request, reason_text=data.get("notes") or "",
+            )
+
         result = (
             supabase.table("orders")
             .update(data)
@@ -418,14 +445,6 @@ def patch_order(
         # ── Decremento de stock al confirmar (pending o pending_payment → confirmed) ──
         if new_status == "confirmed" and current_status in ("pending", "pending_payment"):
             _decrement_stock_on_confirm(supabase, order_id, tenant_id)
-        # ── BLOQUE D item 4: reposición de stock al CANCELAR desde un estado ya
-        #    decrementado (confirmed/processing/shipped). Antes patch_order (consola/API)
-        #    sólo decrementaba al confirmar y NUNCA reponía al cancelar → inventario
-        #    inflado permanente. Idempotente cross-path: mismo reason 'cancellation_refund'
-        #    que el webhook MeLi (_restore_stock_for_meli_order) y el pipeline orchestrator
-        #    (order_cancellation.py) → dos caminos de cancelación reponen una sola vez.
-        elif new_status == "cancelled" and current_status in ("confirmed", "processing", "shipped"):
-            _restore_stock_on_cancel(supabase, order_id, tenant_id)
 
         return result.data[0]
     except HTTPException:
@@ -433,6 +452,86 @@ def patch_order(
     except Exception as e:
         logger.error("Error actualizando pedido %s: %s", order_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar pedido")
+
+
+def _cancel_via_domain_pipeline(
+    supabase: Client, *, order_id: str, tenant_id: str,
+    user_id: Optional[str], request: Request, reason_text: str,
+) -> dict:
+    """Adaptador consola → `konvi_domain.orders.cancellation.cancel_order` (M2.2).
+
+    Mapea CancellationResult a la respuesta HTTP: 404 si la orden no existe,
+    409 defensivo si el pipeline escala (no ocurre para staff — la escalación
+    bloquea solo al canal customer), 200 con la orden re-leída + resumen de la
+    cancelación. Efectos de proveedor inyectados (puertos del servicio API).
+    """
+    from konvi_domain.orders.cancellation import CancellationRequest as _CancelReq
+    from konvi_domain.orders.cancellation import cancel_order as _domain_cancel
+
+    from lib.order_cancel_ports import (
+        build_api_cancellation_ports,
+        send_cancellation_notifications,
+    )
+
+    cancel_result = asyncio.run(_domain_cancel(
+        supabase,
+        _CancelReq(
+            order_id=order_id,
+            tenant_id=tenant_id,
+            # Enum DB order_cancellation_actor: 'operator' cubre staff de
+            # consola (owner/manager); la granularidad del rol queda en
+            # cancelled_by_user_id + audit_log. ("owner" rompe el enum 22P02 —
+            # destapado por la certificación live M2.2.)
+            actor="operator",
+            reason_code="operator_console",
+            reason_text=reason_text,
+            user_id=user_id,
+            ip_address=request.client.host if request and request.client else None,
+        ),
+        ports=build_api_cancellation_ports(supabase),
+    ))
+
+    if not cancel_result.success:
+        if cancel_result.requires_escalation:
+            raise HTTPException(
+                status_code=409,
+                detail="La cancelación requiere revisión: "
+                       + ", ".join(cancel_result.escalation_reasons),
+            )
+        logger.error(
+            "[CANCEL] pipeline falló order=%s: %s", order_id, cancel_result.error,
+        )
+        raise HTTPException(status_code=500, detail="Error al cancelar el pedido")
+
+    # Re-leer la orden ya cancelada por el pipeline (mismo shape que el PATCH
+    # heredado: la fila actualizada + resumen de la cancelación para la UI).
+    row = (
+        supabase.table("orders")
+        .select("*")
+        .eq("id", order_id)
+        .eq("tenant_id", tenant_id)
+        .maybe_single()
+        .execute()
+    )
+    order_row = (row.data if row else None) or {}
+
+    send_cancellation_notifications(
+        supabase,
+        result=cancel_result,
+        tenant_id=tenant_id,
+        conversation_id=order_row.get("conversation_id"),
+    )
+
+    return {
+        **order_row,
+        "cancellation": {
+            "id": cancel_result.cancellation_id,
+            "status": cancel_result.status,
+            "refund_method": cancel_result.refund_method,
+            "refund_status": cancel_result.refund_status,
+            "refund_amount_cents": cancel_result.refund_amount_cents,
+        },
+    }
 
 
 @router.post("/{order_id}/payment-link", response_model=dict)
@@ -955,70 +1054,6 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
             "Error decrementando stock para pedido %s: %s",
             order_id, e
         )
-
-
-def _restore_stock_on_cancel(supabase: Client, order_id: str, tenant_id: str) -> None:
-    """Repone stock de las variantes de un pedido al CANCELARLO desde la consola/API.
-
-    BLOQUE D item 4: patch_order sólo decrementaba al confirmar y NUNCA reponía al
-    cancelar → inventario inflado permanente cuando un operador cancela un pedido ya
-    confirmado. Repone SÓLO lo realmente decrementado leyendo los movimientos
-    'sale'/'reservation_consumed' de la orden (no la qty de order_items, que puede
-    diferir del delta clampeado por over-sell). Idempotente por
-    (order_id, variation_id, 'cancellation_refund') vía el índice único — mismo reason
-    que el webhook MeLi (_restore_stock_for_meli_order) y el pipeline orchestrator
-    (order_cancellation.py) → dos caminos de cancelación reponen una sola vez.
-    """
-    try:
-        movements = (
-            supabase.table("stock_movements")
-            .select("variation_id, delta")
-            .eq("tenant_id", tenant_id)
-            .eq("order_id", order_id)
-            .in_("reason", ["sale", "reservation_consumed"])
-            .execute()
-        ).data or []
-        restore_by_var: dict = {}
-        for mv in movements:
-            vid = mv.get("variation_id")
-            qty = abs(int(mv.get("delta") or 0))
-            if vid and qty > 0:
-                restore_by_var[vid] = restore_by_var.get(vid, 0) + qty
-
-        for variation_id, qty in restore_by_var.items():
-            try:
-                _rpc = supabase.rpc("rpc_stock_restore", {
-                    "p_tenant_id": tenant_id,
-                    "p_variation_id": variation_id,
-                    "p_qty": int(qty),
-                    "p_order_id": order_id,
-                    "p_reason": "cancellation_refund",
-                }).execute()
-                new_stock = _rpc.data if isinstance(_rpc.data, int) else None
-            except Exception as _res_exc:
-                logger.error(
-                    "[STOCK] rpc_stock_restore falló order=%s var=%s: %s",
-                    order_id, variation_id, _res_exc,
-                )
-                continue
-            if new_stock is None:
-                continue
-
-            # Sync a MeLi (loop-aware, igual patrón que el decremento).
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(sync_meli_stock(variation_id, new_stock, supabase))
-            except RuntimeError:
-                try:
-                    asyncio.run(sync_meli_stock(variation_id, new_stock, supabase))
-                except Exception as meli_err:
-                    logger.warning(
-                        "[STOCK] Sync MeLi (restore) falló variation=%s (no bloquea): %s",
-                        variation_id, meli_err,
-                    )
-
-    except Exception as e:
-        logger.error("Error reponiendo stock (cancel) para pedido %s: %s", order_id, e)
 
 
 @router.post("/{order_id}/generate-shipping-guide", response_model=dict)

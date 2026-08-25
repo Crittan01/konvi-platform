@@ -474,6 +474,20 @@ if $LINT || $CI_MODE; then
       files=$(find services tests -name "*.py" ! -path "*/__pycache__/*" 2>/dev/null | wc -l | tr -d ' ')
       _ok "ruff OK ($files archivos Python)"
     fi
+    # Track 5 (M2.0): la capa de dominio compartida es código NUEVO — cero deuda
+    # permitida (sin baseline heredado). Falla el gate con 1 solo error.
+    if [ -d packages/shared-py ]; then
+      # OJO: `grep -c` imprime "0" y sale 1 sin matches — `|| true` (no `|| echo 0`,
+      # que duplicaría el conteo: quirk heredado del check de baseline arriba).
+      pkg_out=$(ruff check packages/shared-py/ --output-format=concise 2>&1 || true)
+      pkg_count=$(echo "$pkg_out" | grep -cE "^packages/" || true)
+      if [ "$pkg_count" -eq 0 ]; then
+        _ok "ruff packages/shared-py: 0 errores (capa de dominio sin deuda)"
+      else
+        _err "ruff packages/shared-py: $pkg_count errores — la capa de dominio no admite baseline"
+        echo "$pkg_out" | grep -E "^packages/" | head -10
+      fi
+    fi
   else
     _warn "ruff no instalado: pip install ruff"
   fi

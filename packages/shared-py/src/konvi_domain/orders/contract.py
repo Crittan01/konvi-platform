@@ -110,7 +110,7 @@ ORDERS_CONTRACT = DomainContract(
             events=("order.cancelled",),
             errors=("NOT_FOUND", "PRECONDITION", "FORBIDDEN", "UPSTREAM"),
             customer_facing=True,
-            implemented=False,              # M2.2
+            implemented=True,               # M2.2 — konvi_domain.orders.cancellation.cancel_order
         ),
         Operation(
             name="payments.get_or_create_link",

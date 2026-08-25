@@ -26,9 +26,12 @@ from konvi_domain.orders.contract import ORDERS_CONTRACT
 
 CONTRACTS: list[DomainContract] = [ORDERS_CONTRACT]
 
-# dominio → módulo de servicio donde deben vivir los service_fn.
+# dominio → módulos de servicio donde deben vivir los service_fn.
 SERVICE_MODULES = {
-    "orders": "konvi_domain.orders.service",
+    "orders": (
+        "konvi_domain.orders.service",
+        "konvi_domain.orders.cancellation",
+    ),
 }
 
 
@@ -62,13 +65,15 @@ class DomainContractStructuralTests(unittest.TestCase):
 
     def test_implemented_exige_service_fn_real(self):
         for contract in CONTRACTS:
-            module = importlib.import_module(SERVICE_MODULES[contract.domain])
+            modules = [
+                importlib.import_module(m) for m in SERVICE_MODULES[contract.domain]
+            ]
             for op in contract.operations:
                 if not op.implemented:
                     continue
                 with self.subTest(op=op.name):
                     self.assertTrue(
-                        callable(getattr(module, op.service_fn, None)),
+                        any(callable(getattr(m, op.service_fn, None)) for m in modules),
                         f"{op.name}: implemented=True pero {op.service_fn} no existe en {SERVICE_MODULES[contract.domain]}",
                     )
 
