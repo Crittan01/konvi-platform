@@ -446,7 +446,7 @@ de dónde se extrae y qué hueco nuevo hay que construir.
 
 | # | Domain service | Extraer de | Construir nuevo | Drift que mata |
 |---|---|---|---|---|
-| 1 | **OrdersService** (piloto) | `orders.py:143-752` (create/patch/link) + `order_cancellation.py` (pipeline) + 3 reads del bot | `GET /orders/` listado · `orders.list_by_contact` · cancelación unificada para consola | 2 pipelines de cancelación · reuso/TTL de link ×2 |
+| 1 | **OrdersService** (piloto) | `orders.py:143-752` (create/patch/link) + `order_cancellation.py` (pipeline) + 3 reads del bot | `GET /orders/` listado · `orders.list_by_contact` · cancelación unificada para consola | 2 pipelines de cancelación · reuso/TTL de link ×2 — **M2.0+M2.1 ✅ 2026-08-25: create/get/list/list_by_contact + FSM en el paquete + `GET /orders/` vivo + consola sobre REST; pendientes M2.2 (cancel) y M2.3 (link)** |
 | 2 | **ClaimsService** (piloto) | `claims.py` (CRUD+reversión+FSM) + `agentic/tools/claims.py` (dedup, titularidad) | `list_by_contact` / `get_by_order` · reason unificado · enums compartidos | 2 writers divergentes · vocabulario extinto en bot |
 | 3 | **InventoryService** | `lib/stock_reservation.py` + RPCs (ya SoT) | `POST /stock/adjustments` atómico con ledger (deuda declarada `page.tsx:487-489`) · disponible neto de primera clase · receive compras atómico | restock ×3 · escrituras fuera de RPC ×3 · bruto vs neto |
 | 4 | **CatalogService** | `catalog_contract.py` + `catalog.py` + `catalog_tool.py` (read) | shape canónico único + label único + consumidores reales de `/catalog` | shape ×2 · label ×2 · fallback ×3 · validación ×2 |

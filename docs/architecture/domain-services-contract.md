@@ -206,8 +206,15 @@ RMA/devoluciones formales (tabla muerta — decisión de producto aparte, M1 §H
    instalación en los 2 servicios (requirements/buildCommand/Makefile) + CI. Sin cambio de
    comportamiento. **Primera extracción sin riesgo: `api/lib/coupons.py` → paquete** (ya es el
    servicio de-facto; sustituye el sys.path hack — prueba el packaging con el caso más fácil).
+   **✅ CERRADO 2026-08-25** (con ajuste de alcance documentado: el cliente supabase compartido y
+   la base del contrato aterrizan con su primer consumidor real — M2.1 — en vez de construirse
+   especulativamente; bitácora PLAN.md §E).
 2. **M2.1 — OrdersService lecturas + create**: `orders.create/get/list/list_by_contact` en el
    servicio; router como adaptador; `GET /orders/` nuevo; consola orders migra listado a REST.
+   **✅ CERRADO 2026-08-25** — incluye la máquina de estados como alias único del paquete y tests
+   de paridad canal↔canal (REST↔servicio in-process) + verificación live en STG (list/create/get/
+   idempotencia). El efecto de stock al confirmar se inyecta (`on_confirm_stock`) porque sigue
+   acoplado a `sync_meli_stock` hasta InventoryService (backlog M1 #3).
 3. **M2.2 — Cancelación unificada**: pipeline completo en el servicio; `POST /orders/{id}/cancel`
    (o PATCH con política completa) para la consola; **el bot sigue con el suyo (R4)** — duplicación
    time-boxed y defendida por test de paridad de outcome (mismo estado DB final para el mismo input).
