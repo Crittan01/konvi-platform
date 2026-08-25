@@ -4,7 +4,7 @@
 // render (y que el stub de matchMedia basta para useReducedMotion).
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { AnimatePresence, BubbleIn, FadeIn, LayoutItem, NavPill, StaggerList, StaggerItem, Pressable } from './motion'
+import { AnimatePresence, BubbleIn, CelebrationCheck, FadeIn, LayoutItem, NavPill, StaggerList, StaggerItem, Pressable } from './motion'
 
 let reduceMotion = false
 
@@ -107,5 +107,20 @@ describe('LayoutItem (T7.3)', () => {
     reduceMotion = true
     render(<LayoutItem>CardR</LayoutItem>)
     expect(screen.getByText('CardR')).toBeInTheDocument()
+  })
+})
+
+describe('CelebrationCheck (T7.4)', () => {
+  it('renderiza children y conserva className', () => {
+    render(<CelebrationCheck className="h-8 w-8">✓</CelebrationCheck>)
+    const el = screen.getByText('✓')
+    expect(el).toBeInTheDocument()
+    expect(el.parentElement?.className || el.className).toBeTruthy()
+  })
+
+  it('con prefers-reduced-motion el render es estático (sin pop)', () => {
+    reduceMotion = true
+    render(<CelebrationCheck>✓</CelebrationCheck>)
+    expect(screen.getByText('✓')).toBeInTheDocument()
   })
 })

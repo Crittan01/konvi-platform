@@ -6,6 +6,7 @@ import {
 import { createClient } from '@/utils/supabase/server'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { OrderStatusLive } from './_components/order-status-live'
 
 // ─── Contrato de estados (espejo del listado / orders.py VALID_STATUSES) ──────
 const STATUS_LABELS: Record<string, string> = {
@@ -110,6 +111,10 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
   return (
     <div className="max-w-3xl space-y-5">
       <BackLink />
+
+      {/* T7.4 — isla realtime: celebra confirmed/delivered y refresca la data
+          sin F5 (antes el detalle quedaba estático tras el pago). */}
+      <OrderStatusLive orderId={order.id} />
 
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">

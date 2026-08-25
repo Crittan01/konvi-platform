@@ -19,6 +19,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { Carousel, CarouselContent, CarouselItem, CarouselDots } from '@/components/ui/carousel'
 import { Pressable } from '@/components/ui/motion'
 import { useCountUp } from '@/lib/use-count-up'
+import { maybeCelebrateFromPayload } from './money-celebration'
 import { formatCOP, formatCOPNegative } from './finance/lib/format'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -143,7 +144,12 @@ export default function DashboardClient({
     const supabase = createClient()
     const channel = supabase.channel(`dashboard_ops_${tenantId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, debouncedRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${tenantId}` }, debouncedRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+        // T7.4 — micro-celebración de dinero: transición a confirmed/delivered
+        // (dedupe por orden+estado; REPLICA IDENTITY FULL da old.status).
+        maybeCelebrateFromPayload(payload as never)
+        debouncedRefresh()
+      })
       .subscribe((status) => {
         // Sin callback, CHANNEL_ERROR/TIMED_OUT pasaban invisibles y la UI seguía
         // prometiendo tiempo real con el canal caído.

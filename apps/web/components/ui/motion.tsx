@@ -27,8 +27,10 @@ const EASE_OUT = [0.16, 1, 0.3, 1] as const
  * (false) y el valor real aplica tras montar: el contenido aparece ESTÁTICO
  * en el primer frame post-hidratación — exactamente lo que pide §4.1.1.
  * Uso: wrappers de ENTRADA con estilo SSR-visible (FadeIn/StaggerList/
- * StaggerItem). Pressable no lo necesita (no emite `initial` al HTML) ni
- * BubbleIn (superficie client-only tras auth: lee el valor real directo).
+ * StaggerItem) y Pressable (framer añade `tabindex="0"` al SSR cuando hay
+ * `whileTap` — atributo SSR-visible que también diverge, expuesto por la
+ * verificación live T7.4). BubbleIn no lo necesita (superficie client-only
+ * tras auth: lee el valor real directo).
  */
 function useReducedMotionDS(): boolean {
   const reduce = useReducedMotion()
@@ -117,7 +119,7 @@ export function StaggerItem({ children, ...props }: HTMLMotionProps<'div'>) {
  * visual queda a cargo de los estilos CSS (card-hover, etc.).
  */
 export function Pressable({ children, ...props }: HTMLMotionProps<'div'>) {
-  const reduce = useReducedMotion()
+  const reduce = useReducedMotionDS()
   return (
     <motion.div
       whileHover={reduce ? undefined : { y: -2 }}
@@ -217,5 +219,25 @@ export function LayoutItem({ children, ...props }: HTMLMotionProps<'div'>) {
     >
       {children}
     </motion.div>
+  )
+}
+
+/**
+ * CelebrationCheck — check de hito de dinero (T7.4, Spec §4.2): UN pop con
+ * spring (scale 0.3→1 + fade) al montar, sin confetti pesado ni loops. Con
+ * prefers-reduced-motion: estático (`initial={false}`, §4.1.1).
+ * Pensado para el toast de money events (`money-celebration.tsx`).
+ */
+export function CelebrationCheck({ children, ...props }: HTMLMotionProps<'span'>) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.span
+      initial={reduce ? false : { scale: 0.3, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 14 }}
+      {...props}
+    >
+      {children}
+    </motion.span>
   )
 }
