@@ -168,13 +168,11 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 > boundaries + badge takeover en bottom-nav). **NO rehacer eso.** El trabajo restante,
 > ordenado por impacto para ojos de founder:
 
-- **T7.1 — Login memorable animado** ✅ 2026-08-25 (con T7.10 — bitácora PLAN.md §E). Hoy: estático
-  total, logo MOCK (SVG genérico, `app/login/page.tsx:111-131`), literales hardcodeados.
-  Scope: `app/login/` + `login/mfa/` + `forgot-password/` + `set-password/`. Coreografía
-  de entrada (glow/revelado, `text-gradient` en wordmark, `StaggerList` en campos), fondo
-  ambiental CSS-only (estático bajo reduced-motion), logo real (wordmark Kaiu por defecto
-  — el mock actual es explícito; si el founder entrega asset se swapea después). NO tocar:
-  patrón `.light` forzado, anti-FOUC, CSP con nonce (`csp.test.ts`), `auth-errors.test.ts`.
+- **T7.1 — Login memorable animado** ✅ 2026-08-25 (con T7.10 — bitácora PLAN.md §E).
+  Estado previo: estático total, logo MOCK (SVG genérico). Ejecutado: escena compartida
+  `components/auth/auth-scene.tsx` (grano inline sin terceros + aurora estática + brand
+  tile degradado + glow + coreografía stagger/reveal vía wrappers DS) aplicada a las 4
+  páginas auth; el mock murió (wordmark K en tile degradado).
 - **T7.2 — Motion del chat del inbox** (donde vive el operador). `chat-panel.tsx`:
   `AnimatePresence` + `layout` en burbujas nuevas (slide-up 200ms, fade en reduced-motion),
   keys por message id, SIN re-animación en polling/realtime dedupe.
