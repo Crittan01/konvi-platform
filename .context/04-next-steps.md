@@ -150,6 +150,56 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   **AL FINAL el BLOQUE BOT** (inventario parche → B-2 dispatcher sobre contratos estables →
   B-4 observabilidad/métricas → bot GUI/API en consola).
 
+### Track 7 — brief de implementación (gap analysis verificado contra `develop` 2026-08-25)
+
+> Derivado con auditoría completa de la consola contra `docs/ux/UX-UI.md` (Kaiu DS).
+> **Hallazgo central:** gran parte de la Spec WOW §4 YA está implementada (commit
+> `894b7357`, 2026-08-02: wrappers `ui/motion.tsx` + command palette ⌘K + drawers vaul
+> + carrusel embla + StaggerList en inbox/orders + EmptyState en 14 módulos + 7 error
+> boundaries + badge takeover en bottom-nav). **NO rehacer eso.** El trabajo restante,
+> ordenado por impacto para ojos de founder:
+
+- **T7.1 — Login memorable animado** (gap #1, la puerta del producto). Hoy: estático
+  total, logo MOCK (SVG genérico, `app/login/page.tsx:111-131`), literales hardcodeados.
+  Scope: `app/login/` + `login/mfa/` + `forgot-password/` + `set-password/`. Coreografía
+  de entrada (glow/revelado, `text-gradient` en wordmark, `StaggerList` en campos), fondo
+  ambiental CSS-only (estático bajo reduced-motion), logo real (wordmark Kaiu por defecto
+  — el mock actual es explícito; si el founder entrega asset se swapea después). NO tocar:
+  patrón `.light` forzado, anti-FOUC, CSP con nonce (`csp.test.ts`), `auth-errors.test.ts`.
+- **T7.2 — Motion del chat del inbox** (donde vive el operador). `chat-panel.tsx`:
+  `AnimatePresence` + `layout` en burbujas nuevas (slide-up 200ms, fade en reduced-motion),
+  keys por message id, SIN re-animación en polling/realtime dedupe.
+- **T7.3 — Física de navegación y pedidos**: pill `layoutId` en `bottom-nav.tsx`
+  (respetando `aria-current` y el badge) + `layout` en cards de `orders-manager.tsx` al
+  reordenar por chips de filtro (la carga inicial ya la cubre StaggerList).
+- **T7.4 — Micro-celebraciones de dinero**: check animado + count-up al llegar
+  `confirmed`/`delivered` por realtime (home + detalle de pedido), una vez por evento,
+  off en reduced-motion, sin confetti pesado. Verificación live: pago Wompi sandbox STG.
+- **T7.5 — Topbar con identidad de página** (en móvil hoy no dice dónde estás): título
+  de ruta desde `nav-items.ts` (fuente única), manteniendo palette + ThemeToggle.
+- **T7.6 — Barrido de estados**: ~44 vacíos ad-hoc restantes → `ui/empty-state.tsx`;
+  skeletons de divs crudos → `ui/skeleton` donde trivial; `error.tsx` en rutas de alto
+  tráfico sin boundary (contacts, purchases, finance, claims, team, integrations/*,
+  settings/*, marketplace, ai-agents, categories, promotions, receipts) — patrón
+  anti-falso-0 intacto (error+retry, nunca 0 falso).
+- **T7.7 — Virtualización donde paga**: `audit/page.tsx` (miles de filas);
+  `conversation-list.tsx` solo si el cursor no basta. Si nada lo justifica → decisión
+  documentada y dep `@tanstack/react-virtual` eliminada (no dejar dep muerta).
+- **T7.8 — Cobertura de render del DS**: vitest para empty-state, carousel, drawer,
+  responsive-dialog, confirm-dialog, skeleton (hoy 5 tests .tsx sobre 27 primitivos).
+- **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
+- **También**: BUG-105-02 del tracker (inbox "no refresca sin F5") — probablemente obsoleto
+  (Realtime+polling ya viven en `inbox-manager.tsx:152,180`): verificar live y cerrar entrada.
+
+**Reglas Kaiu inviolables (§4.1):** todo motion pasa por `@/components/ui/motion`
+(prohibido `motion` crudo) · solo tokens semánticos (la excepción documentada del login
+es la única) · dark probado en cada superficie nueva · 150-300ms · reduced-motion siempre.
+**Barra por T7.x:** vitest + tsc + lint → suite completa → `validate.sh --ci` (web
+detenido) → verificación visual live STG en AMBOS temas + viewport móvil + reduced-motion
+emulado → commits temáticos + CI 5/5 + bitácora PLAN.md §E + UX-UI.md §6/§1.9 al día
+(el inventario dice 20 componentes y son 27). **NO tocar backend ni bot** (directiva —
+el bloque bot va al final del §Orden).
+
 ### F2.7 — UAT HSM con 2 tenants piloto (único remanente de F2)
 
 Onboarding manual de 2 de los 6 tenants que requieren proactivos fuera de la CSW de 24h
