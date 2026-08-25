@@ -23,9 +23,20 @@ class ErrorCode(str, Enum):
 class DomainError(Exception):
     """Error de dominio con código estable y mensaje seguro para el cliente."""
 
-    def __init__(self, code: ErrorCode, message: str, *, detail: Optional[dict] = None):
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        detail: Optional[dict] = None,
+        http_status: Optional[int] = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         # Contexto opcional NO sensible (p.ej. {"min_amount_cents": 150000}).
         self.detail = detail or {}
+        # Override opcional del status REST (M2.3: "proveedor no configurado"
+        # es 503, no el 500 genérico de UPSTREAM). El adaptador lo honra cuando
+        # viene; si es None aplica el mapeo estándar code→status.
+        self.http_status = http_status

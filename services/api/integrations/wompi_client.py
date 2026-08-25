@@ -27,7 +27,6 @@ H.3.1 — Estado de exposición HTTP (cierre 2026-05-29):
 import hashlib
 import hmac
 import logging
-import os
 from typing import Any, Optional, Tuple
 
 import httpx
@@ -42,8 +41,13 @@ WOMPI_PROD_URL = "https://production.wompi.co/v1"
 
 REQUEST_TIMEOUT_SECONDS = 15
 
-# TTL default del link de pago Wompi (minutos). ÚNICA fuente: el env
-# WOMPI_PAYMENT_LINK_TTL_MINUTES lo overridea vía payment_link_ttl_minutes().
+# TTL default del link de pago Wompi (minutos). ÚNICA fuente desde M2.3:
+# `konvi_domain.orders.payments` (paquete packages/shared-py — la política de
+# reuso/TTL colapsada router↔bot). Este módulo es un SHIM que re-exporta los
+# símbolos para sus consumidores históricos (routers/orders.py histórico,
+# routers/wompi_webhook.py:29, tests). NO duplicar la lógica aquí.
+# El env WOMPI_PAYMENT_LINK_TTL_MINUTES lo overridea vía payment_link_ttl_minutes()
+# (leído EN CADA LLAMADA, fail-safe al default).
 # Antes del cierre 2026-08-02 había DOS lecturas divergentes: orders.py
 # hardcodeaba 30 (creación del link) y wompi_webhook.py leía el env
 # (regeneración post-pago fallido) → un override del env solo aplicaba a la
@@ -55,35 +59,10 @@ REQUEST_TIMEOUT_SECONDS = 15
 # El cron de cancelación de orden (PENDING_PAYMENT_TTL_MINUTES) se diseña 5
 # min POR ENCIMA de este valor para permitir regeneración del link sobre la
 # misma orden. Detalles: docs/adr/0011-payment-link-lifecycle.md.
-DEFAULT_PAYMENT_LINK_TTL_MINUTES = 30
-
-
-def payment_link_ttl_minutes() -> int:
-    """TTL (minutos) del link de pago Wompi (`expires_at` al crear/regenerar).
-
-    Lee `WOMPI_PAYMENT_LINK_TTL_MINUTES` del env en CADA llamada (testeable y
-    coherente entre creación — orders.py — y regeneración — wompi_webhook.py).
-    Default 30; valor inválido o <1 cae al default con warning (fail-safe: un
-    TTL malformado nunca rompe la generación del link de pago).
-    """
-    raw = os.getenv("WOMPI_PAYMENT_LINK_TTL_MINUTES", "").strip()
-    if not raw:
-        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning(
-            "[WOMPI] WOMPI_PAYMENT_LINK_TTL_MINUTES inválido (%r) — usando default %d",
-            raw, DEFAULT_PAYMENT_LINK_TTL_MINUTES,
-        )
-        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
-    if value < 1:
-        logger.warning(
-            "[WOMPI] WOMPI_PAYMENT_LINK_TTL_MINUTES=%d <1 — usando default %d",
-            value, DEFAULT_PAYMENT_LINK_TTL_MINUTES,
-        )
-        return DEFAULT_PAYMENT_LINK_TTL_MINUTES
-    return value
+from konvi_domain.orders.payments import (  # noqa: E402
+    DEFAULT_PAYMENT_LINK_TTL_MINUTES as DEFAULT_PAYMENT_LINK_TTL_MINUTES,
+    payment_link_ttl_minutes as payment_link_ttl_minutes,
+)
 
 
 def wompi_base_url(environment: str) -> str:

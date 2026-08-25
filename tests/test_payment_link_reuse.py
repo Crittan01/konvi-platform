@@ -17,11 +17,11 @@ Cubre:
     creación. Verifica que el filtro de cutoff usa el TTL correcto (~30 min).
 (d) wiring: el endpoint declara Depends(RL_WRITE_DEFAULT) (rate-limit G3).
 
-Patrón de mocks: mismo que tests/test_wompi_payment_link_endpoint.py.
+Patrón de mocks: `tests/helpers/supabase_mocks.py` (compartido; antes copia
+local calcada de tests/test_wompi_payment_link_endpoint.py).
 """
 import os
 import sys
-import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,6 +36,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "api")
 from routers import orders  # noqa: E402
 from dependencies.security import RL_WRITE_DEFAULT  # noqa: E402
 import integrations.wompi_client as wompi_client_module  # noqa: E402
+from helpers.supabase_mocks import (  # noqa: E402
+    make_orders_payments_supabase_mock as _make_supabase_mock,
+)
 
 _FAKE_CREDS = ("prv_test_fake_key", "test_events_fake_key", "sandbox")
 
@@ -48,63 +51,6 @@ _ORDER_PENDING = {
     "contact_id": "contact-1",
     "contacts": {"name": "Cristian Garzon", "phone": "573001112233"},
 }
-
-
-def _make_supabase_mock(state):
-    """Mock de supabase con cadenas explícitas inspeccionables.
-
-    Devuelve (supabase, probes) donde probes expone:
-      - payments_select: cadena select().eq().eq().eq().gte().order().limit().execute()
-      - payments_insert: método insert de la tabla payments
-      - orders_update:   método update de la tabla orders
-    """
-    supabase = MagicMock()
-
-    orders_q = MagicMock(name="orders_table")
-    single = MagicMock()
-    single.execute.return_value = types.SimpleNamespace(data=state.get("orders_single"))
-    eq_chain = MagicMock()
-    eq_chain.maybe_single.return_value = single
-    eq_chain.single.return_value = single
-    eq_chain.eq.return_value = eq_chain
-    select_chain = MagicMock()
-    select_chain.eq.return_value = eq_chain
-    orders_q.select.return_value = select_chain
-    upd = MagicMock()
-    upd.eq.return_value = upd
-    upd.execute.return_value = types.SimpleNamespace(data=state.get("orders_update", []))
-    orders_q.update.return_value = upd
-
-    payments_q = MagicMock(name="payments_table")
-    sel = MagicMock(name="payments_select_chain")
-    sel.eq.return_value = sel
-    sel.gte.return_value = sel
-    sel.order.return_value = sel
-    sel.limit.return_value = sel
-    sel.execute.return_value = types.SimpleNamespace(
-        data=state.get("payments_select", [])
-    )
-    payments_q.select.return_value = sel
-    ins_execute = MagicMock()
-    ins_execute.execute.return_value = types.SimpleNamespace(
-        data=state.get("payments_insert", [])
-    )
-    payments_q.insert.return_value = ins_execute
-
-    def table_side_effect(name):
-        if name == "orders":
-            return orders_q
-        if name == "payments":
-            return payments_q
-        raise AssertionError(f"Tabla inesperada: {name}")
-
-    supabase.table.side_effect = table_side_effect
-    probes = {
-        "payments_select": sel,
-        "payments_insert": payments_q.insert,
-        "orders_update": orders_q.update,
-    }
-    return supabase, probes
 
 
 class PaymentLinkReuseTests(unittest.IsolatedAsyncioTestCase):

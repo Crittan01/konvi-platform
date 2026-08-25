@@ -31,6 +31,7 @@ SERVICE_MODULES = {
     "orders": (
         "konvi_domain.orders.service",
         "konvi_domain.orders.cancellation",
+        "konvi_domain.orders.payments",
     ),
 }
 

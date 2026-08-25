@@ -74,8 +74,9 @@ ORDERS_CONTRACT = DomainContract(
             customer_facing=True,
             implemented=True,
         ),
-        # ── Declaradas, aún no migradas (M2.2/M2.3) — el camino real sigue en
-        # el router/orchestrator hasta su fase (strangler).
+        # ── Declaradas, aún no migradas (transition queda para una fase
+        # futura; payments.confirm es referencia de frontera webhook→servicio)
+        # — el camino real sigue en el router/webhook hasta su fase (strangler).
         Operation(
             name="orders.transition",
             description=(
@@ -126,7 +127,7 @@ ORDERS_CONTRACT = DomainContract(
             events=("payment.link_created",),
             errors=("NOT_FOUND", "PRECONDITION", "VALIDATION", "UPSTREAM"),
             customer_facing=True,
-            implemented=False,              # M2.3
+            implemented=True,               # M2.3 — konvi_domain.orders.payments.get_or_create_payment_link
         ),
         Operation(
             name="payments.confirm",

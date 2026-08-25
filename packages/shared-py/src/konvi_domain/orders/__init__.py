@@ -31,6 +31,17 @@ from konvi_domain.orders.cancellation import (
     is_void_eligible,
     load_policy,
 )
+from konvi_domain.orders.payments import (
+    DEFAULT_PAYMENT_LINK_TTL_MINUTES,
+    MIN_WOMPI_AMOUNT_CENTS,
+    PaymentLinkOutcome,
+    PaymentLinkPorts,
+    find_reusable_payment_link,
+    get_or_create_payment_link,
+    payment_link_expires_at,
+    payment_link_ttl_minutes,
+    validate_link_amount,
+)
 
 __all__ = [
     "ORDERS_CONTRACT",
@@ -60,4 +71,14 @@ __all__ = [
     "detect_escalation_reasons",
     "is_void_eligible",
     "load_policy",
+    # Payment link colapsado (M2.3)
+    "DEFAULT_PAYMENT_LINK_TTL_MINUTES",
+    "MIN_WOMPI_AMOUNT_CENTS",
+    "PaymentLinkOutcome",
+    "PaymentLinkPorts",
+    "find_reusable_payment_link",
+    "get_or_create_payment_link",
+    "payment_link_expires_at",
+    "payment_link_ttl_minutes",
+    "validate_link_amount",
 ]

@@ -12,7 +12,6 @@ Estados válidos: pending | pending_payment → confirmed → processing → shi
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -44,7 +43,6 @@ from dependencies.internal_auth import (
 )
 from dependencies.plans import PLAN_ORDERS_CREATE
 from dependencies.security import RL_WRITE_DEFAULT
-from integrations.wompi_client import payment_link_ttl_minutes
 from routers.marketplace import sync_meli_stock
 
 # ── Capa de dominio compartida (Track 5 M2.1) ────────────────────────────────
@@ -52,6 +50,7 @@ from routers.marketplace import sync_meli_stock
 # packages/shared-py — única fuente). Este router es el ADAPTADOR HTTP:
 # dual-auth, RBAC/MFA, Idempotency-Key, audit decorator y DomainError→HTTP.
 from konvi_domain import Actor, Channel, DomainError, ErrorCode, Role
+from konvi_domain.orders import payments as payments_service  # M2.3
 from konvi_domain.orders import service as orders_service
 from konvi_domain.orders import (
     VALID_STATUSES,
@@ -69,31 +68,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Orders"])
 
 
-# TTL de validez del link Wompi (expires_at enviado al crear el link): ÚNICA
-# fuente `integrations.wompi_client.payment_link_ttl_minutes()` (env
-# WOMPI_PAYMENT_LINK_TTL_MINUTES, default 30) — compartida con la regeneración
-# de wompi_webhook.py. Antes aquí había un 30 hardcodeado que divergía del env.
-# Detalles + espejos (payment_link_tool, PAYMENT_REMINDER_DELAY_MINUTES):
-# ver el comentario junto a DEFAULT_PAYMENT_LINK_TTL_MINUTES en wompi_client.py.
-
-
-def _payment_link_expires_at(created_at: object) -> str:
-    """Deriva el `expires_at` de un link REUTILIZADO: created_at + TTL (misma
-    regla que en la creación; la fila payments no persiste expires_at).
-    Formato idéntico al de creación ('%Y-%m-%dT%H:%M:%S.000Z'). Si created_at
-    no es parseable retorna '' (degradación segura — espeja al bot, que en
-    reuso responde expires_at='')."""
-    if not isinstance(created_at, str) or not created_at:
-        return ""
-    try:
-        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    return (created + timedelta(minutes=payment_link_ttl_minutes())).strftime(
-        "%Y-%m-%dT%H:%M:%S.000Z"
-    )
+# TTL de validez del link Wompi: ÚNICA fuente `konvi_domain.orders.payments`
+# (M2.3 — política reuso/TTL colapsada router↔bot; el shim
+# `integrations.wompi_client` la re-exporta para wompi_webhook.py). Espejos
+# congelados del bot (payment_link_tool, PAYMENT_REMINDER_DELAY_MINUTES):
+# ver el docstring de `konvi_domain/orders/payments.py` y ADR-0011.
 
 
 # ── Adaptador HTTP ↔ capa de dominio (M2.1) ──────────────────────────────────
@@ -110,9 +89,13 @@ _DOMAIN_ERROR_HTTP = {
 
 
 def _domain_error_to_http(exc: DomainError) -> HTTPException:
-    """Mapeo único DomainError → HTTPException (mismos status/detalle heredados)."""
+    """Mapeo único DomainError → HTTPException (mismos status/detalle heredados).
+
+    `exc.http_status` (M2.3) overridea el mapeo cuando el dominio conoce el
+    status exacto heredado (p.ej. proveedor no configurado → 503, no 500)."""
     return HTTPException(
-        status_code=_DOMAIN_ERROR_HTTP.get(exc.code, 500), detail=exc.message,
+        status_code=exc.http_status or _DOMAIN_ERROR_HTTP.get(exc.code, 500),
+        detail=exc.message,
     )
 
 
@@ -577,167 +560,33 @@ async def create_payment_link(
                 headers={"Idempotency-Replayed": "true"},
             )
 
-        # F105: usar el wrapper resiliente (retry exponencial + circuit breaker) — cierra el riesgo P0
-        # del dossier Wompi (un 5xx/timeout transitorio rompía el pago al primer intento). max_attempts=2
-        # para no exceder el timeout ~20s del cliente orquestador (3×15s lo superaría → ReadTimeout).
-        from integrations.wompi_client import create_payment_link_with_resilience as wompi_create_link
-        from integrations.wompi_client import get_tenant_wompi_creds
+        # ── M2.3: la operación de dominio vive en el paquete compartido ──────
+        # (konvi_domain.orders.payments.get_or_create_payment_link) — UNA
+        # política de reuso/TTL para todos los canales (colapsa el espejo
+        # router↔bot medido en M1 §3.3; el bot conserva el suyo congelado
+        # hasta B-2/M3, defendido por tests/test_payment_link_policy_parity.py).
+        # El orden de pasos heredado (creds→orden→status→reuso→monto→crear→
+        # insert→flip) y los mensajes/status exactos los garantiza el servicio;
+        # aquí solo se traduce DomainError → HTTPException.
+        from lib.order_payment_ports import build_api_payment_ports
 
-        private_key, _, wompi_environment = get_tenant_wompi_creds(supabase, tenant_id)
-        if not private_key:
-            raise HTTPException(
-                status_code=503,
-                detail="Integración Wompi no configurada. Conéctala en Ajustes → Integraciones.",
-            )
-
-        order_res = (
-            supabase.table("orders")
-            .select(
-                "id, status, total_amount, shipping_cost, notes, contact_id, "
-                "contacts(name, phone, email, document_type, document_number)"
-            )
-            .eq("id", order_id)
-            .eq("tenant_id", tenant_id)
-            .maybe_single()
-            .execute()
-        )
-        if not order_res or not order_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
-            raise HTTPException(status_code=404, detail="Pedido no encontrado")
-
-        order = order_res.data
-        if order["status"] not in ("pending", "pending_payment"):
-            raise HTTPException(
-                status_code=409,
-                detail=f"El pedido está en estado '{order['status']}' — solo se puede generar link para pedidos pending o pending_payment",
-            )
-
-        # ── G3 audit: reuso de link vigente (anti-duplicado de DINERO) ────────
-        # Antes este endpoint creaba SIEMPRE link nuevo en Wompi + fila payments
-        # nueva por llamada → doble-click del operador o retry del bot generaba
-        # N links/filas vigentes para la misma orden. El path del bot YA resuelve
-        # esto; se espeja EXACTO su criterio de reuso
-        # (services/ai-orchestrator/tools/payment_link_tool.py:_find_pending_order,
-        # líneas 119-138):
-        #     supabase.table("payments")
-        #         .select("checkout_url, wompi_link_id, status, created_at, amount_in_cents")
-        #         .eq("tenant_id", tenant_id)
-        #         .eq("order_id", ord_row["id"])
-        #         .eq("status", "pending")
-        #         .gte("created_at", cutoff)   # cutoff = now - WOMPI_LINK_TTL_MINUTES
-        #         .order("created_at", desc=True)
-        #         .limit(1)
-        # y reusar solo si la fila tiene checkout_url no vacío. El TTL es la
-        # misma fuente compartida (payment_link_ttl_minutes(), default 30, que
-        # el bot fija en WOMPI_LINK_TTL_MINUTES=30 — deben coincidir, ver
-        # docs/adr/0011-payment-link-lifecycle.md). Lookup defensivo igual que
-        # el bot: si falla, se degrada a crear (disponibilidad).
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(minutes=payment_link_ttl_minutes())
-        ).isoformat()
         try:
-            existing_pay = (
-                supabase.table("payments")
-                .select("checkout_url, wompi_link_id, status, created_at, amount_in_cents")
-                .eq("tenant_id", tenant_id)
-                .eq("order_id", order_id)
-                .eq("status", "pending")
-                .gte("created_at", cutoff)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
+            outcome = await payments_service.get_or_create_payment_link(
+                supabase,
+                tenant_id=tenant_id,
+                order_id=order_id,
+                actor=_build_actor(request, tenant_id, _role),
+                ports=build_api_payment_ports(supabase),
             )
-            pay_rows = existing_pay.data if isinstance(existing_pay.data, list) else []
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[PAYMENT_LINK] reuso lookup falló order=%s: %s — procediendo a crear",
-                order_id, exc,
-            )
-            pay_rows = []
-        if pay_rows and isinstance(pay_rows[0], dict) and pay_rows[0].get("checkout_url"):
-            reusable = pay_rows[0]
-            logger.info(
-                "[PAYMENT_LINK] reutilizando link vigente order=%s link=%s "
-                "(sin llamada a Wompi ni fila payments nueva)",
-                order_id, reusable.get("wompi_link_id"),
-            )
-            reuse_body = {
-                "order_id": order_id,
-                "checkout_url": reusable["checkout_url"],
-                "amount_in_cents": int(reusable.get("amount_in_cents") or 0),
-                "expires_at": _payment_link_expires_at(reusable.get("created_at")),
-                "wompi_link_id": reusable.get("wompi_link_id"),
-            }
-            finalize_idempotency(
-                supabase=supabase, tenant_id=tenant_id, session=idem_session,
-                status_code=200, body=reuse_body,
-            )
-            return reuse_body
+        except DomainError as de:
+            raise _domain_error_to_http(de) from de
 
-        total_amount = float(order.get("total_amount") or 0)
-        # BLOQUE A (P1): round, no int() — total_amount es numeric(10,2) leído como float;
-        # total_amount*100 produce X.9999998 y int() trunca 1 cent (subcobro). round()
-        # recupera los cents exactos acordados y alinea con payment_link_tool.py:438/485.
-        amount_in_cents = int(round(total_amount * 100))
-
-        if amount_in_cents < 150000:  # mínimo $1.500 COP para modelo Agregador
-            raise HTTPException(
-                status_code=422,
-                detail=f"Monto mínimo Wompi es $1.500 COP. Monto actual: ${total_amount:,.0f}",
-            )
-
-        contact = order.get("contacts") or {}
-        contact_name = contact.get("name") or "Cliente"
-        short_id = order_id[:8].upper()
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(minutes=payment_link_ttl_minutes())
-        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-        link_data = await wompi_create_link(
-            private_key=private_key,
-            environment=wompi_environment,
-            order_id=order_id,
-            name=f"Pedido #{short_id} — {contact_name}"[:100],
-            description=order.get("notes") or f"Pedido #{short_id}",
-            amount_in_cents=amount_in_cents,
-            expires_at=expires_at,
-            contact=contact,  # rev. 68 — pre-popula customer_data
-            max_attempts=2,   # F105: 2 intentos (retry solo errores donde Wompi NO creó el link)
-        )
-
-        # Persistir en tabla payments
-        supabase.table("payments").insert({
-            "tenant_id": tenant_id,
-            "order_id": order_id,
-            "provider": "wompi",
-            "wompi_link_id": link_data["link_id"],
-            "checkout_url": link_data["checkout_url"],
-            "amount_in_cents": amount_in_cents,
-            "currency": "COP",
-            "status": "pending",
-            "wompi_status": "ACTIVE",
-        }).execute()
-
-        # Asegurar que el pedido quede en pending_payment
-        if order["status"] != "pending_payment":
-            supabase.table("orders").update({"status": "pending_payment"}).eq(
-                "id", order_id
-            ).eq("tenant_id", tenant_id).execute()
-
-        logger.info(
-            "Payment link generado para order %s: %s", order_id, link_data["checkout_url"]
-        )
-        create_body = {
-            "order_id": order_id,
-            "checkout_url": link_data["checkout_url"],
-            "amount_in_cents": amount_in_cents,
-            "expires_at": expires_at,
-            "wompi_link_id": link_data["link_id"],
-        }
+        body = outcome.body()
         finalize_idempotency(
             supabase=supabase, tenant_id=tenant_id, session=idem_session,
-            status_code=200, body=create_body,
+            status_code=200, body=body,
         )
-        return create_body
+        return body
 
     except HTTPException:
         abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
