@@ -169,6 +169,7 @@ def assert_time_aware_greeting_first_outbound(
     history: list[dict],
     *,
     server_time_greeting: str,
+    customer_name: Optional[str] = None,
 ) -> Optional[tuple[str, str]]:
     """Invariant — alinea el saludo del primer outbound a server_time.
 
@@ -176,15 +177,26 @@ def assert_time_aware_greeting_first_outbound(
     cliente. NO se respeta la elección del LLM. Si el bot saludó con algo
     distinto al server_time_greeting, se reescribe.
 
+    Founder 2026-08-23 (fix ARQUITECTÓNICO en el embudo): si el primer
+    outbound NO abre con saludo en absoluto (p.ej. el resolver determinístico
+    de compra abre en frío con "Tu pedido va así:"), el invariant ANTEPONE el
+    saludo horario (+ nombre del cliente si se conoce) en vez de dejarlo pasar.
+    Antes esta rama era no-op ("bot no abrió con saludo → OK") — la cortesía
+    de primer contacto quedaba librada a que cada path se acordara. Ahora la
+    garantiza el embudo para TODOS los paths (LLM, resolvers, gates).
+
     Args:
       candidate_text: texto que el bot está por enviar.
       history: mensajes previos (oldest first).
       server_time_greeting: saludo canónico según hora local Colombia
         ("Buenos días" / "Buenas tardes" / "Buenas noches" / "Hola").
+      customer_name: primer nombre del cliente si es conocido (saludo
+        personalizado). Opcional — sin él el prepend es neutral.
 
     No dispara cuando:
       • No es primer outbound de la conversación.
-      • Bot no abre con saludo (ej. "Claro,", "Listo,").
+      • Bot abre con conector cordial ("Claro,", "Mira," — dominio del
+        invariant SMELL-3, que ya aporta su forma de cortesía).
       • Bot ya emitió el server_time_greeting (idempotencia).
       • server_time_greeting es "Hola" o vacío.
     """
@@ -197,7 +209,21 @@ def assert_time_aware_greeting_first_outbound(
 
     match = _OPENING_GREETING_PATTERN.match(candidate_text)
     if not match:
-        return None  # bot no abrió con saludo (ej. con conector "Claro,").
+        # Primer outbound SIN saludo (cold open) — antepone el saludo horario
+        # (+ nombre si se conoce). La cortesía de primer contacto la garantiza
+        # el embudo, no la memoria de cada resolver/prompt. Excepción: si abre
+        # con un CONECTOR cordial ("Claro,", "Mira,"), ya hay cortesía — ese
+        # es el dominio de SMELL-3, no se toca.
+        if _bot_opens_with_greeting_or_connector(candidate_text):
+            return None
+        name = f", {customer_name}" if customer_name else ""
+        rewritten = f"{server_time_greeting}{name}! {candidate_text}"
+        violation = (
+            "Outbound primer mensaje SIN saludo (cold open) — invariant "
+            "'time-aware-greeting' violado: se antepone "
+            f"'{server_time_greeting}'."
+        )
+        return (violation, rewritten)
 
     bot_greeting = _canonicalize_greeting(match.group(1))
     if bot_greeting == server_time_greeting:

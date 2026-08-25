@@ -832,19 +832,24 @@ async def _send_outbound_text(
             (_conv_row.data or [{}])[0].get("customer_phone") or ""
         )
         _consent_given = False
+        _customer_name: Optional[str] = None
         if _customer_phone:
             _phone_digits = _customer_phone.lstrip("+")
             _ctc = (
                 supabase.table("contacts")
-                .select("consent_given")
+                .select("consent_given, name")
                 .eq("tenant_id", tenant_id)
                 .or_(f"phone.eq.{_phone_digits},phone.eq.+{_phone_digits}")
                 .limit(1)
                 .execute()
             )
-            _consent_given = bool(
-                (_ctc.data or [{}])[0].get("consent_given")
-            )
+            _ctc_row = (_ctc.data or [{}])[0]
+            _consent_given = bool(_ctc_row.get("consent_given"))
+            # Founder 2026-08-23: primer nombre para el saludo personalizado
+            # del prepend cold-open (cliente conocido).
+            _full_name = (_ctc_row.get("name") or "").strip()
+            if _full_name:
+                _customer_name = _full_name.split(" ", 1)[0]
 
         # SMELL-1: pasar saludo time-aware computado por hora local Colombia.
         # El validator solo aplica el rewrite si este valor está presente
@@ -859,6 +864,7 @@ async def _send_outbound_text(
             contact_consent_given=_consent_given,
             consent_question_template=CONSENT_QUESTION_TEMPLATE,
             server_time_greeting=_server_greet,
+            customer_name=_customer_name,
         ))
         for v in result.violations:
             logger.warning("[INVARIANT_VIOLATION] conv=%s %s", conversation_id, v)

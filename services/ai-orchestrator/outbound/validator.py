@@ -83,6 +83,9 @@ class ValidationContext:
     # `_co_time_of_day_greeting()` y lo pasa aquí. Si no se proporciona,
     # el invariant se desactiva (back-compat con tests existentes).
     server_time_greeting: Optional[str] = None
+    # Founder 2026-08-23: primer nombre del cliente (si es conocido) para el
+    # saludo personalizado del prepend cold-open. None → saludo neutral.
+    customer_name: Optional[str] = None
 
 
 # ─── Invariants implementados ────────────────────────────────────────────────
@@ -142,6 +145,7 @@ class OutputValidator:
             tg_check = assert_time_aware_greeting_first_outbound(
                 text, ctx.history,
                 server_time_greeting=ctx.server_time_greeting,
+                customer_name=ctx.customer_name,
             )
             if tg_check is not None:
                 violation, rewrite = tg_check

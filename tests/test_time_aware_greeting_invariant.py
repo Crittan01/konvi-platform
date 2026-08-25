@@ -140,11 +140,45 @@ class TimeAwareGreetingInvariantTests(unittest.TestCase):
         self.assertTrue(rewrite.startswith("Buenos días,"))
 
     def test_skips_when_bot_opens_with_connector(self):
-        # Bot abre con "Claro" / "Listo" — no saluda, invariant no aplica.
+        # Bot abre con "Claro" / "Listo" — cortesía ya presente (dominio SMELL-3),
+        # el invariant de saludo no toca.
         result = self.inv.assert_time_aware_greeting_first_outbound(
             "Claro, te cuento sobre nuestros productos.",
             history=[{"direction": "inbound", "content": "qué tienen?"}],
             server_time_greeting="Buenas tardes",
+        )
+        self.assertIsNone(result)
+
+    def test_prepends_greeting_on_cold_open(self):
+        # Founder 2026-08-23: primer outbound cold-open ("Tu pedido va así:") —
+        # el embudo GARANTIZA el saludo (antes era no-op → salida en frío).
+        result = self.inv.assert_time_aware_greeting_first_outbound(
+            "Tu pedido va así:\n\n* 2 *Aceite* — $64.000",
+            history=[{"direction": "inbound", "content": "Hola, quiero 2 Aceite"}],
+            server_time_greeting="Buenas noches",
+        )
+        self.assertIsNotNone(result)
+        _, rewrite = result
+        self.assertTrue(rewrite.startswith("Buenas noches! "))
+        self.assertIn("Tu pedido va así:", rewrite)
+
+    def test_prepends_greeting_with_customer_name(self):
+        result = self.inv.assert_time_aware_greeting_first_outbound(
+            "Tu pedido va así: X",
+            history=[{"direction": "inbound", "content": "quiero 2 aceites"}],
+            server_time_greeting="Buenos días",
+            customer_name="Andrés",
+        )
+        self.assertIsNotNone(result)
+        _, rewrite = result
+        self.assertTrue(rewrite.startswith("Buenos días, Andrés! "))
+
+    def test_cold_open_no_dispara_en_turnos_posteriores(self):
+        result = self.inv.assert_time_aware_greeting_first_outbound(
+            "Tu pedido va así: X",
+            history=[{"direction": "outbound", "content": "Buenas noches!"},
+                     {"direction": "inbound", "content": "agrega otro"}],
+            server_time_greeting="Buenas noches",
         )
         self.assertIsNone(result)
 

@@ -2385,6 +2385,9 @@ async def _run_agentic_full(
                 len(intent_resolution.get("resolved") or []),
                 len(intent_resolution.get("ambiguous") or []),
             )
+            # Cortesía de primer contacto: NO se resuelve aquí — la garantiza el
+            # embudo (OutputValidator / invariant time-aware-greeting antepone el
+            # saludo horario al primer outbound cold-open, founder 2026-08-23).
             await _send_outbound_text(
                 supabase=supabase,
                 conversation_id=conversation_id,
