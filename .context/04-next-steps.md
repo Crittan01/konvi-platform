@@ -139,6 +139,12 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   ramas con estilo de entrada (opacity:0/translateY) no coinciden y React loguea mismatch para
   usuarios con reduce (chromium headless con `reduced_motion='reduce'` lo expone). Fix en el
   wrapper: `useReducedMotionDS` (motion.tsx) — false en SSR/hidratación, valor real tras montar.
+- **`variants={undefined}` bajo reduced-motion CONGELA el contenido (bug T7.3)**: quitar las
+  variantes post-hidratación no resetea los valores en vuelo → StaggerItem quedaba en
+  `opacity:0` para siempre (listas invisibles para usuarios reduce desde 894b7357). Patrón
+  correcto: variante reduced con los MISMOS valores finales + `transition: {duration: 0}`
+  (snap instantáneo). Y al verificar viajes layout/layoutId con una sonda: framer-motion usa
+  **`translate3d(x, y, 0)`** (no `translateX/Y`) — el detector debe cubrir ambos.
 
 ### M2.4 ✅ CERRADO (2026-08-25) — M2 COMPLETO — brief ejecutado
 
@@ -199,9 +205,17 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   re-mount, reduced-motion fade-only, móvil 390px, ambos temas, 0 errores
   consola. Efecto colateral (fix arquitectónico DS): `useReducedMotionDS`
   hidratación-seguro mata el mismatch SSR/CSR pre-existente de T7.1.
-- **T7.3 — Física de navegación y pedidos**: pill `layoutId` en `bottom-nav.tsx`
-  (respetando `aria-current` y el badge) + `layout` en cards de `orders-manager.tsx` al
-  reordenar por chips de filtro (la carga inicial ya la cubre StaggerList).
+- **T7.3 — Física de navegación y pedidos** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  Ejecutado: `NavPill` (layoutId, pill que viaja entre destinos del bottom-nav,
+  aria-current y badge intactos) + `LayoutItem` (reubicación suave de cards de
+  `orders-manager.tsx` al filtrar — wrapper de TODA card, StaggerItem queda
+  dentro para la entrada). Verificado live (`scratch/t7_03_visual_verify.py`):
+  viaje con 56 mutaciones translate en cards / 16 en la pill, estático en
+  reduced-motion, aria-current viaja, ambos temas. **Bug real cazado por la
+  sonda (fix DS):** `StaggerItem` con `variants={undefined}` bajo reduced-motion
+  NUNCA reseteaba los valores en vuelo → las listas con StaggerList quedaban
+  congeladas en `opacity:0` (invisibles) para usuarios reduced-motion desde
+  894b7357. Fix: `itemVariantsReduced` (mismos valores finales, duration 0).
 - **T7.4 — Micro-celebraciones de dinero**: check animado + count-up al llegar
   `confirmed`/`delivered` por realtime (home + detalle de pedido), una vez por evento,
   off en reduced-motion, sin confetti pesado. Verificación live: pago Wompi sandbox STG.
