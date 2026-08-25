@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "konvi-domain"
+version = "0.1.0"
+description = "Konvi domain services — capa de dominio compartida entre servicios (Track 5 M2)"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]

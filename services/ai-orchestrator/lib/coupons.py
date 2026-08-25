@@ -1,41 +1,45 @@
-"""Wrapper sobre services/api/lib/coupons.py — Sem 6 I.2.2 / ADR-0015.
+"""Shim de compatibilidad — única fuente: `konvi_domain.coupons` (Track 5 M2.0).
 
-Single source of truth: la lógica vive en `services/api/lib/coupons.py`.
-Este módulo solo extiende sys.path en runtime para que el orchestrator
-pueda importarla sin duplicación.
-
-Deuda técnica menor (post-MVP): cuando creemos `packages/shared-py/`
-(análogo a `packages/shared-types/` para TS), mover el módulo allí y
-ambos servicios importan desde un único lugar canónico.
+Reemplaza al wrapper histórico que extendía `sys.path` en runtime para importar
+`services/api/lib/coupons.py` (deuda declarada en su docstring). Ahora el motor
+ADR-0015 vive en el paquete compartido `packages/shared-py/` instalado editable
+en ambos servicios; este módulo solo re-exporta su API pública para no tocar
+los call sites (`from lib.coupons import …` / `from lib import coupons`).
+NO añadir lógica aquí — toda edición va al paquete.
+Guard: `tests/test_konvi_domain_pact.py`.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_API_LIB = Path(__file__).resolve().parents[2] / "api" / "lib"
-if str(_API_LIB) not in sys.path:
-    sys.path.insert(0, str(_API_LIB))
-
-# Re-export todo lo público de services/api/lib/coupons.py.
-# El módulo target NO importa nada relativo; resuelve OK aún con
-# sys.path injection.
-from coupons import (  # noqa: E402,F401
-    # Constantes intent (para callers).
-    DISCOUNT_TYPE_PERCENT,
+from konvi_domain.coupons import (
     DISCOUNT_TYPE_FIXED,
     DISCOUNT_TYPE_FREE_SHIPPING,
+    DISCOUNT_TYPE_PERCENT,
     REDEMPTION_STATUS_APPLIED,
     REDEMPTION_STATUS_CONSUMED,
     REDEMPTION_STATUS_REVOKED,
-    # Result dataclasses.
+    VALID_DISCOUNT_TYPES,
     ApplyResult,
     ValidationResult,
-    # Funciones puras.
-    validate_coupon_applicable,
-    compute_discount,
-    # Operaciones DB.
     apply_coupon,
-    revoke_coupon,
+    compute_discount,
     consume_redemption,
+    revoke_coupon,
+    validate_coupon_applicable,
 )
+
+__all__ = [
+    "DISCOUNT_TYPE_FIXED",
+    "DISCOUNT_TYPE_FREE_SHIPPING",
+    "DISCOUNT_TYPE_PERCENT",
+    "REDEMPTION_STATUS_APPLIED",
+    "REDEMPTION_STATUS_CONSUMED",
+    "REDEMPTION_STATUS_REVOKED",
+    "VALID_DISCOUNT_TYPES",
+    "ApplyResult",
+    "ValidationResult",
+    "apply_coupon",
+    "compute_discount",
+    "consume_redemption",
+    "revoke_coupon",
+    "validate_coupon_applicable",
+]

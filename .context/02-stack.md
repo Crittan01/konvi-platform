@@ -17,6 +17,12 @@
 
 ⚠️ `packages/ui` está vacío. Los componentes UI viven en `apps/web/components/ui/`.
 
+📦 `packages/shared-py/` (**Track 5 M2.0, 2026-08-25**): paquete Python `konvi_domain` — capa de
+dominio compartida entre `services/api` y `services/ai-orchestrator` (instalación editable en build
+Render/CI/local: `make -C .local deps`). Hogar canónico del motor de cupones ADR-0015 y de las
+primitivas del contrato de domain services (`Actor`, `DomainError`, `DomainEvent`) — contrato:
+`docs/architecture/domain-services-contract.md`.
+
 ## Backend — servicios Python
 
 | Elemento | Versión real |

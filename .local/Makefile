@@ -27,7 +27,7 @@ ENV_DIR := $(STATE_DIR)/env
 # shell que invoca make; HOME para caches de node/python).
 CLEAN_ENV := env -i PATH="$(PATH)" HOME="$(HOME)" LANG="$(LANG)"
 
-.PHONY: help up down restart status logs print-urls clean db \
+.PHONY: help up down restart status logs print-urls clean db deps \
         start-api start-connector start-orchestrator start-web \
         stop-api  stop-connector  stop-orchestrator  stop-web  \
         _preflight-db _tunnel-api _tunnel-connector _tunnel-down
@@ -40,6 +40,8 @@ help:
 	@echo ""
 	@echo "  make up           Inicia servicios + túneles ngrok (NO la DB — ver make db)"
 	@echo "  make db           Levanta la DB: Supabase local en podman (supabase start)"
+	@echo "  make deps         Instala el paquete de dominio compartido (packages/shared-py,"
+	@echo "                    editable en el user site — Track 5 M2.0; requerido por api y orchestrator)"
 	@echo "  make down         Detiene todo (no toca la DB)"
 	@echo "  make restart      down + up"
 	@echo "  make status       Estado de todos los procesos"
@@ -73,7 +75,17 @@ _check:
 	@command -v pnpm       >/dev/null     || (echo "ERROR: pnpm no encontrado" && exit 1)
 	@command -v python3.11 >/dev/null     || (echo "ERROR: python3.11 no encontrado" && exit 1)
 	@command -v ngrok      >/dev/null     || (echo "ERROR: ngrok no encontrado" && exit 1)
+	@python3.11 -c "import konvi_domain" 2>/dev/null \
+		|| (echo "ERROR: paquete konvi_domain no instalado — correr: make deps" && exit 1)
 	@mkdir -p "$(LOG_DIR)" "$(PID_DIR)" "$(ENV_DIR)"
+
+# ── Dependencias locales del stack Python (VM sin venv → user site) ───────────
+
+# Track 5 M2.0: paquete de dominio compartido konvi_domain (packages/shared-py),
+# editable para que los cambios sean inmediatos en api y orchestrator.
+deps:
+	@python3.11 -m pip install --user -e "$(REPO)/packages/shared-py" -q \
+		&& echo "  deps: konvi_domain instalado (editable, user site)"
 
 # ── DB local (NO la levanta `up` — pieza separada del stack) ─────────────────
 

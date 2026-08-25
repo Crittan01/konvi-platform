@@ -46,10 +46,12 @@ jobs:
             services/api/requirements.txt
             services/ai-orchestrator/requirements.txt
             services/connector-whatsapp/requirements.txt
+            packages/shared-py/pyproject.toml
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -e packages/shared-py  # Track 5 M2.0 (konvi_domain — mismo wiring que ci.yml)
           pip install -r services/api/requirements.txt
           pip install -r services/ai-orchestrator/requirements.txt
           pip install -r services/connector-whatsapp/requirements.txt

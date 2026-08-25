@@ -1,5 +1,9 @@
 """Tests coupon engine (rev. 105 Sem 6 I.2 / ADR-0015).
 
+Hogar canónico del motor: `konvi_domain.coupons` (packages/shared-py, Track 5
+M2.0 — antes `services/api/lib/coupons.py`, hoy shim re-exportador; la paridad
+shim↔paquete la cubre `tests/test_konvi_domain_pact.py`).
+
 Cubre:
   1. validate_coupon_applicable — todos los reasons
   2. compute_discount — los 3 tipos + edge cases
@@ -9,35 +13,12 @@ Cubre:
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
 import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-api_root = REPO_ROOT / "services" / "api"
-if str(api_root) not in sys.path:
-    sys.path.insert(0, str(api_root))
-
-
-# Cargar módulo lib.coupons aislado.
-def _load_coupons():
-    if "_coupons" in sys.modules:
-        return sys.modules["_coupons"]
-    spec = importlib.util.spec_from_file_location(
-        "_coupons",
-        REPO_ROOT / "services" / "api" / "lib" / "coupons.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["_coupons"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-cp = _load_coupons()
+import konvi_domain.coupons as cp
 
 
 # ─── validate_coupon_applicable ──────────────────────────────────────────────
