@@ -1,9 +1,9 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-08-25 (**Track 7 EN CURSO — T7.1+T7.10+T7.5+T7.2+T7.3 CERRADOS**: escena de auth con firma diferencial en las 4 páginas + `/logout` de marca + topbar con identidad de página (fuente única nav-items) + motion del chat inbox (solo burbujas nuevas, dedupe-proof) + pill bottom-nav que viaja (layoutId) y cards de pedidos con reubicación suave (LayoutItem) — todo verificado live con navegador real; fixes DS: `useReducedMotionDS` hidratación-segura + `itemVariantsReduced` (listas reduced-motion ya NO quedan invisibles)); directiva founder 2026-08-25: la firma impregna TODO el front · antes: **M2.4 CERRADO — M2 COMPLETO**)
+**Última actualización**: 2026-08-25 (**Track 7 EN CURSO — T7.1+T7.10+T7.5+T7.2+T7.3+T7.4 CERRADOS**: escena auth diferencial ×4 + `/logout` de marca + topbar con identidad (fuente única nav-items) + motion chat inbox dedupe-proof + pill bottom-nav viajera (layoutId) y cards pedidos con reubicación suave (LayoutItem) + micro-celebraciones de dinero (toast `CelebrationCheck` + count-up en home y detalle — isla `OrderStatusLive` refresca sin F5 — verificado con pago Wompi sandbox real); fixes DS de la sonda live: `useReducedMotionDS` hidratación-segura + `itemVariantsReduced` + Pressable (tabindex SSR). Directiva founder 2026-08-25: la firma impregna TODO el front · antes: **M2.4 CERRADO — M2 COMPLETO**)
 **Branch activo**: `develop`; `production` = `eec5534f` (deploy 2026-08-22, los 4 servicios live verificados vía Render API + health ×5).
 **Ledger**: 269 migraciones repo / 262 ledger prod — las 7 nuevas (4 Track 6 + 2 B-1 + 1 M2.4 `claims.reason_detail`) van a PRD por protocolo en el próximo deploy autorizado.
-**Tests**: 4.826 pytest (316 dbharness) + 392 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 25/25.
+**Tests**: 4.826 pytest (316 dbharness) + 403 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 25/25.
 
 > **Guía de continuación para sesiones nuevas:** el plan de trabajo operativo vigente es
 > **`docs/PLAN-CIERRE.md`** (tracks 1-5 por ambiente, con owner y verificación por ítem).

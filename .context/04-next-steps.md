@@ -145,6 +145,17 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   correcto: variante reduced con los MISMOS valores finales + `transition: {duration: 0}`
   (snap instantáneo). Y al verificar viajes layout/layoutId con una sonda: framer-motion usa
   **`translate3d(x, y, 0)`** (no `translateX/Y`) — el detector debe cubrir ambos.
+- **`whileTap` emite `tabindex="0"` en SSR (bug T7.4)**: framer-motion hace focusable cualquier
+  elemento con gesto tap → el atributo SÍ es SSR-visible y diverge bajo reduced-motion
+  (mismatch hydration). Pressable también necesita el gate `useReducedMotionDS`. Regla general:
+  para saber si un wrapper diverge en SSR no basta mirar `initial` — pensar en ATRIBUTOS
+  (tabindex) además de estilos.
+- **Sonda de dinero real (T7.4)**: el loop completo orden REST (auth interna `X-Internal-Service-
+  Secret`) → `payment-link` (Wompi sandbox real) → `scripts/uat/_send_wompi_webhook.py APPROVED
+  --tenant-id=d0000000-...` (corre con `python3.11` del sistema, NO con el venv de la sonda —
+  necesita `supabase` y lee la events_key del Vault) → realtime → toast. El webhook apunta a la
+  ÚLTIMA fila `payments` del tenant: crear la orden del escenario justo antes de dispararlo.
+  Ojo: `unit_price` de la REST es en PESOS y Wompi exige mínimo $1.500.
 
 ### M2.4 ✅ CERRADO (2026-08-25) — M2 COMPLETO — brief ejecutado
 
@@ -216,9 +227,18 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   NUNCA reseteaba los valores en vuelo → las listas con StaggerList quedaban
   congeladas en `opacity:0` (invisibles) para usuarios reduced-motion desde
   894b7357. Fix: `itemVariantsReduced` (mismos valores finales, duration 0).
-- **T7.4 — Micro-celebraciones de dinero**: check animado + count-up al llegar
-  `confirmed`/`delivered` por realtime (home + detalle de pedido), una vez por evento,
-  off en reduced-motion, sin confetti pesado. Verificación live: pago Wompi sandbox STG.
+- **T7.4 — Micro-celebraciones de dinero** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  Ejecutado: `CelebrationCheck` (DS, pop spring una vez / estático en reduced) +
+  `money-celebration.tsx` (detección de transición vía payload UPDATE —
+  `orders` tiene REPLICA IDENTITY FULL, `old.status` viaja — + dedupe por
+  orden+estado + toast sonner con monto count-up) en home (canal orders
+  existente) y detalle de pedido (isla `OrderStatusLive` NUEVA: celebra y
+  refresca sin F5 — antes el detalle quedaba estático). Verificado live con
+  dinero sandbox real (`scratch/t7_04_visual_verify.py`: orden REST + link
+  Wompi sandbox + webhook firmado APPROVED → `confirmed`): toast único con
+  monto exacto en home y detalle, badge flips sin F5, reduced estático.
+  **Bug DS cazado:** Pressable con `whileTap` emite `tabindex="0"` en SSR →
+  mismatch bajo reduced-motion; ahora también usa `useReducedMotionDS`.
 - **T7.5 — Topbar con identidad de página** ✅ 2026-08-25 (bitácora PLAN.md §E).
 - **T7.6 — Barrido de estados**: ~44 vacíos ad-hoc restantes → `ui/empty-state.tsx`;
   skeletons de divs crudos → `ui/skeleton` donde trivial; `error.tsx` en rutas de alto
