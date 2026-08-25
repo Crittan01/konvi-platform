@@ -230,6 +230,19 @@ RMA/devoluciones formales (tabla muerta — decisión de producto aparte, M1 §H
    `on_stock_restored` preserva el sync MeLi que la consola ya tenía.
 4. **M2.3 — Payment link colapsado**: `payments.get_or_create_link` único (política + TTL de config
    única); test de paridad anti-drift TTL.
+   **✅ CERRADO 2026-08-25** — implementación real: política reuso/TTL extraída intacta a
+   `konvi_domain.orders.payments` (TTL fail-safe de env · `find_reusable_payment_link` con el
+   criterio exacto · `validate_link_amount` con round-no-int y mínimo $1.500 ·
+   `get_or_create_payment_link` async con el orden de pasos heredado) · **puertos inyectados**
+   (`PaymentLinkPorts`: wompi_credentials/create_link — lazy import en call time para preservar el
+   patrón de patch de los tests del endpoint) · puertos API en `lib/order_payment_ports.py`
+   (max_attempts=2 = presupuesto de latencia del canal, F105) · router = adaptador (idempotency +
+   dual-auth/RBAC/MFA/rate-limit/audit intactos; DomainError→HTTP con `http_status` opcional nuevo
+   en `DomainError` — el "Wompi no configurada" 503 no cabía en el mapeo UPSTREAM→500) · shim
+   `integrations/wompi_client` re-exporta el TTL (wompi_webhook sigue cableado) ·
+   `_payment_link_expires_at` del router muere (vive en el paquete) · **paridad de política
+   bot↔paquete con alarma** (`test_payment_link_policy_parity.py`: TTL env-limpio + decisión de
+   reuso en 4 escenarios + mismos filtros de query) · el bot conserva su espejo congelado (B-2/M3).
 5. **M2.4 — ClaimsService completo**: §5.1 + endpoints + consola claims migra; enums compartidos.
 6. **Cierre M2**: tests de paridad canal↔canal, test estructural del contrato, docs (§9).
 
