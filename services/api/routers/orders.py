@@ -46,32 +46,26 @@ from dependencies.security import RL_WRITE_DEFAULT
 from integrations.wompi_client import payment_link_ttl_minutes
 from routers.marketplace import sync_meli_stock
 
+# ── Capa de dominio compartida (Track 5 M2.1) ────────────────────────────────
+# La lógica de negocio de pedidos vive en `konvi_domain.orders` (paquete
+# packages/shared-py — única fuente). Este router es el ADAPTADOR HTTP:
+# dual-auth, RBAC/MFA, Idempotency-Key, audit decorator y DomainError→HTTP.
+from konvi_domain import Actor, Channel, DomainError, ErrorCode, Role
+from konvi_domain.orders import service as orders_service
+from konvi_domain.orders import (
+    VALID_STATUSES,
+    CreateOrderInput,
+    OrderItemInput,
+)
+
+# La máquina de estados (A11 audit ORD-01: forward-only + cancelar desde
+# no-terminal + idempotente; terminal no reabrible) tiene UNA fuente en el
+# paquete — se conserva el alias con el nombre histórico (lo usan patch_order
+# y tests/test_a11_order_state_machine.py).
+from konvi_domain.orders import is_allowed_order_transition as _is_allowed_order_transition
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Orders"])
-
-VALID_STATUSES = {"pending", "pending_payment", "confirmed", "processing", "shipped", "delivered", "cancelled"}
-
-# A11 audit ORD-01: máquina de estados de la orden. patch_order validaba
-# pertenencia al set pero NO la transición → permitía saltos inválidos
-# (delivered→pending). Lifecycle: pending|pending_payment → confirmed →
-# processing → shipped → delivered | cancelled. Regla conservadora (no rompe
-# flujos legítimos): forward (rank no decrece) + cancelar desde cualquier
-# no-terminal + idempotente; rechaza backward y reabrir un estado terminal.
-_ORDER_STATUS_RANK = {
-    "pending": 0, "pending_payment": 0,
-    "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4,
-}
-_ORDER_TERMINAL_STATUSES = {"delivered", "cancelled"}
-
-
-def _is_allowed_order_transition(current: str, new: str) -> bool:
-    if current == new:
-        return True  # idempotente
-    if current in _ORDER_TERMINAL_STATUSES:
-        return False  # un estado terminal NO se reabre
-    if new == "cancelled":
-        return True  # cancelable desde cualquier estado no-terminal
-    return _ORDER_STATUS_RANK.get(new, 99) >= _ORDER_STATUS_RANK.get(current, -1)
 
 
 # TTL de validez del link Wompi (expires_at enviado al crear el link): ÚNICA
@@ -99,6 +93,37 @@ def _payment_link_expires_at(created_at: object) -> str:
     return (created + timedelta(minutes=payment_link_ttl_minutes())).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
+
+
+# ── Adaptador HTTP ↔ capa de dominio (M2.1) ──────────────────────────────────
+
+_DOMAIN_ERROR_HTTP = {
+    ErrorCode.VALIDATION: 422,
+    ErrorCode.FORBIDDEN: 403,
+    ErrorCode.NOT_FOUND: 404,
+    ErrorCode.CONFLICT: 409,
+    ErrorCode.PRECONDITION: 409,
+    ErrorCode.UPSTREAM: 500,
+    ErrorCode.TENANT_MISMATCH: 403,
+}
+
+
+def _domain_error_to_http(exc: DomainError) -> HTTPException:
+    """Mapeo único DomainError → HTTPException (mismos status/detalle heredados)."""
+    return HTTPException(
+        status_code=_DOMAIN_ERROR_HTTP.get(exc.code, 500), detail=exc.message,
+    )
+
+
+def _build_actor(request: Request, tenant_id: str, role: Optional[str]) -> Actor:
+    """Actor del contrato desde el borde HTTP (dual-auth).
+
+    Canal: header X-Internal-Service-Secret presente → BOT (orchestrator→API);
+    si no, CONSOLE (JWT usuario). Rol: el verificado por la dependency; None en
+    lecturas tenant-scoped que no verifican rol (patrón heredado list_claims).
+    """
+    channel = Channel.BOT if request.headers.get("X-Internal-Service-Secret") else Channel.CONSOLE
+    return Actor(channel=channel, tenant_id=tenant_id, role=Role(role) if role else None)
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -177,230 +202,59 @@ def create_order(
                 headers={"Idempotency-Replayed": "true"},
             )
 
-        # F1 (coherencia de dinero, 2026-07-02): el total DEBE incluir el descuento del cupón aplicado en el
-        # cart (cart-as-SoT, ADR-0026). Antes se recomponía sin descuento → orders.total_amount quedaba pleno
-        # y Wompi cobraba de más (el cliente veía el total CON descuento vía GetCartTool). Se lee el descuento
-        # del cart de esta conversación y se espeja la fórmula del cart (cart_tool.py): max(0, subtotal+shipping-descuento).
-        subtotal = sum(item.unit_price * item.quantity for item in order.items)
-        discount_amount = 0.0
-        if order.conversation_id:
-            try:
-                # BLOQUE A (P1): heredar el descuento SOLO de un cart no-terminal
-                # (open/checkout) Y con una redención VIVA ('applied'). Un cart
-                # 'converted'/'cancelled' conserva discount_cents stale (consume_redemption
-                # no lo limpia); sin este guard, un segundo pedido manual del operador para
-                # la misma conversación re-aplicaría el mismo descuento (doble descuento /
-                # pedido en $0). La redención 'applied' es la señal autoritativa del cupón vivo.
-                cart_res = (
-                    supabase.table("conversation_carts")
-                    .select("id, status, discount_cents")
-                    .eq("tenant_id", tenant_id)
-                    .eq("conversation_id", order.conversation_id)
-                    .in_("status", ["open", "checkout"])
-                    .order("updated_at", desc=True)
-                    .limit(1)
-                    .execute()
+        # ── Dominio en la capa compartida (Track 5 M2.1) ─────────────────────
+        # Toda la lógica de negocio (total recomputado + herencia de cupón vivo
+        # del cart, validación FKs anti-IDOR, estados iniciales credit/cod,
+        # insert + adopt-winner 23505, efectos de stock COD/auto-confirm) vive en
+        # konvi_domain.orders.service.create_order — única fuente consumida por
+        # este adaptador HTTP y (en M3) por el canal bot. Los invariantes de
+        # dinero se preservan EXACTOS (tests/test_orders_channel_parity.py).
+        input_ = CreateOrderInput(
+            items=tuple(
+                OrderItemInput(
+                    product_id=i.product_id,
+                    variation_id=i.variation_id,
+                    title=i.title,
+                    unit_price=i.unit_price,
+                    unit_cost=i.unit_cost,
+                    quantity=i.quantity,
                 )
-                if cart_res.data:
-                    _cart_row = cart_res.data[0]
-                    _dc = int(_cart_row.get("discount_cents") or 0)
-                    if _dc > 0:
-                        _red = (
-                            supabase.table("coupon_redemptions")
-                            .select("id")
-                            .eq("tenant_id", tenant_id)
-                            .eq("cart_id", _cart_row["id"])
-                            .eq("status", "applied")
-                            .limit(1)
-                            .execute()
-                        )
-                        if _red.data:
-                            discount_amount = round(_dc / 100.0, 2)
-            except Exception as exc:
-                logger.warning("[ORDER] lookup descuento del cart falló conv=%s: %s", order.conversation_id, exc)
-        total = max(0.0, subtotal + order.shipping_cost - discount_amount)
-
-        # F27 (IDOR / fuga PII cross-tenant): validar ownership de los FK del body ANTES del INSERT.
-        # Sin esto un order del tenant A podía apuntar a contact_id/conversation_id de OTRO tenant, y los
-        # embeds PostgREST de get_order/create_payment_link (contacts(name,phone,email,documento)) seguían
-        # el FK sin re-filtrar tenant → fuga de PII (incl. cédula, Ley 1581).
-        if order.contact_id:
-            _c = (
-                supabase.table("contacts").select("id")
-                .eq("id", order.contact_id).eq("tenant_id", tenant_id).limit(1).execute()
-            )
-            if not _c.data:
-                raise HTTPException(status_code=404, detail="Contacto no encontrado en este tenant")
-        if order.conversation_id:
-            _cv = (
-                supabase.table("conversations").select("id")
-                .eq("id", order.conversation_id).eq("tenant_id", tenant_id).limit(1).execute()
-            )
-            if not _cv.data:
-                raise HTTPException(status_code=404, detail="Conversación no encontrada en este tenant")
-
-        # Lookup de cost_price (tenant-scoped) — ANTES del insert para (a) validar que cada variation_id
-        # del body pertenezca al tenant y (b) reusarlo en items_data.
-        variation_ids = [str(item.variation_id) for item in order.items if item.variation_id]
-        variation_costs = {}
-        if variation_ids:
-            var_res = (
-                supabase.table("product_variations")
-                .select("id, cost_price")
-                .eq("tenant_id", tenant_id)
-                .in_("id", variation_ids)
-                .execute()
-            )
-            variation_costs = {v["id"]: float(v["cost_price"] or 0) for v in (var_res.data or [])}
-        for item in order.items:
-            if item.variation_id and str(item.variation_id) not in variation_costs:
-                raise HTTPException(status_code=422, detail="variation_id no pertenece a este tenant")
-
-        # Rev. 108 Fase B — COD bypass: si payment_method='cod', orden directo
-        # confirmed (no hay pago anticipado a esperar). payment_link flag
-        # se ignora en COD.
-        if order.payment_method == "cod":
-            initial_status = "confirmed"
-        else:
-            initial_status = (
-                "pending_payment" if order.payment_link else "pending"
-            )
-        # B1 (auditoría money-path 2026-08-21): el índice único parcial
-        # uq_orders_one_pending_payment_per_conversation (migración 20260821120000)
-        # cierra la carrera de dos turnos concurrentes creando dos órdenes pagables
-        # para la misma conversación. El insert perdedor (23505) ADOPTA la orden
-        # ganadora: se re-lee y se devuelve — nunca se duplica ni se explota con 500.
+                for i in order.items
+            ),
+            contact_id=order.contact_id,
+            conversation_id=order.conversation_id,
+            notes=order.notes,
+            shipping_cost=order.shipping_cost,
+            auto_confirm=order.auto_confirm,
+            payment_link=order.payment_link,
+            payment_method=order.payment_method,
+        )
         try:
-            order_result = supabase.table("orders").insert({
-                "tenant_id": tenant_id,
-                "contact_id": order.contact_id,
-                "conversation_id": order.conversation_id,
-                "status": initial_status,
-                "total_amount": total,
-                "discount_amount": discount_amount,   # F1: snapshot del descuento (moneda) para trazabilidad + coherencia
-                "shipping_cost": order.shipping_cost,
-                "notes": order.notes,
-                "payment_method": order.payment_method,
-            }).execute()
-        except Exception as insert_exc:
-            _winner = None
-            _emsg = str(insert_exc)
-            if (
-                ("23505" in _emsg or "duplicate" in _emsg.lower())
-                and order.conversation_id
-                and initial_status == "pending_payment"
-            ):
-                try:
-                    _wres = (
-                        supabase.table("orders")
-                        .select("*")
-                        .eq("tenant_id", tenant_id)
-                        .eq("conversation_id", order.conversation_id)
-                        .eq("status", "pending_payment")
-                        .order("created_at", desc=True)
-                        .limit(1)
-                        .execute()
-                    )
-                    _winner = (_wres.data or [None])[0]
-                except Exception:
-                    _winner = None
-            if not isinstance(_winner, dict) or not _winner.get("id"):
-                raise  # no era la carrera B1 → propagar el error original
-            # Adopt-winner: responder la orden ganadora con sus items reales
-            # (mismo shape que el happy path + marca adopted_existing para el caller).
-            _winner_items: list = []
-            try:
-                _wi = (
-                    supabase.table("order_items")
-                    .select("order_id, tenant_id, product_id, variation_id, "
-                            "title, unit_price, unit_cost, quantity")
-                    .eq("order_id", _winner["id"])
-                    .eq("tenant_id", tenant_id)
-                    .execute()
-                )
-                _winner_items = _wi.data or []
-            except Exception as _wi_exc:
-                logger.warning(
-                    "[ORDER] B1 adopt-winner: no pude leer items de %s: %s",
-                    _winner["id"], _wi_exc,
-                )
-            adopted_body = {**_winner, "items": _winner_items, "adopted_existing": True}
-            logger.warning(
-                "[ORDER] B1 adopt-winner: carrera 23505 conv=%s — reuso orden ganadora %s "
-                "en vez de duplicar",
-                order.conversation_id, _winner["id"],
-            )
-            finalize_idempotency(
-                supabase=supabase,
+            result = orders_service.create_order(
+                supabase,
                 tenant_id=tenant_id,
-                session=idem_session,
-                status_code=200,
-                body=adopted_body,
+                input=input_,
+                actor=_build_actor(request, tenant_id, _role),
+                # El efecto de stock al confirmar queda en ESTE servicio (acoplado
+                # a sync_meli_stock) hasta InventoryService (backlog M1 #3) —
+                # entonces solo cambia la implementación inyectada.
+                on_confirm_stock=_decrement_stock_on_confirm,
             )
-            return JSONResponse(status_code=200, content=adopted_body)
+        except DomainError as de:
+            raise _domain_error_to_http(de)
 
-        if not order_result.data:
-            raise HTTPException(status_code=500, detail="Error al crear pedido")
-
-        order_id = order_result.data[0]["id"]
-
-        items_data = [
-            {
-                "order_id": order_id,
-                "tenant_id": tenant_id,
-                "product_id": item.product_id,
-                "variation_id": item.variation_id,
-                "title": item.title,
-                "unit_price": item.unit_price,
-                "unit_cost": variation_costs.get(str(item.variation_id), 0.0) if item.variation_id else 0.0,
-                "quantity": item.quantity,
-            }
-            for item in order.items
-        ]
-        supabase.table("order_items").insert(items_data).execute()  # tenant_filter:exempt:payload_includes_tenant_id
-
-        response_body = {**order_result.data[0], "items": items_data}
-
-        # Rev. 108 Fase B — COD: consumir stock inmediatamente (orden ya
-        # está confirmed). Reusa el mismo path que auto_confirm + Wompi
-        # APPROVED para mantener invariantes de stock.
-        if order.payment_method == "cod":
-            try:
-                _decrement_stock_on_confirm(supabase, order_id, tenant_id)
-                logger.info(
-                    "Pedido COD %s creado confirmed + stock decrementado tenant=%s",
-                    order_id, tenant_id,
-                )
-            except Exception as ce:
-                logger.error(
-                    "Error decrementando stock pedido COD %s: %s", order_id, ce,
-                )
-
-        # Confirmar de inmediato si el frontend lo solicita (Inbox flow)
-        elif order.auto_confirm:
-            try:
-                (
-                    supabase.table("orders")
-                    .update({"status": "confirmed"})
-                    .eq("id", order_id)
-                    .eq("tenant_id", tenant_id)
-                    .execute()
-                )
-                _decrement_stock_on_confirm(supabase, order_id, tenant_id)
-                response_body["status"] = "confirmed"
-                logger.info("Pedido %s auto-confirmado desde Inbox (stock decrementado)", order_id)
-            except Exception as ce:
-                logger.error("Error auto-confirmando pedido %s: %s", order_id, ce)
-                # No fallar la creación — el pedido quedó en pending
-
+        body = result.body()
         finalize_idempotency(
             supabase=supabase,
             tenant_id=tenant_id,
             session=idem_session,
-            status_code=201,
-            body=response_body,
+            status_code=result.http_status,
+            body=body,
         )
-        return response_body
+        if result.adopted_existing:
+            # Carrera 23505 adoptada (B1): la respuesta emitida/guardada es 200.
+            return JSONResponse(status_code=200, content=body)
+        return body
     except HTTPException:
         abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
@@ -410,30 +264,74 @@ def create_order(
         raise HTTPException(status_code=500, detail="Error al crear pedido")
 
 
-@router.get("/{order_id}", response_model=dict)
-def get_order(
-    order_id: str,
+@router.get("/", response_model=dict)
+def list_orders(
+    request: Request,
+    status: Optional[str] = None,
+    contact_id: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 20,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Detalle del pedido con ítems y datos del contacto."""
+    """Lista pedidos del tenant (filtros estado/contacto/búsqueda + paginación
+    + conteos por estado). Cierra el hueco M1 §H2 (la consola listaba directo
+    de PostgREST). La lógica vive en konvi_domain.orders.service.list_orders."""
+    if page < 1:
+        raise HTTPException(status_code=422, detail="page debe ser ≥ 1")
+    if not 1 <= per_page <= 100:
+        raise HTTPException(status_code=422, detail="per_page debe estar entre 1 y 100")
+    status_filter = None
+    if status and status != "all":
+        if status not in VALID_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Estado inválido. Válidos: {', '.join(sorted(VALID_STATUSES))}",
+            )
+        status_filter = status
     try:
-        result = (
-            supabase.table("orders")
-            .select("*, contacts(phone, name), order_items(id, title, unit_price, unit_cost, quantity, product_id, variation_id)")
-            .eq("id", order_id)
-            .eq("tenant_id", tenant_id)
-            # F19: .single() lanza APIError (PGRST116) en not-found → 500 genérico (el frontend no puede
-            # distinguir not-found de error real). .limit(1) + unwrap devuelve el 404 correcto.
-            .limit(1)
-            .execute()
+        page_res = orders_service.list_orders(
+            supabase,
+            tenant_id=tenant_id,
+            actor=_build_actor(request, tenant_id, None),
+            status=status_filter,
+            contact_id=contact_id,
+            q=q,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
-        row = (result.data or [None])[0]
-        if not row:
-            raise HTTPException(status_code=404, detail="Pedido no encontrado")
-        return row
-    except HTTPException:
-        raise
+        return {
+            "orders": page_res.orders,
+            "total": page_res.total,
+            "counts": page_res.counts,
+            "page": page,
+            "per_page": per_page,
+        }
+    except DomainError as de:
+        raise _domain_error_to_http(de)
+    except Exception as e:
+        logger.error("Error listando pedidos tenant %s: %s", tenant_id, e)
+        raise HTTPException(status_code=500, detail="Error al listar pedidos")
+
+
+@router.get("/{order_id}", response_model=dict)
+def get_order(
+    order_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Detalle del pedido con ítems y datos del contacto (konvi_domain M2.1)."""
+    try:
+        return orders_service.get_order(
+            supabase,
+            tenant_id=tenant_id,
+            order_id=order_id,
+            actor=_build_actor(request, tenant_id, None),
+        )
+    except DomainError as de:
+        raise _domain_error_to_http(de)
     except Exception as e:
         logger.error("Error obteniendo pedido %s: %s", order_id, e)
         raise HTTPException(status_code=500, detail="Error al obtener pedido")

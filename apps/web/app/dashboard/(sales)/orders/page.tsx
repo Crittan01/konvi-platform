@@ -57,7 +57,6 @@ export default async function OrdersPage(props: {
   const contactId = sp.contact_id || null
   const parsedPage = parseInt(sp.page ?? '1', 10)
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
-  const offset = (page - 1) * ORDERS_PER_PAGE
 
   let orders: Order[] = []
   let products: Product[] = []
@@ -68,50 +67,42 @@ export default async function OrdersPage(props: {
   let loadError: string | null = null
 
   if (tenantId) {
-    // D7 — búsqueda server-side por contacto (nombre/teléfono). Resolvemos los
-    // contact_id que coinciden y filtramos pedidos por ese conjunto. Dos ilike
-    // en lugar de .or() para seguir el patrón del repo (audit/page.tsx).
-    let searchContactIds: string[] | null = null
-    if (q) {
-      const [byName, byPhone] = await Promise.all([
-        supabase.from('contacts').select('id').eq('tenant_id', tenantId).ilike('name', `%${q}%`).limit(200),
-        supabase.from('contacts').select('id').eq('tenant_id', tenantId).ilike('phone', `%${q}%`).limit(200),
-      ])
-      searchContactIds = Array.from(new Set([
-        ...((byName.data as { id: string }[] | null) ?? []),
-        ...((byPhone.data as { id: string }[] | null) ?? []),
-      ].map(r => r.id)))
+    // M2.1 (Track 5): el listado de pedidos viene del domain service vía REST
+    // (GET /api/v1/orders/ — filtros, búsqueda D7, paginación y conteos por
+    // estado viven en konvi_domain.orders) — UNA fuente de verdad compartida;
+    // antes esta página consultaba PostgREST directo. Los catálogos auxiliares
+    // del formulario (products/contacts) siguen directos hasta que su dominio
+    // entre al backlog (M1 #4).
+    const params = new URLSearchParams()
+    if (status !== 'all') params.set('status', status)
+    if (contactId) params.set('contact_id', contactId)
+    if (q) params.set('q', q)
+    params.set('page', String(page))
+    params.set('per_page', String(ORDERS_PER_PAGE))
+
+    type ListResponse = { orders?: Order[]; total?: number; counts?: Record<string, number> }
+    const fetchOrders = async (): Promise<ListResponse | null> => {
+      const { data: { session: s } } = await supabase.auth.getSession()
+      const token = s?.access_token
+      if (!token) return null
+      try {
+        const ctrl = new AbortController()
+        const timeout = setTimeout(() => ctrl.abort(), 15000)
+        const res = await fetch(`${CORE_API_URL}/api/v1/orders/?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store', // datos transaccionales — nunca cachear
+          signal: ctrl.signal,
+        })
+        clearTimeout(timeout)
+        if (!res.ok) return null
+        return (await res.json()) as ListResponse
+      } catch {
+        return null
+      }
     }
 
-    // Listado paginado (count exacto para la barra de paginación).
-    let listQuery = supabase
-      .from('orders')
-      .select(
-        'id, status, total_amount, discount_amount, shipping_cost, notes, created_at, payment_method, contacts(id, phone, name), order_items(title, quantity, unit_price)',
-        { count: 'exact' },
-      )
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + ORDERS_PER_PAGE - 1)
-
-    if (status !== 'all') listQuery = listQuery.eq('status', status)
-    if (contactId) listQuery = listQuery.eq('contact_id', contactId)
-    // Si hay búsqueda sin coincidencias de contacto → resultado vacío inmediato.
-    if (searchContactIds !== null) {
-      if (searchContactIds.length === 0) listQuery = listQuery.eq('contact_id', '00000000-0000-0000-0000-000000000000')
-      else listQuery = listQuery.in('contact_id', searchContactIds)
-    }
-
-    // Conteos por estado (badges). Lente persistente = tenant + contacto; el
-    // texto de búsqueda no afecta las pestañas (reflejan la distribución real).
-    const countBase = () => {
-      let cq = supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId)
-      if (contactId) cq = cq.eq('contact_id', contactId)
-      return cq
-    }
-
-    const [listRes, productsRes, contactsRes, allCountRes, ...statusCountRes] = await Promise.all([
-      listQuery,
+    const [listData, productsRes, contactsRes] = await Promise.all([
+      fetchOrders(),
       supabase
         .from('products')
         .select('id, title, product_variations(id, price, attributes)')
@@ -125,19 +116,15 @@ export default async function OrdersPage(props: {
         .eq('tenant_id', tenantId)
         .order('name')
         .limit(FORM_SELECT_LIMIT),
-      countBase(),
-      ...STATUS_KEYS.map(s => countBase().eq('status', s)),
     ])
 
-    if (listRes.error) {
+    if (!listData) {
       loadError = 'No se pudieron cargar los pedidos. Reintenta en unos segundos.'
     }
 
-    counts = { all: allCountRes.count ?? 0 }
-    STATUS_KEYS.forEach((s, i) => { counts[s] = statusCountRes[i]?.count ?? 0 })
-
-    orders = (listRes.data as unknown as Order[]) || []
-    filteredCount = listRes.count ?? 0
+    counts = listData?.counts ?? {}
+    orders = (listData?.orders as Order[]) || []
+    filteredCount = listData?.total ?? 0
     products = (productsRes.data as Product[]) || []
     contacts = (contactsRes.data as Contact[]) || []
 
