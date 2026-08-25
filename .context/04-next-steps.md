@@ -168,7 +168,7 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 > boundaries + badge takeover en bottom-nav). **NO rehacer eso.** El trabajo restante,
 > ordenado por impacto para ojos de founder:
 
-- **T7.1 — Login memorable animado** (gap #1, la puerta del producto). Hoy: estático
+- **T7.1 — Login memorable animado** ✅ 2026-08-25 (con T7.10 — bitácora PLAN.md §E). Hoy: estático
   total, logo MOCK (SVG genérico, `app/login/page.tsx:111-131`), literales hardcodeados.
   Scope: `app/login/` + `login/mfa/` + `forgot-password/` + `set-password/`. Coreografía
   de entrada (glow/revelado, `text-gradient` en wordmark, `StaggerList` en campos), fondo
@@ -184,8 +184,7 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 - **T7.4 — Micro-celebraciones de dinero**: check animado + count-up al llegar
   `confirmed`/`delivered` por realtime (home + detalle de pedido), una vez por evento,
   off en reduced-motion, sin confetti pesado. Verificación live: pago Wompi sandbox STG.
-- **T7.5 — Topbar con identidad de página** (en móvil hoy no dice dónde estás): título
-  de ruta desde `nav-items.ts` (fuente única), manteniendo palette + ThemeToggle.
+- **T7.5 — Topbar con identidad de página** ✅ 2026-08-25 (bitácora PLAN.md §E).
 - **T7.6 — Barrido de estados**: ~44 vacíos ad-hoc restantes → `ui/empty-state.tsx`;
   skeletons de divs crudos → `ui/skeleton` donde trivial; `error.tsx` en rutas de alto
   tráfico sin boundary (contacts, purchases, finance, claims, team, integrations/*,
@@ -197,10 +196,7 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 - **T7.8 — Cobertura de render del DS**: vitest para empty-state, carousel, drawer,
   responsive-dialog, confirm-dialog, skeleton (hoy 5 tests .tsx sobre 27 primitivos).
 - **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
-- **T7.10 — Logout con despedida de marca** (directiva founder 2026-08-25): hoy el logout
-  es una acción muda. Pantalla `/logout` con la escena de auth (AuthScene/AuthBrand) +
-  momento "Hasta pronto" + signOut server-side (con la limpieza de cookie AAL2 del patrón
-  G7, `login/page.tsx` switch-user) + redirect a `/login`.
+- **T7.10 — Logout con despedida de marca** ✅ 2026-08-25 (con T7.1 — bitácora PLAN.md §E).
 - **T7.11 — Settings/Security con la firma** (directiva): cambio de contraseña, MFA TOTP,
   recovery codes — mismo lenguaje de superficie (cabecera de módulo con identidad,
   revelado stagger, cards con diseño) dentro del canvas dashboard.
