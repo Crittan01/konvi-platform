@@ -14,6 +14,9 @@
  *   - Toggle panel contextual (desktop) + open mobile.
  *   - Banner 24h Meta (ventana CSW) cuando status='human_takeover'.
  *   - Mensajes con dedupe + scroll histórico cursor + R-13 filter aplicado.
+ *     T7.2: entrada animada (BubbleIn/AnimatePresence del DS) SOLO para
+ *     burbujas nuevas — la carga inicial, el prepend histórico (loadMore) y
+ *     los dedupes de polling/realtime NO re-animan (useAnimatableMessageIds).
  *   - Footer: editor WhatsApp + toolbar formato + preview formateado.
  *
  * Props: data del hook useMessages + selectedConv + context (para nombre).
@@ -27,6 +30,7 @@ import {
   Circle, Clock, FileText, Info, MessageSquare, Paperclip, Phone, Send, User,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AnimatePresence, BubbleIn } from '@/components/ui/motion'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { createClient } from '@/utils/supabase/client'
 import { renderWhatsAppFormat } from '@/lib/whatsapp-format'
@@ -36,6 +40,7 @@ import type { ConvContext, Conversation, Message } from '../_lib/types'
 import { STATUS_CONFIG } from '../_lib/constants'
 import { formatDateTime, formatPhone, timeAgo } from '../_lib/format'
 import { wrapSelection } from '../_lib/editor'
+import { useAnimatableMessageIds } from '../_hooks/use-animatable-messages'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
 import { InboxImage } from './inbox-image'
 import { isInboxMediaPath } from '../_lib/media'
@@ -68,6 +73,8 @@ interface Props {
   selectedConv: Conversation | null
   context: ConvContext | null
   messages: Message[]
+  /** Conversación dueña de la data en `messages` (stale paint guard, T7.2). */
+  loadedConvId: string | null
   error: string | null
   hasMore: boolean
   loadingMore: boolean
@@ -99,6 +106,7 @@ export function ChatPanel({
   selectedConv,
   context,
   messages,
+  loadedConvId,
   error,
   hasMore,
   loadingMore,
@@ -120,6 +128,14 @@ export function ChatPanel({
   onToggleContextPanel,
 }: Props) {
   const confirm = useConfirm()
+
+  // T7.2 — ids de mensajes que entran con animación (solo los NUEVOS tras la
+  // carga inicial; nunca el historial, el prepend de loadMore ni los dedupes).
+  const animatableIds = useAnimatableMessageIds(
+    selectedConv?.id ?? null,
+    loadedConvId,
+    messages,
+  )
 
   // 2026-07-04 (F2) — Cerrar conversación manual. El estado 'closed' ya existe
   // en el contrato (CONVERSATION_STATUSES) y STATUS_CONFIG.closed promete
@@ -396,10 +412,20 @@ export function ChatPanel({
                 <Circle className="h-8 w-8 mx-auto mb-2 opacity-20" />
                 Sin mensajes aún.
               </div>
-            ) : messages.map(msg => {
+            ) : (
+              // T7.2 — AnimatePresence con initial={false}: la primera pintura
+              // del árbol no anima; cada burbuja decide su entrada con `enter`
+              // (solo mensajes NUEVOS). Sin `exit`: la UI no borra mensajes y
+              // el cambio de conversación reemplaza la lista entera.
+              <AnimatePresence initial={false}>
+              {messages.map(msg => {
               const isInbound = msg.direction === 'inbound'
               return (
-                <div key={msg.id} className={`flex gap-2 ${isInbound ? 'justify-start' : 'justify-end'}`}>
+                <BubbleIn
+                  key={msg.id}
+                  enter={animatableIds.has(msg.id)}
+                  className={`flex gap-2 ${isInbound ? 'justify-start' : 'justify-end'}`}
+                >
                   {isInbound && (
                     <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
                       <User className="h-3.5 w-3.5 text-muted-foreground" />
@@ -582,9 +608,11 @@ export function ChatPanel({
                       <Bot className="h-3.5 w-3.5 text-primary" />
                     </div>
                   )}
-                </div>
+                </BubbleIn>
               )
             })}
+              </AnimatePresence>
+            )}
             <div ref={messagesEndRef} />
           </div>
 

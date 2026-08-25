@@ -24,6 +24,10 @@
  *   - messages, loading, error
  *   - hasMore, loadingMore, loadMore()
  *   - messagesContainerRef, messagesEndRef (DOM refs para scroll)
+ *   - loadedConvId: id de la conversación cuya data está AHORA en `messages`
+ *     (al cambiar de id, la data vieja queda pintada hasta que llega la nueva
+ *     — el consumidor lo usa para no confundir stale paint con carga inicial;
+ *     T7.2 lo usa para no animar esa pintura stale ni la carga inicial).
  *
  * Pitfalls evitados:
  *   - Closure stale de selectedId: el efecto depende explícitamente del id
@@ -53,6 +57,10 @@ interface Options {
 
 interface Result {
   messages: Message[]
+  /** Conversación dueña de la data actual en `messages` (null si aún no
+   *  cargó nada o no hay selección). Difiere de `conversationId` durante la
+   *  ventana de fetch tras un cambio de conversación (stale paint). */
+  loadedConvId: string | null
   error: string | null
   hasMore: boolean
   loadingMore: boolean
@@ -77,6 +85,7 @@ export function useMessages(
   { supabase, onMessageInserted }: Options,
 ): Result {
   const [messages, setMessages] = useState<Message[]>([])
+  const [loadedConvId, setLoadedConvId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -93,6 +102,7 @@ export function useMessages(
   useEffect(() => {
     if (!conversationId) {
       setMessages([])
+      setLoadedConvId(null)
       return
     }
     setHasMore(true)
@@ -107,11 +117,13 @@ export function useMessages(
         if (qErr) {
           setMessages([])
           setError('No se pudieron cargar los mensajes de esta conversación.')
+          setLoadedConvId(conversationId)
           return
         }
         setError(null)
         const fetched = ((data || []) as Message[]).reverse()
         setMessages(fetched)
+        setLoadedConvId(conversationId)
         setHasMore(fetched.length === PAGE_INITIAL)
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       })
@@ -250,6 +262,7 @@ export function useMessages(
 
   return {
     messages,
+    loadedConvId,
     error,
     hasMore,
     loadingMore,

@@ -154,6 +154,7 @@ export default function InboxManager() {
   // last_interaction_at via callback onMessageInserted.
   const {
     messages,
+    loadedConvId,
     error: messagesLoadError,
     hasMore: hasMoreMessages,
     loadingMore,
@@ -374,6 +375,7 @@ export default function InboxManager() {
         selectedConv={selectedConv}
         context={convContext}
         messages={messages}
+        loadedConvId={loadedConvId}
         error={messagesLoadError}
         hasMore={hasMoreMessages}
         loadingMore={loadingMore}

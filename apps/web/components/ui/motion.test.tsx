@@ -2,14 +2,16 @@
 // Smoke tests de los primitivos motion del DS: montan, renderizan children y
 // pasan className. jsdom no anima; lo que se verifica es el contrato de
 // render (y que el stub de matchMedia basta para useReducedMotion).
-import { describe, it, expect, beforeAll } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { FadeIn, StaggerList, StaggerItem, Pressable } from './motion'
+import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import { AnimatePresence, BubbleIn, FadeIn, StaggerList, StaggerItem, Pressable } from './motion'
+
+let reduceMotion = false
 
 beforeAll(() => {
   // jsdom no implementa matchMedia; useReducedMotion lo consulta al montar.
   window.matchMedia = window.matchMedia ?? ((query: string) => ({
-    matches: false,
+    matches: query.includes('reduce') ? reduceMotion : false,
     media: query,
     onchange: null,
     addListener: () => {},
@@ -18,6 +20,11 @@ beforeAll(() => {
     removeEventListener: () => {},
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia
+})
+
+afterEach(() => {
+  reduceMotion = false
+  cleanup()
 })
 
 describe('Motion primitives', () => {
@@ -43,5 +50,29 @@ describe('Motion primitives', () => {
     render(<Pressable data-testid="press"><span>Toca</span></Pressable>)
     expect(screen.getByTestId('press')).toBeInTheDocument()
     expect(screen.getByText('Toca')).toBeInTheDocument()
+  })
+})
+
+describe('BubbleIn (T7.2)', () => {
+  it('enter={false} renderiza children y conserva className (sin entrada)', () => {
+    render(<BubbleIn enter={false} className="flex gap-2">Burbuja</BubbleIn>)
+    const el = screen.getByText('Burbuja')
+    expect(el).toBeInTheDocument()
+    expect(el.className).toContain('flex')
+  })
+
+  it('enter (default) dentro de AnimatePresence initial={false} renderiza igual', () => {
+    render(
+      <AnimatePresence initial={false}>
+        <BubbleIn className="flex">Nueva</BubbleIn>
+      </AnimatePresence>,
+    )
+    expect(screen.getByText('Nueva')).toBeInTheDocument()
+  })
+
+  it('con prefers-reduced-motion el render no se rompe (variante fade)', () => {
+    reduceMotion = true
+    render(<BubbleIn>Reducida</BubbleIn>)
+    expect(screen.getByText('Reducida')).toBeInTheDocument()
   })
 })
