@@ -218,6 +218,16 @@ RMA/devoluciones formales (tabla muerta — decisión de producto aparte, M1 §H
 3. **M2.2 — Cancelación unificada**: pipeline completo en el servicio; `POST /orders/{id}/cancel`
    (o PATCH con política completa) para la consola; **el bot sigue con el suyo (R4)** — duplicación
    time-boxed y defendida por test de paridad de outcome (mismo estado DB final para el mismo input).
+   **✅ CERRADO 2026-08-25** — implementación real: pipeline extraído intacto a
+   `konvi_domain.orders.cancellation` con **puertos inyectados** (`CancellationPorts`:
+   void_credentials/void_payment/cancel_shipping_guide/on_stock_restored) · consola cancela vía
+   PATCH (sin endpoint nuevo — una sola superficie) · regla de canal: la triage bloquea solo a
+   `customer` (staff procede registrando la señal en la auditoría) · puertos API en
+   `lib/order_cancel_ports.py` (Wompi void + Aveonline cancel + WhatsApp cliente + Telegram
+   operador) · **paridad de outcome bot↔paquete certificada** (`test_cancellation_outcome_parity.py`
+   — 11 escenarios, misma huella DB) · fix destapado por la certificación live: el actor de consola
+   debe ser `operator` (enum `order_cancellation_actor` — "owner" rompe el insert 22P02) · hook
+   `on_stock_restored` preserva el sync MeLi que la consola ya tenía.
 4. **M2.3 — Payment link colapsado**: `payments.get_or_create_link` único (política + TTL de config
    única); test de paridad anti-drift TTL.
 5. **M2.4 — ClaimsService completo**: §5.1 + endpoints + consola claims migra; enums compartidos.
