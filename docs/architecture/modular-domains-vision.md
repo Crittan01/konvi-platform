@@ -44,8 +44,8 @@
 
 ## 4. Fases (se apoyan en B-0…B-4, no los reemplazan)
 
-- **M1 — Inventario de capacidades por dominio (agente):** matriz dominio × (consola / bot / contrato existente). Detecta qué dominios ya tienen lógica reutilizable y cuáles solo viven en routers. Salida: el backlog exacto de la capa de servicios.
-- **M2 — Contrato de domain services (agente, diseño + primeros 2 dominios):** definir el contrato (`DomainCapability`: acciones, validaciones, eventos) y migrar 2 dominios piloto (pedidos + reclamos) a services compartidos consumidos por router y tool a la vez. Con tests de paridad canal↔canal.
+- **M1 — Inventario de capacidades por dominio (agente):** matriz dominio × (consola / bot / contrato existente). Detecta qué dominios ya tienen lógica reutilizable y cuáles solo viven en routers. Salida: el backlog exacto de la capa de servicios. **✅ ENTREGADO 2026-08-24 → [`domain-capabilities-inventory.md`](domain-capabilities-inventory.md)** (11 dominios, evidencia `archivo:línea`, backlog priorizado de 11 domain services).
+- **M2 — Contrato de domain services (agente, diseño + primeros 2 dominios):** definir el contrato (`DomainCapability`: acciones, validaciones, eventos) y migrar 2 dominios piloto (pedidos + reclamos) a services compartidos consumidos por router y tool a la vez. Con tests de paridad canal↔canal. **Diseño propuesto 2026-08-24 → [`domain-services-contract.md`](domain-services-contract.md) — pendiente visto bueno founder (4 preguntas abiertas §8) antes de escribir código de producción.**
 - **M3 — Tooling generativo del bot (agente):** las tools del bot se generan/adaptan desde el contrato de dominio (schema + descripción para el LLM incluidos en el contrato). El subset por estado (B-2) referencia capacidades, no funciones.
 - **M4 — Packs de vertical (diseño con founder):** pack = categorías+atributos+políticas+preset de bot por tipo de tienda (belleza/moda/tecnología/juguetería…). Activación por tenant al onboarding.
 - **M5 — Analítica conversacional (owner):** preguntas de negocio al bot por WhatsApp/Telegram (ventas, top productos, pedidos pendientes) sobre métricas ya existentes.

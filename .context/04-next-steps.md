@@ -33,6 +33,16 @@ de hoy. **No duplicar aquí ítems que ya están en PLAN.md.**
 
 ## Lo que PLAN.md no cubre (o necesita contexto extra)
 
+### Track 5 M2 — preguntas abiertas founder (bloquean M2.1, registradas 2026-08-24)
+
+El diseño del contrato de domain services (pilotos pedidos+reclamos) quedó propuesto en
+[`docs/architecture/domain-services-contract.md`](../docs/architecture/domain-services-contract.md)
+§8 — NO se escribe código de producción hasta el visto bueno de estas 4 decisiones:
+1. **Packaging** `packages/shared-py/` instalado editable en build (recomendado — mata la copia física y el sys.path hack).
+2. **Cancelación desde consola con void Wompi automático + cancel de guía** (mismo pipeline legal del bot; hoy la consola cancela "a medias").
+3. **Reason de reclamos**: vocabulario cerrado + detalle libre opcional (recomendado) vs texto libre.
+4. **Lecturas consola → REST** dominio a dominio (recomendado, pilotos primero) vs PostgREST permanente.
+
 ### F2.7 — UAT HSM con 2 tenants piloto (único remanente de F2)
 
 Onboarding manual de 2 de los 6 tenants que requieren proactivos fuera de la CSW de 24h
