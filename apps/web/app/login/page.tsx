@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
+import { AuthBrand, AuthCardReveal, AuthScene } from '@/components/auth/auth-scene'
 import LoginForm from './login-form'
 import { isBannedError, translateAuthError, safeNextPath } from '@/app/auth/_lib/auth-errors'
 import { RECOVERY_SESSION_COOKIE } from '@/lib/mfa-recovery-cookie'
@@ -108,38 +109,22 @@ export default async function LoginPage(
   }
 
   return (
-    <div className="light relative flex h-screen w-full items-center justify-center overflow-hidden bg-[#131A19]">
-      {/* Textura grano — SVG inline (sin dependencia runtime de terceros en la
-          puerta de entrada del producto; el asset externo era un vector de
-          supply-chain en el login). */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 opacity-5 mix-blend-overlay pointer-events-none"
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
-        }}
-      ></div>
-      <div className="relative w-full max-w-[420px] p-6 sm:p-8">
-        <div className="flex flex-col items-center mb-8">
-          {/* Logo mock / Brand */}
-          <div className="h-12 w-12 rounded-xl bg-primary/20 text-primary flex items-center justify-center mb-4 shadow-lg ring-1 ring-white/10">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Konvi</h1>
-          <p className="text-white/60 mt-2 text-sm text-center font-medium">Consola de administración de tu negocio</p>
+    <AuthScene>
+      {/* Marca animada (T7.1) — el "Logo mock / Brand" murió: tile degradado
+          primary→amber + glow y coreografía stagger vía wrappers del DS. */}
+      <AuthBrand subtitle="Consola de administración de tu negocio" />
+
+      {forceLogin && data?.user && (
+        <div className="mb-4 rounded-lg border border-amber-700/40 bg-amber-50/95 p-3 text-sm text-amber-900">
+          <p className="font-medium">Sesión activa de otro usuario</p>
+          <p className="text-xs mt-1 text-amber-800">
+            Actualmente: <code className="font-mono">{data.user.email}</code>.
+            Si te logueas ahora, esa sesión se cerrará automáticamente.
+          </p>
         </div>
+      )}
 
-        {forceLogin && data?.user && (
-          <div className="mb-4 rounded-lg border border-amber-700/40 bg-amber-50/95 p-3 text-sm text-amber-900">
-            <p className="font-medium">Sesión activa de otro usuario</p>
-            <p className="text-xs mt-1 text-amber-800">
-              Actualmente: <code className="font-mono">{data.user.email}</code>.
-              Si te logueas ahora, esa sesión se cerrará automáticamente.
-            </p>
-          </div>
-        )}
-
+      <AuthCardReveal>
         {data?.user && !forceLogin ? (
           /* Sesión activa SIN ?force → pantalla intermedia con opciones */
           (<Card className="border-0 shadow-2xl bg-[#FBFAF6]">
@@ -177,7 +162,7 @@ export default async function LoginPage(
             </CardContent>
           </Card>
         )}
-      </div>
-    </div>
+      </AuthCardReveal>
+    </AuthScene>
   );
 }

@@ -36,13 +36,12 @@ interface SidebarProps {
     shipping: boolean  // true si Aveonline está connected (Rev. 107)
     mercadolibre: boolean
   }
-  logoutAction: () => Promise<void>
 }
 
 // ── Componente Principal ──────────────────────────────────────────────────────
 
 export default function SidebarClient({
-  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, planCode, planCapabilities, integrations, logoutAction,
+  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, planCode, planCapabilities, integrations,
 }: SidebarProps) {
   const pathname = usePathname()
   const [mobileOpen,   setMobileOpen]   = useState(false)
@@ -331,18 +330,18 @@ export default function SidebarClient({
                       Seguridad y contraseña
                     </Link>
                     <div className="my-1 mx-2" style={{ borderTop: '1px solid hsl(156 30% 18%)' }} />
-                    <form action={logoutAction}>
-                      <button
-                        type="submit"
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
-                        style={{ color: 'hsl(0 70% 65%)' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'hsl(0 30% 14%)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <LogOut className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                        Cerrar sesión
-                      </button>
-                    </form>
+                    {/* T7.10 — el logout va a `/logout` (despedida de marca con
+                        la escena de auth); el signOut + limpieza G7 ocurren allí. */}
+                    <Link
+                      href="/logout"
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                      style={{ color: 'hsl(0 70% 65%)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'hsl(0 30% 14%)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <LogOut className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                      Cerrar sesión
+                    </Link>
                   </div>
                 </div>
               </>

@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Mail } from 'lucide-react'
+import { AuthBrand, AuthCardReveal, AuthScene } from '@/components/auth/auth-scene'
 import ForgotPasswordForm from './forgot-password-form'
 
 export const metadata = {
@@ -8,8 +9,9 @@ export const metadata = {
 
 export default function ForgotPasswordPage() {
   return (
-    <div className="light flex h-screen w-full items-center justify-center bg-[#131A19]">
-      <div className="w-full max-w-[420px] p-6">
+    <AuthScene>
+      <AuthBrand subtitle="Recupera el acceso a tu consola" />
+      <AuthCardReveal>
         <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
           <CardHeader className="space-y-1">
             <div className="flex items-center gap-2 mb-1">
@@ -24,7 +26,7 @@ export default function ForgotPasswordPage() {
             <ForgotPasswordForm />
           </CardContent>
         </Card>
-      </div>
-    </div>
+      </AuthCardReveal>
+    </AuthScene>
   )
 }

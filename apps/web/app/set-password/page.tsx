@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { ShieldCheck, AlertCircle } from 'lucide-react'
+import { AuthBrand, AuthCardReveal, AuthScene } from '@/components/auth/auth-scene'
 import SetPasswordForm from './set-password-form'
 import { translateAuthError, needsAal2 } from '@/app/auth/_lib/auth-errors'
 
@@ -68,14 +69,9 @@ export default async function SetPasswordPage(
   const submitLabel = isReset ? 'Guardar y entrar' : 'Activar cuenta y entrar'
 
   return (
-    <div className="light flex h-screen w-full items-center justify-center bg-[#131A19]">
-      <div className="w-full max-w-[420px] p-6">
-        <div className="flex flex-col items-center mb-6">
-          <div className="h-12 w-12 rounded-xl bg-primary/20 text-primary flex items-center justify-center mb-3 shadow-lg ring-1 ring-white/10">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Konvi</h1>
-        </div>
+    <AuthScene>
+      <AuthBrand subtitle="Consola de administración de tu negocio" />
+      <AuthCardReveal>
         <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
           <CardHeader className="space-y-1">
             <div className="flex items-center gap-2 mb-1">
@@ -99,7 +95,7 @@ export default async function SetPasswordPage(
             <SetPasswordForm action={setPassword} submitLabel={submitLabel} />
           </CardContent>
         </Card>
-      </div>
-    </div>
+      </AuthCardReveal>
+    </AuthScene>
   )
 }

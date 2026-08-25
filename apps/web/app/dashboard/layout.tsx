@@ -47,18 +47,8 @@ export default async function DashboardLayout({
   const { role, tenantId } = await getCachedTenantMeta()
   const supabase = await createClient()
 
-  const logoutAction = async () => {
-    'use server'
-    const supabase = await createClient()
-    await supabase.auth.signOut()
-    // Rev. 109 J.2.4.3 — limpiar cookie de recovery bypass al cerrar sesión.
-    // Si el user usó recovery code en esta sesión, la cookie HttpOnly debe
-    // borrarse para que el próximo login REQUIERA TOTP o nuevo recovery.
-    const { cookies } = await import('next/headers')
-    const cookieStore = await cookies()   // Next 16: cookies() es async
-    cookieStore.delete('mfa_recovery_session')
-    redirect('/login')
-  }
+  // T7.10 — el logout vive en `/logout` (despedida de marca con la escena de
+  // auth + signOut con limpieza G7 de la cookie AAL2). El sidebar enlaza allí.
 
   // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
   // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
@@ -139,7 +129,6 @@ export default async function DashboardLayout({
         integrations={integrations}
         planCode={planCode}
         planCapabilities={planCapabilities}
-        logoutAction={logoutAction}
       />
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
