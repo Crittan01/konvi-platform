@@ -244,6 +244,25 @@ RMA/devoluciones formales (tabla muerta — decisión de producto aparte, M1 §H
    bot↔paquete con alarma** (`test_payment_link_policy_parity.py`: TTL env-limpio + decisión de
    reuso en 4 escenarios + mismos filtros de query) · el bot conserva su espejo congelado (B-2/M3).
 5. **M2.4 — ClaimsService completo**: §5.1 + endpoints + consola claims migra; enums compartidos.
+   **✅ CERRADO 2026-08-25** — implementación real: las 7 operaciones del piloto en
+   `konvi_domain/claims/` (espejo de `orders/`): UN writer `create_claim` (reason cerrado +
+   `reason_detail` libre opcional — decisión founder #3 — + dedup heredada del bot + titularidad
+   por actor + unión de eventos: audit_log + `messages.claim_audit` con el conversation_id de la
+   ORDEN, omitido si no hay + Telegram operador vía puerto) · `get_claim` (id|ticket, scoping
+   customer fail-closed) · `list_claims` (embeds + reason_detail — GET /claims/ no tenía
+   consumidores) · `list_claims_by_contact` NUEVO (hueco M1 §3.8, service-only) ·
+   `transition_claim` (FSM formalizada que absorbe PATCH y /resolve: refunded FINAL,
+   refunded_amount write-once sellando el KPI, reapertura solo owner, F-5 solo en outcome real)
+   · `register_reversion`/`register_reversion_movement` (delegación RPC — R2 — con
+   `_MOTIVO_HTTP` migrada al servicio vía `DomainError.http_status`) · migración
+   `20260825180000` (`claims.reason_detail`, sin CHECK de reason — el bot congelado sigue
+   free-text hasta M3) · router = adaptador puro (JWT-only, RBAC asimétrico G-4 intacto, dedup
+   → 200 `deduplicated:true`) · F-5 movida a `lib/claim_ports.py` · consola migra su listado a
+   REST (decisión #4) con dialog de reason_detail · **paridad de política bot↔paquete alarmada**
+   (`test_claims_policy_parity.py` — enums, dedup, claves de insert, eventos, get; el
+   `status_human` del bot con vocabulario extinto queda registrado como deuda M3) · live STG
+   vía REST con JWT real (create+dedup+FSM+F-5 encolado+reversión end-to-end) · bitácora
+   PLAN.md §E (2026-08-25, M2.4).
 6. **Cierre M2**: tests de paridad canal↔canal, test estructural del contrato, docs (§9).
 
 ### 6.2 Orden y riesgo
