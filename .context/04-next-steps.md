@@ -54,8 +54,8 @@ bot↔paquete ×11 + fix enum `order_cancellation_actor`: actor consola = `opera
 
 ### M2.3 — brief de implementación (payment link colapsado) — LEER ANTES DE ESCRIBIR
 
-> El prompt de continuación listo para abrir la sesión de M2.3 vive en
-> `.context/handoff-prompt-m23.md` (apunta de vuelta a este brief).
+> El prompt de continuación (durable — vale para cualquier sesión del plan) vive en
+> `.context/handoff-prompt.md` (apunta de vuelta a estos briefs).
 
 **Scope:** operación `payments.get_or_create_link` del contrato (§4.1) — UNA política de reuso/TTL
 (mata el espejo `orders.py` ↔ `payment_link_tool.py` medido en M1 §3.3). El bot NO se toca (su
@@ -165,6 +165,14 @@ validator.ts abajo) → commits temáticos + push + CI 5/5 + bitácora PLAN.md �
 - Después: **M3** (tooling generativo del bot desde los `contract.py` — dentro del BLOQUE BOT),
   M4 (packs de vertical, con founder), M5 (analítica conversacional owner — requiere contexto tenant
   explícito en RPCs de métricas, M1 §H5). Backlog completo de 11 domain services: inventario M1 §4.
+- **Cerrado Track 5, el §Orden sigue** (`docs/PLAN-CIERRE.md` §Orden): **Track 7** (UX/UI consola
+  de clase mundial contra Kaiu DS — login animado, módulos pulidos, micro-interacciones con
+  framer-motion ya instalado, móvil de primera; `docs/ux/UX-UI.md`) → **Track 3** (infra PRD:
+  dominio `api.konvi.co` + Render Projects, pin Python 3.13, dev cloud, G8b media privada) →
+  remanentes Track 1/2 [F] (Wompi prod keys, anular guía UAT, legal B6/B3, MeLi S6, M19, WABA
+  hygiene, smoke dinero real al cierre) → **Track 4** ops (A1 MFA cuando founder decida) →
+  **AL FINAL el BLOQUE BOT** (inventario parche → B-2 dispatcher sobre contratos estables →
+  B-4 observabilidad/métricas → bot GUI/API en consola).
 
 ### F2.7 — UAT HSM con 2 tenants piloto (único remanente de F2)
 
