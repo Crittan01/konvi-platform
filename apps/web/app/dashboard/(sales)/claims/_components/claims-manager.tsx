@@ -27,6 +27,9 @@ type Claim = {
   customer: ClaimCustomer
   status: string
   reason: string
+  // Decisión founder 2026-08-25 #3: detalle libre opcional (las palabras del
+  // cliente), complemento del reason cerrado.
+  reason_detail: string | null
   requested_amount: number | null
   // BLOQUE G-2: monto REAL reembolsado + fecha (capturado al marcar 'refunded').
   refunded_amount: number | null
@@ -122,6 +125,7 @@ export default function ClaimsManager({
   // Create form state
   const [newOrderId, setNewOrderId]     = useState('')
   const [newReason, setNewReason]       = useState('defective')
+  const [newReasonDetail, setNewReasonDetail] = useState('')
   const [newAmount, setNewAmount]       = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [createError, setCreateError]   = useState<string | null>(null)
@@ -162,12 +166,19 @@ export default function ClaimsManager({
         order_id:         newOrderId,
         customer_id:      order?.contact_id ?? null,
         reason:           newReason,
+        reason_detail:    newReasonDetail.trim() || undefined,
         requested_amount: newAmount ? parseFloat(newAmount) : undefined,
       })
       if (resp?.error) { setCreateError(resp.error); return }
-      toast.success('Reclamo registrado')
+      // M2.4: la dedup del dominio puede devolver un reclamo abierto existente.
+      if (resp?.deduplicated) {
+        toast.info('Ya existía un reclamo abierto para este pedido — se conservó ese ticket')
+      } else {
+        toast.success('Reclamo registrado')
+      }
       setIsCreateOpen(false)
       setNewOrderId('')
+      setNewReasonDetail('')
       setNewAmount('')
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : 'Error desconocido')
@@ -389,6 +400,9 @@ export default function ClaimsManager({
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Motivo</p>
               <p className="font-medium text-sm">{REASON_MAP[selectedClaim.reason] ?? selectedClaim.reason}</p>
+              {selectedClaim.reason_detail && (
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedClaim.reason_detail}</p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Monto solicitado</p>
@@ -690,6 +704,17 @@ export default function ClaimsManager({
                   <SelectItem value="other">Otro / Garantía extendida</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Detalle del motivo (opcional)</Label>
+              <Textarea
+                placeholder="Las palabras del cliente: qué pasó exactamente, qué espera…"
+                value={newReasonDetail}
+                onChange={e => setNewReasonDetail(e.target.value.slice(0, 500))}
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground">Se adjunta al ticket y lo ve el equipo (máx. 500).</p>
             </div>
 
             <div className="grid gap-2">

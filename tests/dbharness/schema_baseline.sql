@@ -4835,6 +4835,7 @@ CREATE TABLE IF NOT EXISTS "public"."claims" (
     "ticket_number" integer,
     "refunded_amount" numeric,
     "refunded_at" timestamp with time zone,
+    "reason_detail" "text",
     CONSTRAINT "claims_status_check" CHECK (("status" = ANY (ARRAY['open'::"text", 'investigating'::"text", 'resolved'::"text", 'refunded'::"text", 'rejected'::"text", 'cancelled'::"text"])))
 );
 

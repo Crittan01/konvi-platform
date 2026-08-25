@@ -22,9 +22,10 @@ import sys
 import unittest
 
 from konvi_domain.contract import IDEMPOTENCY_STRATEGIES, DomainContract
+from konvi_domain.claims.contract import CLAIMS_CONTRACT
 from konvi_domain.orders.contract import ORDERS_CONTRACT
 
-CONTRACTS: list[DomainContract] = [ORDERS_CONTRACT]
+CONTRACTS: list[DomainContract] = [ORDERS_CONTRACT, CLAIMS_CONTRACT]
 
 # dominio → módulos de servicio donde deben vivir los service_fn.
 SERVICE_MODULES = {
@@ -32,6 +33,10 @@ SERVICE_MODULES = {
         "konvi_domain.orders.service",
         "konvi_domain.orders.cancellation",
         "konvi_domain.orders.payments",
+    ),
+    "claims": (
+        "konvi_domain.claims.service",
+        "konvi_domain.claims.reversion",
     ),
 }
 
@@ -89,6 +94,7 @@ class DomainContractStructuralTests(unittest.TestCase):
         """Leer contratos (M3) no levanta clientes de DB ni HTTP."""
         code = (
             "import sys; from konvi_domain.orders.contract import ORDERS_CONTRACT; "
+            "from konvi_domain.claims.contract import CLAIMS_CONTRACT; "
             "heavy = [m for m in ('supabase', 'httpx', 'fastapi') if m in sys.modules]; "
             "sys.exit(1 if heavy else 0)"
         )

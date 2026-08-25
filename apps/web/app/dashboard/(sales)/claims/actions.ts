@@ -40,6 +40,7 @@ export async function createClaim(data: {
   order_id: string
   customer_id: string | null
   reason: string
+  reason_detail?: string
   requested_amount?: number
   resolution_notes?: string
 }) {
@@ -52,6 +53,9 @@ export async function createClaim(data: {
       customer_id: data.customer_id,
       reason: data.reason,
     }
+    // Decisión founder 2026-08-25 #3: detalle libre opcional (las palabras del
+    // cliente), complemento del reason cerrado.
+    if (data.reason_detail?.trim()) body.reason_detail = data.reason_detail.trim()
     if (data.requested_amount !== undefined) body.requested_amount = data.requested_amount
     if (data.resolution_notes) body.resolution_notes = data.resolution_notes
 
@@ -64,7 +68,15 @@ export async function createClaim(data: {
       return { error: await readApiError(res, 'No se pudo crear el reclamo') }
     }
     revalidatePath('/dashboard/claims')
-    return { success: true }
+    // M2.4: la dedup del dominio responde 200 + el claim existente + deduplicated
+    // (201 si creó). La consola acepta ambos y lo comunica distinto.
+    const created = res.status === 201
+    let deduplicated = false
+    if (!created) {
+      const payload = await res.json().catch(() => null) as { deduplicated?: boolean } | null
+      deduplicated = payload?.deduplicated === true
+    }
+    return { success: true, deduplicated }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Error creando reclamo'
     return { error: msg }

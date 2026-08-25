@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "column_count": 21,
+      "column_count": 25,
       "columns": [
         {
           "col": "id",
@@ -128,6 +128,30 @@
           "default": null,
           "nullable": "YES",
           "type": "integer"
+        },
+        {
+          "col": "prompt_tokens",
+          "default": null,
+          "nullable": "YES",
+          "type": "integer"
+        },
+        {
+          "col": "cached_tokens",
+          "default": null,
+          "nullable": "YES",
+          "type": "integer"
+        },
+        {
+          "col": "thoughts_tokens",
+          "default": null,
+          "nullable": "YES",
+          "type": "integer"
+        },
+        {
+          "col": "model_used",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
         }
       ],
       "table_name": "agentic_shadow_log"
@@ -397,7 +421,7 @@
       "table_name": "bot_source_log"
     },
     {
-      "column_count": 13,
+      "column_count": 14,
       "columns": [
         {
           "col": "id",
@@ -476,6 +500,12 @@
           "default": null,
           "nullable": "YES",
           "type": "timestamp with time zone"
+        },
+        {
+          "col": "reason_detail",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
         }
       ],
       "table_name": "claims"
@@ -955,7 +985,7 @@
       "table_name": "conversation_reads"
     },
     {
-      "column_count": 11,
+      "column_count": 13,
       "columns": [
         {
           "col": "id",
@@ -1022,6 +1052,18 @@
           "default": null,
           "nullable": "YES",
           "type": "text"
+        },
+        {
+          "col": "pending_cancel_confirmation",
+          "default": null,
+          "nullable": "YES",
+          "type": "jsonb"
+        },
+        {
+          "col": "conversation_summary",
+          "default": null,
+          "nullable": "YES",
+          "type": "jsonb"
         }
       ],
       "table_name": "conversations"
@@ -1903,7 +1945,7 @@
       "table_name": "order_tracking"
     },
     {
-      "column_count": 22,
+      "column_count": 23,
       "columns": [
         {
           "col": "id",
@@ -2036,6 +2078,12 @@
           "default": null,
           "nullable": "YES",
           "type": "text"
+        },
+        {
+          "col": "paid_no_guide_alerted_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
         }
       ],
       "table_name": "orders"

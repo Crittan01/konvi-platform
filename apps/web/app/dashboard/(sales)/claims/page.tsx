@@ -3,11 +3,28 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { redirect } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
 import ClaimsManager from './_components/claims-manager'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 // Cap de lectura alineado con el límite del router API (claims.py: limit<=200).
 // Evita el full-table-fetch del tenant en tenants con historial largo.
 const CLAIMS_LIMIT = 200
 const ORDERS_LIMIT = 100
+
+// Fila del REST de dominio (GET /api/v1/claims/ — M2.4): columnas + embeds.
+type ClaimRow = {
+  id: string
+  ticket_number: number | null
+  status: string
+  reason: string
+  reason_detail: string | null
+  requested_amount: number | null
+  refunded_amount: number | null
+  refunded_at: string | null
+  resolution_notes: string | null
+  created_at: string
+  orders: { id: string; total_amount: number | null; payment_method: string | null } | { id: string; total_amount: number | null; payment_method: string | null }[] | null
+  contacts: { id: string; name: string | null; phone: string | null } | { id: string; name: string | null; phone: string | null }[] | null
+}
 
 export default async function ClaimsPage() {
   // Sem 5 perf: cached.
@@ -28,30 +45,47 @@ export default async function ClaimsPage() {
 
   const supabase = await createClient()
 
-  // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
-  const { data: claimsData, error: claimsError } = await supabase
-    .from('claims')
-    .select(`
-      id, ticket_number, status, reason, requested_amount, refunded_amount, refunded_at, resolution_notes, created_at,
-      orders ( id, total_amount, payment_method ),
-      contacts ( id, name, phone )
-    `)
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .limit(CLAIMS_LIMIT)
+  // M2.4 (Track 5): el listado de reclamos viene del domain service vía REST
+  // (GET /api/v1/claims/ — filtros y embeds orders/contacts + reason_detail
+  // viven en konvi_domain.claims) — UNA fuente de verdad compartida; antes esta
+  // página consultaba PostgREST directo. Los pedidos recientes del selector de
+  // "Nuevo Reclamo" siguen directos (lectura del dominio orders — su REST de
+  // listado existe desde M2.1 pero pagina distinto a lo que el selector necesita).
+  const fetchClaims = async (): Promise<ClaimRow[] | null> => {
+    const { data: { session: s } } = await supabase.auth.getSession()
+    const token = s?.access_token
+    if (!token) return null
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      const res = await fetch(`${CORE_API_URL}/api/v1/claims/?limit=${CLAIMS_LIMIT}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store', // datos transaccionales — nunca cachear
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+      if (!res.ok) return null
+      return (await res.json()) as ClaimRow[]
+    } catch {
+      return null
+    }
+  }
 
-  // Fetch recent orders for the "New Claim" selector (con contacto para etiquetarlos)
-  const { data: ordersData, error: ordersError } = await supabase
-    .from('orders')
-    .select('id, status, total_amount, contact_id, created_at, contacts ( name, phone )')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .limit(ORDERS_LIMIT)
+  const [claimsData, { data: ordersData, error: ordersError }] = await Promise.all([
+    fetchClaims(),
+    // Fetch recent orders for the "New Claim" selector (con contacto para etiquetarlos)
+    supabase
+      .from('orders')
+      .select('id, status, total_amount, contact_id, created_at, contacts ( name, phone )')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(ORDERS_LIMIT),
+  ])
 
-  // Un fallo de lectura NO es "no hay reclamos": logear (visible en server logs)
-  // y surfacear un estado de error con retry, no un empty state engañoso.
-  if (claimsError) {
-    console.error('[claims] read error', { tenantId, code: claimsError.code, message: claimsError.message })
+  // Un fallo de lectura NO es "no hay reclamos": surfacear un estado de error
+  // con retry, no un empty state engañoso.
+  if (!claimsData) {
+    console.error('[claims] read error (REST domain service)', { tenantId })
     return <ClaimsError message="No pudimos cargar los reclamos. Reintenta en unos segundos." />
   }
   if (ordersError) {
@@ -61,14 +95,15 @@ export default async function ClaimsPage() {
   // Map to flat structures
   const claims = (claimsData || []).map(c => ({
     id: c.id,
-    ticket_number: (c as { ticket_number?: number | null }).ticket_number ?? null,
+    ticket_number: c.ticket_number ?? null,
     order:    Array.isArray(c.orders)   ? (c.orders[0]   ?? null) : (c.orders   ?? null),
     customer: Array.isArray(c.contacts) ? (c.contacts[0] ?? null) : (c.contacts ?? null),
     status: c.status,
     reason: c.reason,
+    reason_detail: c.reason_detail ?? null,
     requested_amount: c.requested_amount,
-    refunded_amount: (c as { refunded_amount?: number | null }).refunded_amount ?? null,
-    refunded_at: (c as { refunded_at?: string | null }).refunded_at ?? null,
+    refunded_amount: c.refunded_amount ?? null,
+    refunded_at: c.refunded_at ?? null,
     resolution_notes: c.resolution_notes,
     created_at: c.created_at
   }))

@@ -1,29 +1,54 @@
 """
-Router de Reclamos / Claims — CRUD con aislamiento multi-tenant.
+Router de Reclamos / Claims — ADAPTADOR HTTP sobre `konvi_domain.claims` (Track 5 M2.4).
 
-Rev. 72 — cierra el drift D1 (Claims escribía directo a DB desde RSC sin pasar por API).
+La lógica de negocio vive en el paquete compartido (única fuente, contrato §5.1):
+create unificado (reason cerrado + reason_detail + dedup + titularidad por actor),
+get/list/list_by_contact, transition (FSM formalizada), reversión delegada en las
+RPCs SECURITY DEFINER. Este router conserva EXACTAMENTE la seguridad heredada:
+JWT (`get_current_tenant`), RBAC asimétrico G-4 (create = owner/manager/operator
+SIN require_write_role; patch/resolve/reversion = owner/manager), rate-limit,
+audit decorators y mapeo DomainError→HTTP.
 
 Endpoints:
-  GET    /api/v1/claims/                 — listar reclamos del tenant
-  POST   /api/v1/claims/                 — crear reclamo                       [owner, manager, operator]
+  GET    /api/v1/claims/                 — listar reclamos del tenant (con embeds)
+  POST   /api/v1/claims/                 — crear reclamo (dedup → 200)  [owner, manager, operator]
   GET    /api/v1/claims/{id}             — detalle
   PATCH  /api/v1/claims/{id}             — cambiar status / resolution_notes   [owner, manager]
   POST   /api/v1/claims/{id}/resolve     — atajo: status=resolved + notas      [owner, manager]
+  POST   /api/v1/claims/{id}/reversion   — radicar queja de reversión + constancia [owner, manager]
+  GET    /api/v1/claims/{id}/reversion   — leer la constancia
+  POST   /api/v1/claims/{id}/reversion/movimiento — registrar vía de devolución [owner, manager]
 
-Estados válidos: open → in_progress → resolved | closed | cancelled
+Estados válidos: open → investigating → resolved | refunded | rejected | cancelled
+(canon único en `konvi_domain.claims.models` — los nombres históricos de este
+módulo quedan como alias, patrón FSM de M2.1).
 
 Coexistencia con orchestrator: el bot inserta claims via service_role direct
 (`.table('claims').insert({'tenant_id': ..., ...})`), bypassa este router. Es
-intencional: el bot tiene contexto de conversación que el frontend no tiene.
-Ambos paths escriben a la misma tabla; RLS + tenant_id explícito mantiene
-aislamiento. Patrón canónico `.table(X).eq('tenant_id', tid)` enforced por lint
-AST scripts/audit_tenant_filter.py (ADR-0025 — helper scoped_table eliminado).
+intencional (R4 — bot congelado hasta B-2/M3): ambos paths escriben a la misma
+tabla y la duplicación queda con alarma (`tests/test_claims_policy_parity.py`).
+RLS + tenant_id explícito mantiene aislamiento; patrón canónico
+`.table(X).eq('tenant_id', tid)` enforced por lint AST scripts/audit_tenant_filter.py.
 """
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+
+# ── Capa de dominio compartida (Track 5 M2.4) ────────────────────────────────
+from konvi_domain import Actor, Channel, DomainError, ErrorCode, Role
+from konvi_domain.claims import (
+    CLAIM_REASONS,
+    CLAIM_REOPENABLE_STATUSES,
+    CLAIM_STATUSES,
+    CLAIM_TERMINAL_STATUSES,
+    ClaimCreateInput,
+    ClaimTransitionInput,
+    ReversionInput,
+)
+from konvi_domain.claims import reversion as reversion_service
+from konvi_domain.claims import service as claims_service
 from pydantic import BaseModel, Field
 from supabase import Client
 
@@ -38,58 +63,65 @@ from dependencies.security import RL_WRITE_DEFAULT
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Claims"])
 
+# Aliases con los nombres históricos (los usan tests/consumidores del router —
+# patrón alias de M2.1). La ÚNICA fuente es `konvi_domain.claims.models`:
 # A4 finiquito (audit §3 BUG#2 CRITICAL) — vocabulario canónico alineado con la UI
-# (claims-manager.tsx STATUS_MAP + botones Investigando/Reembolsar/Rechazar). Antes
-# el API tenía {in_progress, closed} que la UI NO usaba, y rechazaba 422 los
-# {investigating, refunded, rejected} de los botones → 3 botones rotos. 0 claims en
-# DB al alinear (sin migración de datos). Mismo set en el tool agentic
-# (tools/claims.py) + CHECK constraint DB (migración 20260624010000).
-VALID_STATUSES = {"open", "investigating", "resolved", "refunded", "rejected", "cancelled"}
-
-# Estados terminales: el ticket ya está cerrado. Coincide con TERMINAL en la UI
-# (claims-manager.tsx). Reabrir uno de estos es una transición especial (ver abajo).
-TERMINAL_STATUSES = {"resolved", "refunded", "rejected", "cancelled"}
-
-# Terminales que un OWNER puede reabrir (decisión F2 — Opción B).
-#   - 'rejected' / 'cancelled': reversibles, sin impacto financiero → reabribles.
-#   - 'refunded': revertir un reembolso ya movió dinero → NUNCA reabrir.
-#   - 'resolved': cierre positivo → se maneja como reclamo nuevo, no se reabre.
-# Reabrir = pasar de un estado terminal a uno no-terminal ('open' / 'investigating').
-REOPENABLE_STATUSES = {"rejected", "cancelled"}
-
-# Vocabulario canónico de 'reason' (decisión F2 — Opción A). El set de la UI
-# (claims-manager.tsx REASON_MAP + dropdown de "Nuevo Reclamo") es la fuente de
-# verdad; este API lo valida en create para mantener reporting consistente.
-# El bot escribe reason en texto libre directo a DB (bypassa este router) y su
-# mapeo a estas keys vive en el orchestrator (fuera de este router). La DB NO tiene
-# CHECK sobre reason justamente para no romper esa escritura libre del bot.
-VALID_REASONS = {"defective", "wrong_item", "missing_parts", "delayed", "other"}
+# (claims-manager.tsx STATUS_MAP + botones Investigando/Reembolsar/Rechazar) y el
+# tool agentic (espejo congelado, defendido por test de paridad) + CHECK
+# constraint DB (migración 20260624010000).
+VALID_STATUSES = CLAIM_STATUSES
+TERMINAL_STATUSES = CLAIM_TERMINAL_STATUSES
+REOPENABLE_STATUSES = CLAIM_REOPENABLE_STATUSES
+# Vocabulario canónico de 'reason' (decisión founder 2026-08-25 #3 — espejo del
+# REASON_MAP de la UI). La DB NO tiene CHECK sobre reason justamente para no
+# romper la escritura libre del bot congelado (hasta B-2/M3).
+VALID_REASONS = CLAIM_REASONS
 
 
-# ─── Modelos ─────────────────────────────────────────────────────────────────
+# ── Adaptador HTTP ↔ capa de dominio (patrón M2.1) ───────────────────────────
 
-class ClaimCreate(BaseModel):
-    order_id: str = Field(..., description="UUID del pedido reclamado.")
-    customer_id: Optional[str] = Field(default=None, description="UUID del contacto. Si no viene, el back lo deriva del order.")
-    reason: str = Field(..., min_length=3, max_length=500)
-    requested_amount: Optional[float] = Field(default=None, ge=0)
-    resolution_notes: Optional[str] = Field(default=None, max_length=2000)
-
-
-class ClaimPatch(BaseModel):
-    status: Optional[str] = None
-    resolution_notes: Optional[str] = Field(default=None, max_length=2000)
-    # BLOQUE G-2 — monto REAL reembolsado (obligatorio al pasar a 'refunded'). Es lo
-    # que el KPI net-revenue resta; NO uses requested_amount (intención del cliente).
-    refunded_amount: Optional[float] = Field(default=None, ge=0)
+_DOMAIN_ERROR_HTTP = {
+    ErrorCode.VALIDATION: 422,
+    ErrorCode.FORBIDDEN: 403,
+    ErrorCode.NOT_FOUND: 404,
+    ErrorCode.CONFLICT: 409,
+    ErrorCode.PRECONDITION: 409,
+    ErrorCode.UPSTREAM: 500,
+    ErrorCode.TENANT_MISMATCH: 403,
+}
 
 
-class ClaimResolve(BaseModel):
-    resolution_notes: str = Field(..., min_length=3, max_length=2000)
+def _domain_error_to_http(exc: DomainError) -> HTTPException:
+    """Mapeo único DomainError → HTTPException (mismos status/detalle heredados).
+    `exc.http_status` overridea cuando el dominio conoce el status exacto (la
+    tabla _MOTIVO_HTTP de la reversión: 404/409/422 según el motivo)."""
+    return HTTPException(
+        status_code=exc.http_status or _DOMAIN_ERROR_HTTP.get(exc.code, 500),
+        detail=exc.message,
+    )
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+def _to_role(role: Optional[str]) -> Optional[Role]:
+    try:
+        return Role(role) if role else None
+    except ValueError:
+        return None
 
+
+def _build_actor(request: Request, tenant_id: str, role: Optional[str]) -> Actor:
+    """Actor del contrato desde el borde HTTP (dual-auth).
+
+    Canal: header X-Internal-Service-Secret presente → BOT (orchestrator→API);
+    si no, CONSOLE (JWT usuario). Rol: el verificado por la dependency; None en
+    operaciones sin verificación de rol (create G-4 / lecturas tenant-scoped).
+    """
+    channel = Channel.BOT if request.headers.get("X-Internal-Service-Secret") else Channel.CONSOLE
+    return Actor(channel=channel, tenant_id=tenant_id, role=_to_role(role))
+
+
+# Wrappers HTTP legacy — `test_a3_a4_nivel5` importa `_validate_status` del
+# router y exige HTTPException. La validación de negocio vive en el servicio
+# (DomainError); estos quedan para compatibilidad de imports.
 def _validate_status(status: str) -> None:
     if status not in VALID_STATUSES:
         raise HTTPException(
@@ -106,71 +138,29 @@ def _validate_reason(reason: str) -> None:
         )
 
 
-def _fetch_claim(supabase: Client, tenant_id: str, claim_id: str) -> dict:
-    """Lee un reclamo del tenant o lanza 404. Usado para validar transiciones."""
-    res = (
-        supabase.table("claims")
-        .select("id, status, refunded_amount, refunded_at")
-        .eq("id", claim_id)
-        .eq("tenant_id", tenant_id)
-        .maybe_single()
-        .execute()
-    )
-    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
-        raise HTTPException(status_code=404, detail="Reclamo no encontrado")
-    return res.data
+# ─── Modelos ─────────────────────────────────────────────────────────────────
+
+class ClaimCreate(BaseModel):
+    order_id: str = Field(..., description="UUID del pedido reclamado.")
+    customer_id: Optional[str] = Field(default=None, description="UUID del contacto. Si no viene, el back lo deriva del order.")
+    reason: str = Field(..., min_length=3, max_length=500)
+    # Decisión founder 2026-08-25 #3: detalle libre opcional (las palabras del
+    # cliente), complemento del reason cerrado — máx 500 como el free-text del bot.
+    reason_detail: Optional[str] = Field(default=None, max_length=500)
+    requested_amount: Optional[float] = Field(default=None, ge=0)
+    resolution_notes: Optional[str] = Field(default=None, max_length=2000)
 
 
-def _refund_ledger_fields(
-    patch: "ClaimPatch", *, cur_status: Optional[str], new_status: Optional[str], current: dict,
-) -> dict:
-    """BLOQUE G-2 — campos refunded_* a persistir en un patch de reclamo (o {}).
-
-    El KPI net-revenue resta refunded_amount por refunded_at, no requested_amount
-    (intención, nullable). Reglas (write-once):
-      · transición a 'refunded': exige patch.refunded_amount → sella monto + fecha.
-      · corrección (sin cambio de status) de un 'refunded' con monto NULL (backfill
-        histórico sin monto): setea el monto (+ fecha si faltaba). No re-escribe.
-    Raises 422/409 según corresponda.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    if new_status == "refunded" and cur_status != "refunded":
-        if patch.refunded_amount is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Indica el monto reembolsado real para marcar el reclamo reembolsado.",
-            )
-        return {"refunded_amount": patch.refunded_amount, "refunded_at": now_iso}
-    if new_status is None and patch.refunded_amount is not None:
-        if cur_status != "refunded":
-            raise HTTPException(
-                status_code=422,
-                detail="El monto reembolsado solo aplica a un reclamo ya reembolsado.",
-            )
-        if current.get("refunded_amount") is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="El monto reembolsado ya está registrado y no se puede cambiar.",
-            )
-        out: dict = {"refunded_amount": patch.refunded_amount}
-        if not current.get("refunded_at"):
-            out["refunded_at"] = now_iso
-        return out
-    return {}
+class ClaimPatch(BaseModel):
+    status: Optional[str] = None
+    resolution_notes: Optional[str] = Field(default=None, max_length=2000)
+    # BLOQUE G-2 — monto REAL reembolsado (obligatorio al pasar a 'refunded'). Es lo
+    # que el KPI net-revenue resta; NO uses requested_amount (intención del cliente).
+    refunded_amount: Optional[float] = Field(default=None, ge=0)
 
 
-def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: str) -> dict:
-    res = (
-        supabase.table("orders")
-        .select("id, tenant_id, contact_id, status")
-        .eq("id", order_id)
-        .eq("tenant_id", tenant_id)
-        .maybe_single()
-        .execute()
-    )
-    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
-        raise HTTPException(status_code=404, detail="Pedido no encontrado para este tenant")
-    return res.data
+class ClaimResolve(BaseModel):
+    resolution_notes: str = Field(..., min_length=3, max_length=2000)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -184,18 +174,21 @@ def list_claims(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Lista reclamos del tenant. Filtros opcionales por status / customer / order."""
-    q = supabase.table("claims").select("*").eq("tenant_id", tenant_id)
-    if status:
-        _validate_status(status)
-        q = q.eq("status", status)
-    if customer_id:
-        q = q.eq("customer_id", customer_id)
-    if order_id:
-        q = q.eq("order_id", order_id)
-    q = q.order("created_at", desc=True).limit(limit)
-    res = q.execute()
-    return res.data or []
+    """Lista reclamos del tenant con embeds de pedido/contacto + reason_detail
+    (lo que la consola necesita — M2.4: page.tsx migra su listado a este REST).
+    Filtros opcionales por status / customer / order (semántica heredada)."""
+    try:
+        return claims_service.list_claims(
+            supabase,
+            tenant_id=tenant_id,
+            actor=Actor(channel=Channel.CONSOLE, tenant_id=tenant_id),
+            status=status,
+            customer_id=customer_id,
+            order_id=order_id,
+            limit=limit,
+        )
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 @router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
@@ -206,35 +199,40 @@ def create_claim(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Crea un reclamo. Valida que el order pertenezca al tenant.
-    Si customer_id no viene, se deriva del order.contact_id.
+    """Crea un reclamo vía el writer unificado del dominio.
 
     BLOQUE G-4 (decisión founder): CREAR reclamos es owner/manager/operator — el
     operator es front-line de soporte y la UI ya expone «Nuevo Reclamo» (canWrite
     incluye operator). Se quitó require_write_role para alinear la API con la UI
     (antes el operator veía el botón y recibía 403). RESOLVER/reembolsar sigue
-    restringido (patch_claim/resolve_claim mantienen require_write_role)."""
-    order = _ensure_order_belongs_to_tenant(supabase, tenant_id, body.order_id)
-    _validate_reason(body.reason.strip())
+    restringido (patch_claim/resolve_claim mantienen require_write_role).
 
-    customer_id = body.customer_id or order.get("contact_id")
+    M2.4: la dedup del dominio (reclamo abierto para ese pedido+cliente) responde
+    200 + el claim existente + `deduplicated: true` — sin duplicar fila.
+    """
+    from lib.claim_ports import build_api_claim_ports
 
-    payload: dict = {
-        "tenant_id": tenant_id,
-        "order_id":  body.order_id,
-        "customer_id": customer_id,
-        "reason":    body.reason.strip(),
-        "status":    "open",
-    }
-    if body.requested_amount is not None:
-        payload["requested_amount"] = body.requested_amount
-    if body.resolution_notes:
-        payload["resolution_notes"] = body.resolution_notes.strip()
-
-    res = supabase.table("claims").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
-    if not res.data:
-        raise HTTPException(status_code=500, detail="No fue posible crear el reclamo")
-    return res.data[0]
+    try:
+        result = claims_service.create_claim(
+            supabase,
+            tenant_id=tenant_id,
+            input=ClaimCreateInput(
+                order_id=body.order_id,
+                reason=body.reason,
+                customer_id=body.customer_id,
+                reason_detail=body.reason_detail,
+                requested_amount=body.requested_amount,
+                resolution_notes=body.resolution_notes,
+            ),
+            actor=_build_actor(request, tenant_id, None),
+            ports=build_api_claim_ports(supabase, tenant_id),
+        )
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
+    if not result.created:
+        # Dedup (patrón adopt-winner de orders.create): 200 + claim existente.
+        return JSONResponse(status_code=200, content=result.body())
+    return result.body()
 
 
 @router.get("/{claim_id}", response_model=dict)
@@ -243,73 +241,15 @@ def get_claim(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    res = (
-        supabase.table("claims")
-        .select("*")
-        .eq("id", claim_id)
-        .eq("tenant_id", tenant_id)
-        .maybe_single()
-        .execute()
-    )
-    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
-        raise HTTPException(status_code=404, detail="Reclamo no encontrado")
-    return res.data
-
-
-def _notify_client_claim_outcome(supabase, *, claim: dict, tenant_id: str, enabled: bool = True) -> None:
-    """BLOQUE F-5: notifica al cliente por WhatsApp cuando su reclamo se RESUELVE o RECHAZA.
-
-    Antes los paths de mutación (resolve/patch) solo escribían a DB → el cliente NUNCA se enteraba,
-    aunque la UI se lo afirmaba al operador. Reusa el patrón best-effort de wompi_webhook
-    (_enqueue_whatsapp_outbound): encola el mensaje y la ventana 24h de Meta la aplica el downstream
-    (si el cliente escribió hace >24h la entrega falla igual que en las notifs de pago/envío). NUNCA
-    rompe la mutación (best-effort). `claim` es la fila YA actualizada (incluye status/notes/order_id).
-    `enabled` deja al caller (patch_claim) notificar solo en la TRANSICIÓN sin añadir una rama propia.
-    """
-    if not enabled:
-        return
     try:
-        status = (claim or {}).get("status")
-        if status not in ("resolved", "rejected"):
-            return
-        order_id = claim.get("order_id")
-        if not order_id:
-            return
-        order = (
-            supabase.table("orders")
-            .select("conversation_id")
-            .eq("id", order_id)
-            .eq("tenant_id", tenant_id)
-            .limit(1)
-            .execute()
-        ).data
-        conversation_id = (order or [{}])[0].get("conversation_id")
-        if not conversation_id:
-            return  # sin conversación WhatsApp (p.ej. pedido MeLi/consola) → no hay canal
-
-        ticket = claim.get("ticket_number")
-        notes = (claim.get("resolution_notes") or "").strip()
-        ref = f"#{ticket}" if ticket else f"del pedido #{str(order_id)[:8].upper()}"
-        if status == "resolved":
-            text = (
-                f"✅ *Reclamo resuelto*\n\nTu reclamo {ref} fue resuelto."
-                + (f"\n\n{notes}" if notes else "")
-                + "\n\nGracias por tu paciencia. Si necesitas algo más, escríbenos."
-            )
-        else:  # rejected
-            text = (
-                f"Hemos revisado tu reclamo {ref}."
-                + (f"\n\n{notes}" if notes else "")
-                + "\n\nSi tienes dudas o nueva información, escríbenos y lo revisamos."
-            )
-
-        from routers.wompi_webhook import _enqueue_whatsapp_outbound
-        _enqueue_whatsapp_outbound(
-            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-            text=text, log_tag="CLAIM_WA_OUTCOME",
+        return claims_service.get_claim(
+            supabase,
+            tenant_id=tenant_id,
+            actor=Actor(channel=Channel.CONSOLE, tenant_id=tenant_id),
+            claim_id=claim_id,
         )
-    except Exception as exc:
-        logger.warning("[CLAIMS] notif cliente falló claim=%s: %s", (claim or {}).get("id"), exc)
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 @router.patch("/{claim_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
@@ -327,78 +267,25 @@ def patch_claim(
     Reapertura (terminal → no-terminal): restringida a OWNER y solo desde
     'rejected'/'cancelled'. 'refunded' nunca se reabre (el reembolso ya movió
     dinero); 'resolved' tampoco (cierre positivo). Decisión F2 — Opción B.
+    La FSM completa vive en `konvi_domain.claims.transition_claim`.
     """
-    update: dict = {}
-    if patch.status is not None:
-        _validate_status(patch.status)
-        update["status"] = patch.status
-    if patch.resolution_notes is not None:
-        update["resolution_notes"] = patch.resolution_notes.strip() or None
+    from lib.claim_ports import build_api_claim_ports
 
-    # BLOQUE G-2: leemos el estado actual si cambia el status O si se corrige el monto
-    # reembolsado (path de corrección de reembolsos históricos con monto NULL).
-    need_current = ("status" in update) or (patch.refunded_amount is not None)
-    current = _fetch_claim(supabase, tenant_id, claim_id) if need_current else None
-    cur_status = current.get("status") if current else None
-
-    # F-5: notificar al cliente SOLO en la transición a un outcome (resolved/rejected), no en cada patch.
-    _notify_outcome = False
-    if "status" in update:
-        new_status = update["status"]
-        _notify_outcome = new_status in ("resolved", "rejected") and cur_status != new_status
-
-        # BLOQUE G-2: 'refunded' es FINAL — no se puede cambiar a NINGÚN otro estado.
-        # Antes refunded→resolved pasaba (terminal→terminal, no lo atrapaba is_reopen)
-        # y sacaba el reembolso del neteo del KPI (el RPC solo cuenta status='refunded').
-        if cur_status == "refunded" and new_status != "refunded":
-            raise HTTPException(
-                status_code=409,
-                detail="Un reclamo reembolsado es final; no se puede cambiar de estado.",
-            )
-
-        # BLOQUE G-2: captura del monto/fecha reales al marcar 'refunded' (write-once).
-        update.update(_refund_ledger_fields(
-            patch, cur_status=cur_status, new_status=new_status, current=current or {},
-        ))
-
-        # Guard de reapertura: terminal → no-terminal (solo owner, desde rejected/cancelled).
-        # El caso 'refunded' ya lo cortó el guard de finalidad de arriba (rama eliminada).
-        is_reopen = cur_status in TERMINAL_STATUSES and new_status not in TERMINAL_STATUSES
-        if is_reopen:
-            if _role != "owner":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Solo el owner puede reabrir un reclamo cerrado.",
-                )
-            if cur_status not in REOPENABLE_STATUSES:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"No se puede reabrir un reclamo en estado '{cur_status}'. "
-                        "Solo 'rejected' o 'cancelled' se pueden reabrir."
-                    ),
-                )
-    elif patch.refunded_amount is not None:
-        # BLOQUE G-2: corrección de monto en un reclamo YA 'refunded' con monto NULL
-        # (backfill histórico sin monto) — única vía sin cambiar el status.
-        update.update(_refund_ledger_fields(
-            patch, cur_status=cur_status, new_status=None, current=current or {},
-        ))
-
-    if not update:
-        raise HTTPException(status_code=422, detail="Sin campos a actualizar")
-
-    res = (
-        supabase.table("claims")
-        .update(update)
-        .eq("id", claim_id)
-        .eq("tenant_id", tenant_id)
-        .execute()
-    )
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Reclamo no encontrado")
-    _notify_client_claim_outcome(supabase, claim=res.data[0], tenant_id=tenant_id, enabled=_notify_outcome)
-    return res.data[0]
+    try:
+        return claims_service.transition_claim(
+            supabase,
+            tenant_id=tenant_id,
+            claim_id=claim_id,
+            input=ClaimTransitionInput(
+                status=patch.status,
+                resolution_notes=patch.resolution_notes,
+                refunded_amount=patch.refunded_amount,
+            ),
+            actor=_build_actor(request, tenant_id, _role),
+            ports=build_api_claim_ports(supabase, tenant_id),
+        )
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 @router.post("/{claim_id}/resolve", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
@@ -411,87 +298,38 @@ def resolve_claim(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
-    """Atajo: marca status=resolved + persiste resolution_notes obligatoria."""
-    prev = _fetch_claim(supabase, tenant_id, claim_id)  # status previo + 404 si no existe
-    # BLOQUE G-2: 'refunded' es FINAL también por esta puerta. Sin este guard, /resolve
-    # sacaba un reclamo reembolsado del neteo del KPI (el RPC solo cuenta 'refunded')
-    # → revenue sobrestimado. Simétrico con patch_claim.
-    if prev.get("status") == "refunded":
-        raise HTTPException(
-            status_code=409,
-            detail="Un reclamo reembolsado es final; no se puede cambiar de estado.",
+    """Atajo: marca status=resolved + persiste resolution_notes obligatoria.
+    Misma transición del dominio (el guard de 'refunded' FINAL y la
+    notificación F-5 solo-en-transición-real los garantiza el servicio)."""
+    from lib.claim_ports import build_api_claim_ports
+
+    try:
+        return claims_service.transition_claim(
+            supabase,
+            tenant_id=tenant_id,
+            claim_id=claim_id,
+            input=ClaimTransitionInput(
+                status="resolved",
+                resolution_notes=body.resolution_notes,
+            ),
+            actor=_build_actor(request, tenant_id, _role),
+            ports=build_api_claim_ports(supabase, tenant_id),
         )
-    res = (
-        supabase.table("claims")
-        .update({
-            "status": "resolved",
-            "resolution_notes": body.resolution_notes.strip(),
-        })
-        .eq("id", claim_id)
-        .eq("tenant_id", tenant_id)
-        .execute()
-    )
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Reclamo no encontrado")
-    # F-5: notificar SOLO en la transición real a 'resolved' (idempotente: repetir /resolve —o
-    # PATCH-resolve seguido de /resolve— NO re-notifica al cliente).
-    _notify_client_claim_outcome(
-        supabase, claim=res.data[0], tenant_id=tenant_id,
-        enabled=(prev.get("status") != "resolved"),
-    )
-    return res.data[0]
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 # ─── Reversión del pago (Ley 1480 art. 51 + Decreto 1074 cap. 2.2.2.51) ──────
 #
-# Es una figura DISTINTA del reembolso que ya vive en este router. Acá el dinero no lo
-# devolvemos nosotros: el consumidor le pide al EMISOR de su medio de pago que deshaga el
-# cargo. Nuestra única obligación —y es dura— es emitir la constancia de la queja con
-# fecha y causal (art. 2.2.2.51.4), porque el art. 2.2.2.51.7 num. 6 se la exige al
-# consumidor como contenido de la notificación a su banco. Sin ella no puede ejercer el
-# derecho.
+# Es una figura DISTINTA del reembolso. Acá el dinero no lo devolvemos nosotros:
+# el consumidor le pide al EMISOR de su medio de pago que deshaga el cargo.
+# Nuestra única obligación —y es dura— es emitir la constancia de la queja con
+# fecha y causal (art. 2.2.2.51.4). La lógica delega en las RPCs SECURITY
+# DEFINER vía `konvi_domain.claims.reversion` (R2 — no se reimplementan).
 #
 # La causal la DECLARA el consumidor y el operador la transcribe: la norma pide
-# "indicación de la causal que sustenta la petición", y clasificarla con un LLM sería
-# ponerlo a decidir verdad legal.
-
-#: Las cinco del art. 2.2.2.51.2. Lista cerrada, espejo del CHECK en DB. Duplicarla acá
-#: es a propósito: el 422 explica cuáles son, en vez de devolver un error de constraint.
-CAUSALES_REVERSION = {
-    "fraude",
-    "operacion_no_solicitada",
-    "producto_no_recibido",
-    "producto_no_corresponde",
-    "producto_defectuoso",
-}
-
-#: Por dónde puede haber vuelto la plata. Tenerlos separados es lo que permite ver el
-#: doble pago del art. 2.2.2.51.10.
-VIAS_REVERSION = {"reembolso_directo", "reversion_emisor"}
-
-#: Motivos por los que la radicación no procede, traducidos a HTTP. Un 404 para "el
-#: reclamo no existe" y un 409 para "existe pero esta figura no aplica": son cosas
-#: distintas y el operador necesita distinguirlas.
-_MOTIVO_HTTP = {
-    "reclamo_inexistente": (404, "Reclamo no encontrado"),
-    "reclamo_sin_pedido": (409, "El reclamo no está asociado a un pedido"),
-    "pago_no_electronico": (
-        409,
-        "La reversión del pago no procede sobre pagos presenciales (contra entrega en "
-        "efectivo): Decreto 1074 art. 2.2.2.51.1. El camino acá es el reembolso.",
-    ),
-    "forma_de_pago_desconocida": (
-        409,
-        "El pedido no tiene forma de pago registrada; no se puede afirmar que fue "
-        "electrónico y la constancia afirma hechos.",
-    ),
-    "valor_excede_el_pedido": (
-        422,
-        "El valor solicitado excede el total del pedido. Al emisor le es oponible la "
-        "inexistencia de la operación (art. 2.2.2.51.8).",
-    ),
-}
-
+# "indicación de la causal que sustenta la petición", y clasificarla con un LLM
+# sería ponerlo a decidir verdad legal.
 
 class ReversionCreate(BaseModel):
     causal: str = Field(..., description="Una de las cinco del art. 2.2.2.51.2.")
@@ -541,36 +379,27 @@ def registrar_reversion(
     una segunda con otra fecha: la fecha es lo que prueba que la queja llegó dentro de los
     cinco días hábiles del art. 2.2.2.51.4.
     """
-    if body.causal not in CAUSALES_REVERSION:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Causal inválida '{body.causal}'. La ley enumera cinco: "
-                   f"{sorted(CAUSALES_REVERSION)} (Decreto 1074 art. 2.2.2.51.2).",
+    try:
+        return reversion_service.register_reversion(
+            supabase,
+            tenant_id=tenant_id,
+            claim_id=claim_id,
+            input=ReversionInput(
+                causal=body.causal,
+                razones=body.razones,
+                valor=body.valor,
+                instrumento=body.instrumento,
+                es_parcial=body.es_parcial,
+                items=body.items,
+                bien_a_disposicion=body.bien_a_disposicion,
+                canal=body.canal,
+                conversation_id=body.conversation_id,
+                message_id=body.message_id,
+                meta_message_id=body.meta_message_id,
+            ),
         )
-
-    res = supabase.rpc("rpc_registrar_reversion", {
-        "p_claim_id": claim_id,
-        "p_tenant_id": tenant_id,
-        "p_causal": body.causal,
-        "p_razones": body.razones.strip(),
-        "p_valor": body.valor,
-        "p_instrumento": body.instrumento,
-        "p_es_parcial": body.es_parcial,
-        "p_items": body.items,
-        "p_bien_a_disposicion": body.bien_a_disposicion,
-        "p_canal": body.canal,
-        "p_conversation_id": body.conversation_id,
-        "p_message_id": body.message_id,
-        "p_meta_message_id": body.meta_message_id,
-    }).execute()
-    fila = (res.data or [{}])[0] if isinstance(res.data, list) else (res.data or {})
-
-    motivo = fila.get("motivo")
-    if motivo:
-        code, detalle = _MOTIVO_HTTP.get(motivo, (422, f"No se pudo radicar: {motivo}"))
-        raise HTTPException(status_code=code, detail=detalle)
-
-    return _leer_reversion(supabase, tenant_id, claim_id)
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 @router.get("/{claim_id}/reversion", response_model=dict)
@@ -580,7 +409,12 @@ def obtener_reversion(
     supabase: Client = Depends(get_service_client),
 ):
     """La constancia radicada de un reclamo, o 404 si no hay ninguna."""
-    return _leer_reversion(supabase, tenant_id, claim_id)
+    try:
+        return reversion_service.read_reversion(
+            supabase, tenant_id=tenant_id, claim_id=claim_id,
+        )
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
 
 
 @router.post("/{claim_id}/reversion/movimiento", response_model=dict,
@@ -601,39 +435,13 @@ def registrar_movimiento(
     el consumidor debe devolver esos recursos. Sin registrarlo sería invisible: no se puede
     reclamar lo que no se sabe que se pagó.
     """
-    if body.via not in VIAS_REVERSION:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Vía inválida '{body.via}'. Válidas: {sorted(VIAS_REVERSION)}",
+    try:
+        return reversion_service.register_reversion_movement(
+            supabase,
+            tenant_id=tenant_id,
+            claim_id=claim_id,
+            via=body.via,
+            valor=body.valor,
         )
-    actual = _leer_reversion(supabase, tenant_id, claim_id)
-
-    res = supabase.rpc("rpc_registrar_movimiento_reversion", {
-        "p_reversal_id": actual["id"],
-        "p_tenant_id": tenant_id,
-        "p_via": body.via,
-        "p_valor": body.valor,
-    }).execute()
-    fila = (res.data or [{}])[0] if isinstance(res.data, list) else (res.data or {})
-    if fila.get("motivo"):
-        raise HTTPException(status_code=422, detail=fila["motivo"])
-
-    return _leer_reversion(supabase, tenant_id, claim_id)
-
-
-def _leer_reversion(supabase: Client, tenant_id: str, claim_id: str) -> dict:
-    res = (
-        supabase.table("payment_reversal_requests")
-        .select("*")
-        .eq("claim_id", claim_id)
-        .eq("tenant_id", tenant_id)
-        .limit(1)
-        .execute()
-    )
-    filas = res.data or []
-    if not filas:
-        raise HTTPException(
-            status_code=404,
-            detail="Este reclamo no tiene una solicitud de reversión radicada",
-        )
-    return filas[0]
+    except DomainError as de:
+        raise _domain_error_to_http(de) from de
