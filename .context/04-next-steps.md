@@ -54,6 +54,9 @@ bot↔paquete ×11 + fix enum `order_cancellation_actor`: actor consola = `opera
 
 ### M2.3 — brief de implementación (payment link colapsado) — LEER ANTES DE ESCRIBIR
 
+> El prompt de continuación listo para abrir la sesión de M2.3 vive en
+> `.context/handoff-prompt-m23.md` (apunta de vuelta a este brief).
+
 **Scope:** operación `payments.get_or_create_link` del contrato (§4.1) — UNA política de reuso/TTL
 (mata el espejo `orders.py` ↔ `payment_link_tool.py` medido en M1 §3.3). El bot NO se toca (su
 espejo se retira en B-2/M3); la duplicación queda con alarma de paridad.
