@@ -69,7 +69,7 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 | Mensajería | WhatsApp Cloud API (Meta Graph API **v22.0**, Model B per-tenant) |
 | Shipping | **Aveonline** (único provider — Envia eliminado del runtime en rev.109) |
 | Hosting | Render — Free plan (4 servicios live) — ver upgrade path en `docs/deployment/render-upgrade-path.md` |
-| Tests | 4.826 pytest (316 dbharness) + 363 tests Vitest |
+| Tests | 4.826 pytest (316 dbharness) + 373 tests Vitest |
 
 ---
 

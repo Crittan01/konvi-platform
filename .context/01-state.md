@@ -3,7 +3,7 @@
 **Última actualización**: 2026-08-25 (**Track 7 EN CURSO — T7.1+T7.10+T7.5 CERRADOS**: escena de auth con firma diferencial en las 4 páginas + `/logout` de marca + topbar con identidad de página (fuente única nav-items); directiva founder 2026-08-25: la firma impregna TODO el front · antes: **M2.4 CERRADO — M2 COMPLETO**)
 **Branch activo**: `develop`; `production` = `eec5534f` (deploy 2026-08-22, los 4 servicios live verificados vía Render API + health ×5).
 **Ledger**: 269 migraciones repo / 262 ledger prod — las 7 nuevas (4 Track 6 + 2 B-1 + 1 M2.4 `claims.reason_detail`) van a PRD por protocolo en el próximo deploy autorizado.
-**Tests**: 4.826 pytest (316 dbharness) + 369 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 25/25.
+**Tests**: 4.826 pytest (316 dbharness) + 373 vitest · ruff ≤196 · CI 5/5 · `certify_stg.sh` 18/18 · validate --ci 25/25.
 
 > **Guía de continuación para sesiones nuevas:** el plan de trabajo operativo vigente es
 > **`docs/PLAN-CIERRE.md`** (tracks 1-5 por ambiente, con owner y verificación por ítem).
