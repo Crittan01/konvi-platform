@@ -10,6 +10,7 @@ import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
 import { BottomNav } from './bottom-nav'
+import TopbarTitle from './topbar-title'
 import CommandPalette from '@/components/command-palette'
 
 /**
@@ -137,6 +138,8 @@ export default async function DashboardLayout({
         <div className="sticky top-0 z-10 h-12 border-b topbar-bg flex items-center px-4 sm:px-8">
           {/* Espacio para el hamburger en mobile */}
           <div className="w-10 lg:hidden" />
+          {/* T7.5 — identidad de página (móvil y desktop; fuente única nav-items) */}
+          <TopbarTitle />
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             {/* Spec WOW §4.3 — entrada a la command palette (⌘K). Móvil: icono;
