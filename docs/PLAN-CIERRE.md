@@ -1,6 +1,6 @@
 # PLAN DE CIERRE CONTROLADO — lo que falta, por ambiente
 
-> Estado: VIGENTE · Creado 2026-08-19 tras cerrar S0/S7/S8 + B2 paso 10 (P0 muerto) + G23 + DB password.
+> Estado: VIGENTE · Reordenado 2026-08-24 (directiva founder: la plataforma primero — dominios/consola/infra — y el BLOQUE BOT AL FINAL, inclusive su GUI/API/métricas; ver §Orden de ejecución). Creado 2026-08-19.
 > Cada ítem tiene: ambiente donde se ejecuta · owner ([F] founder dashboard / [A] agente) · pasos · verificación.
 > Regla de oro (sin cambios): STG nunca escribe en PRD. PRD solo recibe código vía `git push origin develop:production` + migraciones por protocolo seguro.
 > Detalle por plataforma (URLs, límites, fuentes oficiales): [`infra/environment-segregation-plan.md`](infra/environment-segregation-plan.md).
@@ -48,7 +48,7 @@
 
 ## Track 5 — Arquitectura de dominios modulares (visión founder 2026-08-22)
 
-La plataforma como UN todo modular para cualquier e-commerce: los dominios (catálogo, pedidos, contactos, envíos, promociones, reclamos, comprobantes, compras, finanzas, analítica, stock) son la única fuente de verdad; la consola y el bot son canales sobre ellos; packs de vertical por tipo de tienda. Documento de arquitectura: [`architecture/modular-domains-vision.md`](architecture/modular-domains-vision.md). Fases M1-M5 (inventario de capacidades → contrato de domain services → tooling generativo del bot → packs de vertical → analítica conversacional), se insertan después de B-2. Nada toca PRD sin certificar en STG.
+La plataforma como UN todo modular para cualquier e-commerce: los dominios (catálogo, pedidos, contactos, envíos, promociones, reclamos, comprobantes, compras, finanzas, analítica, stock) son la única fuente de verdad; la consola y el bot son canales sobre ellos; packs de vertical por tipo de tienda. Documento de arquitectura: [`architecture/modular-domains-vision.md`](architecture/modular-domains-vision.md). Fases M1-M5 (inventario de capacidades → contrato de domain services → tooling generativo del bot → packs de vertical → analítica conversacional). **Por el REORDEN founder 2026-08-24 (PLAN-CIERRE §Orden): los dominios van PRIMERO y el bloque bot AL FINAL — M3 (tools del bot generadas del contrato) es exactamente la razón.** Nada toca PRD sin certificar en STG.
 
 ---
 
@@ -103,6 +103,8 @@ Mejorar ABSOLUTAMENTE la experiencia: no solo corregir bugs visuales sino elevar
 
 ## Track 8 — Bot a presión (adversarial conversation suite) (directiva founder 2026-08-22)
 
+> **✅ IMPLEMENTADO dentro de B-3 (2026-08-23)** — corpus adversarial en `coherence_scenarios.py` (10 escenarios `t8_*`: grosero, corchar/descuento inventado, prompt injection, PII ajena, lenguaje roto, estrés/urgencia, cambio abrupto, multi-intención, arrepentimiento mid-checkout, "ya pagué" falso) con assertions de comportamiento correcto verificadas contra DB (no cede plata — `check_no_discount_without_coupon`; no confirma pago falso — `check_no_fake_payment_confirmation`; escala de verdad — `check_real_escalation` sobre `human_takeover` en DB). La deuda encontrada quedó codificada como xfails auditables (H1-H8) para el bloque bot.
+
 Cuando B-1/B-2 dejen el bot versátil: batería de conversaciones DIFÍCILES en STG — cliente grosero/de mal humor, el que intenta "corchar" (descuentos inventados, "ya pagué" falso, prompt injection, pedir datos de otro cliente), lenguaje coloquial extremo/escritura rota, estrés/urgencia, cambios de tema abruptos, multi-intención en un mensaje, arrepentimientos a mitad de checkout. Cada caso: assertions de comportamiento correcto (no cede plata, no pierde la calma, no alucina, escala cuando debe). Vive dentro del harness serio (B-3) como corpus adversarial.
 
 ## Nota Platform Console (transversal a todo)
@@ -111,62 +113,55 @@ Todo lo que se construye ahora se diseña pensando en la futura **Platform Conso
 
 ---
 
-## Orden de ejecución vigente (consolidado 2026-08-22 — integra Fase A/B, auditoría del bot, conformidad de proveedores y la visión de dominios)
+## Orden de ejecución vigente (consolidado 2026-08-24 — REORDEN founder: la plataforma primero, el BOT AL FINAL)
 
-**Reglas vigentes:** STG-first — nada pasa a PRD sin certificar en STG y sin visto bueno founder (PRD está CONGELADO desde 2026-08-21 hasta cerrar los bloques de ajuste). Todo con evidencia, cero suposiciones.
+**Reglas vigentes:** STG-first — nada pasa a PRD sin certificar en STG y sin visto bueno founder. Todo con evidencia, cero suposiciones. PRD descongelado 2026-08-22; el smoke de dinero real sigue aplazado al cierre (la certificación de dinero la hace el harness turno a turno en STG).
+
+**Por qué el BOT va al final (directiva founder 2026-08-24):** el bot es el mayor CONSUMIDOR de las superficies de dominio (inventario, reclamos, órdenes, pagos, catálogo, endpoints de API). Re-ingenierizar su núcleo mientras esas superficies se mueven (dominios modulares, consola, API) es construir sobre blanco en movimiento: cada cambio de contrato rompe los supuestos del bot. La propia visión Track 5 ya lo declara: las tools del bot se GENERAN del contrato de dominios (M3) — el bot correcto solo se construye sobre contratos estables. **Lo que hace seguro este reorden: B-3 (cerrado 2026-08-23/24) deja la red de seguridad — harness serio con assertions de outcome en DB + corpus adversarial Track 8 + CI nocturno + corpus dorado + LLM-judge — que certifica en cada noche que el bot ACTUAL sigue verde mientras la plataforma evoluciona debajo.**
+
+**Matiz sobre el harness (objeción founder 2026-08-24: "el harness mide al bot — ¿no es tema bot?"):** sí, y tiene DOS capas con destinos distintos que NO hay que confundir:
+1. **Framework (desacoplado del bot)** — runner, `TurnCtx`, assertions de outcome contra DB, aislamiento fail-closed, CI nocturno, LLM-judge, métricas SQL. Mide verdad en DB + texto observable; no depende del núcleo interno del bot. **Persiste intacta a través de B-2** y es además el instrumento de aceptación DEL bloque bot (B-2 es migración strangler que preserva comportamiento — sin esta red, esa migración va a ciegas).
+2. **Capa de escenarios (acoplada al bot actual)** — los 28 escenarios codifican el comportamiento observable de HOY. Cuando B-2/M3 cambien el núcleo y las tools se generen del contrato de dominios, ESTA capa se revisa/reescrive donde aplique. Es deuda conocida y barata: los xfails H1-H8 ya son la cola de comportamiento a corregir, y el runner obliga a retirarlos (XPASS).
+
+Conclusión documentada: el harness NO va al bloque bot porque la fase plataforma sin él deja al bot sin certificación continua (el riesgo exacto del reorden). Lo que SÍ va al bloque bot es la revisión de la capa de escenarios — registrado como parte del paso 7 (B-2).
+
+**CERRADOS (base sobre la que se para este plan):** S8 · B2 paso 10 (P0 muerto) · G23 · Fase A STG (Meta/Resend/Telegram/Gemini) · Track 9 (seguridad DB, aplicado a PRD) · Track 6 (alineación docs oficiales 6/6) · B-1 (calidad conversacional) · B-3 (harness serio + Track 8) · descongelamiento PRD (deploy `eec5534f`).
 
 ```
-HOY → en curso:
-  1. Track 9 — SEGURIDAD DB (RLS/grants): migración por tiers con test          [A]
-     de ataque por hallazgo (C1, A1-A9, luego M1-M14, luego bajos) +
-     guard CI anti-funciones-sin-REVOKE. Va primero: son huecos de PII/dinero
-     cross-tenant abiertos hoy.
-  2. Track 6 — Alineación total con docs oficiales de TODAS las          [A]
-     tecnologías (Wompi 4 llaves + widget futuro, Meta, Supabase, Gemini
-     context caching, Resend webhooks, Telegram, MeLi). Aveonline ya
-     cerrado 2026-08-22. Matriz capacidad×doc×código por tecnología.
-  3. B-1 — Calidad conversacional (la queja original del founder):    [A]
-     resumen rodante de conversación (amnesia estructural), routing de modelo
-     por estado (lite→flash en transaccional), contradicción de longitud,
-     few-shots + manejo de objeciones, gate de pago NO destructivo (F5),
-     resolvers de afirmación/preguntas mid-flow (F4/F6), instrucción de cupón
-     (F3), convivencia bot↔operador y salida de human_takeover (F7/F8).
-  4. B-3 — Harness de evaluación serio (ANTES de B-2, es la red de      [A]
-     seguridad de la re-ingeniería): assertions de outcome en DB
-     obligatorias, fail por respuesta stale, CI nocturno; corpus dorado
-     (conversaciones reales anonimizadas) + LLM-judge + métricas SQL.
-     INCLUYE Track 8: corpus adversarial (cliente grosero, "corchar",
-     lenguaje roto, estrés, multi-intención, arrepentimientos).
-  5. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por    [A]
-     estado FSM, TurnContext único, TurnFinalizer único; strangler por fases,
-     Fase 0 sin riesgo primero: matar V2 eager, resolver estado ANTES de
-     mutaciones, borrar estados/reglas muertos). Con B-3 ya operativo.
-  6. B-4 — Observabilidad mínima post-Sentry: cron /agentic/metrics +     [A]
-     alertas Telegram (error rate, p95, tokens/día), señal Gemini caído,
-     uptime externo /health. Diseñado como base de la futura Platform Console.
-  7. Track 7 — UX/UI de clase mundial (login animado, módulos             [A]
-     completos y pulidos, micro-interacciones framer-motion, estados
-     vacíos/errores/cargas con diseño, móvil primero — contra Kaiu DS).
+AHORA — la plataforma primero:
+  1. Track 5 (M1-M5) — Dominios modulares [A]: inventario de capacidades por
+     dominio → contrato de domain services (pilotos: pedidos + reclamos) →
+     tooling generativo → packs de vertical → analítica conversacional.
+     Es la fuente de verdad que el bot consumirá — por eso va primero.
+  2. Track 7 — UX/UI de clase mundial [A]: consola del tenant completa y
+     pulida contra Kaiu DS (login, módulos, inbox, móvil).
+  3. Track 3 — Infra PRD profesional [F/A]: dominio api.konvi.co + Render
+     Projects (3.1) · pin Python 3.13 (3.2) · dev cloud (3.3) · G8b media
+     privada (3.4).
+  4. Track 1+2 remanentes [F]: Wompi prod keys (1.1) · anular guía UAT (1.2)
+     · B6/B3 legal (1.4) · S6 MeLi (2.3) · M19 verify_token (2.4) · WABA
+     hygiene (2.5) · smoke dinero real PRD (al cierre, con todo certificado).
+  5. Track 4 — Operación continua: A1 MFA (cuando [F] decida) · plantillas
+     Meta por tenant · revisión trimestral.
 
-DESPUÉS (visión de plataforma — Track 5):
-  8. M1-M5 — Dominios modulares (ver docs/architecture/modular-domains-vision.md):
-     inventario de capacidades por dominio → contrato de domain services
-     (pilotos: pedidos + reclamos) → tools del bot generadas del contrato →
-     packs de vertical (belleza/moda/tecnología/juguetería) → analítica
-     conversacional para el owner. Todo deja el punto de extensión para
-     la futura Platform Console (Fase 12).
-
-DESCONGELAR PRD (cuando Track 9 cierre en STG + migraciones aplicadas; el resto sigue en paralelo):
-  9. Migraciones pendientes a prod por protocolo: B-0 ×3 (20260821120000,
-     …120100, …120200) + 20260822020000 (RPC idagente) + las de Track 9.
-     Antes: SELECT de duplicados legacy para el pre-paso del índice B1.
- 10. Deploy develop→production + verificación Render ×4 + health ×5.
- 11. Smoke delgado PRD: pago real mínimo (link prod) + confirmación.
- 12. Founder ops: B2 dominio api.konvi.co · M19 verify_token · desuscribir
-     apps prod de la WABA de prueba (2.5) · anular guía UAT 86732771636 ·
-     pin Python 3.13 · A1 MFA (cuando decida).
+AL FINAL — BLOQUE BOT (TODO el bot, inclusive su GUI, API y métricas):
+  6. Entrada: inventario de inclusiones parche del bot → formulación
+     arquitectónica (validación pedida por founder 2026-08-23; los agentes
+     explore cayeron por cuota — los briefs quedan en
+     .audit/findings/2026-08-23-patch-inventory-brief.md como primer paso).
+  7. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por estado
+     FSM + TurnContext único + TurnFinalizer único; strangler por fases, Fase 0
+     sin riesgo primero) SOBRE los contratos de dominio ya estables. Resuelve
+     la deuda conversacional H1-H8 (codificada como xfails del harness — el
+     runner obliga a retirar cada xfail cuando el comportamiento se corrija).
+  8. B-4 — Observabilidad/métricas del bot post-Sentry: cron /agentic/metrics
+     + alertas Telegram + decisión canary (AGENTIC_STATE_ROUTING_ENABLED /
+     AGENTIC_TOOL_VALIDATED_ENABLED se vuelven default solo con la telemetría
+     acumulada en agentic_shadow_log — medir con
+     scripts/uat/agentic_quality_metrics.py).
+  9. Bot GUI/API/métricas en la consola del tenant (inbox, controles,
+     evidencia) — con Track 7 ya cerrado y la Platform Console como destino
+     (Fase 12 sigue fuera de alcance — OQ-P01).
 ```
 
-**Completado esta semana (base sobre la que se para este plan):** S8 total · B2 paso 10 (P0 muerto) · G23 · Fase A STG (Meta/Resend/Telegram/Gemini E2E) · deploy prod 2026-08-21 · auditoría profunda del bot (6 frentes, evidencia en `.audit/findings/2026-08-21-bot-deep-audit.md`) · B-0 fixes críticos de dinero/verdad · E2E bot STG certificado turno a turno · conformidad Aveonline contra doc oficial (verificada live contra cuenta demo).
-
-**Estado al crear este plan (2026-08-19):** suite 4405 pytest + 353 vitest + tsc 0 + ruff ≤ baseline + CI 5/5 + `certify_stg.sh` 18/18 — todo verde en develop. Cerrados hoy: S8 total (código + Render + sentry.io), B2 paso 10 (legacy Supabase 401), DB password, G23 (fallbacks legacy fuera del código), dashboard Render sin vars legacy/Sentry (verificado vía API).
+**Completado la semana del 2026-08-17→24 (base certificada):** S8 total · B2 paso 10 · G23 · Fase A STG · Track 9 (STG + PRD) · Track 6 (6/6) · B-1 · B-3 (harness serio + Track 8 + E2E real de verificación + fix arquitectónico de cortesía en el embudo OutputValidator) · suite 4.707 pytest + 316 dbharness + 363 vitest · certify_stg 18/18 · CI 5/5.
