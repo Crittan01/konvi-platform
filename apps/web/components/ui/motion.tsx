@@ -65,6 +65,18 @@ const itemVariants: Variants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.2, ease: EASE_OUT } },
 }
 
+// Variante reduced-motion de StaggerItem: MISMOS valores finales con snap
+// instantáneo (duration 0). NUNCA `variants={undefined}` para reduced: al
+// quitar las variantes framer NO resetea los valores en vuelo y el contenido
+// quedaba congelado en `opacity: 0` (bug real expuesto por la verificación
+// live T7.3: usuarios con prefers-reduced-motion veían las listas con
+// StaggerList VACÍAS). Con la variante duration-0, el flip post-hidratación
+// (useReducedMotionDS) re-targets a `show` y todo encaja en el mismo frame.
+const itemVariantsReduced: Variants = {
+  hidden: {},
+  show: { opacity: 1, y: 0, transition: { duration: 0 } },
+}
+
 /**
  * StaggerList — contenedor de listas: los <StaggerItem> hijos entran en
  * cascada. Con prefers-reduced-motion no hay stagger ni item animation.
@@ -93,7 +105,7 @@ export function StaggerList({
 export function StaggerItem({ children, ...props }: HTMLMotionProps<'div'>) {
   const reduce = useReducedMotionDS()
   return (
-    <motion.div variants={reduce ? undefined : itemVariants} {...props}>
+    <motion.div variants={reduce ? itemVariantsReduced : itemVariants} {...props}>
       {children}
     </motion.div>
   )
@@ -148,6 +160,59 @@ export function BubbleIn({
       initial={!enter ? false : reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
       transition={reduce ? { duration: 0.15 } : { duration: 0.2, ease: EASE_OUT }}
+      {...props}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/**
+ * NavPill — indicador de destino activo que VIAJA entre ítems (T7.3, Spec
+ * §4.2 bottom-nav). Se renderiza UNA vez por ítem con `active`; solo la del
+ * destino activo se pinta. El `layoutId` compartido hace que la pill se
+ * desplace al nuevo destino (250ms, easing del DS) en vez de aparecer de
+ * golpe. Con prefers-reduced-motion se pinta estática (span sin layoutId →
+ * sin viaje, §4.1.1). `aria-hidden`: el estado activo lo anuncia
+ * `aria-current` en el link padre — la pill es solo refuerzo visual.
+ * Sin estilos de entrada en SSR → no hay hydration mismatch (no aplica
+ * useReducedMotionDS: el span de la pill no lleva `initial`).
+ */
+export function NavPill({
+  active,
+  layoutId,
+  className,
+}: {
+  active: boolean
+  layoutId: string
+  className?: string
+}) {
+  const reduce = useReducedMotion()
+  if (!active) return null
+  if (reduce) return <span aria-hidden className={className} />
+  return (
+    <motion.span
+      aria-hidden
+      layoutId={layoutId}
+      className={className}
+      transition={{ duration: 0.25, ease: EASE_OUT }}
+    />
+  )
+}
+
+/**
+ * LayoutItem — ítem de colección que se REUBICA suave cuando sus hermanos
+ * cambian (chips de filtro, reorden; T7.3, Spec §4.2 pedidos). NO anima
+ * entrada — eso es de FadeIn/StaggerItem (se anidan: LayoutItem por fuera,
+ * StaggerItem dentro, para que el layout mida la caja del ítem de lista).
+ * Con prefers-reduced-motion: sin layout (§4.1.1).
+ */
+export function LayoutItem({ children, ...props }: HTMLMotionProps<'div'>) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.div
+      layout={!reduce}
+      transition={{ duration: 0.25, ease: EASE_OUT }}
       {...props}
     >
       {children}

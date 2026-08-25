@@ -4,7 +4,7 @@
 // render (y que el stub de matchMedia basta para useReducedMotion).
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { AnimatePresence, BubbleIn, FadeIn, StaggerList, StaggerItem, Pressable } from './motion'
+import { AnimatePresence, BubbleIn, FadeIn, LayoutItem, NavPill, StaggerList, StaggerItem, Pressable } from './motion'
 
 let reduceMotion = false
 
@@ -74,5 +74,38 @@ describe('BubbleIn (T7.2)', () => {
     reduceMotion = true
     render(<BubbleIn>Reducida</BubbleIn>)
     expect(screen.getByText('Reducida')).toBeInTheDocument()
+  })
+})
+
+describe('NavPill (T7.3)', () => {
+  it('active=true pinta la pill con su className', () => {
+    render(<NavPill active layoutId="test-pill" className="bg-primary/10" />)
+    expect(document.querySelector('[class*="bg-primary/10"]')).not.toBeNull()
+  })
+
+  it('active=false no pinta nada', () => {
+    const { container } = render(<NavPill active={false} layoutId="test-pill" className="bg-primary/10" />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('con prefers-reduced-motion pinta span estático (sin viaje)', () => {
+    reduceMotion = true
+    render(<NavPill active layoutId="test-pill" className="bg-primary/10" />)
+    expect(document.querySelector('[class*="bg-primary/10"]')).not.toBeNull()
+  })
+})
+
+describe('LayoutItem (T7.3)', () => {
+  it('renderiza children y conserva className', () => {
+    render(<LayoutItem className="rounded-xl">Card</LayoutItem>)
+    const el = screen.getByText('Card')
+    expect(el).toBeInTheDocument()
+    expect(el.className).toContain('rounded-xl')
+  })
+
+  it('con prefers-reduced-motion el render no se rompe (sin layout)', () => {
+    reduceMotion = true
+    render(<LayoutItem>CardR</LayoutItem>)
+    expect(screen.getByText('CardR')).toBeInTheDocument()
   })
 })

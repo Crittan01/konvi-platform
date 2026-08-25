@@ -3,6 +3,7 @@
 import { BarChart3, Boxes, MessageSquare, ShoppingBag, Users } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { NavPill } from '@/components/ui/motion'
 
 // Navegación inferior móvil — acceso directo a los destinos primarios. El menú
 // completo sigue en el drawer del sidebar (hamburguesa). Solo visible < lg.
@@ -39,10 +40,17 @@ export function BottomNav({ inboxBadge = 0 }: { inboxBadge?: number }) {
                     ? `${label}, ${inboxBadge > 99 ? 'más de 99' : inboxBadge} ${inboxBadge === 1 ? 'conversación necesita' : 'conversaciones necesitan'} atención humana`
                     : undefined
                 }
-                className={`flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${
+                className={`relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${
                   active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
+                {/* T7.3 — pill que viaja entre destinos (layoutId, Spec §4.2).
+                    Visual solamente: el estado activo lo anuncia aria-current. */}
+                <NavPill
+                  active={active}
+                  layoutId="bottomnav-active-pill"
+                  className="absolute inset-x-2 inset-y-1 rounded-xl bg-primary/10 ring-1 ring-primary/20"
+                />
                 <span className="relative">
                   <Icon className="h-5 w-5" aria-hidden />
                   {showBadge && (
@@ -54,7 +62,7 @@ export function BottomNav({ inboxBadge = 0 }: { inboxBadge?: number }) {
                     </span>
                   )}
                 </span>
-                <span>{label}</span>
+                <span className="relative">{label}</span>
               </Link>
             </li>
           )

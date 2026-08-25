@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog'
-import { StaggerList, StaggerItem } from '@/components/ui/motion'
+import { StaggerList, StaggerItem, LayoutItem } from '@/components/ui/motion'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import OrdersNewForm from '../orders-new-form'
 
@@ -539,8 +539,10 @@ export default function OrdersManager({
           ) : (
             /* Spec WOW §4.2: entrada escalonada sutil (stagger 25ms) solo en los
                primeros 6 ítems (sin cascada infinita). Las keys estables (o.id)
-               evitan re-animar en refreshes con la misma data; al cambiar de
-               filtro/página la cascada se repite, que es lo deseado. */
+               evitan re-animar en refreshes con la misma data.
+               T7.3: LayoutItem envuelve TODA card — al cambiar de filtro/página
+               las que sobreviven se REUBICAN suave (layout animation) en vez de
+               saltar; la entrada de las nuevas sigue siendo del StaggerItem. */
             <StaggerList stagger={0.025} className={`space-y-4 transition-opacity ${isNavPending ? 'opacity-60' : ''}`}>
               {initialOrders.map((o, orderIdx) => {
                 const nextStatus = STATUS_NEXT[o.status]
@@ -551,8 +553,9 @@ export default function OrdersManager({
                 const discount  = o.discount_amount ?? 0
                 const revenue   = o.total_amount ?? (subtotal + shipping - discount)
 
+                // La key de lista vive en el LayoutItem (wrapper exterior).
                 const card = (
-                  <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-xs transition-all focus-within:border-primary/50">
+                  <div className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-xs transition-all focus-within:border-primary/50">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -652,9 +655,13 @@ export default function OrdersManager({
                   </div>
                 )
 
-                return orderIdx < 6
-                  ? <StaggerItem key={o.id}>{card}</StaggerItem>
-                  : card
+                return (
+                  <LayoutItem key={o.id}>
+                    {orderIdx < 6
+                      ? <StaggerItem>{card}</StaggerItem>
+                      : card}
+                  </LayoutItem>
+                )
               })}
 
               {/* D7 — Paginación server-side */}
