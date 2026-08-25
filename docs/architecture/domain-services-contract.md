@@ -1,6 +1,6 @@
 # Track 5 · M2 — Contrato de Domain Services (propuesta de diseño)
 
-> **Estado: PROPUESTA — pendiente visto bueno founder. NO se ha escrito código de producción.**
+> **Estado: APROBADO por founder 2026-08-25 (4/4 decisiones §8 en la opción recomendada) — M2 en ejecución.**
 > Origen: visión [`modular-domains-vision.md`](modular-domains-vision.md) §4 fase M2, sobre el
 > inventario verificado [`domain-capabilities-inventory.md`](domain-capabilities-inventory.md) (M1,
 > 2026-08-24, evidencia `archivo:línea` por afirmación — abreviado abajo como **M1 §x.y**).
@@ -256,19 +256,18 @@ y audit SIC que hoy no tiene — requiere certificación STG turno a turno con e
 7. **Seguridad heredada verificada**: dbharness de ataque sigue verde (Track 9); los nuevos
    endpoints heredan dual-auth/RBAC/MFA/rate-limit por adaptador, con tests.
 
-## 8. Preguntas abiertas para el founder (bloquean M2.1, no este documento)
+## 8. Decisiones founder (2026-08-25 — 4/4 aprobadas en la opción recomendada)
 
-1. **Packaging (D1)**: ¿aprueba `packages/shared-py/` instalado editable en build? Es la opción
-   recomendada (mata H1 de raíz; alternativa = bot-consumo-por-HTTP para todo, con latencia y sin
-   matar las copias).
-2. **Cancelación consola (§4.1)**: ¿aprueba que la consola gane void Wompi automático + cancel de
-   guía (mismo pipeline legal del bot)? Implica que cancelar desde consola mueve dinero real como
-   hoy solo hace el bot — recomendado: sí, con MFA AAL2 ya existente.
-3. **Reason de reclamos (§5.1)**: ¿vocabulario cerrado + detalle libre opcional (recomendado —
-   preserva la expresividad del bot y recupera la analítica por causal), o texto libre con
-   categorización posterior?
-4. **Lecturas consola (D8)**: ¿migración a REST dominio a dominio (recomendado, pilotos primero) o
-   PostgREST permanente para lecturas?
+1. **Packaging (D1) → APROBADO `packages/shared-py/`** instalado editable en build. Mata la copia
+   física y el sys.path hack de raíz; el bot la consumirá in-process en M3. (Alternativa descartada:
+   bot-consumo-por-HTTP para todo — latencia por turno y no mata las copias in-process.)
+2. **Cancelación consola (§4.1) → APROBADO pipeline legal completo**: la consola gana void Wompi
+   automático + cancel de guía Aveonline + audit `order_cancellations` (misma semántica del bot),
+   protegida con el MFA AAL2 ya existente.
+3. **Reason de reclamos (§5.1) → APROBADO vocabulario cerrado + `reason_detail` libre opcional**:
+   recupera analítica por causal y preserva la expresividad del bot.
+4. **Lecturas consola (D8) → APROBADO migrar a REST dominio a dominio**, pilotos primero (pedidos y
+   reclamos, donde faltan endpoints como `GET /orders/`); el resto al llegar su turno en el backlog.
 
 ## 9. Relación con las fases siguientes
 

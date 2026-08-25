@@ -33,15 +33,14 @@ de hoy. **No duplicar aquí ítems que ya están en PLAN.md.**
 
 ## Lo que PLAN.md no cubre (o necesita contexto extra)
 
-### Track 5 M2 — preguntas abiertas founder (bloquean M2.1, registradas 2026-08-24)
+### Track 5 M2 — decisiones founder TOMADAS (2026-08-25, 4/4 recomendadas)
 
-El diseño del contrato de domain services (pilotos pedidos+reclamos) quedó propuesto en
-[`docs/architecture/domain-services-contract.md`](../docs/architecture/domain-services-contract.md)
-§8 — NO se escribe código de producción hasta el visto bueno de estas 4 decisiones:
-1. **Packaging** `packages/shared-py/` instalado editable en build (recomendado — mata la copia física y el sys.path hack).
-2. **Cancelación desde consola con void Wompi automático + cancel de guía** (mismo pipeline legal del bot; hoy la consola cancela "a medias").
-3. **Reason de reclamos**: vocabulario cerrado + detalle libre opcional (recomendado) vs texto libre.
-4. **Lecturas consola → REST** dominio a dominio (recomendado, pilotos primero) vs PostgREST permanente.
+Las 4 preguntas del diseño del contrato ([`domain-services-contract.md`](../docs/architecture/domain-services-contract.md) §8)
+quedaron resueltas: **(1)** packaging `packages/shared-py/` editable en build · **(2)** cancelación
+desde consola con pipeline legal completo (void Wompi + cancel guía + audit) tras MFA AAL2 ·
+**(3)** reason de reclamos = vocabulario cerrado + `reason_detail` libre opcional · **(4)** lecturas
+consola → REST dominio a dominio (pilotos primero). M2 en ejecución: M2.0 (paquete + extracción
+cupones) → M2.1-M2.4 (pilotos pedidos + reclamos) con la barra de certificación vigente.
 
 ### F2.7 — UAT HSM con 2 tenants piloto (único remanente de F2)
 
