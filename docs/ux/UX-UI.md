@@ -122,7 +122,7 @@ Verificado con `ls apps/web/components/ui/` (2026-08-25; 28 archivos: 26 compone
 
 `alert` · `badge` · `button` · `card` · `carousel` · `checkbox` · `command` · `confirm-dialog` · `dialog` · `drawer` · `dropdown-menu` · `empty-state` · `input` · `label` · `motion` · `responsive-dialog` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
 
-Fuera de `ui/` pero parte del DS aplicado: `components/command-palette.tsx` (⌘K, §4.3) · `components/auth/auth-scene.tsx` (escena de auth T7.1: `AuthScene`/`AuthBrand`/`AuthCardReveal` — grano inline + aurora estática + brand tile degradado + coreografía stagger, usada por login/mfa/forgot/set-password/logout) · `components/pwa/` · `components/theme/`.
+Fuera de `ui/` pero parte del DS aplicado: `components/command-palette.tsx` (⌘K, §4.3) · `components/auth/auth-scene.tsx` (escena de auth T7.1: `AuthScene`/`AuthBrand`/`AuthCardReveal` — grano inline + aurora estática + brand tile degradado + coreografía stagger, usada por login/mfa/forgot/set-password/logout) · `components/route-error.tsx` (T7.6: boundary de error compartido por módulo — 23 `error.tsx` lo consumen) · `components/pwa/` · `components/theme/`.
 
 Primitivos Radix instalados (`package.json`): accordion, checkbox, dialog, dropdown-menu, select, slot, switch, tabs, tooltip. Nota: `@radix-ui/react-accordion` es dependencia y sus keyframes viven en `globals.css:48-66`, pero **no existe `ui/accordion.tsx`** — primitive instalado sin wrapper del DS.
 
@@ -344,6 +344,8 @@ Verificado con `find apps/web/app/dashboard -name "page.tsx"` (2026-08-02): **37
 
 ## 6. Gaps UX conocidos (auditoría 2026-08-02, re-verificados)
 
+> **Estado al 2026-08-25 (Track 7):** §6.1 ✅ (badge takeover vive en bottom-nav desde la rev. M1 — verificado live en T7.3) · §6.2 ✅ (T7.5: topbar con identidad de página + ⌘K) · §6.3 ✅ (T7.6: barrido a `EmptyState` completado) · §6.4 ✅ (T7.6: `RouteError` compartido + 23 boundaries por ruta) · §6.5 sigue parcial (T7.8 pendiente: cobertura de render del DS).
+
 ### 6.1 Badge `human_takeover` ausente en bottom-nav móvil (M1)
 
 El badge rojo con el conteo de conversaciones en `human_takeover` solo se renderiza en el sidebar (`sidebar-client.tsx:319-323`). `bottom-nav.tsx` no recibe `inboxBadge` (verificado: su `ITEMS` no tiene badge y `layout.tsx:183` lo monta sin props). En móvil el sidebar está oculto tras el drawer → el operador no ve la señal de escalaciones pendientes. **Fix sugerido**: dot/badge sobre el destino Inbox del bottom-nav, misma query ya cacheada en el layout.
@@ -354,9 +356,13 @@ El badge rojo con el conteo de conversaciones en `human_takeover` solo se render
 
 ### 6.3 Sin EmptyState compartido
 
+**✅ CERRADO 2026-08-25 (T7.6):** el barrido completó la migración — ~20 sitios ad-hoc en 13 archivos pasaron a `EmptyState` (team, categories, media, whatsapp-quality ×2, product-edit-drawer movimientos, context-panel pedidos/catálogo, metrics-charts ×2, metrics ×5, expenses con CTA, chat-panel ×2, las 4 páginas "Sin acceso", notas del inbox). Quedaron fuera a propósito: micro-notas en dropdowns de búsqueda (layout crítico, `p-3 text-xs`) y la alerta ámbar de proveedores en compras (es guía/alert, no vacío de lista). Verificado live (media light/dark, finance con CTA, barrido 27 rutas sin errores).
+
 Al momento de la verificación no existía componente EmptyState en el DS (solo un helper local en `finance-dashboard.tsx`) y los estados vacíos eran ad-hoc: 47 coincidencias de frases tipo "No hay… / Aún no… / Sin resultados" en `app/dashboard` (grep) — cada módulo con su propio markup (ej. `orders-manager.tsx:478-495` con icono + dashed border + "Limpiar filtros"). **En curso (WIP sin commit, 2026-08-02)**: ya se creó `components/ui/empty-state.tsx` (variantes `default` dashed / `plain`, basado en el estilo del EmptyState local de finance) — falta la migración gradual de los ~15+ estados ad-hoc.
 
 ### 6.4 Error boundaries solo a nivel sección
+
+**✅ CERRADO 2026-08-25 (T7.6):** `components/route-error.tsx` NUEVO (superficie única: card + retry + link inicio + digest, log con tag de módulo — extraído de los 6 idénticos) + **23 `error.tsx` por ruta** (17 nuevos: contacts, purchases, finance, claims, team, integrations (cubre los 5 providers), settings (cubre security/retention/health/legal/account-closure), marketplace, ai-agents, categories, promotions, receipts, inventory, audit, knowledge-base, media, account; + los 6 existentes migrados al compartido). Un error en una página ya no tira la sección completa.
 
 En el árbol comprometido solo hay 3 boundaries: `app/global-error.tsx`, `app/error.tsx`, `app/dashboard/error.tsx` (este último: card "Error al cargar el módulo" + botón reintentar, log a consola) — un error en una página tira la sección dashboard completa (M5). **En curso (WIP sin commit, 2026-08-02)**: se agregaron `error.tsx` por ruta en `inbox`, `catalog`, `orders`, `shipping` y `metrics` (verificado con find: 7 `error.tsx` en total bajo `app/`). Cobertura aún parcial — el resto de módulos sigue cayendo al boundary de sección.
 

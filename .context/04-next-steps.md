@@ -156,6 +156,13 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   necesita `supabase` y lee la events_key del Vault) → realtime → toast. El webhook apunta a la
   ÚLTIMA fila `payments` del tenant: crear la orden del escenario justo antes de dispararlo.
   Ojo: `unit_price` de la REST es en PESOS y Wompi exige mínimo $1.500.
+- **Live-verify de dinero CONTAMINA el dbharness si no se limpia (T7.4, bug auto-infligido)**:
+  `tests/dbharness/test_order_receipts.py` cuenta GLOBALMENTE `order_receipts` y asume la tabla
+  prístina — cada orden confirmada por la sonda emite un comprobante que SOBREVIVE a la
+  cancelación (voided_at, la fila queda). Regla: toda sonda que confirme pedidos DEBE borrar sus
+  filas al final (`order_receipts` + `payments` + `order_items` + `orders`; ver
+  `cleanup_orders` en `scratch/t7_04_visual_verify.py`). Síntoma: `assert 8 == 1` en
+  `test_y_ademas_rls_lo_bloquearia_igual`.
 
 ### M2.4 ✅ CERRADO (2026-08-25) — M2 COMPLETO — brief ejecutado
 
@@ -240,11 +247,16 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   **Bug DS cazado:** Pressable con `whileTap` emite `tabindex="0"` en SSR →
   mismatch bajo reduced-motion; ahora también usa `useReducedMotionDS`.
 - **T7.5 — Topbar con identidad de página** ✅ 2026-08-25 (bitácora PLAN.md §E).
-- **T7.6 — Barrido de estados**: ~44 vacíos ad-hoc restantes → `ui/empty-state.tsx`;
-  skeletons de divs crudos → `ui/skeleton` donde trivial; `error.tsx` en rutas de alto
-  tráfico sin boundary (contacts, purchases, finance, claims, team, integrations/*,
-  settings/*, marketplace, ai-agents, categories, promotions, receipts) — patrón
-  anti-falso-0 intacto (error+retry, nunca 0 falso).
+- **T7.6 — Barrido de estados** ✅ 2026-08-25 (bitácora PLAN.md §E). Ejecutado:
+  `components/route-error.tsx` NUEVO (superficie única anti-falso-0: retry +
+  inicio + digest) + **23 `error.tsx` por ruta** (17 nuevos + 6 migrados;
+  integrations cubre providers, settings cubre subrutas) · **barrido EmptyState**
+  (~20 sitios en 13 archivos; excluidos a propósito: micro-notas de dropdown
+  y la alerta ámbar de proveedores — documentado en UX-UI §6.3) · **skeletons**
+  → `ui/skeleton` (14 `loading.tsx` + 4 componentes inbox: conversaciones,
+  contexto, notas, imagen). Tests nuevos (3): route-error. Verificado live
+  (`scratch/t7_06_visual_verify.py`): 27 rutas renderizan sin errores de
+  consola/hidratación + empties en ambos temas + móvil.
 - **T7.7 — Virtualización donde paga**: `audit/page.tsx` (miles de filas);
   `conversation-list.tsx` solo si el cursor no basta. Si nada lo justifica → decisión
   documentada y dep `@tanstack/react-virtual` eliminada (no dejar dep muerta).
