@@ -4,7 +4,7 @@
 // patrón anti-falso-0 §3.2: error + retry, nunca un 0 que parezca dato).
 import { RouteError } from '@/components/route-error'
 
-export default function InboxError({
+export default function MediaError({
   error,
   reset,
 }: {
@@ -13,11 +13,11 @@ export default function InboxError({
 }) {
   return (
     <RouteError
-      title="Error al cargar el Inbox"
-      description="No se pudieron cargar las conversaciones. Puede ser un problema de conexión temporal."
+      title="Error al cargar Media"
+      description="No se pudo cargar la biblioteca de medios. Puede ser un problema de conexión temporal."
       error={error}
       reset={reset}
-      logTag="InboxError"
+      logTag="MediaError"
     />
   )
 }
