@@ -163,6 +163,22 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   filas al final (`order_receipts` + `payments` + `order_items` + `orders`; ver
   `cleanup_orders` en `scratch/t7_04_visual_verify.py`). Síntoma: `assert 8 == 1` en
   `test_y_ademas_rls_lo_bloquearia_igual`.
+- **Vitest "Errors N errors" intermitente con todos los tests verdes = trabajo de React tras
+  el teardown de jsdom (T7.8)**: RTL NO auto-limpia en este repo (vitest sin `globals: true` →
+  el auto-cleanup de @testing-library/react nunca se registra). Un test jsdom sin
+  `afterEach(cleanup)` deja el árbol montado; el scheduler de React 19 (MessageChannel/
+  setImmediate) ejecuta trabajo pendiente DESPUÉS de que vitest destruye `window` →
+  `ReferenceError: window is not defined`, "originated in <file>" — intermitente y más
+  probable bajo presión de memoria (validate.sh corre tsc/pytest justo antes) → vitest sale 1
+  con `52 passed` a la vista. Regla: TODO test jsdom lleva `afterEach(cleanup)` explícito
+  (barrido T7.8 en los 6 archivos que faltaban). Diagnóstico: correr
+  `tsc --noEmit && pnpm --filter web test` en ciclo hasta reproducir y leer la sección
+  "Unhandled Errors" del log completo (validate solo muestra tail -12).
+- **jsdom + libs con observers (T7.8)**: embla-carousel 8.6 exige stub de
+  `IntersectionObserver` + `ResizeObserver` además de `matchMedia` (patrón en
+  `motion.test.tsx` / `carousel.test.tsx`). Y `lib/use-media-query.ts` cachea el mql por query
+  a nivel MÓDULO → para testear ramas responsivas el stub de matchMedia necesita `matches`
+  como **getter** (ver `responsive-dialog.test.tsx`).
 
 ### M2.4 ✅ CERRADO (2026-08-25) — M2 COMPLETO — brief ejecutado
 
@@ -267,8 +283,14 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   muerta `@tanstack/react-virtual` retirada (0 imports desde 894b7357).
   Sonda `scratch/t7_07_visual_verify.py` 17/17 (cotas medidas live + ambos
   temas + móvil + reduced-motion + 0 errores consola).
-- **T7.8 — Cobertura de render del DS**: vitest para empty-state, carousel, drawer,
-  responsive-dialog, confirm-dialog, skeleton (hoy 5 tests .tsx sobre 27 primitivos).
+- **T7.8 — Cobertura de render del DS** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  20 tests vitest nuevos para los 6 primitivos con lógica propia
+  (empty-state, carousel, drawer, responsive-dialog, confirm-dialog,
+  skeleton) — vitest 406→426, gap §6.5 cerrado. Lección jsdom: embla 8.6
+  exige stubs de `matchMedia` + `IntersectionObserver` + `ResizeObserver`;
+  y `use-media-query` cachea el mql por query a nivel módulo → el stub de
+  matchMedia para ramas responsivas necesita `matches` como **getter**.
+  Sonda live `scratch/t7_08_visual_verify.py` 19/19.
 - **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
 - **T7.10 — Logout con despedida de marca** ✅ 2026-08-25 (con T7.1 — bitácora PLAN.md §E).
 - **T7.11 — Settings/Security con la firma** (directiva): cambio de contraseña, MFA TOTP,

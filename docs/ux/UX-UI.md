@@ -118,7 +118,7 @@ Cinco, todas en `globals.css`:
 
 ### 1.9 Inventario real de componentes (`components/ui/` — 26)
 
-Verificado con `ls apps/web/components/ui/` (2026-08-25; 28 archivos: 26 componentes + `badge.test.tsx` + `motion.test.tsx`):
+Verificado con `ls apps/web/components/ui/` (2026-08-25; 34 archivos: 26 componentes + 8 `.test.tsx` — badge, motion + los 6 de T7.8 §6.5):
 
 `alert` · `badge` · `button` · `card` · `carousel` · `checkbox` · `command` · `confirm-dialog` · `dialog` · `drawer` · `dropdown-menu` · `empty-state` · `input` · `label` · `motion` · `responsive-dialog` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
 
@@ -353,7 +353,7 @@ Verificado con `find apps/web/app/dashboard -name "page.tsx"` (2026-08-02): **37
 
 ## 6. Gaps UX conocidos (auditoría 2026-08-02, re-verificados)
 
-> **Estado al 2026-08-25 (Track 7):** §6.1 ✅ (badge takeover vive en bottom-nav desde la rev. M1 — verificado live en T7.3) · §6.2 ✅ (T7.5: topbar con identidad de página + ⌘K) · §6.3 ✅ (T7.6: barrido a `EmptyState` completado) · §6.4 ✅ (T7.6: `RouteError` compartido + 23 boundaries por ruta) · §6.5 sigue parcial (T7.8 pendiente: cobertura de render del DS).
+> **Estado al 2026-08-25 (Track 7):** §6.1 ✅ (badge takeover vive en bottom-nav desde la rev. M1 — verificado live en T7.3) · §6.2 ✅ (T7.5: topbar con identidad de página + ⌘K) · §6.3 ✅ (T7.6: barrido a `EmptyState` completado) · §6.4 ✅ (T7.6: `RouteError` compartido + 23 boundaries por ruta) · §6.5 ✅ (T7.8: los 6 primitivos con lógica propia tienen cobertura de render).
 
 ### 6.1 Badge `human_takeover` ausente en bottom-nav móvil (M1)
 
@@ -375,9 +375,11 @@ Al momento de la verificación no existía componente EmptyState en el DS (solo 
 
 En el árbol comprometido solo hay 3 boundaries: `app/global-error.tsx`, `app/error.tsx`, `app/dashboard/error.tsx` (este último: card "Error al cargar el módulo" + botón reintentar, log a consola) — un error en una página tira la sección dashboard completa (M5). **En curso (WIP sin commit, 2026-08-02)**: se agregaron `error.tsx` por ruta en `inbox`, `catalog`, `orders`, `shipping` y `metrics` (verificado con find: 7 `error.tsx` en total bajo `app/`). Cobertura aún parcial — el resto de módulos sigue cayendo al boundary de sección.
 
-### 6.5 Tests de componente: 1 solo
+### 6.5 Tests de componente
 
-30 archivos de tests Vitest, pero solo **2 son `.tsx`**: `components/ui/badge.test.tsx` (único test de componente UI) y `app/auth/callback/page.test.tsx` (página). Los otros 28 son lógica/lib. El DS de 20 componentes carece de cobertura de render (M5).
+**✅ CERRADO 2026-08-25 (T7.8):** los 6 primitivos del DS con lógica propia tienen cobertura de render — `empty-state` ×5 (variantes default/plain, icono aria-hidden, slot action, margen condicional) · `skeleton` ×2 (tokens base + merge de className) · `confirm-dialog` ×5 (error sin provider, resuelve true/false por botón, destructive, labels por defecto) · `responsive-dialog` ×2 (ambas ramas ≥lg Dialog / <lg bottom-sheet vía stub de `matchMedia` con getter — el mql queda cacheado por query) · `drawer` ×3 (portal, superficie tokens + handle + safe-area, cerrado no renderiza) · `carousel` ×3 (roles carrusel/diapositiva, guard de dots con ≤1 snap, error fuera de contexto). **20 tests nuevos** (vitest 406→426, 52 archivos). Lección de entorno: embla 8.6 exige stub de `matchMedia` + `IntersectionObserver` + `ResizeObserver` en jsdom (mismo patrón que `motion.test.tsx`). Verificado live en navegador real (`scratch/t7_08_visual_verify.py` 19/19: dots del carrusel home móvil, ResponsiveDialog bottom-sheet/dialog en pedidos, ConfirmDialog global abre/cancela sin redirect, EmptyState media ×2 temas, skeletons del inbox durante fetch demorado, reduced-motion, 0 errores consola). Los demás primitivos son wrappers finos Radix/shadcn sin lógica propia — cobertura incremental solo si ganan lógica.
+
+Estado previo (auditoría 2026-08-02): 30 archivos de tests Vitest, pero solo **2 eran `.tsx`**: `components/ui/badge.test.tsx` (único test de componente UI) y `app/auth/callback/page.test.tsx` (página). Los otros 28 eran lógica/lib. El DS de 20 componentes carecía de cobertura de render (M5).
 
 ---
 
