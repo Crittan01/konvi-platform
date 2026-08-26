@@ -278,10 +278,12 @@ completa: PLAN.md §E (2026-08-25, M2.4).
 (prohibido `motion` crudo) · solo tokens semánticos (la excepción documentada del login
 es la única) · dark probado en cada superficie nueva · 150-300ms · reduced-motion siempre.
 **Barra por T7.x:** vitest + tsc + lint → suite completa → `validate.sh --ci` (web
-detenido) → verificación visual live STG en AMBOS temas + viewport móvil + reduced-motion
-emulado → commits temáticos + CI 5/5 + bitácora PLAN.md §E + UX-UI.md §6/§1.9 al día
-(el inventario dice 20 componentes y son 27). **NO tocar backend ni bot** (directiva —
-el bloque bot va al final del §Orden).
+detenido) → **verificación visual live STG con navegador real (playwright —
+sonda en `scratch/t7_NN_visual_verify.py` sobre el patrón de las ya probadas;
+veng `scratch/venv-visual` ya creado con chromium cacheado) en AMBOS temas +
+viewport móvil + reduced-motion emulado + 0 errores de consola/hidratación** →
+commits temáticos + CI 5/5 + bitácora PLAN.md §E + UX-UI.md §6/§1.9 al día.
+**NO tocar backend ni bot** (directiva — el bloque bot va al final del §Orden).
 
 ### F2.7 — UAT HSM con 2 tenants piloto (único remanente de F2)
 
