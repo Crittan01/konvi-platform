@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { ImageIcon } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getInboxMediaSignedUrl } from '../actions'
 import {
   INBOX_MEDIA_SIGNED_TTL_SECONDS,
@@ -58,7 +59,7 @@ export function InboxImage({
   }
   if (!src) {
     return (
-      <span className="mb-1.5 block h-24 w-40 animate-pulse rounded-lg bg-muted/40" />
+      <Skeleton className="mb-1.5 block h-24 w-40 rounded-lg bg-muted/40" />
     )
   }
   return (

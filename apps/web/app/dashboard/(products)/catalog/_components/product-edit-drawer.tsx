@@ -17,6 +17,7 @@ import {
   Info, Package2, ArrowUpDown, Archive, History,
   Plus, Zap, Edit3, Trash2, X, ImageOff, ChevronDown, ChevronUp, Sparkles, Loader2,
 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { ImageUploadBox } from './image-upload-box'
 import { VariantMatrixGenerator } from './variant-matrix'
 import type { Product, Variation, AttributeDef } from '../types'
@@ -259,7 +260,7 @@ function StockMovementHistory({ product, tenantId }: { product: Product; tenantI
             </div>
           )}
           {!loading && !error && rows && rows.length === 0 && (
-            <p className="py-3 text-xs text-muted-foreground">Aún no hay movimientos registrados para este producto.</p>
+            <EmptyState variant="plain" className="py-3" description="Aún no hay movimientos registrados para este producto." />
           )}
           {!loading && !error && rows && rows.length > 0 && (
             <div className="rounded-lg border border-border/60 overflow-hidden">

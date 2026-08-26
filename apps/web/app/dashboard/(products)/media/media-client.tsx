@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Upload, Copy, Check, Trash2, Image as ImageIcon, X, Info } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 
 const MEDIA_LIMIT = 100
 
@@ -166,11 +167,12 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
 
         {/* Grid */}
         {files.length === 0 ? (
-          <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
-            <ImageIcon className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground text-sm font-medium">Sin archivos aún.</p>
-            <p className="text-xs text-muted-foreground mt-1">Sube imágenes para asociarlas a tus productos.</p>
-          </div>
+          <EmptyState
+            icon={ImageIcon}
+            className="py-16"
+            title="Sin archivos aún."
+            description="Sube imágenes para asociarlas a tus productos."
+          />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {files.map(file => {

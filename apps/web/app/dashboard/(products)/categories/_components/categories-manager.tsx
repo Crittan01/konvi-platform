@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal, AlertTriangle, RefreshCw } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { createCategory, updateCategory, deleteCategory } from '../actions'
 import { AttributeContractEditor, type AttributeDef } from './attribute-contract-editor'
 import { useConfirm } from '@/components/ui/confirm-dialog'
@@ -314,17 +315,21 @@ export default function CategoriesManager({
       {/* Lista en árbol: raíces en orden; bajo cada raíz, sus subcategorías indentadas. */}
       <div className="rounded-xl border border-border bg-card divide-y divide-border">
         {categories.length === 0 && !loadError && (
-          <div className="px-4 py-8 text-center space-y-1.5">
-            <FolderTree className="h-6 w-6 text-muted-foreground/40 mx-auto" />
-            <p className="text-sm font-medium text-foreground">Aún no tienes categorías</p>
-            <p className="text-xs text-muted-foreground max-w-md mx-auto">
-              Las categorías son cómo el bot agrupa y presenta tu catálogo. Los productos sin categoría
-              caen a una heurística por título (menos precisa).{' '}
-              {canWrite
-                ? 'Crea tu primera vertical arriba (ej. «Salud y Belleza») y luego sus subcategorías.'
-                : 'Pide a un administrador que las configure.'}
-            </p>
-          </div>
+          <EmptyState
+            variant="plain"
+            icon={FolderTree}
+            className="px-4 py-8"
+            title="Aún no tienes categorías"
+            description={(
+              <>
+                Las categorías son cómo el bot agrupa y presenta tu catálogo. Los productos sin categoría
+                caen a una heurística por título (menos precisa).{' '}
+                {canWrite
+                  ? 'Crea tu primera vertical arriba (ej. «Salud y Belleza») y luego sus subcategorías.'
+                  : 'Pide a un administrador que las configure.'}
+              </>
+            )}
+          />
         )}
         {roots.map(root => (
           <div key={root.id} className="divide-y divide-border/60">

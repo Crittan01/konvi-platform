@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { BookOpen, Search, BrainCircuit, PenLine, AlertCircle } from 'lucide-react'
+import { BookOpen, Search, BrainCircuit, PenLine, AlertCircle, ShieldAlert } from 'lucide-react'
 import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
 import { STARTER_TEMPLATES } from './starter-templates'
@@ -121,7 +121,15 @@ export default async function KnowledgeBasePage(
   const cat = searchParams?.cat ?? ''
 
   if (!tenantId) {
-    return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
+    return (
+      <EmptyState
+        variant="plain"
+        icon={ShieldAlert}
+        className="p-8"
+        title="Sin acceso"
+        description="Tenant no configurado."
+      />
+    )
   }
 
   const [{ data }, { data: withEmb }] = await Promise.all([

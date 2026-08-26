@@ -1,7 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { Bot, BookOpen, Sparkles } from 'lucide-react'
+import { Bot, BookOpen, Sparkles, ShieldAlert } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
 import { AgentsList } from './agents-list'
@@ -62,7 +63,15 @@ export default async function AiAgentsPage() {
   const tenantId = meta.tenant_id
 
   if (!tenantId) {
-    return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
+    return (
+      <EmptyState
+        variant="plain"
+        icon={ShieldAlert}
+        className="p-8"
+        title="Sin acceso"
+        description="Tenant no configurado."
+      />
+    )
   }
 
   // BLOQUE G-4: la PAGE es el borde de seguridad (no el sidebar). Endurecer a

@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
 import { Plus, Receipt, Calendar, Tag, Ban } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { addExpense, reverseExpense } from '../actions'
 import { EXPENSE_CATEGORIES, isReversed, type ExpenseRow } from '../lib/pnl'
 import { formatCOPNegative, formatBogotaDate } from '../lib/format'
@@ -118,19 +119,17 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
       )}
 
       {expenses.length === 0 && !showAdd && (
-        <div className="border border-dashed p-8 text-center rounded-xl text-sm space-y-2">
-          <Receipt className="h-8 w-8 text-muted-foreground/50 mx-auto" />
-          <p className="font-medium text-foreground">Sin gastos operativos en este período</p>
-          <p className="text-muted-foreground max-w-sm mx-auto">
-            Un gasto operativo es un egreso del negocio que no es inventario: pauta publicitaria, nómina,
-            suscripciones de software o logística. Registrarlos hace que tu Beneficio Neto sea real.
-          </p>
-          {canWrite && (
+        <EmptyState
+          icon={Receipt}
+          className="p-8"
+          title="Sin gastos operativos en este período"
+          description="Un gasto operativo es un egreso del negocio que no es inventario: pauta publicitaria, nómina, suscripciones de software o logística. Registrarlos hace que tu Beneficio Neto sea real."
+          action={canWrite ? (
             <Button onClick={() => setShowAdd(true)} size="sm" className="h-8 text-xs gap-1.5 mt-1">
               <Plus className="h-3.5 w-3.5" /> Registrar el primer gasto
             </Button>
-          )}
-        </div>
+          ) : undefined}
+        />
       )}
 
       {expenses.length > 0 && (

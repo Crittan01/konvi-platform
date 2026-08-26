@@ -4,13 +4,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts'
+import { EmptyState } from '@/components/ui/empty-state'
 import { ORDER_STATUS_LABELS, ORDER_STATUS_HEX, STATUS_HEX_FALLBACK } from './_lib/metrics'
 
 interface BarData { day: string; mensajes: number }
 interface PieData  { name: string; value: number }
 
 export function MessagesBarChart({ data }: { data: BarData[] }) {
-  if (data.length === 0) return <p className="text-sm text-muted-foreground">Sin datos.</p>
+  if (data.length === 0) return <EmptyState variant="plain" className="py-8" description="Sin datos." />
 
   // Alternativa accesible: la gráfica recharts es invisible para lectores de
   // pantalla → tabla oculta con los mismos datos + role/aria en el contenedor.
@@ -36,7 +37,7 @@ export function MessagesBarChart({ data }: { data: BarData[] }) {
 }
 
 export function OrdersPieChart({ data }: { data: PieData[] }) {
-  if (data.length === 0) return <p className="text-sm text-muted-foreground">Sin datos.</p>
+  if (data.length === 0) return <EmptyState variant="plain" className="py-8" description="Sin datos." />
 
   const label = data.map(d => `${ORDER_STATUS_LABELS[d.name] ?? d.name}: ${d.value}`).join(', ')
   return (

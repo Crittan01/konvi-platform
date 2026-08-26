@@ -25,6 +25,8 @@ import {
   AlertCircle, BadgeCheck, BadgeX, ChevronsRight, FileText,
   Loader2, Mail, MapPin, Search, ShoppingCart, Truck, User, X,
 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { ConvContext, Conversation } from '../_lib/types'
 import {
   formatDate, formatMoney, formatPhone, timeAgo, variationLabel,
@@ -124,7 +126,7 @@ export function ContextPanel({
             )}
           </div>
           {loading ? (
-            <div className="h-12 rounded-lg bg-border/30 animate-pulse" />
+            <Skeleton className="h-12 rounded-lg bg-border/30" />
           ) : context?.contact ? (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
@@ -344,7 +346,7 @@ export function ContextPanel({
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Pedidos recientes</p>
           {loading ? (
             <div className="space-y-2">
-              {[1, 2].map(i => <div key={i} className="h-10 rounded-lg bg-border/30 animate-pulse" />)}
+              {[1, 2].map(i => <Skeleton key={i} className="h-10 rounded-lg bg-border/30" />)}
             </div>
           ) : context && (context.recent_orders ?? []).length > 0 ? (
             <div className="space-y-2">
@@ -377,7 +379,7 @@ export function ContextPanel({
               )}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">No hay pedidos vinculados.</p>
+            <EmptyState variant="plain" className="py-2" description="No hay pedidos vinculados." />
           )}
 
           {/* Mini-form crear pedido — sólo en human_takeover */}
@@ -422,12 +424,14 @@ export function ContextPanel({
 
           {loading ? (
             <div className="space-y-2">
-              {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-lg bg-border/30 animate-pulse" />)}
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 rounded-lg bg-border/30" />)}
             </div>
           ) : filteredProducts.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {productSearch ? 'Sin coincidencias' : 'No hay productos activos'}
-            </p>
+            <EmptyState
+              variant="plain"
+              className="py-2"
+              description={productSearch ? 'Sin coincidencias' : 'No hay productos activos'}
+            />
           ) : (
             <div className="space-y-2">
               {filteredProducts.map(product => {

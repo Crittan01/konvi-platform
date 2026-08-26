@@ -27,9 +27,10 @@ import { useRef as _useRef } from 'react'  // unused; explicit just for clarity
 import type React from 'react'
 import {
   AlertCircle, Bot, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronsRight,
-  Circle, Clock, FileText, Info, MessageSquare, Paperclip, Phone, Send, User,
+  Clock, FileText, Info, MessageSquare, Paperclip, Phone, Send, User,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { AnimatePresence, BubbleIn } from '@/components/ui/motion'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { createClient } from '@/utils/supabase/client'
@@ -202,11 +203,8 @@ export function ChatPanel({
       ${mobileView === 'list' || mobileView === 'context' ? 'hidden sm:flex' : 'flex'}
     `}>
       {!selectedConv ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">
-          <div className="text-center">
-            <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-20" />
-            <p className="text-sm">Selecciona una conversación</p>
-          </div>
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState variant="plain" icon={MessageSquare} title="Selecciona una conversación" />
         </div>
       ) : (
         <>
@@ -408,10 +406,7 @@ export function ChatPanel({
                 {error}
               </div>
             ) : messages.length === 0 ? (
-              <div className="text-center text-muted-foreground text-sm pt-12">
-                <Circle className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                Sin mensajes aún.
-              </div>
+              <EmptyState variant="plain" icon={MessageSquare} className="pt-12" title="Sin mensajes aún." />
             ) : (
               // T7.2 — AnimatePresence con initial={false}: la primera pintura
               // del árbol no anima; cada burbuja decide su entrada con `enter`

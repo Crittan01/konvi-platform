@@ -6,6 +6,7 @@ import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones, RefreshCw } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { WEB_APP_URL } from '@/lib/runtime-env'
 import RemoveMemberButton from './remove-member-button'
 import ChangeRoleButton from './change-role-button'
@@ -763,11 +764,13 @@ export default async function TeamPage(
             </a>
           </div>
         ) : team.length === 0 ? (
-          <div className="text-center py-8">
-            <Users className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Aún no hay miembros registrados.</p>
-            {isOwner && <p className="text-xs text-muted-foreground/60 mt-1">Usa el formulario de arriba para invitar al primer miembro.</p>}
-          </div>
+          <EmptyState
+            variant="plain"
+            icon={Users}
+            className="py-8"
+            title="Aún no hay miembros registrados."
+            description={isOwner ? 'Usa el formulario de arriba para invitar al primer miembro.' : undefined}
+          />
         ) : (
           <div className="divide-y divide-border">
             {team.map(m => {

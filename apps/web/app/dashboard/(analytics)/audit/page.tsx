@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Download, ClipboardList, AlertTriangle, Info, RotateCw, ShieldCheck } from 'lucide-react'
+import { Download, ClipboardList, AlertTriangle, Info, RotateCw, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { bogotaLocalToUTC } from '@/lib/date-window'
 import {
@@ -91,7 +91,15 @@ export default async function AuditPage(
   if (role !== 'owner') redirect('/dashboard')
 
   if (!tenantId) {
-    return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
+    return (
+      <EmptyState
+        variant="plain"
+        icon={ShieldAlert}
+        className="p-8"
+        title="Sin acceso"
+        description="Tenant no configurado."
+      />
+    )
   }
 
   const view: View = searchParams.view === 'access' ? 'access' : 'changes'

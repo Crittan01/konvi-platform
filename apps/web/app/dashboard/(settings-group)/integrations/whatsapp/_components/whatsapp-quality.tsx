@@ -8,6 +8,7 @@
  * Sin webhook aún recibido, los campos no existen → estado "sin datos todavía".
  */
 import { Activity, TrendingUp, AlertCircle } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Props = {
   connected: boolean
@@ -89,7 +90,7 @@ export default function WhatsAppQuality({ connected, credentials }: Props) {
             )}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Sin señal de calidad todavía.</p>
+          <EmptyState variant="plain" className="py-2" description="Sin señal de calidad todavía." />
         )}
       </section>
 
@@ -109,7 +110,7 @@ export default function WhatsAppQuality({ connected, credentials }: Props) {
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">Sin tier reportado todavía.</p>
+          <EmptyState variant="plain" className="py-2" description="Sin tier reportado todavía." />
         )}
       </section>
     </div>

@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
-import { Image as ImageIcon, HardDrive } from 'lucide-react'
+import { Image as ImageIcon, HardDrive, ShieldAlert } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import MediaClient from './media-client'
 
 function formatBytesServer(bytes: number): string {
@@ -17,7 +18,15 @@ export default async function MediaPage() {
   const supabase = await createClient()
 
   if (!tenantId) {
-    return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
+    return (
+      <EmptyState
+        variant="plain"
+        icon={ShieldAlert}
+        className="p-8"
+        title="Sin acceso"
+        description="Tenant no configurado."
+      />
+    )
   }
 
   const { data: files } = await supabase.storage

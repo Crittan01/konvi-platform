@@ -20,6 +20,8 @@ import { createClient } from '@/utils/supabase/client'
 import {
   AlertCircle, BadgeCheck, Check, Loader2, Pencil, Pin, PinOff, Plus, Trash2, X,
 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { ConversationNote } from '../_lib/types'
 import { timeAgo } from '../_lib/format'
 import { useConfirm } from '@/components/ui/confirm-dialog'
@@ -272,12 +274,14 @@ export function ConversationNotes({ conversationId }: Props) {
       {/* Lista de notas */}
       {loading ? (
         <div className="space-y-1">
-          {[1, 2].map(i => <div key={i} className="h-12 rounded-lg bg-border/30 animate-pulse" />)}
+          {[1, 2].map(i => <Skeleton key={i} className="h-12 rounded-lg bg-border/30" />)}
         </div>
       ) : notes.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground italic">
-          Sin notas todavía. Las notas quedan visibles para todo el equipo del tenant.
-        </p>
+        <EmptyState
+          variant="plain"
+          className="py-2"
+          description="Sin notas todavía. Las notas quedan visibles para todo el equipo del tenant."
+        />
       ) : (
         <div className="space-y-1.5">
           {notes.map(note => (

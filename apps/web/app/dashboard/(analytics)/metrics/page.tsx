@@ -8,6 +8,7 @@ import {
   ArrowUp, ArrowDown, Minus, Coins,
 } from 'lucide-react'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MetricsFilters from './metrics-filters'
 import MetricsRetry from './metrics-retry'
@@ -341,10 +342,12 @@ export default async function MetricsPage(
           {err('messages') ? (
             <p className="text-sm text-muted-foreground py-8 text-center">No se pudo cargar la actividad de mensajes.</p>
           ) : messagesTotal === 0 ? (
-            <div className="py-8 text-center space-y-1">
-              <p className="text-sm text-muted-foreground">Sin mensajes en el período.</p>
-              <Link href="/dashboard/inbox" className="text-xs text-primary hover:underline">Ir al Inbox →</Link>
-            </div>
+            <EmptyState
+              variant="plain"
+              className="py-8"
+              description="Sin mensajes en el período."
+              action={<Link href="/dashboard/inbox" className="text-xs text-primary hover:underline">Ir al Inbox →</Link>}
+            />
           ) : (
             <MessagesBarChart data={barData} />
           )}
@@ -356,10 +359,12 @@ export default async function MetricsPage(
           ) : pieData.length > 0 ? (
             <OrdersPieChart data={pieData} />
           ) : (
-            <div className="py-8 text-center space-y-1">
-              <p className="text-sm text-muted-foreground">Sin pedidos en el período.</p>
-              <Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>
-            </div>
+            <EmptyState
+              variant="plain"
+              className="py-8"
+              description="Sin pedidos en el período."
+              action={<Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>}
+            />
           )}
         </div>
       </div>
@@ -373,10 +378,11 @@ export default async function MetricsPage(
           {err('orders') ? (
             <p className="text-sm text-muted-foreground">No se pudieron cargar los pedidos.</p>
           ) : statusTotal === 0 ? (
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Sin pedidos en el período.</p>
-              <Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>
-            </div>
+            <EmptyState
+              variant="plain"
+              description="Sin pedidos en el período."
+              action={<Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>}
+            />
           ) : (
             <div className="space-y-2.5">
               {Object.entries(byStatus).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
@@ -415,10 +421,11 @@ export default async function MetricsPage(
           {err('orderItems') ? (
             <p className="text-sm text-muted-foreground">No se pudieron cargar los ítems vendidos.</p>
           ) : top.length === 0 ? (
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Sin ventas registradas en el período.</p>
-              <Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>
-            </div>
+            <EmptyState
+              variant="plain"
+              description="Sin ventas registradas en el período."
+              action={<Link href="/dashboard/orders" className="text-xs text-primary hover:underline">Ver pedidos →</Link>}
+            />
           ) : (
             <div className="space-y-3">
               {top.map((p, i) => (
@@ -453,7 +460,7 @@ export default async function MetricsPage(
         {err('claims') ? (
           <p className="text-sm text-muted-foreground">No se pudieron cargar los reclamos.</p>
         ) : claimsAgg.total === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin reclamos en el período.</p>
+          <EmptyState variant="plain" className="py-2" description="Sin reclamos en el período." />
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">

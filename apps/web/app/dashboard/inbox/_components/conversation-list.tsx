@@ -36,6 +36,7 @@ import {
 import { FILTER_OPTIONS, SLA_BREACH_HOURS, STATUS_CONFIG } from '../_lib/constants'
 import { stripWhatsAppFormat } from '@/lib/whatsapp-format'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { StaggerList, StaggerItem } from '@/components/ui/motion'
 
 interface Props {
@@ -286,7 +287,7 @@ export function ConversationList({
         {loading ? (
           <div className="space-y-1 p-2">
             {[1, 2, 3, 4].map(i => (
-              <div key={i} className="h-16 rounded-lg bg-border/40 animate-pulse" />
+              <Skeleton key={i} className="h-16 rounded-lg bg-border/40" />
             ))}
           </div>
         ) : error ? (
