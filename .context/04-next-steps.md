@@ -304,10 +304,65 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   Sonda live `scratch/t7_11_visual_verify.py` 34/34 (ambos temas + móvil +
   reduced-motion + alerts via query string + 0 errores). **PageHeader es el
   patrón que T7.12 aplica transversal a los módulos.**
-- **T7.12 — Cabeceras de módulo con identidad** (directiva "módulos y submódulos"):
-  patrón de header de página (título + contexto + micro-motion de entrada) aplicado
-  transversal a los 37 `page.tsx` — hoy cada módulo encabeza a su manera; la firma
-  exige UN patrón (hermano de lo que T7.5 hace en la topbar móvil).
+- **T7.12 — Cabeceras de módulo con identidad** (directiva "módulos y submódulos").
+  **LISTO PARA EJECUTAR — plan de rollout completo derivado y verificado contra el
+  código 2026-08-25 (NO re-derivar):**
+
+  Patrón (piloto ya aplicado en T7.11): `components/ui/page-header.tsx` — props
+  `icon` (LucideIcon, el MISMO que el h1 ya usa), `title` (string), `description`
+  (ReactNode, la línea de contexto VERBATIM), `actions` (ReactNode opcional — lo
+  que hoy está a la derecha del header; condicional `{c && (x)}` →
+  `actions={c ? (x) : undefined}`; varios elementos → `<div className="flex
+  items-center gap-2">`). Import: `@/components/ui/page-header`. Sin 'use client'.
+  Ejemplo aplicado de referencia: `settings/security/page.tsx` (commit `4eca35d1`).
+
+  **Archivos con header estándar (transformación mecánica)** — 24:
+  - Ventas: `orders/_components/orders-manager.tsx:411` (client) ·
+    `contacts/page.tsx:834` · `promotions/page.tsx:445` ·
+    `receipts/page.tsx:58` (SIN icono hoy → `FileText`) · `shipping/page.tsx:187` ·
+    `claims/page.tsx:149` (OJO: el h1 de :128 está en la rama sin-acceso — las ramas
+    de error/EmptyState NO se tocan).
+  - Productos: `catalog/_components/products-manager.tsx:68` (client) ·
+    `categories/_components/categories-manager.tsx:238` (client) · `media/page.tsx:50`.
+  - Canales/IA: `marketplace/page.tsx:227` · `ai-agents/page.tsx:414` ·
+    `knowledge-base/page.tsx:353`.
+  - Analítica/Finanzas/Compras: `audit/page.tsx:198` (actions: Export CSV condicional) ·
+    `metrics/page.tsx:210` · `finance/page.tsx:139` · `purchases/page.tsx:123`.
+  - Configuración: `integrations/_components/integrations-manager.tsx:209` (hub, client) ·
+    `integrations/_components/panel-header.tsx:35` (compartido ×5 providers — el
+    breadcrumb "Volver a Integraciones" queda como fila ENCIMA; la línea de estado
+    Conectado/Desconectado con los dots va al `description` verbatim) ·
+    `integrations/whatsapp/page.tsx:445` · `team/page.tsx:585` · `settings/page.tsx:132` ·
+    `settings/health/page.tsx:66` (sin icono → `Activity`) · `settings/legal/page.tsx:132` ·
+    `settings/retention/page.tsx:154` · `settings/account-closure/page.tsx:83` (sin icono →
+    `TriangleAlert`).
+
+  **Casos especiales (decisión ya tomada — no re-derivar):**
+  - Home (`dashboard-client.tsx:193`): el saludo "Bienvenido, {tenant}" ES el header →
+    PageHeader icon=`LayoutDashboard`, title=saludo, description=línea email·rol,
+    actions=lo que esté a la derecha.
+  - Inbox (`inbox/_components/conversation-list.tsx:184`): el h1 "Inbox AI" vive en el
+    PANEL angosto (w-80), no en una fila de página → NO PageHeader completo; mini-tile
+    de marca inline (mismo degradado, `h-7 w-7 rounded-lg`) junto al título + chip
+    "Live" intacto. Documentar la excepción en UX-UI §5.
+  - Detalle pedido (`orders/[id]/page.tsx:123`): conservar back-link; PageHeader
+    icon=`Package`, title=`Pedido #…`, description=cliente/fecha, badge a `actions`.
+  - Detalle comprobante (`receipts/[id]/page.tsx:86`): igual, icon=`FileText`.
+  - Visor legal (`legal/view/[doc]/page.tsx:47`): conservar back; icon=`Scale`,
+    title=`entry.title`.
+  - Redirects (inventory, account, whatsapp-templates): sin header propio — nada.
+  - Auth (login/mfa/forgot/set-password/logout): ya firmadas (T7.1/T7.10) — fuera.
+
+  **Barra de cierre T7.12:** vitest + tsc + lint → sonda live
+  `scratch/t7_12_visual_verify.py` (barrido de las 27 rutas del probe T7.6 + assert del
+  tile `span[aria-hidden]` con `bg-gradient-to-br` junto a cada h1 + ambos temas +
+  móvil + reduced-motion + 0 errores consola) → `validate.sh --ci` (web detenido) →
+  certify_stg → commits temáticos (un feat transversal + docs) → CI 5/5 → bitácora
+  PLAN.md §E + UX-UI §5 (nota por módulo) + 01-state/04-next-steps al día.
+  **Incidente a NO repetir:** un swarm de 4 coders quedó abortado a mitad (dejó 5
+  imports huérfanos en audit/metrics/whatsapp/finance/purchases — revertidos con
+  `git checkout`; la próxima sesión ejecuta el rollout verificando `git status`
+  limpio antes de empezar).
 - **También**: BUG-105-02 del tracker (inbox "no refresca sin F5") — probablemente obsoleto
   (Realtime+polling ya viven en `inbox-manager.tsx:152,180`): verificar live y cerrar entrada.
 
