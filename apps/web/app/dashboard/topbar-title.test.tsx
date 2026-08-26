@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 // T7.5 — resolver del título de topbar (fuente única NAV_ITEMS + overrides de
 // huérfanas) y smoke del componente (FadeIn keyeado por destino).
-import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
 import TopbarTitle, { resolveTopbarTitle } from './topbar-title'
+
+afterEach(cleanup)
 
 const mocks = { pathname: '/dashboard' }
 vi.mock('next/navigation', () => ({

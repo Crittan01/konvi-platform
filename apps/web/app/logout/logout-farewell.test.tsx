@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 // T7.10 — el farewell del logout ejecuta el signOut (action) al montar y
 // redirige al login (best-effort: también si la action falla).
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import LogoutFarewell from './logout-farewell'
+
+afterEach(cleanup)
 
 const mocks = { replace: vi.fn() }
 vi.mock('next/navigation', () => ({

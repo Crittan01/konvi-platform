@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 // F1 2026-07-04: fija el fix de contraste AA de Badge (antes success/warning
 // eran bg-green-500/yellow-500 + text-white, ~2:1, bajo el mínimo AA).
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
 import { Badge } from './badge'
+
+afterEach(cleanup)
 
 describe('Badge', () => {
   it('success usa el patrón wash+texto-800 del tema (no text-white ilegible)', () => {

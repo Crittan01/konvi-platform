@@ -3,7 +3,7 @@
 // fragment). Cubre setSession + redirect al next validado (anti open-redirect) y
 // el estado de error traducido a es-CO.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, cleanup } from '@testing-library/react'
 
 const nav = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -36,7 +36,7 @@ beforeEach(() => {
   sb.setSessionError = null
   setHash('')
 })
-afterEach(() => setHash(''))
+afterEach(() => { cleanup(); setHash('') })
 
 describe('/auth/callback', () => {
   it('establece la sesión y redirige al next por defecto (/set-password)', async () => {

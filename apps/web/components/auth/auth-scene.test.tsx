@@ -3,9 +3,11 @@
 // la marca (logo real — el "Logo mock" murió), el tagline y los children.
 // jsdom no anima; se verifica el contrato de render y que no haya dependencia
 // de red externa (el grano es data URL inline, el de terceros fue eliminado).
-import { describe, it, expect, beforeAll } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
 import { AuthBrand, AuthCardReveal, AuthScene } from './auth-scene'
+
+afterEach(cleanup)
 
 beforeAll(() => {
   // jsdom no implementa matchMedia; useReducedMotion lo consulta al montar.

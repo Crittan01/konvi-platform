@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 // T7.6 — RouteError: boundary compartido por módulo (anti-falso-0 §3.2:
 // error + retry + link a inicio, con digest cuando existe).
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { RouteError } from './route-error'
+
+// cleanup explícito: sin globals de vitest no hay auto-cleanup de RTL; un árbol
+// montado que sobrevive al teardown de jsdom deja trabajo del scheduler de React
+// corriendo sin `window` (flake intermitente "window is not defined" bajo carga).
+afterEach(cleanup)
 
 const base = {
   title: 'Error al cargar Pedidos',
