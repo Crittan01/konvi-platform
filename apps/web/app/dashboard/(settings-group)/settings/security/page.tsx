@@ -21,7 +21,10 @@ import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { KeyRound } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { PageHeader } from '@/components/ui/page-header'
+import { StaggerItem, StaggerList } from '@/components/ui/motion'
+import { KeyRound, Shield, ShieldCheck } from 'lucide-react'
 import SetPasswordForm from '@/app/set-password/set-password-form'
 import { SecurityForm } from './_components/security-form'
 import { RecoveryChangePassword } from './_components/recovery-change-password'
@@ -132,40 +135,49 @@ export default async function SecurityPage(
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Seguridad</h1>
-        <p className="text-sm text-muted-foreground">
-          Gestiona tu contraseña y autenticación de dos factores (MFA TOTP) para
-          proteger tu cuenta personal: <code className="text-xs">{userEmail}</code>.
-        </p>
-      </header>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.11 — piloto PageHeader) */}
+      <PageHeader
+        icon={ShieldCheck}
+        title="Seguridad"
+        description={
+          <>
+            Gestiona tu contraseña y autenticación de dos factores (MFA TOTP) para
+            proteger tu cuenta personal: <code className="text-xs">{userEmail}</code>.
+          </>
+        }
+      />
 
+      {/* Revelado escalonado de las superficies (wrappers DS — §4.1). */}
+      <StaggerList className="space-y-6" stagger={0.08}>
+      <StaggerItem>
       {/* ── Sección 1: Cambiar contraseña ────────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base inline-flex items-center gap-2">
-            <KeyRound className="h-4 w-4" /> Contraseña
+            <KeyRound className="h-4 w-4 text-primary" /> Contraseña
           </CardTitle>
           <CardDescription>
             Actualiza tu contraseña de acceso. Requerido: mínimo 8 caracteres.
-            {isRecoverySession && (
-              <span className="block mt-2 text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                ⚠️ Estás en sesión de recuperación. Para cambiar la contraseña
-                necesitas verificación con código de respaldo (ver abajo).
-              </span>
-            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isRecoverySession && (
+            <Alert variant="warning">
+              <AlertDescription>
+                Estás en sesión de recuperación. Para cambiar la contraseña
+                necesitas verificación con código de respaldo (ver abajo).
+              </AlertDescription>
+            </Alert>
+          )}
           {searchParams.pwd_success && (
-            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
-              Contraseña actualizada correctamente.
-            </p>
+            <Alert variant="success" role="status">
+              <AlertDescription>Contraseña actualizada correctamente.</AlertDescription>
+            </Alert>
           )}
           {searchParams.pwd_error && (
-            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
-              {decodeURIComponent(searchParams.pwd_error)}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{decodeURIComponent(searchParams.pwd_error)}</AlertDescription>
+            </Alert>
           )}
           {!isRecoverySession ? (
             <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" />
@@ -174,18 +186,26 @@ export default async function SecurityPage(
           )}
         </CardContent>
       </Card>
+      </StaggerItem>
 
       {/* ── Sección 2: MFA TOTP ─────────────────────────────────────────── */}
-      <div className="border-t border-border pt-6 space-y-3">
-        <header className="space-y-1">
-          <h2 className="text-lg font-semibold">Autenticación de dos factores (MFA)</h2>
-          <p className="text-sm text-muted-foreground">
+      <StaggerItem>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base inline-flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" /> Autenticación de dos factores (MFA)
+          </CardTitle>
+          <CardDescription>
             Compatible con Google Authenticator, Authy, 1Password.
-          </p>
-        </header>
-        <SecurityForm initialState={state} userId={userId} isRecoverySession={isRecoverySession} />
-      </div>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SecurityForm initialState={state} userId={userId} isRecoverySession={isRecoverySession} />
+        </CardContent>
+      </Card>
+      </StaggerItem>
 
+      <StaggerItem>
       <footer className="text-xs text-muted-foreground border-t border-border pt-4 space-y-1">
         <p>
           <strong>¿Perdiste tu authenticator?</strong> Inicia sesión con uno de
@@ -197,6 +217,8 @@ export default async function SecurityPage(
           que fueron comprometidos.
         </p>
       </footer>
+      </StaggerItem>
+      </StaggerList>
     </div>
   )
 }

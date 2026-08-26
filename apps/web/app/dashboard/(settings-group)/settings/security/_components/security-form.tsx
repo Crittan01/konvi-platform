@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -344,17 +345,17 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
   return (
     <div className="space-y-4">
       {feedback && (
-        <div role="status" aria-live="polite" className="rounded-md border border-emerald-700 bg-emerald-50 p-3 flex items-start gap-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-700 mt-0.5 shrink-0" />
-          <p className="text-sm text-emerald-800">{feedback}</p>
-        </div>
+        <Alert variant="success" role="status" aria-live="polite">
+          <CheckCircle2 />
+          <AlertDescription>{feedback}</AlertDescription>
+        </Alert>
       )}
 
       {error && (
-        <div role="alert" aria-live="assertive" className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
-          <p className="text-sm text-red-800">{error}</p>
-        </div>
+        <Alert variant="destructive" aria-live="assertive">
+          <AlertTriangle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* Recovery codes — display ONCE (post-enrollment o post-regenerate) */}
@@ -504,24 +505,24 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
           </div>
 
           {state.totpEnrolled && !state.recoveryCountAvailable && (
-            <div role="status" className="rounded-md border border-amber-700 bg-amber-50 p-2 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
-              <p className="text-xs text-amber-800">
+            <Alert variant="warning" role="status" className="text-xs">
+              <AlertTriangle />
+              <AlertDescription className="text-xs">
                 No pudimos consultar cuántos códigos de respaldo te quedan (el
                 servicio no respondió). Recarga la página; si persiste, regenera
                 tus códigos para asegurarte de tener acceso de respaldo.
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           )}
 
           {state.totpEnrolled && state.recoveryCountAvailable && state.recoveryCodesCount < 3 && (
-            <div className="rounded-md border border-amber-700 bg-amber-50 p-2 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
-              <p className="text-xs text-amber-800">
+            <Alert variant="warning" className="text-xs">
+              <AlertTriangle />
+              <AlertDescription className="text-xs">
                 Te quedan pocos códigos de respaldo. Regenera nuevos para mantener
                 acceso si pierdes tu authenticator.
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           )}
 
           <div className="flex flex-wrap gap-2">
