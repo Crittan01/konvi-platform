@@ -257,9 +257,16 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   contexto, notas, imagen). Tests nuevos (3): route-error. Verificado live
   (`scratch/t7_06_visual_verify.py`): 27 rutas renderizan sin errores de
   consola/hidratación + empties en ambos temas + móvil.
-- **T7.7 — Virtualización donde paga**: `audit/page.tsx` (miles de filas);
-  `conversation-list.tsx` solo si el cursor no basta. Si nada lo justifica → decisión
-  documentada y dep `@tanstack/react-virtual` eliminada (no dejar dep muerta).
+- **T7.7 — Virtualización donde paga** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  Decisión MEDIDA (código + live STG): NO paga en ninguna superficie — audit
+  pagina server-side 25/pág (68 eventos/220 accesos reales → DOM máx 25),
+  conversation-list tiene cursor 50+50 deliberado con filas agrupadas de
+  altura variable, contactos 30/pág cliente, pedidos REST 20/pág. Único borde
+  (catálogo, ventana 1000): trigger documentado en UX-UI §4.6 — si aparece un
+  tenant así, paginación cliente estilo contacts, NO filas virtuales. Dep
+  muerta `@tanstack/react-virtual` retirada (0 imports desde 894b7357).
+  Sonda `scratch/t7_07_visual_verify.py` 17/17 (cotas medidas live + ambos
+  temas + móvil + reduced-motion + 0 errores consola).
 - **T7.8 — Cobertura de render del DS**: vitest para empty-state, carousel, drawer,
   responsive-dialog, confirm-dialog, skeleton (hoy 5 tests .tsx sobre 27 primitivos).
 - **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
