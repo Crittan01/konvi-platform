@@ -116,17 +116,17 @@ Cinco, todas en `globals.css`:
 - `<html suppressHydrationWarning>` (`layout.tsx:54`) por la mutación de clase pre-hidratación.
 - `theme-color` por esquema en viewport (`layout.tsx:42-45`): `#F8F5F1` claro / `#1A211F` oscuro.
 
-### 1.9 Inventario real de componentes (`components/ui/` — 26)
+### 1.9 Inventario real de componentes (`components/ui/` — 27)
 
-Verificado con `ls apps/web/components/ui/` (2026-08-25; 34 archivos: 26 componentes + 8 `.test.tsx` — badge, motion + los 6 de T7.8 §6.5):
+Verificado con `ls apps/web/components/ui/` (2026-08-25; 36 archivos: 27 componentes + 9 `.test.tsx` — badge, motion, page-header + los 6 de T7.8 §6.5):
 
-`alert` · `badge` · `button` · `card` · `carousel` · `checkbox` · `command` · `confirm-dialog` · `dialog` · `drawer` · `dropdown-menu` · `empty-state` · `input` · `label` · `motion` · `responsive-dialog` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
+`alert` · `badge` · `button` · `card` · `carousel` · `checkbox` · `command` · `confirm-dialog` · `dialog` · `drawer` · `dropdown-menu` · `empty-state` · `input` · `label` · `motion` · `page-header` · `responsive-dialog` · `select` · `sheet` · `skeleton` · `sonner` · `submit-button` · `switch` · `table` · `tabs` · `textarea` · `tooltip`
 
 Fuera de `ui/` pero parte del DS aplicado: `components/command-palette.tsx` (⌘K, §4.3) · `components/auth/auth-scene.tsx` (escena de auth T7.1: `AuthScene`/`AuthBrand`/`AuthCardReveal` — grano inline + aurora estática + brand tile degradado + coreografía stagger, usada por login/mfa/forgot/set-password/logout) · `components/route-error.tsx` (T7.6: boundary de error compartido por módulo — 23 `error.tsx` lo consumen) · `components/pwa/` · `components/theme/`.
 
 Primitivos Radix instalados (`package.json`): accordion, checkbox, dialog, dropdown-menu, select, slot, switch, tabs, tooltip. Nota: `@radix-ui/react-accordion` es dependencia y sus keyframes viven en `globals.css:48-66`, pero **no existe `ui/accordion.tsx`** — primitive instalado sin wrapper del DS.
 
-`confirm-dialog` y `submit-button` son componentes propios (no shadcn estándar): `ConfirmProvider` se monta en el root layout (`app/layout.tsx:5,59`).
+`confirm-dialog` y `submit-button` son componentes propios (no shadcn estándar): `ConfirmProvider` se monta en el root layout (`app/layout.tsx:5,59`). **`page-header` (T7.11)** es la cabecera de módulo con identidad: tile degradado primary→amber + `glow-primary` + glifo blanco (hermano del brand tile de auth) + título h1 + contexto + slot de acciones, con entrada stagger vía wrappers DS (§4.1); piloto en settings/security, rollout transversal en T7.12.
 
 ### 1.10 Deuda declarada del DS
 
@@ -227,7 +227,7 @@ sonner montado una vez en root (`app/layout.tsx:60`). **95 llamadas** `toast.suc
 >
 > Estado de dependencias (verificado en `apps/web/package.json`): **5 vigentes** — `tw-animate-css` ^1.4.0 y, agregadas el 2026-08-02: `framer-motion` ^12.43.0, `cmdk` ^1.1.1, `vaul` ^1.1.2, `embla-carousel-react` ^8.6.0. (`@tanstack/react-virtual` se instaló con ese mismo pack pero **nunca tuvo consumidor**: T7.7 midió todas las superficies candidatas — §4.6 — y la retiró el 2026-08-25; no dejar dep muerta). Ya existe además `components/ui/motion.tsx` (wrappers DS sobre framer-motion con reduced-motion uniforme vía `useReducedMotionDS` — hidratación-seguro desde T7.2; aplicado a pantallas desde T7.1). Las secciones 4.2-4.6 quedan como guía de dónde y cómo aplicar cada una.
 >
-> **Estado de implementación (2026-08-25):** §4.2 parcial (StaggerList en inbox/orders, `useCountUp` + Pressable en home, **chat motion ✅ T7.2** — `BubbleIn`+`AnimatePresence`, solo burbujas nuevas, live-verificado · **pill bottom-nav + layout cards pedidos ✅ T7.3** — `NavPill` layoutId + `LayoutItem`, live-verificado · **micro-celebraciones ✅ T7.4** — `CelebrationCheck` + toast sonner con monto count-up en home y detalle, verificado con dinero sandbox real) · §4.3 ✅ command palette ⌘K con búsqueda federada · §4.4 parcial (drawers en stock móvil y confirmación de pedido) · §4.5 parcial (carrusel OpsCards/KpiCards del home) · **§4.6 ✅ T7.7 (decisión medida live: la virtualización NO paga en ninguna superficie — dep `@tanstack/react-virtual` retirada)**. **Auth con firma propia (T7.1+T7.10 ✅):** `components/auth/auth-scene.tsx` — escena compartida (grano SVG inline sin terceros, aurora estática de tokens, brand tile degradado primary→amber + `glow-primary`, coreografía stagger vía wrappers §4.1) en login/mfa/forgot/set-password + **logout con despedida de marca** (`/logout`, signOut con limpieza G7 de la cookie AAL2); el "Logo mock / Brand" del login murió.
+> **Estado de implementación (2026-08-25):** §4.2 parcial (StaggerList en inbox/orders, `useCountUp` + Pressable en home, **chat motion ✅ T7.2** — `BubbleIn`+`AnimatePresence`, solo burbujas nuevas, live-verificado · **pill bottom-nav + layout cards pedidos ✅ T7.3** — `NavPill` layoutId + `LayoutItem`, live-verificado · **micro-celebraciones ✅ T7.4** — `CelebrationCheck` + toast sonner con monto count-up en home y detalle, verificado con dinero sandbox real) · §4.3 ✅ command palette ⌘K con búsqueda federada · §4.4 parcial (drawers en stock móvil y confirmación de pedido) · §4.5 parcial (carrusel OpsCards/KpiCards del home) · **§4.6 ✅ T7.7 (decisión medida live: la virtualización NO paga en ninguna superficie — dep `@tanstack/react-virtual` retirada)**. **Auth con firma propia (T7.1+T7.10 ✅):** `components/auth/auth-scene.tsx` — escena compartida (grano SVG inline sin terceros, aurora estática de tokens, brand tile degradado primary→amber + `glow-primary`, coreografía stagger vía wrappers §4.1) en login/mfa/forgot/set-password + **logout con despedida de marca** (`/logout`, signOut con limpieza G7 de la cookie AAL2); el "Logo mock / Brand" del login murió. **La firma dentro del canvas dashboard (T7.11 ✅):** `components/ui/page-header.tsx` — cabecera de módulo con identidad (tile degradado primary→amber + glow + glifo blanco + h1 + contexto + acciones, entrada stagger §4.1) pilotada en settings/security (cards DS para contraseña/MFA + avisos migrados a variantes de `Alert`); rollout a todos los módulos = T7.12.
 
 ### 4.1 Reglas transversales de motion (obligatorias)
 
@@ -336,7 +336,7 @@ Verificado con `find apps/web/app/dashboard -name "page.tsx"` (2026-08-02): **37
 | `/dashboard/integrations/aveonline` | CONFIG · Integraciones | usuario/password/empresa + carriers + how-it-works |
 | `/dashboard/integrations/telegram` | CONFIG · Integraciones | bot token + chat ID; comandos /resolver · /estado |
 | `/dashboard/integrations/mercadolibre` | CONFIG · Integraciones | OAuth MeLi |
-| `/dashboard/settings/security` ◊ | CONFIG · Seguridad | Todos los roles; MFA TOTP + recovery codes + cambio contraseña |
+| `/dashboard/settings/security` ◊ | CONFIG · Seguridad | Todos los roles; MFA TOTP + recovery codes + cambio contraseña · **con la firma (T7.11): PageHeader + stagger + cards DS + Alert variants** |
 | `/dashboard/settings/health` ◊ | CONFIG · Salud integraciones | Grid de salud + refresh manual |
 | `/dashboard/settings/legal` ◊ | CONFIG · Legal | Aceptación legal + descarga reporte SIC |
 | `/dashboard/settings/legal/view/[doc]` ◊ | CONFIG · Legal | Visor de documento legal |

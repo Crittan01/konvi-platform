@@ -293,9 +293,17 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   Sonda live `scratch/t7_08_visual_verify.py` 19/19.
 - **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
 - **T7.10 — Logout con despedida de marca** ✅ 2026-08-25 (con T7.1 — bitácora PLAN.md §E).
-- **T7.11 — Settings/Security con la firma** (directiva): cambio de contraseña, MFA TOTP,
-  recovery codes — mismo lenguaje de superficie (cabecera de módulo con identidad,
-  revelado stagger, cards con diseño) dentro del canvas dashboard.
+- **T7.11 — Settings/Security con la firma** ✅ 2026-08-25 (bitácora PLAN.md §E).
+  `components/ui/page-header.tsx` NUEVO — cabecera de módulo con identidad
+  (tile degradado primary→amber + glow + glifo blanco, h1 + contexto + slot
+  de acciones, entrada stagger vía wrappers DS; sin 'use client' — el icono
+  nunca cruza la frontera server→client). Security: PageHeader + revelado
+  stagger de las 3 superficies + MFA de div plano a Card DS + 4 avisos inline
+  a variantes de `Alert` (role="status" preservado vía spread). Intactos a
+  propósito: QR bg-white y la card ámbar de recovery codes. Tests +5 (431).
+  Sonda live `scratch/t7_11_visual_verify.py` 34/34 (ambos temas + móvil +
+  reduced-motion + alerts via query string + 0 errores). **PageHeader es el
+  patrón que T7.12 aplica transversal a los módulos.**
 - **T7.12 — Cabeceras de módulo con identidad** (directiva "módulos y submódulos"):
   patrón de header de página (título + contexto + micro-motion de entrada) aplicado
   transversal a los 37 `page.tsx` — hoy cada módulo encabeza a su manera; la firma
