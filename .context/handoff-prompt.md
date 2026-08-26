@@ -16,10 +16,17 @@ en este orden antes de actuar:
    FINAL — núcleo + GUI + API + métricas TODO el bot).
 3. `.context/04-next-steps.md` — lo que queda pendiente + briefs de
    implementación + lecciones de entorno (léelas ANTES de certificar: ahorran
-   horas — validator.ts, xdist, enums DB, reinicio de servicios, make deps).
+   horas — validator.ts, xdist, enums DB, reinicio de servicios, make deps,
+   **sondas visuales playwright en `scratch/t7_0x_visual_verify.py` (venv
+   `scratch/venv-visual`, chromium ya cacheado — `localhost` NO `127.0.0.1`),
+   reglas reduced-motion del DS (`useReducedMotionDS`/`itemVariantsReduced`),
+   dbharness asume `order_receipts` prístina — las sondas de dinero se
+   auto-limpian**).
 4. Los documentos del trabajo en curso que el estado señale (hoy Track 7 —
    UX/UI de la consola contra Kaiu DS: `docs/ux/UX-UI.md`; brief T7.1-T7.12 en
-   `.context/04-next-steps.md` §"Track 7 — brief de implementación").
+   `.context/04-next-steps.md` §"Track 7 — brief de implementación" — cerrados
+   T7.1/T7.2/T7.3/T7.4/T7.5/T7.6/T7.10 al 2026-08-25; siguen T7.7, T7.8,
+   T7.11, T7.12, T7.9 opcional y la verificación BUG-105-02).
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).
 
@@ -41,10 +48,12 @@ La tarea inmediata es la que el plan marque como siguiente en
 en `04-next-steps.md`, léelo primero y no re-derives nada sin verificar que
 siga vigente contra el código. Al cerrarla (con la barra de cierre completa:
 suite + dbharness + harness B-3 si el path lo toca + live STG +
-`validate.sh --ci` con el web detenido + commits temáticos + push + CI 5/5 +
-bitácora `PLAN.md` §E + `01-state.md`/`04-next-steps.md` al día), continúa con
-la siguiente del §Orden sin esperar instrucción, y actualiza los documentos
-vivos para que la próxima sesión encuentre el plan actualizado.
+**verificación visual con navegador real si es front (sonda playwright en
+`scratch/`, ambos temas + móvil + reduced-motion emulado + 0 errores de
+consola)** + `validate.sh --ci` con el web detenido + commits temáticos + push
++ CI 5/5 + bitácora `PLAN.md` §E + `01-state.md`/`04-next-steps.md` al día),
+continúa con la siguiente del §Orden sin esperar instrucción, y actualiza los
+documentos vivos para que la próxima sesión encuentre el plan actualizado.
 
 Stack STG local: `export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
 && make -C .local deps && make -C .local db && make -C .local up` · certificar:
