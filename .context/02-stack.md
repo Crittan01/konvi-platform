@@ -13,7 +13,7 @@
 | TailwindCSS | **4.3.3** (tokens en `globals.css` `@theme inline`, sin `tailwind.config`) |
 | `@supabase/ssr` | ^0.12.1 |
 | shadcn/ui | **20 componentes + `empty-state` + `motion`** en `apps/web/components/ui/` |
-| Deps UX (2026-08-02) | `framer-motion` ^12, `cmdk` ^1, `vaul` ^1, `embla-carousel-react` ^8, `@tanstack/react-virtual` ^3 |
+| Deps UX (2026-08-02; T7.7 retiró `react-virtual` el 2026-08-25 — sin consumidor, decisión medida en UX-UI §4.6) | `framer-motion` ^12, `cmdk` ^1, `vaul` ^1, `embla-carousel-react` ^8 |
 
 ⚠️ `packages/ui` está vacío. Los componentes UI viven en `apps/web/components/ui/`.
 

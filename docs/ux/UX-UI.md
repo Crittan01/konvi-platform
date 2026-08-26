@@ -225,9 +225,9 @@ sonner montado una vez en root (`app/layout.tsx:60`). **95 llamadas** `toast.suc
 >
 > **Directiva founder 2026-08-25 (ampliación, Track 7):** el lenguaje de diseño de auth (escena con grano + aurora + brand tile + coreografía) NO es una referencia aislada — es la **firma diferencial que debe impregnar TODO el front** (logout, cambio de contraseña, módulos y submódulos): no solo "llamativo", sino **diferencial frente a cualquier desarrollo genérico**. Track 7 ejecuta esta ampliación (breakdown T7.1-T7.12 en `.context/04-next-steps.md`).
 >
-> Estado de dependencias (verificado en `apps/web/package.json`): **las 6 ya están instaladas** — `tw-animate-css` ^1.4.0 y, agregadas el 2026-08-02 (WIP sin commit al cierre de esta verificación): `framer-motion` ^12.43.0, `cmdk` ^1.1.1, `vaul` ^1.1.2, `embla-carousel-react` ^8.6.0, `@tanstack/react-virtual` ^3.14.9. Ya existe además `components/ui/motion.tsx` (wrappers DS sobre framer-motion con reduced-motion uniforme vía `useReducedMotionDS` — hidratación-seguro desde T7.2; aplicado a pantallas desde T7.1). Las secciones 4.2-4.6 quedan como guía de dónde y cómo aplicar cada una.
+> Estado de dependencias (verificado en `apps/web/package.json`): **5 vigentes** — `tw-animate-css` ^1.4.0 y, agregadas el 2026-08-02: `framer-motion` ^12.43.0, `cmdk` ^1.1.1, `vaul` ^1.1.2, `embla-carousel-react` ^8.6.0. (`@tanstack/react-virtual` se instaló con ese mismo pack pero **nunca tuvo consumidor**: T7.7 midió todas las superficies candidatas — §4.6 — y la retiró el 2026-08-25; no dejar dep muerta). Ya existe además `components/ui/motion.tsx` (wrappers DS sobre framer-motion con reduced-motion uniforme vía `useReducedMotionDS` — hidratación-seguro desde T7.2; aplicado a pantallas desde T7.1). Las secciones 4.2-4.6 quedan como guía de dónde y cómo aplicar cada una.
 >
-> **Estado de implementación (2026-08-25):** §4.2 parcial (StaggerList en inbox/orders, `useCountUp` + Pressable en home, **chat motion ✅ T7.2** — `BubbleIn`+`AnimatePresence`, solo burbujas nuevas, live-verificado · **pill bottom-nav + layout cards pedidos ✅ T7.3** — `NavPill` layoutId + `LayoutItem`, live-verificado · **micro-celebraciones ✅ T7.4** — `CelebrationCheck` + toast sonner con monto count-up en home y detalle, verificado con dinero sandbox real) · §4.3 ✅ command palette ⌘K con búsqueda federada · §4.4 parcial (drawers en stock móvil y confirmación de pedido) · §4.5 parcial (carrusel OpsCards/KpiCards del home) · §4.6 pendiente (react-virtual instalado, sin consumidor aún). **Auth con firma propia (T7.1+T7.10 ✅):** `components/auth/auth-scene.tsx` — escena compartida (grano SVG inline sin terceros, aurora estática de tokens, brand tile degradado primary→amber + `glow-primary`, coreografía stagger vía wrappers §4.1) en login/mfa/forgot/set-password + **logout con despedida de marca** (`/logout`, signOut con limpieza G7 de la cookie AAL2); el "Logo mock / Brand" del login murió.
+> **Estado de implementación (2026-08-25):** §4.2 parcial (StaggerList en inbox/orders, `useCountUp` + Pressable en home, **chat motion ✅ T7.2** — `BubbleIn`+`AnimatePresence`, solo burbujas nuevas, live-verificado · **pill bottom-nav + layout cards pedidos ✅ T7.3** — `NavPill` layoutId + `LayoutItem`, live-verificado · **micro-celebraciones ✅ T7.4** — `CelebrationCheck` + toast sonner con monto count-up en home y detalle, verificado con dinero sandbox real) · §4.3 ✅ command palette ⌘K con búsqueda federada · §4.4 parcial (drawers en stock móvil y confirmación de pedido) · §4.5 parcial (carrusel OpsCards/KpiCards del home) · **§4.6 ✅ T7.7 (decisión medida live: la virtualización NO paga en ninguna superficie — dep `@tanstack/react-virtual` retirada)**. **Auth con firma propia (T7.1+T7.10 ✅):** `components/auth/auth-scene.tsx` — escena compartida (grano SVG inline sin terceros, aurora estática de tokens, brand tile degradado primary→amber + `glow-primary`, coreografía stagger vía wrappers §4.1) en login/mfa/forgot/set-password + **logout con despedida de marca** (`/logout`, signOut con limpieza G7 de la cookie AAL2); el "Logo mock / Brand" del login murió.
 
 ### 4.1 Reglas transversales de motion (obligatorias)
 
@@ -274,12 +274,21 @@ Dependencia: `embla-carousel-react` ^8.6.0 (instalada 2026-08-02). Crear wrapper
 - **Galería de producto**: `product-edit-drawer.tsx` / `image-upload-box.tsx` — navegación swipe entre fotos con thumbnails; reordenable sigue por DnD desktop.
 - **Reglas**: `align: 'start'`, `containScroll: 'trimSnaps'`; dots con `aria-label`; loop desactivado en KPIs (son finitos y escaneables).
 
-### 4.6 @tanstack/react-virtual — listas largas
+### 4.6 Listas largas — decisión verificada T7.7 (2026-08-25): la virtualización NO paga hoy
 
-Dependencia: `@tanstack/react-virtual` ^3.14.9 (instalada 2026-08-02).
+`@tanstack/react-virtual` se instaló con la Spec (2026-08-02) y **nunca tuvo consumidor** (grep: solo `package.json`). T7.7 midió TODAS las superficies candidatas contra el código y en live STG (sonda `scratch/t7_07_visual_verify.py`, 17/17, ambos temas + móvil + reduced-motion, 0 errores de consola):
 
-- **Dónde**: lista de conversaciones del inbox (`conversation-list.tsx` — hoy pagina con "cargar más"), historial de auditoría (`audit/page.tsx` — exporta CSV, potencialmente miles de filas), tabla de catálogo en tenants con catálogo grande.
-- **Reglas**: virtualizar solo cuando la paginación cursor existente no baste (el inbox ya tiene cursor-based pagination — la virtualización es para scroll continuo); mantener los skeletons de fila (§3.1) como placeholders de overscan; filas de altura medida dinámica en conversaciones (preview de texto variable).
+| Superficie | Cota real verificada (código) | DOM máx (medido live) |
+|---|---|---|
+| Auditoría — cambios y accesos PII | Paginación **server-side** 25/pág (`audit/page.tsx` `pageSize=25` + `range()`) | 25 filas — con 68 eventos (3 págs) y 220 accesos (9 págs) reales en STG; navegación p1→p2 trae set distinto |
+| Inbox — conversaciones | Ventana cursor 50 + 50 por click **deliberado** (`use-conversations.ts` PAGE_INITIAL/PAGE_STEP); agrupada por teléfono con filas expandibles de altura variable | 3 filas STG; sin scroll infinito; "Ver más" solo si el cursor no se agotó |
+| Inbox — chat | Cursor de mensajes (prepend al subir) | acotado |
+| Contactos | Ventana 500 + paginación **cliente** 30/pág (`contacts-manager.tsx` ITEMS_PER_PAGE) | 30 |
+| Pedidos | REST `per_page=20` (`orders/page.tsx`) | 20 |
+| Catálogo | Ventana protectora 1000 con aviso al operador (`catalog/page.tsx` PRODUCT_WINDOW — data-fetching: PostgREST trunca en silencio sin ella) | 7 en STG |
+| Despachos / Marketplace / Comprobantes / Compras / Promociones | 50 envíos · páginas de 50 · paginado server · 100 OC+300 selects · redenciones on-demand ≤500 | acotados |
+
+**Conclusión:** ninguna superficie monta miles de nodos hoy; la dep muerta se retiró de `apps/web/package.json` (2026-08-25). El caso borde es el catálogo (única lista sin paginación cliente): si un tenant real se acerca a la ventana de 1000, el fix consistente con el codebase es **paginación cliente estilo contacts** (`ITEMS_PER_PAGE`), NO virtualizar — la tabla tiene filas expandibles de altura variable con `aria-expanded`/teclado, y las filas virtuales romperían esa semántica por un caso borde. **Trigger para revisitar:** tenant con catálogo >500 productos Y pedido de producto de scroll continuo — solo ahí se re-evalúa `@tanstack/react-virtual` con `measureElement`.
 
 ### 4.7 tw-animate-css — ya instalado (usar hoy)
 
