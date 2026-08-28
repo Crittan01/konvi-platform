@@ -1,6 +1,9 @@
 # B-2 — Re-ingeniería del dispatcher del bot (formulación arquitectónica)
 
-> **Estado: PENDIENTE DE VALIDACIÓN founder — leer §4 (decisiones) antes de autorizar la Fase 0.**
+> **Estado: ✅ VALIDADO por founder 2026-08-28 — 6/6 hacia la opción recomendada, bajo la premisa
+> founder vigente: "efectividad y calidad de implementación sin importar tiempo ni esfuerzo" — la
+> premisa resuelve las 6 hacia la opción arquitectónicamente correcta (resolución por decisión en §4).
+> Fase 0 AUTORIZADA (arranca 2026-08-28).**
 > Origen: directiva founder 2026-08-23 ("validar si existen inclusiones parches… formular de forma
 > arquitectónica") sobre la auditoría profunda del bot (`.audit/findings/2026-08-21-bot-deep-audit.md`)
 > + los dos inventarios ejecutados 2026-08-28 (`.audit/findings/2026-08-28-bot-patch-inventory-outbound.md`
@@ -121,29 +124,33 @@ divergentes) · cupón (totales + invalidación de orden pending_payment) · **c
 ÚLTIMO** (void de dinero real, confirmación en 2 turnos, audit SIC — mayor blast radius
 legal-financiero) · payment availability se disuelve en PAYMENT tras decidir P12 (§4.1).
 
-## 4. Decisiones que necesitan tu validación (todas con opción recomendada)
+## 4. Decisiones — ✅ VALIDADAS por founder 2026-08-28 (6/6 hacia la recomendada)
 
-1. **Divergencia doc↔código (INV-B P12):** `payment_method_availability_resolver` promete "bypass
-   total con respuesta directa" pero el dispatcher nunca envía `direct_response` (fuerza el cart y
-   deja la glosa al LLM, `dispatcher.py:1148-1181`). Al migrar el handler PAYMENT:
-   **(a) recomendada:** respuesta directa determinística cuando el modo de pago es unívoco (menos
-   LLM = menos superficie de alucinación de dinero); (b) conservar el comportamiento actual
-   (glosa LLM sobre cart forzado) — strangler puro.
-2. **Los 17 invariants del dispatcher:** **(a) recomendada:** migrar la política al embudo y
-   re-expresar los de dinero sobre ctx (no regex de texto) a medida que su handler migra;
-   (b) formalizar el pipeline del dispatcher como etapa pre-embudo (más barato, pero queda un
-   segundo embudo — la fragmentación que INV-A documenta persiste).
-3. **Consent Habeas Data duplicado** (INV-A #13: texto del invariant vs `CONSENT_QUESTION_TEMPLATE`
-   del embudo): **(a) recomendada:** template único (el del embudo, que ya es el que ve la mayoría
-   de paths) — toca texto legal: confirmar que el texto único es el aprobado.
-4. **Política de emojis:** el 🙌 de `_GOODBYE_CLEAN`/auto-exit sobrevive por first-rewrite-wins
-   (INV-A #7/#52): **(a) recomendada:** quitar 🙌 de esos textos (la whitelist del DS es 📋🚚✅💵);
-   (b) ampliar la whitelist si el 🙌 es deseado de marca.
-5. **Captions de imagen y la cola pgmq** (INV-A #4/#5): **(a) recomendada:** extender el embudo a
-   captions + contrato "solo texto post-embudo entra a la cola" (las notificaciones de
-   refund/envío pasarían por el embudo al encolar); (b) dejar captions fuera documentándolo.
-6. **Renderers de dinero:** **(a) recomendada:** unificar los 3 renderers de resumen sobre
-   `cart_render.py` (el canónico ADR-0026) — formato de dinero único en todas las superficies.
+**Premisa founder vigente (2026-08-28):** "efectividad sin importar la estrategia — primar la
+calidad de implementación, sin importar el tiempo de esfuerzo". Bajo esa premisa las 6 se
+resuelven hacia la opción arquitectónicamente correcta; no quedaron dudas abiertas que preguntar.
+Resolución y razón por decisión:
+
+1. **Divergencia doc↔código (INV-B P12) → (a) respuesta directa determinística** cuando el modo de
+   pago es unívoco. Razón: menos LLM = menos superficie de alucinación de dinero (regla "No Magia
+   LLM": el LLM nunca es fuente de verdad de capacidades/estados). `payment_method_availability_resolver`
+   se disuelve en el handler PAYMENT (Fase 3) con respuesta determinística.
+2. **Los 17 invariants del dispatcher → (a) migrar la política al embudo** y re-expresar los de
+   dinero sobre ctx (no regex de texto) a medida que su handler migra (Fase 2). La opción (b) era el
+   parche barato que dejaba la fragmentación de INV-A viva.
+3. **Consent Habeas Data duplicado → (a) template único = `CONSENT_QUESTION_TEMPLATE`**
+   (`orchestrator.py:45-56`, rev. 89.b+91). Razón: es el texto legalmente más completo (consent
+   previo + expreso + informado + REVOCABLE — menciona el borrado) y ya es el aprobado en producción
+   que ve la mayoría de paths; unificar sobre él no introduce texto legal nuevo, mata el duplicado
+   (el rewrite de `consent_required.py:82-89` pasa a consumirlo).
+4. **Política de emojis → (a) quitar 🙌** de `_GOODBYE_CLEAN` (`post_escalation_coherence.py:43-47`)
+   y del auto-exit (`worker.py:1963`). Razón: el 🙌 sobrevive por el bug first-rewrite-wins, no por
+   decisión de marca; la whitelist del DS ya está definida (📋🚚✅💵). Consistencia = calidad.
+5. **Captions de imagen y la cola pgmq → (a) extender el embudo** a captions + contrato "solo texto
+   post-embudo entra a la cola" (las notificaciones de refund/envío pasan por el embudo al encolar,
+   Fase 2).
+6. **Renderers de dinero → (a) unificar los 3 resúmenes sobre `cart_render.py`** (canónico ADR-0026)
+   — formato de dinero único en todas las superficies (Fase 3, CART_BUILDING).
 
 ## 5. Instrumento de aceptación (por qué esta migración NO va a ciegas)
 
@@ -161,4 +168,5 @@ legal-financiero) · payment availability se disuelve en PAYMENT tras decidir P1
 
 ---
 
-*Cuando valides §4 (y autorices), arranca la Fase 0 — gratis y sin cambio de comportamiento.*
+*§4 validado por founder 2026-08-28 (6/6 recomendadas, premisa calidad/efectividad sin importar
+esfuerzo) — Fase 0 autorizada y en ejecución.*
