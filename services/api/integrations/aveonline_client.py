@@ -69,9 +69,20 @@ logger = logging.getLogger(__name__)
 
 # ─── URLs oficiales (dossier §1) ──────────────────────────────────────────
 
+# Endpoint auth legacy (HS256): para TODAS las APIs operativas (cotizar, guías,
+# agentes, carriers, tracking pull). NO sirve para el servicio api-integrations:
+# ese exige RS256 — con el token HS256 responde 400 "Incorrect key for this
+# algorithm" (verificado empíricamente 2026-08-27 en la cuenta demo Y en la
+# cuenta real: bug latente desde Rev. 108 — el registro de webhook nunca
+# funcionó; lo cazó la verificación del panel "Mis integraciones" vacío).
 AVEONLINE_AUTH_URL = (
     "https://app.aveonline.co/api/comunes/v1.0/autenticarusuario.php"
 )
+# Auth v3.0 (`tipo: "AuthProduct"`, body `user`/`password`): emite el JWT
+# RS256 que api-integrations acepta (doc marcaBlancaAutenticacion — su ejemplo
+# muestra alg RS256 — + probe empírico 2026-08-27: token v3.0 → custom-webhook
+# responde 422 de validación, o sea auth SUPERADA; token v1.0 → 400 de firma).
+AVEONLINE_AUTH_V3_URL = "https://app.aveonline.co/api/auth/v3.0/index.php"
 # Endpoint genérico nacional: mismo URL para cotizar/generarGuia/recogida.
 # El discriminador es el campo `tipo` del body. Para cotización
 # multi-carrier usamos `tipo: "cotizarDoble"` (dossier §3.2 — recomendado
@@ -1184,9 +1195,13 @@ class AveonlineClient:
     # DOS mecanismos de registro coexisten:
     #
     #  A) OFICIAL vigente — `register_custom_webhook` (doc
-    #     `integraciones.aveonline.co/docs/webhookPersonalizadoApi`, verificado
-    #     2026-08-22): POST api-integrations/.../custom-webhook con el JWT en
-    #     `Authorization` (SIN Bearer). UPSERT por empresa (una sola URL de
+    #     `integraciones.aveonline.co/docs/webhookPersonalizadoApi`): POST
+    #     api-integrations/.../custom-webhook con el JWT en `Authorization`
+    #     (SIN Bearer). OJO con el token: el servicio api-integrations exige
+    #     RS256 → se obtiene de la auth v3.0 (`_get_integrations_jwt`). El JWT
+    #     operativo v1.0 (HS256) es rechazado con 400 "Incorrect key for this
+    #     algorithm" — bug latente cazado 2026-08-27 (panel "Mis integraciones"
+    #     vacío pese al "registro" previo). UPSERT por empresa (una sola URL de
     #     tracking por cuenta — addendum dossier 2026-08-16). Aveonline genera
     #     `data.token` y lo reenvía TOP-LEVEL en cada notificación → ese token
     #     es el secret que persiste Konvi (bcrypt) para verificar eventos.
@@ -1200,6 +1215,49 @@ class AveonlineClient:
     #
     # El receiver (`routers/aveonline_webhook.py`) acepta AMBOS formatos.
     # Referencias: /docs/webhookPersonalizadoApi + /docs/avecrm/crearWebhook/
+
+    async def _get_integrations_jwt(self) -> str:
+        """JWT **RS256** para el servicio api-integrations (webhookPersonalizadoApi).
+
+        La auth v3.0 (`AVEONLINE_AUTH_V3_URL`, `tipo: "AuthProduct"`, body
+        `user`/`password`) emite el token firmado con RSA que ese servicio
+        exige; el JWT de la v1.0 (HS256) muere ahí con 400 "Incorrect key for
+        this algorithm" (probado en demo y en cuenta real, 2026-08-27).
+        SIN caché: registrar/rotar el webhook es operación rara (una vez por
+        tenant) — token fresco por llamada, cero estado stale que depurar.
+
+        Raises:
+            AveonlineAuthError: credenciales rechazadas/incompletas.
+            AveonlineTransientError: red o 5xx.
+        """
+        creds = await self._load_credentials()
+        usuario = creds.get("usuario")
+        password = creds.get("password")
+        if not usuario or not password:
+            raise AveonlineAuthError(
+                "Credenciales incompletas (falta usuario/password) en Vault."
+            )
+
+        body = {"tipo": "AuthProduct", "user": usuario, "password": password}
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as cx:
+                resp = await cx.post(AVEONLINE_AUTH_V3_URL, json=body)
+        except httpx.HTTPError as exc:
+            raise AveonlineTransientError(f"auth v3.0 network: {exc}") from exc
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        token = ((data.get("data") or {}).get("token") or data.get("token") or "")
+        if resp.status_code >= 500:
+            raise AveonlineTransientError(f"Aveonline auth v3.0 HTTP {resp.status_code}")
+        if resp.status_code != 200 or data.get("status") != "ok" or not token:
+            raise AveonlineAuthError(
+                f"Aveonline auth v3.0 rechazó credenciales: HTTP {resp.status_code} "
+                f"{data.get('message', 'unknown')}"
+            )
+        return token
 
     async def register_custom_webhook(self, *, name: str, webhook_url: str) -> dict:
         """Registra (o actualiza) el Webhook personalizado — endpoint OFICIAL.
@@ -1225,7 +1283,7 @@ class AveonlineClient:
                 otro 4xx.
             AveonlineTransientError: red/5xx.
         """
-        jwt = await self._get_valid_jwt()
+        jwt = await self._get_integrations_jwt()
         body = {"name": name[:120], "webhookUrl": webhook_url[:500]}
         try:
             async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:

@@ -886,32 +886,45 @@ class ResolveIdagenteTests(unittest.TestCase):
 # ─── Registro webhook OFICIAL (webhookPersonalizadoApi) ──────────────────────
 
 
-class RegisterCustomWebhookTests(unittest.TestCase):
-    """Doc `webhookPersonalizadoApi` (fetch 2026-08-22): upsert por empresa,
-    JWT en header Authorization SIN Bearer, response data.token."""
+# La auth v3.0 (AuthProduct → JWT RS256) es la primera llamada de cada registro
+# (2026-08-27: api-integrations rechaza el JWT HS256 de la v1.0 — bug latente).
+_AUTH_V3_OK = _Resp(200, {
+    "status": "ok", "message": "sesion ok",
+    "data": {"id": 15289, "token": "JWT-RS256-V3"},
+})
 
-    def test_created_201_devuelve_token_y_header_sin_bearer(self):
+
+class RegisterCustomWebhookTests(unittest.TestCase):
+    """Doc `webhookPersonalizadoApi`: upsert por empresa, JWT **RS256** (auth
+    v3.0) en header Authorization SIN Bearer, response data.token."""
+
+    def test_created_201_devuelve_token_y_header_rs256_sin_bearer(self):
         client, _ = _client()
-        record = _patched_http(self, [_Resp(201, {
+        record = _patched_http(self, [_AUTH_V3_OK, _Resp(201, {
             "success": True,
             "data": {"id": 45, "token": "AVE-TOKEN-123", "type": "CUSTOM"},
             "message": "Custom webhook created successfully",
         })])
 
         result = _run(client.register_custom_webhook(
-            name="Konvi tracking t1", webhook_url="https://api.konvi.app/wh",
+            name="Konvi tracking t1", webhook_url="https://api.konvi.co/wh",
         ))
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["token"], "AVE-TOKEN-123")
         self.assertFalse(result["updated"])
-        self.assertEqual(record[0]["url"], ave.AVEONLINE_CUSTOM_WEBHOOK_URL)
-        self.assertEqual(record[0]["headers"], {"Authorization": "JWT-OLD"})
-        self.assertEqual(record[0]["json"]["webhookUrl"], "https://api.konvi.app/wh")
+        # 1ª llamada: auth v3.0 (AuthProduct con usuario/password del Vault)
+        self.assertEqual(record[0]["url"], ave.AVEONLINE_AUTH_V3_URL)
+        self.assertEqual(record[0]["json"]["tipo"], "AuthProduct")
+        self.assertEqual(record[0]["json"]["user"], "user@test.com")
+        # 2ª llamada: el registro con el token RS256 (NO el JWT operativo HS256)
+        self.assertEqual(record[1]["url"], ave.AVEONLINE_CUSTOM_WEBHOOK_URL)
+        self.assertEqual(record[1]["headers"], {"Authorization": "JWT-RS256-V3"})
+        self.assertEqual(record[1]["json"]["webhookUrl"], "https://api.konvi.co/wh")
 
     def test_updated_200_marca_updated(self):
         client, _ = _client()
-        _patched_http(self, [_Resp(200, {
+        _patched_http(self, [_AUTH_V3_OK, _Resp(200, {
             "success": True,
             "data": {"id": 45, "token": "AVE-TOKEN-123"},
             "message": "Custom webhook updated successfully",
@@ -922,15 +935,31 @@ class RegisterCustomWebhookTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["updated"])
 
+    def test_auth_v3_rechazada_levanta_auth_error(self):
+        client, _ = _client()
+        _patched_http(self, [_Resp(200, {"status": "error", "message": "Error en usuario o contraseña"})])
+        with self.assertRaises(ave.AveonlineAuthError):
+            _run(client.register_custom_webhook(name="n", webhook_url="https://x"))
+
     def test_403_token_invalido_auth_error(self):
         client, _ = _client()
-        _patched_http(self, [_Resp(403, {"success": False, "error": "Invalid token provided"})])
+        _patched_http(self, [_AUTH_V3_OK, _Resp(403, {"success": False, "error": "Invalid token provided"})])
         with self.assertRaises(ave.AveonlineAuthError):
+            _run(client.register_custom_webhook(name="n", webhook_url="https://x"))
+
+    def test_400_incorrect_key_es_permanent_error(self):
+        # El error que destapó el bug (JWT HS256 → 400 "Incorrect key…"): el
+        # contrato real es AveonlinePermanentError — el router lo captura como
+        # "official register err" y cae al fallback legacy (log de prod
+        # 2026-08-27). Con el token RS256 de la v3.0 este 400 ya no ocurre.
+        client, _ = _client()
+        _patched_http(self, [_AUTH_V3_OK, _Resp(400, {"success": False, "error": "Incorrect key for this algorithm"})])
+        with self.assertRaises(ave.AveonlinePermanentError):
             _run(client.register_custom_webhook(name="n", webhook_url="https://x"))
 
     def test_422_payload_invalido_permanent(self):
         client, _ = _client()
-        _patched_http(self, [_Resp(422, {"success": False, "error": "Validation failed"})])
+        _patched_http(self, [_AUTH_V3_OK, _Resp(422, {"success": False, "error": "Validation failed"})])
         with self.assertRaises(ave.AveonlinePermanentError):
             _run(client.register_custom_webhook(name="n", webhook_url="no-es-url"))
 
