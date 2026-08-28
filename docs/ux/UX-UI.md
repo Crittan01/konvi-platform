@@ -126,7 +126,7 @@ Fuera de `ui/` pero parte del DS aplicado: `components/command-palette.tsx` (⌘
 
 Primitivos Radix instalados (`package.json`): accordion, checkbox, dialog, dropdown-menu, select, slot, switch, tabs, tooltip. Nota: `@radix-ui/react-accordion` es dependencia y sus keyframes viven en `globals.css:48-66`, pero **no existe `ui/accordion.tsx`** — primitive instalado sin wrapper del DS.
 
-`confirm-dialog` y `submit-button` son componentes propios (no shadcn estándar): `ConfirmProvider` se monta en el root layout (`app/layout.tsx:5,59`). **`page-header` (T7.11)** es la cabecera de módulo con identidad: tile degradado primary→amber + `glow-primary` + glifo blanco (hermano del brand tile de auth) + título h1 + contexto + slot de acciones, con entrada stagger vía wrappers DS (§4.1); piloto en settings/security, rollout transversal en T7.12.
+`confirm-dialog` y `submit-button` son componentes propios (no shadcn estándar): `ConfirmProvider` se monta en el root layout (`app/layout.tsx:5,59`). **`page-header` (T7.11)** es la cabecera de módulo con identidad: tile degradado primary→amber + `glow-primary` + glifo blanco (hermano del brand tile de auth) + título h1 + contexto + slot de acciones, con entrada stagger vía wrappers DS (§4.1); pilotada en settings/security (T7.11) y **aplicada transversal a todos los módulos en T7.12** (2026-08-27 — mapa por pantalla y excepciones en §5).
 
 ### 1.10 Deuda declarada del DS
 
@@ -346,6 +346,8 @@ Verificado con `find apps/web/app/dashboard -name "page.tsx"` (2026-08-02): **37
 | `/dashboard/whatsapp-templates` ↪ | — | Redirect → `/dashboard/integrations/whatsapp?tab=plantillas` (00-product §5.1) |
 
 ◊ = ruta huérfana del tree canónico (hallazgo M2 de la auditoría). ↪ = redirect de compatibilidad.
+
+**Cabeceras de módulo con identidad (T7.12, 2026-08-27):** todas las pantallas de módulo llevan `PageHeader` (§1.9) — tile degradado primary→amber + `glow-primary` + glifo blanco junto al h1, línea de contexto verbatim y acciones a la derecha (rollout transversal del piloto settings/security de T7.11; home incluido: el saludo «Bienvenido, {tenant}» ES el header, con `text-gradient` intacto — `PageHeader.title` es ReactNode). **Excepciones documentadas:** **inbox** — el h1 «Inbox AI» vive en el panel angosto (w-80), no en una fila de página → NO PageHeader completo; mini-tile de marca inline (mismo degradado, `h-7 w-7 rounded-lg`) junto al título, chip «Live» intacto · **ramas de error/vacío/gate NO llevan firma** (`ClaimsError` en claims, gate «no conectado» de marketplace — ahí manda el EmptyState) · **detalle comprobante** (`receipts/[id]`) — PageHeader con `print:hidden`: el CSS de impresión oculta todo `<header>` y el artefacto impreso queda byte-idéntico · redirects (inventory, account, whatsapp-templates) y el área auth (ya firmada en T7.1/T7.10) fuera de alcance. **Bug pre-existente cazado por la sonda T7.12:** el visor legal (`legal/view/[doc]`) era `force-static` bajo el layout autenticado → el layout no recibía las cookies de sesión y la ruta redirigía a /login (inalcanzable); quedó `force-dynamic` (verificado live: chain sin redirect).
 
 **RBAC efectivo en navegación** (`sidebar-client.tsx:53-138`): Dashboard/Inbox/Pedidos/Contactos/Cotizador/Reclamos/Comprobantes — todos los roles; Productos/Categorías/Canales/KB/Métricas — owner+manager; Compras/Finanzas/Equipo/General/Cerrar cuenta — owner; Integraciones/Salud/Legal/Retención — owner+manager; Seguridad — todos. Locks visibles con razón (`Lock` icon + title) cuando falta integración o capability de plan (289-303).
 
