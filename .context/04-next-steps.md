@@ -205,41 +205,30 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   hygiene, smoke dinero real al cierre) → **Track 4** ops (A1 MFA cuando founder decida) →
   **AL FINAL el BLOQUE BOT** (inventario parche → B-2 dispatcher sobre contratos estables →
   B-4 observabilidad/métricas → bot GUI/API en consola).
-  **⚠️ Track 3 es founder-gated** (PLAN-CIERRE §Track 3, owner [F] en 3.1/3.2/3.3): 3.1 requiere
-  consola Render + DNS (custom domain `api.konvi.co` + Project con 2 environments) · 3.2 el pin
-  de Python 3.13 se hace en Render Settings por servicio · 3.3 crea un proyecto Supabase nuevo ·
-  3.4 (G8b media privada) la ejecuta [A] en PRD **solo con autorización explícita del founder**
-  (script `scripts/admin/migrate_inbox_media_private.py` — dry-run → --apply). Sin esas acciones
-  del founder no hay nada ejecutable por el agente en Track 3.
 
-  **Prep de Track 3 ejecutada por el agente (2026-08-27, evidencia medida — NO asumida):**
-  - **Secrets del harness nocturno REGISTRADOS** en GH Actions (los 4: HARNESS_GEMINI_API_KEY,
-    WOMPI_PRIVATE_KEY_SANDBOX, WOMPI_EVENTS_KEY_SANDBOX, AVEONLINE_DEMO_PASSWORD — valores sandbox
-    del STG local/Vault, nunca impresos). **Nightly VERDE verificado** (run 33135919388,
-    2026-08-27: 22 pasaron · 0 fallaron · 7 xfail, ~15 min). Recordatorio de arquitectura: el
-    nightly levanta un STG EFÍMERO en el runner de GH (no usa el STG local ni PRD) — corre con
-    la máquina del founder apagada.
-  - **3.2**: la afirmación "compat ya verificada en CI" era FALSA (ningún job corría 3.13) →
-    gate CI `py-compat-313` agregado (suite completa, 3 servicios, Python 3.13, gate DURO) —
-    **✅ VERDE en su primera corrida (CI run 33136294349, 2026-08-27): el stack ES compatible
-    con 3.13**. El pin en Render (4 servicios, `PYTHON_VERSION=3.13` — hoy sin setear,
-    verificado vía API) queda listo para ejecutar con el OK del founder.
-  - **3.4**: dry-runs ejecutados — STG local 0 objetos · PRD **1 objeto** legado en
-    `inbox-attachments/` (0 errores; el re-apunte de `messages.media_url` solo ocurre en
-    --apply). Blast radius mínimo medido → listo para --apply con autorización.
-  - **3.1** (estado medido vía Render API): project "Konvi" ya existe con UN environment
-    "Production" (unprotected, sin network isolation; los 4 servicios dentro) · konvi-api sin
-    custom domains. Ejecutable por [A] con autorización: crear el custom domain
-    `api.konvi.co` (INERTE hasta que el DNS exista — el subdominio onrender sigue
-    funcionando) + activar `protected` en Production (doc oficial: solo admins podrán hacer
-    cambios destructivos — cero impacto de tráfico). **Pendiente [F] irreducible:** el CNAME
-    en el DNS de konvi.co (apuntando a `konvi-api.onrender.com`). **Decisión documentada:**
-    `networking.isolation` en Production — la doc oficial lo define como bloqueo de tráfico de
-    red PRIVADA cruzando el boundary del environment (NO el ingreso público: los webhooks
-    Meta/Wompi no se cortan) — solo tiene efecto práctico cuando exista un segundo environment
-    (staging Render); con la topología actual (STG local podman) es un no-op. Activarlo o no es
-    decisión del founder; la recomendación del agente es `protected`=sí, `isolation`=diferir
-    hasta que exista un staging en Render.
+  **TRACK 3 EJECUTADO por el agente (2026-08-27, autorización founder "procedo con todo
+  pendiente" — evidencia medida en PLAN.md §E + PLAN-CIERRE §Track 3):**
+  - **3.4 ✅ CERRADO en PRD** — 1 objeto legado migrado a `tenant-inbox-media`, mensaje
+    re-apuntado, URL pública vieja cerrada (400), signed URL 200.
+  - **3.2 ✅ CERRADO en PRD** — `PYTHON_VERSION=3.13.15` en los 3 servicios Python (deploys
+    secuenciales live + health ×4 + versión en logs). Precondición honesta: gate CI
+    `py-compat-313` creado (la "compat ya verificada" era falsa) y VERDE bajo CPython 3.13.15.
+  - **3.1(a) parcial** — custom domain `api.konvi.co` creado en Render (inerte hasta DNS).
+    **[F] irreducible: CNAME `api` → `konvi-api.onrender.com`** en el registrador de konvi.co
+    (detalle + fase 2 webhooks por proveedor en `docs/deployment/domains-and-subdomains.md`).
+  - **3.1(b)** — `protected` Production = **[F] 4 clicks** (Dashboard → Konvi → ••• Production
+    → All settings → Permissions → Protected; la REST API no lo permite — verificado: PATCH
+    no-op/405). `networking.isolation` = DIFERIR (decisión documentada: bloquea tráfico privado
+    ENTRE environments — no-op sin staging en Render; no corta webhooks públicos).
+  - **3.3 [F] irreducible** — crear proyecto Supabase Free dev y entregar ref/keys/password;
+    el replay + bootstrap + re-creación de secretos Vault los ejecuta [A] con `KONVI_SAFE_REFS`.
+
+- **Harness nocturno B-3 OPERATIVO (2026-08-27):** los 4 secrets GH registrados
+  (HARNESS_GEMINI_API_KEY, WOMPI_PRIVATE_KEY_SANDBOX, WOMPI_EVENTS_KEY_SANDBOX,
+  AVEONLINE_DEMO_PASSWORD — valores sandbox del STG local/Vault, nunca impresos) +
+  run 33135919388 VERDE (22 pasaron · 0 fallaron · 7 xfail, ~15 min). Recordatorio de
+  arquitectura: el nightly levanta un STG EFÍMERO en el runner de GH (no usa el STG local
+  ni PRD) — corre con la máquina del founder apagada.
 
 ### Track 7 — brief de implementación (gap analysis verificado contra `develop` 2026-08-25)
 

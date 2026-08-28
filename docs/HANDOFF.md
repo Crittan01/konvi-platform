@@ -20,6 +20,8 @@ Sin secciones históricas — la historia está en git y en `docs/_archive/`.
 
 **Supabase cloud** (proyecto productivo único): PostgreSQL + RLS + Auth + Vault + pgmq — 251 migraciones aplicadas, 79 tablas live. Credenciales: `.env.prd-backup` (backup de las plataformas integradas) y Render Dashboard (nunca en repo).
 
+**Estado infra (2026-08-27, Track 3):** los 3 servicios Python pineados a `PYTHON_VERSION=3.13.15` vía Render API (deploys live verificados: `/health` 200 ×4 servicios + log "Using Python version 3.13.15 via environment variable"; compat probada por el gate CI `py-compat-313` — suite completa bajo CPython 3.13.15) · custom domain `api.konvi.co` creado en `konvi-api` (`unverified` hasta que exista el CNAME — pasos exactos en `docs/deployment/domains-and-subdomains.md`; el subdominio onrender sigue activo, webhooks sin corte) · G8b cerrado: media legada del inbox migrada al bucket privado `tenant-inbox-media` (1 objeto, `messages.media_url` re-apuntado, URL pública vieja cerrada) · environment "Production" del project Konvi: protection pendiente [F] (solo Admin desde Dashboard — 4 clicks documentados en PLAN-CIERRE §Track 3).
+
 Multi-tenant real: N tenants = los mismos 4 servicios; agregar un tenant son datos (`scripts/admin/provision_tenant.py`, runbook `docs/operations/onboarding-tenants.md`), no un deploy.
 
 ## 2. Ramas y deploy

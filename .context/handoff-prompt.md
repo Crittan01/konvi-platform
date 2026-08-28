@@ -25,11 +25,13 @@ en este orden antes de actuar:
    — RTL no auto-limpia sin vitest globals — + stubs matchMedia/observers
    para embla y matchMedia-getter para use-media-query).
 4. Los documentos del trabajo en curso que el estado señale (**Track 7 COMPLETO
-   2026-08-27** — T7.1-T7.12 + T7.9 (consola contra Kaiu DS: `docs/ux/UX-UI.md`)
-   + BUG-105-02 cerrado (obsoleto, verificado live); **sigue Track 3 — infra
-   PRD**: dominio `api.konvi.co` + Render Projects (3.1), pin Python 3.13 (3.2),
-   dev cloud (3.3), G8b media privada (3.4) — detalle en `docs/PLAN-CIERRE.md`
-   §Orden paso 3 y `docs/PLAN.md`).
+   2026-08-27** + **Track 3 EJECUTADO 2026-08-27**: 3.2 ✅ pin Python 3.13.15 ×3
+   servicios live · 3.4 ✅ G8b media privada aplicado en PRD · 3.1(a) custom domain
+   `api.konvi.co` creado (inerte hasta el CNAME [F] — pasos en
+   `docs/deployment/domains-and-subdomains.md`) · 3.1(b) protection [F] 4 clicks +
+   3.3 dev cloud [F] — detalle en `docs/PLAN-CIERRE.md` §Track 3) · **sigue**:
+   fase 2 de webhooks al dominio nuevo (cuando el CNAME exista) → remanentes
+   Track 1/2 [F] → Track 4 ops → BLOQUE BOT al final.
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).
 
