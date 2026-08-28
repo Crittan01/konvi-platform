@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import CatalogForm from './catalog-form'
+import { Carousel, CarouselContent, CarouselItem, CarouselDots } from '@/components/ui/carousel'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
 import { isLowStockVariation } from '../_lib/stock'
@@ -60,6 +61,81 @@ export default function ProductsManager({
   const lowStockCount  = allVariations.filter(v => isLowStockVariation(v, threshold)).length
   const zeroStockCount = allVariations.filter(v => v.stock_quantity === 0).length
 
+  // KPI Bar — T7.9 (Spec §4.5): las 4 cards se construyen UNA vez y se
+  // renderizan dos veces (doble render §2.5): en móvil (< sm) carrusel
+  // horizontal con snap + dots (antes se comprimían en 2×2), en ≥ sm el
+  // grid de 4 columnas de siempre.
+  const kpiCards = [
+    /* Total stock */
+    <div key="total" className="h-full rounded-xl border border-border bg-card p-3 sm:p-4 flex items-center gap-3">
+      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+        <Package className="h-4 w-4 text-primary" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xl font-bold text-primary tabular-nums">{totalUnits}</p>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Total stock</p>
+      </div>
+    </div>,
+
+    /* Stock bajo */
+    <div key="low" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-amber-700/30 bg-amber-500/5' : 'border-border'}`}>
+      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-amber-500/15' : 'bg-muted'}`}>
+        <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-amber-700' : 'text-muted-foreground'}`} />
+      </div>
+      <div className="min-w-0">
+        <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-amber-700' : 'text-foreground'}`}>{lowStockCount}</p>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Stock bajo</p>
+      </div>
+    </div>,
+
+    /* Sin stock */
+    <div key="zero" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-red-700/30 bg-red-500/5' : 'border-border'}`}>
+      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${zeroStockCount > 0 ? 'bg-red-500/15' : 'bg-muted'}`}>
+        <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-red-700' : 'text-muted-foreground'}`} />
+      </div>
+      <div className="min-w-0">
+        <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-red-700' : 'text-foreground'}`}>{zeroStockCount}</p>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Sin stock</p>
+      </div>
+    </div>,
+
+    /* Umbral de alerta — configuración visible */
+    <div key="threshold" className="h-full rounded-xl border border-dashed border-border bg-muted/20 p-3 sm:p-4 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+          Umbral de alerta
+        </p>
+      </div>
+      {editingThreshold && canWrite ? (
+        <ActionResultForm action={saveThresholdAction}
+          className="flex items-center gap-2">
+          <Input name="threshold" type="number" min="1" max="999"
+            defaultValue={threshold} autoFocus
+            className="h-8 w-20 text-sm font-mono" />
+          <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado"
+            className="h-8 text-xs">
+            Guardar
+          </SubmitButton>
+          <button type="button" onClick={() => setEditingThreshold(false)}
+            className="text-xs text-muted-foreground hover:text-foreground">Cerrar</button>
+        </ActionResultForm>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-foreground">
+            Alerta cuando stock <span className="font-bold">≤ {threshold}</span> u.
+          </p>
+          {canWrite && (
+            <button onClick={() => setEditingThreshold(true)}
+              className="h-7 px-3 text-xs font-medium rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors shrink-0">
+              Cambiar
+            </button>
+          )}
+        </div>
+      )}
+    </div>,
+  ]
+
   return (
     <div className="space-y-5">
 
@@ -93,76 +169,21 @@ export default function ProductsManager({
         </div>
       )}
 
-      {/* KPI Bar — 4 cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {/* Total stock */}
-        <div className="rounded-xl border border-border bg-card p-3 sm:p-4 flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-            <Package className="h-4 w-4 text-primary" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xl font-bold text-primary tabular-nums">{totalUnits}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Total stock</p>
-          </div>
-        </div>
-
-        {/* Stock bajo */}
-        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-amber-700/30 bg-amber-500/5' : 'border-border'}`}>
-          <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-amber-500/15' : 'bg-muted'}`}>
-            <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-amber-700' : 'text-muted-foreground'}`} />
-          </div>
-          <div className="min-w-0">
-            <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-amber-700' : 'text-foreground'}`}>{lowStockCount}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Stock bajo</p>
-          </div>
-        </div>
-
-        {/* Sin stock */}
-        <div className={`rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-red-700/30 bg-red-500/5' : 'border-border'}`}>
-          <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${zeroStockCount > 0 ? 'bg-red-500/15' : 'bg-muted'}`}>
-            <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-red-700' : 'text-muted-foreground'}`} />
-          </div>
-          <div className="min-w-0">
-            <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-red-700' : 'text-foreground'}`}>{zeroStockCount}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Sin stock</p>
-          </div>
-        </div>
-
-        {/* Umbral de alerta — configuración visible */}
-        <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3 sm:p-4 space-y-2">
-          <div className="flex items-center gap-1.5">
-            <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-              Umbral de alerta
-            </p>
-          </div>
-          {editingThreshold && canWrite ? (
-            <ActionResultForm action={saveThresholdAction}
-              className="flex items-center gap-2">
-              <Input name="threshold" type="number" min="1" max="999"
-                defaultValue={threshold} autoFocus
-                className="h-8 w-20 text-sm font-mono" />
-              <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado"
-                className="h-8 text-xs">
-                Guardar
-              </SubmitButton>
-              <button type="button" onClick={() => setEditingThreshold(false)}
-                className="text-xs text-muted-foreground hover:text-foreground">Cerrar</button>
-            </ActionResultForm>
-          ) : (
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-foreground">
-                Alerta cuando stock <span className="font-bold">≤ {threshold}</span> u.
-              </p>
-              {canWrite && (
-                <button onClick={() => setEditingThreshold(true)}
-                  className="h-7 px-3 text-xs font-medium rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors shrink-0">
-                  Cambiar
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+      {/* KPI Bar — móvil: carrusel con snap + dots (T7.9); ≥ sm: grid 4 col */}
+      <div className="sm:hidden">
+        <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
+          <CarouselContent className="-ml-3">
+            {kpiCards.map(c => (
+              <CarouselItem key={c.key} className="pl-3 basis-[74%]">
+                {c}
+              </CarouselItem>
+            ))}
+          </CarouselContent>
+          <CarouselDots labels={['Total stock', 'Stock bajo', 'Sin stock', 'Umbral de alerta']} />
+        </Carousel>
+      </div>
+      <div className="hidden sm:grid sm:grid-cols-4 gap-3">
+        {kpiCards}
       </div>
 
       {/* Catalog table — full width */}

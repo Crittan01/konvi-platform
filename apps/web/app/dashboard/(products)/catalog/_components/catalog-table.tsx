@@ -8,6 +8,7 @@ import { SubmitButton } from '@/components/ui/submit-button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { SwipeActions } from '@/components/ui/motion'
 import {
   Search, LayoutGrid, List as ListIcon,
   ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X, Loader2,
@@ -194,7 +195,27 @@ const ProductMobileCard = memo(function ProductMobileCard({
   const totalStock = vars.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
   const hasZero = vars.some(v => v.stock_quantity === 0)
 
+  // T7.9 (Spec WOW §4.2) — gesto swipe sobre la card: derecha → ajuste rápido
+  // de stock (sheet directo si hay UNA variante; si hay varias, expande para
+  // elegir cuál), izquierda → drawer de acciones (editar/desactivar/eliminar
+  // viven ahí con sus confirms propios — el gesto nunca dispara destructivas
+  // directas y nunca es la única vía: el tap expande y los botones permanecen).
+  const [quickAdjustVar, setQuickAdjustVar] = useState<Variation | null>(null)
+  const [quickEditOpen, setQuickEditOpen] = useState(false)
+  const swipeEnabled = canWrite && !!adjustStockAction
+  const handleSwipeStock = () => {
+    if (vars.length === 1) setQuickAdjustVar(vars[0])
+    else if (!isExpanded) onToggle()
+  }
+
   return (
+    <SwipeActions
+      onRight={swipeEnabled ? handleSwipeStock : undefined}
+      onLeft={swipeEnabled ? () => setQuickEditOpen(true) : undefined}
+      rightHint={<span className="inline-flex items-center gap-1.5"><ArrowUpDown className="h-4 w-4" /> Ajustar stock</span>}
+      leftHint={<span className="inline-flex items-center gap-1.5">Acciones <Edit3 className="h-4 w-4" /></span>}
+      className="select-none"
+    >
     <div className={`rounded-xl border ${isExpanded ? 'border-primary/30 bg-primary/5' : 'border-border bg-card'} overflow-hidden transition-colors`}>
       <button
         onClick={onToggle}
@@ -252,6 +273,37 @@ const ProductMobileCard = memo(function ProductMobileCard({
         />
       )}
     </div>
+
+    {/* Superficies directas del gesto (T7.9): las MISMAS que ExpandedPanel,
+        instanciadas aquí para abrirse sin expandir la card. Nunca coexisten:
+        el sheet/drawer del panel solo existe cuando la card está expandida. */}
+    {quickAdjustVar && adjustStockAction && (
+      <StockAdjustSheet
+        product={p}
+        variation={quickAdjustVar}
+        open={quickAdjustVar !== null}
+        onOpenChange={(o) => { if (!o) setQuickAdjustVar(null) }}
+        adjustStockAction={adjustStockAction}
+        threshold={threshold}
+      />
+    )}
+    {quickEditOpen && adjustStockAction && (
+      <ProductEditDrawer
+        product={p}
+        open={quickEditOpen}
+        onOpenChange={setQuickEditOpen}
+        productCategories={productCategories}
+        tenantId={tenantId}
+        threshold={threshold}
+        editProductAction={editProductAction}
+        editVariationAction={editVariationAction}
+        addVariationAction={addVariationAction}
+        deleteVariationAction={deleteVariationAction}
+        adjustStockAction={adjustStockAction}
+        deactivateProductAction={deactivateProductAction}
+      />
+    )}
+    </SwipeActions>
   )
 })
 

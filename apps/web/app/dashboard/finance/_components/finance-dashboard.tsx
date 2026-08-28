@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { Carousel, CarouselContent, CarouselItem, CarouselDots } from '@/components/ui/carousel'
 import { XAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import ExpensesManager from './expenses-manager'
 import FinanceFilters from './finance-filters'
@@ -50,6 +51,49 @@ export default function FinanceDashboard({
   ]
 
   const chartAria = `Estructura del P&L en ${windowLabel}: Ingresos ${formatCOP(revenue)}, COGS ${formatCOP(cogs)}, OPEX ${formatCOP(opex)}, Beneficio Neto ${formatCOP(netProfit)}.`
+
+  // KPIs — T7.9 (Spec §4.5): las 4 cards se construyen UNA vez y se renderizan
+  // dos veces (doble render §2.5): en móvil (< sm) carrusel horizontal con
+  // snap + dots (antes apiladas en 1 columna — scroll largo), en ≥ sm el grid
+  // 2/4 columnas de siempre.
+  const kpiCards = [
+    <KpiCard
+      key="ingresos"
+      icon={<DollarSign className="h-5 w-5 text-primary" />} iconBg="bg-primary/10"
+      label="Ingresos" value={formatCOP(revenue)} valueClass="text-primary"
+      sub={`${paidOrders} ${paidOrders === 1 ? 'pedido pagado' : 'pedidos pagados'}`}
+      help="Suma de pedidos con pago confirmado (confirmado, en proceso, enviado, entregado). Excluye carritos sin pagar y cancelados."
+    />,
+    <KpiCard
+      key="cogs"
+      icon={<TrendingDown className="h-5 w-5 text-amber-700" />} iconBg="bg-amber-500/10"
+      label="Costo Mercancía (COGS)" value={formatCOPNegative(cogs)} valueClass="text-amber-700"
+      sub="Costo del inventario vendido"
+      help="Cost of Goods Sold: lo que te costó comprar/producir lo que vendiste. Sale del costo unitario cargado en el Catálogo."
+    />,
+    <KpiCard
+      key="opex"
+      icon={<Activity className="h-5 w-5 text-red-700" />} iconBg="bg-red-500/10"
+      label="Gastos (OPEX)" value={formatCOPNegative(opex)} valueClass="text-red-700"
+      sub="Marketing, nómina, software…"
+      help="Operating Expenses: gastos operativos no atados a un producto vendido (pauta, nómina, suscripciones, logística)."
+    />,
+    <Card key="neto" className={`h-full border-border/50 shadow-xs relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
+      <CardContent className="p-5 flex flex-col items-center justify-center text-center">
+        <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+          <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} />
+        </div>
+        <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+          Beneficio Neto
+          <JargonTip text="Ingresos − COGS − OPEX. Lo que realmente ganó (o perdió) el negocio en el período." />
+        </p>
+        <h3 className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCOP(netProfit)}</h3>
+        <p className={`text-[11px] font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+          {netMargin.toFixed(1)}% Margen
+        </p>
+      </CardContent>
+    </Card>,
+  ]
 
   const exportCsv = () => {
     const rows: string[][] = [
@@ -146,41 +190,21 @@ export default function FinanceDashboard({
           </>
         ) : (
           <>
-            {/* KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <KpiCard
-                icon={<DollarSign className="h-5 w-5 text-primary" />} iconBg="bg-primary/10"
-                label="Ingresos" value={formatCOP(revenue)} valueClass="text-primary"
-                sub={`${paidOrders} ${paidOrders === 1 ? 'pedido pagado' : 'pedidos pagados'}`}
-                help="Suma de pedidos con pago confirmado (confirmado, en proceso, enviado, entregado). Excluye carritos sin pagar y cancelados."
-              />
-              <KpiCard
-                icon={<TrendingDown className="h-5 w-5 text-amber-700" />} iconBg="bg-amber-500/10"
-                label="Costo Mercancía (COGS)" value={formatCOPNegative(cogs)} valueClass="text-amber-700"
-                sub="Costo del inventario vendido"
-                help="Cost of Goods Sold: lo que te costó comprar/producir lo que vendiste. Sale del costo unitario cargado en el Catálogo."
-              />
-              <KpiCard
-                icon={<Activity className="h-5 w-5 text-red-700" />} iconBg="bg-red-500/10"
-                label="Gastos (OPEX)" value={formatCOPNegative(opex)} valueClass="text-red-700"
-                sub="Marketing, nómina, software…"
-                help="Operating Expenses: gastos operativos no atados a un producto vendido (pauta, nómina, suscripciones, logística)."
-              />
-              <Card className={`border-border/50 shadow-xs relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
-                <CardContent className="p-5 flex flex-col items-center justify-center text-center">
-                  <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
-                    <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} />
-                  </div>
-                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Beneficio Neto
-                    <JargonTip text="Ingresos − COGS − OPEX. Lo que realmente ganó (o perdió) el negocio en el período." />
-                  </p>
-                  <h3 className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCOP(netProfit)}</h3>
-                  <p className={`text-[11px] font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {netMargin.toFixed(1)}% Margen
-                  </p>
-                </CardContent>
-              </Card>
+            {/* KPIs — móvil: carrusel con snap + dots (T7.9); ≥ sm: grid */}
+            <div className="sm:hidden">
+              <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
+                <CarouselContent className="-ml-3">
+                  {kpiCards.map(c => (
+                    <CarouselItem key={c.key} className="pl-3 basis-[78%]">
+                      {c}
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselDots labels={['Ingresos', 'Costo Mercancía (COGS)', 'Gastos (OPEX)', 'Beneficio Neto']} />
+              </Carousel>
+            </div>
+            <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {kpiCards}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -248,7 +272,7 @@ function KpiCard({ icon, iconBg, label, value, valueClass, sub, help }: {
   icon: React.ReactNode; iconBg: string; label: string; value: string; valueClass: string; sub: string; help: string
 }) {
   return (
-    <Card className="border-border/50 shadow-xs">
+    <Card className="h-full border-border/50 shadow-xs">
       <CardContent className="p-5 flex flex-col items-center justify-center text-center">
         <div className={`h-10 w-10 rounded-full ${iconBg} flex items-center justify-center mb-3`}>{icon}</div>
         <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">

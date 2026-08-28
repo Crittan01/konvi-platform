@@ -4,7 +4,7 @@
 // render (y que el stub de matchMedia basta para useReducedMotion).
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { AnimatePresence, BubbleIn, CelebrationCheck, FadeIn, LayoutItem, NavPill, StaggerList, StaggerItem, Pressable } from './motion'
+import { AnimatePresence, BubbleIn, CelebrationCheck, FadeIn, LayoutItem, NavPill, StaggerList, StaggerItem, Pressable, SwipeActions, swipeOutcome } from './motion'
 
 let reduceMotion = false
 
@@ -122,5 +122,41 @@ describe('CelebrationCheck (T7.4)', () => {
     reduceMotion = true
     render(<CelebrationCheck>✓</CelebrationCheck>)
     expect(screen.getByText('✓')).toBeInTheDocument()
+  })
+})
+
+describe('SwipeActions (T7.9)', () => {
+  it('swipeOutcome: umbral 90px en ambas direcciones, snap al origen si no llega', () => {
+    expect(swipeOutcome(90)).toBe('right')
+    expect(swipeOutcome(140)).toBe('right')
+    expect(swipeOutcome(-90)).toBe('left')
+    expect(swipeOutcome(-140)).toBe('left')
+    expect(swipeOutcome(0)).toBeNull()
+    expect(swipeOutcome(89)).toBeNull()
+    expect(swipeOutcome(-89)).toBeNull()
+  })
+
+  it('renderiza children + hints contextuales (aria-hidden)', () => {
+    render(
+      <SwipeActions rightHint="Ajustar stock" leftHint="Acciones">
+        <div>Card producto</div>
+      </SwipeActions>,
+    )
+    expect(screen.getByText('Card producto')).toBeInTheDocument()
+    const hint = screen.getByText('Ajustar stock')
+    expect(hint).toBeInTheDocument()
+    expect(hint.closest('[aria-hidden]')).not.toBeNull()
+    expect(screen.getByText('Acciones').closest('[aria-hidden]')).not.toBeNull()
+  })
+
+  it('sin onRight/onLeft el render no se rompe (gesto sin acción)', () => {
+    render(<SwipeActions>Card solo visual</SwipeActions>)
+    expect(screen.getByText('Card solo visual')).toBeInTheDocument()
+  })
+
+  it('con prefers-reduced-motion el render no se rompe (snap instantáneo)', () => {
+    reduceMotion = true
+    render(<SwipeActions rightHint="S">Card reducida</SwipeActions>)
+    expect(screen.getByText('Card reducida')).toBeInTheDocument()
   })
 })

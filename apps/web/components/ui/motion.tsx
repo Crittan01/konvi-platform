@@ -10,7 +10,9 @@
 import * as React from 'react'
 import {
   motion,
+  useMotionValue,
   useReducedMotion,
+  useTransform,
   type HTMLMotionProps,
   type Variants,
 } from 'framer-motion'
@@ -239,5 +241,99 @@ export function CelebrationCheck({ children, ...props }: HTMLMotionProps<'span'>
     >
       {children}
     </motion.span>
+  )
+}
+
+// ── SwipeActions (T7.9, Spec §4.2 catálogo móvil) ───────────────────────────
+
+/** Umbral del gesto swipe: 90px. Función pura → testeable en jsdom. */
+export const SWIPE_THRESHOLD = 90
+export function swipeOutcome(
+  offsetX: number,
+  threshold = SWIPE_THRESHOLD,
+): 'right' | 'left' | null {
+  if (offsetX >= threshold) return 'right'
+  if (offsetX <= -threshold) return 'left'
+  return null
+}
+
+/**
+ * SwipeActions — gesto swipe horizontal sobre una card (T7.9, Spec §4.2):
+ * arrastrar a la derecha/izquierda revela el hint contextual bajo la card y,
+ * al soltar más allá del umbral, dispara `onRight`/`onLeft` con snap al
+ * origen (dragElastic = rebote haptic-like). Reglas duras del Spec:
+ *   - El gesto NUNCA dispara acciones destructivas directas (quien lo usa
+ *     abre superficies con su propio confirm: sheet de stock, drawer de
+ *     acciones) y NUNCA es la única vía (los botones visibles permanecen).
+ *   - El drag es dirigido por el usuario (exento de §4.1.1), pero el snap
+ *     residual es INSTANTÁNEO con prefers-reduced-motion.
+ *   - Tras un drag real se suprime el click del contenido para no gatillar
+ *     el toggle de la card al soltar.
+ * El contenido debe tener fondo opaco propio (bg-card) para tapar los hints.
+ */
+export function SwipeActions({
+  onRight,
+  onLeft,
+  rightHint,
+  leftHint,
+  children,
+  ...props
+}: HTMLMotionProps<'div'> & {
+  onRight?: () => void
+  onLeft?: () => void
+  /** Hint revelado al arrastrar a la DERECHA (se asoma por el lado izquierdo). */
+  rightHint?: React.ReactNode
+  /** Hint revelado al arrastrar a la IZQUIERDA (se asoma por el lado derecho). */
+  leftHint?: React.ReactNode
+}) {
+  const reduce = useReducedMotion()
+  const x = useMotionValue(0)
+  const rightOpacity = useTransform(x, [0, SWIPE_THRESHOLD], [0, 1])
+  const leftOpacity = useTransform(x, [-SWIPE_THRESHOLD, 0], [1, 0])
+  const dragged = React.useRef(false)
+
+  return (
+    <div className="relative">
+      {/* Hints contextuales bajo la card (aria-hidden: refuerzo visual del
+          gesto; la acción real la anuncian las superficies que se abren). */}
+      <motion.div
+        aria-hidden
+        style={{ opacity: rightOpacity }}
+        className="absolute inset-y-0 left-0 flex items-center pl-4 rounded-l-xl bg-emerald-500/10 text-emerald-700 text-xs font-medium"
+      >
+        {rightHint}
+      </motion.div>
+      <motion.div
+        aria-hidden
+        style={{ opacity: leftOpacity }}
+        className="absolute inset-y-0 right-0 flex items-center pr-4 rounded-r-xl bg-muted text-muted-foreground text-xs font-medium"
+      >
+        {leftHint}
+      </motion.div>
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.18}
+        style={{ x }}
+        onDragStart={() => { dragged.current = true }}
+        onDragEnd={(_, info) => {
+          const outcome = swipeOutcome(info.offset.x)
+          if (outcome === 'right') onRight?.()
+          else if (outcome === 'left') onLeft?.()
+        }}
+        onClickCapture={(e) => {
+          // Un drag real no debe terminar en click sobre el contenido.
+          if (dragged.current) {
+            e.preventDefault()
+            e.stopPropagation()
+            dragged.current = false
+          }
+        }}
+        transition={{ duration: reduce ? 0 : 0.18, ease: EASE_OUT }}
+        {...props}
+      >
+        {children}
+      </motion.div>
+    </div>
   )
 }
