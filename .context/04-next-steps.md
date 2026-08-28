@@ -229,9 +229,10 @@ completa: PLAN.md §E (2026-08-25, M2.4).
     `app.konvi.co/login` 200 (founder agregó los CNAME en Cloudflare DNS-only; verify vía
     Render API). **Fase 2 ejecutada donde hay algo que migrar:** `PUBLIC_WEBHOOK_URL` +
     `NEXT_PUBLIC_WEBHOOK_HOST` → `https://api.konvi.co` (render.yaml + Render) + redeploys
-    live. Telegram: sin tenant prod (nada que migrar) · **Aveonline: ✅ migrado 2026-08-27**
-    (founder 1 click "Configurar webhook" — URL `api.konvi.co` + secret rotado con gracia 7d,
-    verificado en DB + endpoint 401-live en el dominio) · Wompi/Resend: registrarlos con las
+    live. Telegram: sin tenant prod (nada que migrar) · **Aveonline: ✅ migrado DE VERDAD
+    2026-08-28** (tras el fix RS256 en PRD: `POST …/custom-webhook` → 201 Created +
+    `mechanism=custom-webhook aveonline_ok=True` en log + token oficial de Aveonline en DB +
+    endpoint 401-live; el intento de 08-27 a.m. era el fail-silent del bug — corregido aquí) · Wompi/Resend: registrarlos con las
     URLs del dominio cuando se activen esos pendientes [F] · Meta: queda en el connector
     onrender (decisión documentada; **`connector.konvi.co` mapeado como pendiente**: CNAME [F] +
     custom domain + `WHATSAPP_CONNECTOR_URL`/`NEXT_PUBLIC_CONNECTOR_WEBHOOK_HOST` [A] + Meta

@@ -40,8 +40,10 @@
   NO-Meta viven en konvi-api; solo Meta vive en el connector. `PUBLIC_WEBHOOK_URL` y
   `NEXT_PUBLIC_WEBHOOK_HOST` → `https://api.konvi.co` (render.yaml + Render API) + redeploys
   live. Por proveedor: Telegram — sin tenant prod (futuros registros ya salen por el dominio) ·
-  **Aveonline — ✅ MIGRADO 2026-08-27** (founder 1 click en consola: URL `api.konvi.co` +
-  secret rotado con gracia 7d — verificado en DB + endpoint 401-live en el dominio) ·
+  **Aveonline — ✅ MIGRADO DE VERDAD 2026-08-28 14:00 UTC** (tras el fix RS256 en PRD:
+  `POST …/custom-webhook` → 201 Created + `mechanism=custom-webhook aveonline_ok=True` en
+  log + token oficial de Aveonline en DB + endpoint 401-live; el intento de 08-27 a.m. era
+  el fail-silent del bug — corregido aquí) ·
   Wompi/Resend — registrar en sus dashboards con las URLs del dominio cuando activen esos
   pendientes [F] · MeLi — S6 · **Meta — queda en `konvi-connector.onrender.com`** ·
   **`connector.konvi.co` mapeado como pendiente** (activación: CNAME [F] + custom domain/vars

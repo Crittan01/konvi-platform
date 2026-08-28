@@ -26,11 +26,14 @@
 
 1. **Telegram** — sin tenant prod con Telegram conectado → nada que migrar; futuros setups
    (`POST /telegram/setup`) registran con el dominio nuevo vía `PUBLIC_WEBHOOK_URL`.
-2. **Aveonline** — ✅ MIGRADO 2026-08-27 (founder, 1 click en la consola "Configurar webhook"):
-   URL registrada `https://api.konvi.co/api/v1/webhooks/aveonline/0fb0777e-…` + secret rotado
-   (verificado en DB: `tenant_webhook_secrets` rotated_at 2026-08-28T03:45Z, secret anterior en
-   gracia hasta 2026-09-04) + endpoint en el dominio responde 401 a secret inválido (ruta viva,
-   auth correcta). El próximo evento real de guía llega por el dominio.
+2. **Aveonline** — ✅ MIGRADO DE VERDAD 2026-08-28 14:00 UTC (tras el fix RS256 desplegado):
+   `POST …/custom-webhook` → **201 Created** + `mechanism=custom-webhook aveonline_ok=True`
+   (log prod) + token generado por Aveonline persistido (`tenant_webhook_secrets`, reason
+   `aveonline_webhook_configure_official`) + endpoint en el dominio 401 a secret inválido.
+   ⚠️ Corrección: el intento de 2026-08-27 a.m. quedó marcado aquí como "migrado" — era el
+   FAIL-SILENT del bug (`mechanism=None`, secret solo local). La cacería del founder con el
+   panel vacío destapó la causa raíz (HS256 vs RS256) y el fix la cerró. El próximo evento
+   real de guía llega por el dominio.
 3. **Wompi (prod)** — cuando se configuren las keys prod ([F] Track 1/2), registrar el webhook
    en el dashboard Wompi con `https://api.konvi.co/api/v1/webhooks/wompi`.
 4. **Resend** — el registro del webhook en el dashboard Resend (pendiente [F] Track 6) usa
