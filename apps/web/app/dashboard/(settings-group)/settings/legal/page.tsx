@@ -17,6 +17,7 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { ScrollText } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { CORE_API_URL } from '@/lib/runtime-env'
 import { ok, fail, type ActionResult } from '@/lib/action-result'
 import LegalAcceptanceClient from './_components/legal-acceptance-client'
@@ -128,15 +129,12 @@ export default async function LegalAcceptancePage() {
 
   return (
     <div className="space-y-5 max-w-4xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <ScrollText className="h-5 w-5 text-primary" /> Aceptación legal
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Habeas Data Ley 1581/2012 — relación Responsable (tenant) ↔ Encargado (plataforma).
-          La aceptación queda registrada de forma inmutable (append-only) con timestamp + IP.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={ScrollText}
+        title="Aceptación legal"
+        description="Habeas Data Ley 1581/2012 — relación Responsable (tenant) ↔ Encargado (plataforma). La aceptación queda registrada de forma inmutable (append-only) con timestamp + IP."
+      />
 
       <LegalAcceptanceClient
         currentVersions={CURRENT_VERSIONS}

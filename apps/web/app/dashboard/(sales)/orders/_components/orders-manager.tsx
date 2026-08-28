@@ -3,6 +3,7 @@
 import { useState, useEffect, useTransition, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Package, Clock, ChevronRight, ChevronLeft, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck, RefreshCw, AlertCircle, Link2, Copy, Send, User } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -405,40 +406,36 @@ export default function OrdersManager({
 
   return (
     <div className="space-y-5 max-w-7xl">
-      {/* Header & Search */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" /> Pedidos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {counts['all'] ?? 0} pedidos totales
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Buscar por nombre, teléfono o nota..."
-              value={searchInput}
-              onChange={e => setSearchInput(e.target.value)}
-              aria-label="Buscar pedidos"
-              className="pl-9 pr-8 h-9 text-sm bg-card w-full"
-            />
-            {(searchInput || isNavPending) && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
-                {isNavPending
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                  : <button type="button" onClick={() => { setSearchInput(''); navigate(buildUrl({ q: null })) }} aria-label="Limpiar búsqueda" className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
-              </span>
-            )}
+      {/* Header & Search — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Package}
+        title="Pedidos"
+        description={`${counts['all'] ?? 0} pedidos totales`}
+        actions={
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar por nombre, teléfono o nota..."
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                aria-label="Buscar pedidos"
+                className="pl-9 pr-8 h-9 text-sm bg-card w-full"
+              />
+              {(searchInput || isNavPending) && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
+                  {isNavPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                    : <button type="button" onClick={() => { setSearchInput(''); navigate(buildUrl({ q: null })) }} aria-label="Limpiar búsqueda" className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
+                </span>
+              )}
+            </div>
+            <Badge variant="outline" className="text-xs self-start sm:self-auto h-9">
+              {ROLE_LABELS[role] ?? role}
+            </Badge>
           </div>
-          <Badge variant="outline" className="text-xs self-start sm:self-auto h-9">
-            {ROLE_LABELS[role] ?? role}
-          </Badge>
-        </div>
-      </div>
+        }
+      />
 
       {/* Error de lectura */}
       {loadError && (

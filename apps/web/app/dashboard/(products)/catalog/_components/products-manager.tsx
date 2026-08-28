@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import {
   Plus, Boxes, AlertTriangle, XCircle, SlidersHorizontal, Package, Info,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import CatalogForm from './catalog-form'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
@@ -62,22 +63,17 @@ export default function ProductsManager({
   return (
     <div className="space-y-5">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Boxes className="h-5 w-5 text-primary" /> Productos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {products.length} productos · {allVariations.length} variantes
-          </p>
-        </div>
-        {canWrite && (
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Boxes}
+        title="Productos"
+        description={`${products.length} productos · ${allVariations.length} variantes`}
+        actions={canWrite ? (
           <Button onClick={() => setDialogOpen(true)} size="sm" className="gap-1.5 self-start sm:self-auto">
             <Plus className="h-4 w-4" /> Nuevo Producto
           </Button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Aviso: el listado no se pudo cargar (no mostrar un catálogo falso-vacío) */}
       {loadError && (

@@ -6,6 +6,7 @@ import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones, RefreshCw } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { WEB_APP_URL } from '@/lib/runtime-env'
 import RemoveMemberButton from './remove-member-button'
@@ -580,16 +581,12 @@ export default async function TeamPage(
   return (
     <div className="space-y-6 max-w-7xl">
 
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Users className="h-5 w-5 text-primary" />
-          Usuarios y Acceso
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {team.length} {team.length === 1 ? 'miembro' : 'miembros'} con acceso a esta consola
-        </p>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Users}
+        title="Usuarios y Acceso"
+        description={`${team.length} ${team.length === 1 ? 'miembro' : 'miembros'} con acceso a esta consola`}
+      />
 
       {/* Limpia la URL automáticamente después de 4s */}
       <TeamUrlCleaner hasResult={!!(searchParams.invited || searchParams.added || searchParams.removed || searchParams.inactivated || searchParams.activated || searchParams.error || searchParams.resent || searchParams.role_changed)} />

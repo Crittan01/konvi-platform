@@ -11,6 +11,7 @@ import {
   CheckCircle2, XCircle, Sparkles, Bot, Wallet,
   Shield, Activity, Scale, Archive, Trash2, ChevronRight,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import Link from 'next/link'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
@@ -127,16 +128,12 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-6 max-w-7xl">
 
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Settings className="h-5 w-5 text-primary" />
-          General
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Datos de tu negocio y configuración operativa
-        </p>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Settings}
+        title="General"
+        description="Datos de tu negocio y configuración operativa"
+      />
 
       {/*
         ── Layout de 2 columnas en desktop ──────────────────────────────────

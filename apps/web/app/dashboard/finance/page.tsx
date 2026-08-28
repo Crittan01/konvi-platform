@@ -5,6 +5,7 @@ import FinanceDashboard from './_components/finance-dashboard'
 import { computePnl, type PnlOrder, type ExpenseRow } from './lib/pnl'
 import { financeWindow, parseRange } from './lib/window'
 import { Landmark, AlertTriangle } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 
 export const dynamic = 'force-dynamic'
@@ -134,14 +135,12 @@ export default async function FinancePage(props: { searchParams: Promise<{ range
 }
 
 function Header() {
+  // Cabecera de módulo con identidad (firma Kaiu, T7.12).
   return (
-    <div>
-      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-        <Landmark className="h-5 w-5 text-primary" /> Finanzas · P&amp;L
-      </h1>
-      <p className="text-sm text-muted-foreground mt-1">
-        Rentabilidad real del negocio: Ingresos de pedidos pagados − Costo de Mercancía (COGS) − Gastos Operativos (OPEX).
-      </p>
-    </div>
+    <PageHeader
+      icon={Landmark}
+      title="Finanzas · P&L"
+      description="Rentabilidad real del negocio: Ingresos de pedidos pagados − Costo de Mercancía (COGS) − Gastos Operativos (OPEX)."
+    />
   )
 }

@@ -14,6 +14,7 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { CORE_API_URL } from '@/lib/runtime-env'
 import { revalidatePath } from 'next/cache'
 import { Tag, AlertTriangle } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import PromotionsManager from './_components/promotions-manager'
 import { bogotaLocalToUTC } from '@/lib/date-window'
 
@@ -441,15 +442,17 @@ export default async function PromotionsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Tag className="h-5 w-5 text-primary" /> Promociones
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {coupons.length} cupones totales · {activeCount} activos.
-          Los clientes los aplican vía WhatsApp con &quot;tengo el cupón XXX&quot;.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Tag}
+        title="Promociones"
+        description={
+          <>
+            {coupons.length} cupones totales · {activeCount} activos.
+            Los clientes los aplican vía WhatsApp con &quot;tengo el cupón XXX&quot;.
+          </>
+        }
+      />
 
       {!canWrite && (
         <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-3 text-sm text-amber-900">

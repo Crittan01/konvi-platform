@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal, AlertTriangle, RefreshCw } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { createCategory, updateCategory, deleteCategory } from '../actions'
 import { AttributeContractEditor, type AttributeDef } from './attribute-contract-editor'
@@ -233,15 +234,16 @@ export default function CategoriesManager({
   return (
     <TooltipProvider delayDuration={150}>
     <div className="space-y-5 max-w-3xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Tag className="h-5 w-5 text-primary" /> Categorías
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Las categorías con las que el bot presenta tu catálogo. Organízalas en 2 niveles: <span className="font-medium text-foreground/80">vertical</span> (ej. Salud y Belleza) › <span className="font-medium text-foreground/80">subcategoría</span> (ej. Aceites Esenciales). Los productos cuelgan de las subcategorías. {categories.length} en total.
-        </p>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Tag}
+        title="Categorías"
+        description={
+          <>
+            Las categorías con las que el bot presenta tu catálogo. Organízalas en 2 niveles: <span className="font-medium text-foreground/80">vertical</span> (ej. Salud y Belleza) › <span className="font-medium text-foreground/80">subcategoría</span> (ej. Aceites Esenciales). Los productos cuelgan de las subcategorías. {categories.length} en total.
+          </>
+        }
+      />
 
       {/* Error de carga (RLS/red): mostrar como error con reintento, NO como lista vacía. */}
       {loadError && (

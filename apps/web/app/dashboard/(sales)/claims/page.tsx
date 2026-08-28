@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import ClaimsManager from './_components/claims-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
@@ -124,16 +125,15 @@ export default async function ClaimsPage() {
 
   return (
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-hidden flex flex-col">
-      <div className="flex flex-col gap-2 flex-none">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <AlertCircle className="h-5 w-5 text-primary" /> Centro de Reclamos
-        </h1>
-        <p className="text-muted-foreground w-full max-w-3xl">
-          Visualiza, investiga y resuelve disputas, devoluciones y solicitudes de garantías ligadas a pedidos existentes.
-          El cliente recibe su número de ticket por WhatsApp y puede consultar el estado con el bot; tus notas de
-          resolución también le llegan por ese canal.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12). ClaimsError
+          (rama de error) NO lleva PageHeader: las ramas de error/EmptyState
+          quedan intactas por decisión del rollout. */}
+      <PageHeader
+        icon={AlertCircle}
+        title="Centro de Reclamos"
+        description="Visualiza, investiga y resuelve disputas, devoluciones y solicitudes de garantías ligadas a pedidos existentes. El cliente recibe su número de ticket por WhatsApp y puede consultar el estado con el bot; tus notas de resolución también le llegan por ese canal."
+        className="flex-none"
+      />
 
       <div className="flex-1 min-h-0">
         <ClaimsManager claims={claims} recentOrders={recentOrders} canWrite={canWrite} canResolve={canResolve} canReopen={canReopen} />

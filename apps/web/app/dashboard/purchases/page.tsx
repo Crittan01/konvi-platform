@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { ShoppingCart } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import PurchasesClient from './_components/purchases-client'
 import type { PurchaseOrder } from './_components/purchase-orders-manager'
 import type { Supplier } from './_components/suppliers-manager'
@@ -119,14 +120,12 @@ export default async function PurchasesPage() {
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <ShoppingCart className="h-5 w-5 text-primary" /> Compras y Proveedores
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Gestiona tu cadena de suministro, reabastece inventario y controla costos
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={ShoppingCart}
+        title="Compras y Proveedores"
+        description="Gestiona tu cadena de suministro, reabastece inventario y controla costos"
+      />
 
       <PurchasesClient
         tenantId={tenantId}

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import {
   ArrowLeft, Package, Clock, MapPin, CreditCard, Truck, User, Phone, XCircle, FileText,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { createClient } from '@/utils/supabase/server'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -116,27 +117,30 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
           sin F5 (antes el detalle quedaba estático tras el pago). */}
       <OrderStatusLive orderId={order.id} />
 
-      {/* Cabecera */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div className="min-w-0">
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) — badges y
+          total a la derecha (slot de acciones). */}
+      <PageHeader
+        icon={Package}
+        title={`Pedido ${order.id.split('-')[0].toUpperCase()}`}
+        description={
+          <>
+            {contact ? (contact.name || contact.phone || 'Cliente anónimo') : 'Cliente anónimo'}
+            {' · '}
+            <Clock className="inline h-3 w-3" /> Creado {fmtDate(order.created_at)}
+          </>
+        }
+        actions={
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              <Package className="h-5 w-5 text-primary" />
-              Pedido {order.id.split('-')[0].toUpperCase()}
-            </h1>
             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${STATUS_COLORS[order.status] ?? 'bg-muted text-muted-foreground'}`}>
               {STATUS_LABELS[order.status] ?? order.status}
             </span>
             {order.payment_method === 'cod' && (
               <Badge variant="outline" className="text-[11px] text-emerald-700 border-emerald-700/30">💵 Contraentrega</Badge>
             )}
+            <p className="text-2xl font-bold text-primary tabular-nums">{cop(total)}</p>
           </div>
-          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-            <Clock className="h-3 w-3" /> Creado {fmtDate(order.created_at)}
-          </p>
-        </div>
-        <p className="text-2xl font-bold text-primary tabular-nums shrink-0">{cop(total)}</p>
-      </div>
+        }
+      />
 
       {/* Contacto */}
       <section className="rounded-xl border border-border bg-card p-4">

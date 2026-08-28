@@ -9,10 +9,15 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, ScrollText } from 'lucide-react'
+import { ArrowLeft, Scale } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { renderMarkdown, LEGAL_DOCS } from '../../_lib/markdown'
 
-export const dynamic = 'force-static'
+// force-DYNAMIC, no static: la página vive bajo el layout autenticado del
+// dashboard (lee cookies de sesión en cada request). Con `force-static` el
+// layout no recibía las cookies → getUser()=null → redirect a /login: el
+// visor quedaba INALCANZABLE (bug pre-existente expuesto por la sonda T7.12).
+export const dynamic = 'force-dynamic'
 
 export default async function LegalDocViewer({
   params,
@@ -42,10 +47,8 @@ export default async function LegalDocViewer({
         <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Volver a Aceptación legal
       </Link>
 
-      <div className="flex items-center gap-2">
-        <ScrollText className="h-5 w-5 text-primary" aria-hidden="true" />
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">{entry.title}</h1>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader icon={Scale} title={entry.title} />
 
       <article
         className="md-doc text-sm text-foreground/90 leading-relaxed"

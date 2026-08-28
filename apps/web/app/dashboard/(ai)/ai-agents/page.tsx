@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Bot, BookOpen, Sparkles, ShieldAlert } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
@@ -409,12 +410,14 @@ export default async function AiAgentsPage() {
   return (
     <div className="space-y-6 max-w-7xl">
 
-      <div>
-        <div className="flex items-center gap-2.5 mb-1">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-foreground">
-            <Bot className="h-5 w-5 text-primary" /> Configuración de la Inteligencia Artificial
-          </h1>
-          {agent.strict_guardrails ? (
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) — el badge de
+          guardrails que acompañaba al h1 pasa al slot de acciones. */}
+      <PageHeader
+        icon={Bot}
+        title="Configuración de la Inteligencia Artificial"
+        description="Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp."
+        actions={
+          agent.strict_guardrails ? (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-700/30 bg-green-500/10 text-green-700">
               Zero-Hallucinations Activo
             </span>
@@ -422,12 +425,9 @@ export default async function AiAgentsPage() {
             <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-500/10 text-amber-700">
               Guardrails relajados
             </span>
-          )}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp.
-        </p>
-      </div>
+          )
+        }
+      />
 
       <ReadinessCard
         hasFilosofia={hasFilosofia}

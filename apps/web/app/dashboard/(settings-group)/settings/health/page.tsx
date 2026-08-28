@@ -14,6 +14,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 import { HealthGrid } from './_components/health-grid'
 import { RefreshButton } from './_components/refresh-button'
+import { Activity } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import type { HealthRow } from './_components/types'
 
 export const dynamic = 'force-dynamic'
@@ -61,18 +63,13 @@ export default async function HealthPage() {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Salud de mis integraciones</h1>
-          <p className="text-sm text-muted-foreground">
-            Estado de WhatsApp, Wompi, Aveonline, MercadoLibre y Telegram.
-            Se recolecta cada 5 minutos; usa «Actualizar» para ver la última
-            lectura. Si una integración con Telegram conectado empieza a fallar,
-            te avisamos por ese canal.
-          </p>
-        </div>
-        <RefreshButton />
-      </header>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Activity}
+        title="Salud de mis integraciones"
+        description="Estado de WhatsApp, Wompi, Aveonline, MercadoLibre y Telegram. Se recolecta cada 5 minutos; usa «Actualizar» para ver la última lectura. Si una integración con Telegram conectado empieza a fallar, te avisamos por ese canal."
+        actions={<RefreshButton />}
+      />
 
       <HealthGrid byProvider={byProvider} fetchError={error} />
 

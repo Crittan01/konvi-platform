@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { BookOpen, Search, BrainCircuit, PenLine, AlertCircle, ShieldAlert } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
 import { STARTER_TEMPLATES } from './starter-templates'
@@ -347,22 +348,21 @@ export default async function KnowledgeBasePage(
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-primary" /> Base de Conocimiento
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={BookOpen}
+        title="Base de Conocimiento"
+        description={
+          <>
             <span className={atLimit ? 'text-amber-700 font-medium' : ''}>
               {activeCount}/{MAX_DOCS} activos
             </span>
             {totalCount > activeCount && <>{' · '}{totalCount - activeCount} inactivos</>}
             {' · '}<span className="text-emerald-700">{embCount} listos para IA</span>
             {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} por preparar</span>}
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* AI badge */}
       <div className="flex items-start gap-3 rounded-xl border border-green-700/30 bg-green-500/5 px-4 py-3 text-sm text-green-700">

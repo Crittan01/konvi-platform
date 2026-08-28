@@ -12,6 +12,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { Database } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { ok, fail, type ActionResult } from '@/lib/action-result'
 import RetentionPoliciesForm, {
   IMPLEMENTED_ACTION,
@@ -150,16 +151,12 @@ export default async function RetentionPoliciesPage() {
 
   return (
     <div className="space-y-5 max-w-4xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Database className="h-5 w-5 text-primary" /> Retención de datos
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Habeas Data Ley 1581/2012 Art. 4 — uso limitado y prudente.
-          Configura cuánto tiempo se conservan los datos de tu tenant
-          antes de purgarse automáticamente cada domingo 03:xx UTC.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Database}
+        title="Retención de datos"
+        description="Habeas Data Ley 1581/2012 Art. 4 — uso limitado y prudente. Configura cuánto tiempo se conservan los datos de tu tenant antes de purgarse automáticamente cada domingo 03:xx UTC."
+      />
 
       <div className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-3 text-sm text-amber-700">
         <strong>Importante:</strong> los cambios aplican el siguiente domingo a las 03:xx UTC.

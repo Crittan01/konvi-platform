@@ -14,6 +14,7 @@ import {
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
   MessageCircle, Settings2, ChevronUp, CreditCard,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
 type Integration = { provider: string; status: string; meta: Record<string, string> }
@@ -204,15 +205,12 @@ export function IntegrationsManager(props: Props) {
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Plug className="h-5 w-5 text-primary" /> Integraciones
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Conectores activos para tu negocio · {connectedCount}/{TOTAL_CONNECTORS} conectados
-        </p>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Plug}
+        title="Integraciones"
+        description={`Conectores activos para tu negocio · ${connectedCount}/${TOTAL_CONNECTORS} conectados`}
+      />
 
       {/* Banners */}
       {connectedParam && !meliSameUser && (

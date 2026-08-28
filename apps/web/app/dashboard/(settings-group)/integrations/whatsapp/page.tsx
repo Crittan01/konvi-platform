@@ -19,6 +19,7 @@ import {
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { MessageSquareText, ArrowLeft, AlertTriangle } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import WhatsAppTabs from './_components/whatsapp-tabs'
 import WhatsAppSetup from './_components/whatsapp-setup'
 import WhatsAppTemplates from './_components/whatsapp-templates'
@@ -440,13 +441,14 @@ export default async function WhatsAppIntegrationPage(
         </Link>
       </div>
 
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <MessageSquareText className="h-5 w-5 text-primary" /> WhatsApp Business
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {connected ? (
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12). La
+          línea de estado Conectado/Desconectado con los dots va al description
+          verbatim (mismo patrón que PanelHeader). */}
+      <PageHeader
+        icon={MessageSquareText}
+        title="WhatsApp Business"
+        description={
+          connected ? (
             <>
               <span className="inline-flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-emerald-700 inline-block" />
@@ -464,9 +466,9 @@ export default async function WhatsAppIntegrationPage(
               </span>
               {' · Configura WhatsApp en la pestaña Setup para empezar.'}
             </>
-          )}
-        </p>
-      </div>
+          )
+        }
+      />
 
       {/* Banner sin WABA configurado */}
       {!wabaConfigured && tab === 'plantillas' && (

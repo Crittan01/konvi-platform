@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { Store, ExternalLink, Eye } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import MarketplaceManager, { type MeliItem } from './_components/marketplace-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
@@ -223,14 +224,12 @@ export default async function MarketplacePage(props: {
 
   return (
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-auto">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Store className="h-5 w-5 text-yellow-700" /> Mercado Libre
-        </h1>
-        <p className="text-muted-foreground max-w-3xl text-sm">
-          Tus publicaciones en MeLi. Vincula manualmente cada item al producto de tu catálogo para activar el sync de stock — solo los items vinculados se sincronizan.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Store}
+        title="Mercado Libre"
+        description="Tus publicaciones en MeLi. Vincula manualmente cada item al producto de tu catálogo para activar el sync de stock — solo los items vinculados se sincronizan."
+      />
 
       {!canWrite && (
         <Alert className="border-border/60">

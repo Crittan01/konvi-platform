@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { Image as ImageIcon, HardDrive, ShieldAlert } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import MediaClient from './media-client'
 
@@ -44,23 +45,18 @@ export default async function MediaPage() {
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <ImageIcon className="h-5 w-5 text-primary" /> Media
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {mediaFiles.length} archivos · {formatBytesServer(totalSize)} usado
-          </p>
-        </div>
-        {totalSize > 0 && (
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={ImageIcon}
+        title="Media"
+        description={`${mediaFiles.length} archivos · ${formatBytesServer(totalSize)} usado`}
+        actions={totalSize > 0 ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <HardDrive className="h-3.5 w-3.5" />
             <span>Almacenamiento de imágenes</span>
           </div>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <MediaClient
         tenantId={tenantId}

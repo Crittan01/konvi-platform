@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Download, ClipboardList, AlertTriangle, Info, RotateCw, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { cn } from '@/lib/utils'
 import { bogotaLocalToUTC } from '@/lib/date-window'
 import {
@@ -194,29 +195,26 @@ export default async function AuditPage(
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-primary" aria-hidden /> Auditoría
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {error
-              ? (view === 'changes' ? 'Registro de cambios del equipo' : 'Registro de accesos a datos personales')
-              : view === 'changes'
-                ? `${total} evento${total === 1 ? '' : 's'} registrado${total === 1 ? '' : 's'}`
-                : `${total} acceso${total === 1 ? '' : 's'} a datos personales`}
-          </p>
-        </div>
-        {view === 'changes' && !error && (
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={ClipboardList}
+        title="Auditoría"
+        description={
+          error
+            ? (view === 'changes' ? 'Registro de cambios del equipo' : 'Registro de accesos a datos personales')
+            : view === 'changes'
+              ? `${total} evento${total === 1 ? '' : 's'} registrado${total === 1 ? '' : 's'}`
+              : `${total} acceso${total === 1 ? '' : 's'} a datos personales`
+        }
+        actions={view === 'changes' && !error ? (
           <a
             href={`/api/audit/export?${exportParams.toString()}`}
             className={cn(buttonVariants({ size: 'sm', variant: 'outline' }), 'h-8 gap-1.5 text-xs')}
           >
             <Download className="h-3.5 w-3.5" aria-hidden /> Exportar CSV
           </a>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Tabs de vista — cambios (audit_log) vs accesos a PII (pii_access_log) */}
       <nav aria-label="Vista de auditoría" className="flex gap-1 border-b border-border">

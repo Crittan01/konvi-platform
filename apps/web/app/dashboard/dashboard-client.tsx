@@ -8,8 +8,9 @@ import {
   MessageSquare, Package, Users, ShoppingCart,
   Boxes, BarChart2, Plug, ArrowRight,
   AlertTriangle, UserCheck, Clock, Zap, Activity,
-  RefreshCw, CheckCircle2, Circle, WifiOff,
+  RefreshCw, CheckCircle2, Circle, WifiOff, LayoutDashboard,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, CartesianGrid,
@@ -189,36 +190,38 @@ export default function DashboardClient({
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* ── Header ────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight">
+      {/* ── Header — cabecera de módulo con identidad (firma Kaiu, T7.12).
+              El saludo "Bienvenido, {tenant}" ES el header del home. ──────── */}
+      <PageHeader
+        icon={LayoutDashboard}
+        title={
+          <>
             Bienvenido,{' '}
             <span className="text-gradient">{tenantName}</span>
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {userEmail} · {ROLE_LABELS[role] ?? role}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {rtState !== 'connected' && (
-            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-medium" title="El canal de tiempo real se reconecta; los datos pueden tardar en actualizarse.">
-              <WifiOff className="h-3.5 w-3.5" />
-              {rtState === 'down' ? 'Sin tiempo real' : 'Reconectando…'}
-            </span>
-          )}
-          {totalOpsAlerts > 0 && (
-            <button
-              type="button"
-              onClick={() => setTab('operaciones')}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-xs hover:bg-amber-100 transition-colors"
-            >
-              <Zap className="h-4 w-4 shrink-0" />
-              <span>Ver {totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
-            </button>
-          )}
-        </div>
-      </div>
+          </>
+        }
+        description={`${userEmail} · ${ROLE_LABELS[role] ?? role}`}
+        actions={
+          <div className="flex items-center gap-2">
+            {rtState !== 'connected' && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-medium" title="El canal de tiempo real se reconecta; los datos pueden tardar en actualizarse.">
+                <WifiOff className="h-3.5 w-3.5" />
+                {rtState === 'down' ? 'Sin tiempo real' : 'Reconectando…'}
+              </span>
+            )}
+            {totalOpsAlerts > 0 && (
+              <button
+                type="button"
+                onClick={() => setTab('operaciones')}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-xs hover:bg-amber-100 transition-colors"
+              >
+                <Zap className="h-4 w-4 shrink-0" />
+                <span>Ver {totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
+              </button>
+            )}
+          </div>
+        }
+      />
 
       {/* ── Aviso de error de lectura: NO pintar falsos ceros como verdad ──── */}
       {readError && (

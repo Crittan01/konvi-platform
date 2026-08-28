@@ -182,7 +182,15 @@ export function ConversationList({
       <div className="p-4 border-b border-border space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="font-semibold text-base flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-primary" />
+            {/* Mini-tile de marca (firma Kaiu a escala inbox, T7.12): el h1 vive
+                en el panel angosto (w-80) y el PageHeader completo no cabe —
+                excepción documentada en UX-UI §5. Mismo degradado del tile DS. */}
+            <span
+              aria-hidden
+              className="h-7 w-7 shrink-0 rounded-lg bg-gradient-to-br from-primary to-[hsl(var(--amber))] flex items-center justify-center shadow-sm glow-primary ring-1 ring-white/15"
+            >
+              <MessageSquare className="h-3.5 w-3.5 text-white" />
+            </span>
             Inbox AI
           </h1>
           <div className="flex items-center gap-1 text-xs text-emerald-700">

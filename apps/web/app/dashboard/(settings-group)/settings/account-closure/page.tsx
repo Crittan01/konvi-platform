@@ -14,6 +14,8 @@
  */
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { TriangleAlert } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { ClosureForm } from './_components/closure-form'
 
 export const dynamic = 'force-dynamic'
@@ -79,13 +81,12 @@ export default async function AccountClosurePage() {
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Cerrar cuenta</h1>
-        <p className="text-sm text-muted-foreground">
-          Gestiona la eliminación de tu cuenta y la portabilidad de tus datos
-          conforme a la Ley 1581 (Habeas Data).
-        </p>
-      </header>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={TriangleAlert}
+        title="Cerrar cuenta"
+        description="Gestiona la eliminación de tu cuenta y la portabilidad de tus datos conforme a la Ley 1581 (Habeas Data)."
+      />
 
       <ClosureForm
         tenantId={tenantId}

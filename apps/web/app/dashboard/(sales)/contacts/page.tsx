@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { ShieldCheck, Users } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
@@ -828,17 +829,12 @@ export default async function ContactsPage(
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Users className="h-5 w-5 text-primary" /> Contactos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {contacts.length} contactos · {consentCount} con consentimiento Habeas Data · {revokedCount} revocados
-          </p>
-        </div>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Users}
+        title="Contactos"
+        description={`${contacts.length} contactos · ${consentCount} con consentimiento Habeas Data · ${revokedCount} revocados`}
+      />
 
       {/* AI Insight — a demanda */}
       {(role === 'owner' || role === 'manager') && (

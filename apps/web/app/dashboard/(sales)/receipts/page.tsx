@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/server'
-import { ReceiptText } from 'lucide-react'
+import { FileText, ReceiptText } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cop, fechaCO, estadoEntrega, type Receipt } from './_lib/receipt'
@@ -54,12 +55,12 @@ export default async function ReceiptsPage(props: {
 
   return (
     <div className="p-4 md:p-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">Comprobantes de compra</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Documento no fiscal que se le entrega al comprador. No es una factura de venta.
-        </p>
-      </div>
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={FileText}
+        title="Comprobantes de compra"
+        description="Documento no fiscal que se le entrega al comprador. No es una factura de venta."
+      />
 
       {loadError && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">

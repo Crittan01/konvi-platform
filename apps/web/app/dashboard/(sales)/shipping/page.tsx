@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { Truck, Package, AlertCircle, ExternalLink, Clock, Info, FileDown, MapPin, Lock } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import ShippingQuoteForm from './shipping-quote-form'
 import { StatusBadge } from './status-badge'
@@ -181,17 +182,12 @@ export default async function ShippingPage(
   return (
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Truck className="h-5 w-5 text-primary" /> Cotizador de envíos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {totalCount} {totalCount === 1 ? 'envío' : 'envíos'} · {inTransitCount} en tránsito · {deliveredCount} entregados
-          </p>
-        </div>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={Truck}
+        title="Cotizador de envíos"
+        description={`${totalCount} ${totalCount === 1 ? 'envío' : 'envíos'} · ${inTransitCount} en tránsito · ${deliveredCount} entregados`}
+      />
 
       {/* Ayuda contextual: modelo "estimador puro" (decisión 63b18087).
           El cotizador da estimados; la guía real/canónica se genera por-orden

@@ -5,11 +5,12 @@
  * Renderiza breadcrumb + título + estado de conexión + meta secundaria.
  */
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, type LucideIcon } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 
 type Props = {
   /** Icono del provider (componente lucide-react). */
-  Icon: React.ElementType
+  Icon: LucideIcon
   title: string
   connected: boolean
   /** Texto secundario a la derecha del status (e.g. "WABA 1234 · Tier 1k/24h"). */
@@ -30,13 +31,13 @@ export default function PanelHeader({ Icon, title, connected, metaLine }: Props)
         </Link>
       </div>
 
-      {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Icon className="h-5 w-5 text-primary" /> {title}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {connected ? (
+      {/* Cabecera de módulo con identidad (firma Kaiu, T7.12) — la línea de
+          estado Conectado/Desconectado con los dots va al description verbatim. */}
+      <PageHeader
+        icon={Icon}
+        title={title}
+        description={
+          connected ? (
             <>
               <span className="inline-flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-emerald-700 inline-block" />
@@ -52,9 +53,9 @@ export default function PanelHeader({ Icon, title, connected, metaLine }: Props)
               </span>
               {' · Configura esta integración desde el panel de Integraciones.'}
             </>
-          )}
-        </p>
-      </div>
+          )
+        }
+      />
     </div>
   )
 }

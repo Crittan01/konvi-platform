@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { FileText } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   cop,
   fechaCO,
@@ -82,15 +84,21 @@ export default async function ReceiptPage(props: { params: Promise<{ id: string 
         </div>
 
         <article className="rounded-md border border-border bg-card p-6 print:border-0 print:p-0">
-          <header className="mb-5">
-            <h1 className="text-xl font-semibold text-foreground">
-              Comprobante de compra {r.numero}
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Documento no fiscal · No es una factura de venta · Emitido el{' '}
-              {fechaCO(r.issued_at)}
-            </p>
-          </header>
+          {/* Cabecera con identidad (firma Kaiu, T7.12). `print:hidden`:
+              el CSS de impresión de abajo oculta TODO <header> y este PageHeader
+              renderiza <div>s — sin la clase el título aparecería de golpe en
+              el documento impreso. El artefacto impreso queda byte-idéntico. */}
+          <PageHeader
+            icon={FileText}
+            title={`Comprobante de compra ${r.numero}`}
+            description={
+              <>
+                Documento no fiscal · No es una factura de venta · Emitido el{' '}
+                {fechaCO(r.issued_at)}
+              </>
+            }
+            className="mb-5 print:hidden"
+          />
 
           {anulado && (
             <div className="mb-5 rounded-md border border-destructive/40 bg-destructive/5 p-3">

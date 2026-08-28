@@ -23,8 +23,9 @@ import { StaggerItem, StaggerList } from '@/components/ui/motion'
 export interface PageHeaderProps {
   /** Icono del módulo (Lucide). Se pinta blanco sobre el tile degradado. */
   icon: LucideIcon
-  /** Nombre del módulo (único h1 de la página). */
-  title: string
+  /** Nombre del módulo (único h1 de la página). ReactNode: el saludo del
+   *  home lleva un span con `text-gradient` (T7.12). */
+  title: React.ReactNode
   /** Contexto bajo el título (conteo, descripción corta, email…). */
   description?: React.ReactNode
   /** Acciones a la derecha (exportar, CTA primaria del módulo…). */

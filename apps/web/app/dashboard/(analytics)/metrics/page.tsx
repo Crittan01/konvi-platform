@@ -7,6 +7,7 @@ import {
   XCircle, ArrowDownToLine, AlertCircle, Info, AlertTriangle,
   ArrowUp, ArrowDown, Minus, Coins,
 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -204,18 +205,17 @@ export default async function MetricsPage(
     <TooltipProvider delayDuration={150}>
     <div className="space-y-5 max-w-7xl">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <BarChart2 className="h-5 w-5 text-primary" /> Métricas
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{periodLabel} · {ROLE_LABELS[role] ?? role}</p>
-        </div>
-        <Suspense>
-          <MetricsFilters current={period} />
-        </Suspense>
-      </div>
+      {/* Header — cabecera de módulo con identidad (firma Kaiu, T7.12) */}
+      <PageHeader
+        icon={BarChart2}
+        title="Métricas"
+        description={`${periodLabel} · ${ROLE_LABELS[role] ?? role}`}
+        actions={
+          <Suspense>
+            <MetricsFilters current={period} />
+          </Suspense>
+        }
+      />
 
       {/* Estado de error: datos que no se pudieron cargar (no se pintan como 0) */}
       {failed.length > 0 && (
