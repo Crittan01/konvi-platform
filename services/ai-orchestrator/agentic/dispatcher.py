@@ -76,8 +76,8 @@ except Exception:  # pragma: no cover - import defensivo
 
 
 # Cache TTL del meta agentic per-tenant (perf rev. 114). Sus dos consumidores —el
-# gate is_tenant_agentic_enabled (@268) y los guardrails _load_tenant_agentic_meta
-# (@2914)— leían el MISMO row/columna → 2 queries idénticas por turno. Es config del
+# gate `is_tenant_agentic_enabled` y los guardrails `_load_tenant_agentic_meta`—
+# leían el MISMO row/columna → 2 queries idénticas por turno. Es config del
 # tenant (agentic_enabled + guardrails), NO verdad transaccional, no cambia
 # intra-conversación → cacheable. Dedup dentro del turno + reuso cross-turn (30s,
 # consistente con carrier_capabilities/tenant_payment_methods).
@@ -917,47 +917,29 @@ async def _run_agentic_full(
     )
 
     # Cargar context (catalog, contact, history) — reusa helpers legacy.
-    from orchestrator import (
-        _get_conversation_history,
-        _fetch_contact_for_phone,
-        _get_conversation_customer_phone,
-        _mark_message_processing,
-        _send_outbound_text,
-        PROCESSING_STATUS_PROCESSED,
-    )
     from tools.catalog_tool import get_tenant_catalog
 
     # get_tenant_catalog es async — debe awaitearse.
     catalog = await get_tenant_catalog(supabase, tenant_id)
-    history = await _get_conversation_history(supabase, tenant_id, conversation_id)
-    customer_phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
-    # Rev. 108 — auto-upsert contact si no existe (paridad con orchestrator V1
-    # línea 6833). Sin esto, record_consent + save_pii fallan con NO_CONTACT
-    # cuando un cliente nuevo escribe (o tras reset --hard).
-    # consent_given=False default — el bot pedirá consent explícito vía
-    # record_consent antes de save_pii.
-    if customer_phone:
-        try:
-            supabase.table("contacts").upsert(
-                {
-                    "tenant_id": tenant_id,
-                    "phone": customer_phone,
-                    "shipping_phone": customer_phone,
-                    "consent_given": False,
-                },
-                on_conflict="tenant_id,phone",
-                ignore_duplicates=True,
-            ).execute()
-        except Exception as exc:
-            logger.warning(
-                "[AGENTIC_DISPATCH] contact upsert falló phone=%s: %s",
-                customer_phone, exc,
-            )
-    # `_fetch_contact_for_phone` retorna tuple (contact_id, contact_record).
-    if customer_phone:
-        contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
-    else:
-        contact_id, contact = None, {}
+
+    # B-2 Fase 0 (2026-08-28) — TurnContext: UNA lectura por entidad al inicio
+    # del turno (conv+phone, upsert de contact heredado, contact, history),
+    # compartida por los bloques. Antes cada bloque leía por su cuenta
+    # (INV-B §2: conv×7, messages×5-6, contacts×2 por turno). El cart queda en
+    # ctx.get_cart() (refrescable) — lo consume la resolución de estado al
+    # inicio del turno (más abajo) y los bloques con el filtro canónico.
+    # (`_send_outbound_text`/`_mark_message_processing`/`PROCESSING_STATUS_*`
+    # ya se importaron al inicio de la función, en el bloque multimodal.)
+    from agentic.turn_context import TurnContext
+    ctx = await TurnContext.load(
+        supabase,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+    )
+    history = ctx.history
+    customer_phone = ctx.customer_phone
+    contact_id, contact = ctx.contact_id, ctx.contact
 
     # System prompt — Rev. 107 fix: leer tenant.name real desde DB
     # (antes default "el negocio" → bot decía "Bienvenida a Sara Camila,
@@ -1096,31 +1078,68 @@ async def _run_agentic_full(
     # REAL. El LLM igual corre con el role_description del agente sintético
     # (mensaje cálido al cliente, sin tools), pero ahora SÍ hay atención humana.
     if _agent.get("_needs_human_handoff"):
-        await _consume_router_handoff(supabase, tenant_id, conversation_id)
+        if await _consume_router_handoff(supabase, tenant_id, conversation_id):
+            # B-2 Fase 0: el handoff mutó conv.status → reflejarlo en el
+            # snapshot del turno para que la resolución de estado (inmediata,
+            # abajo) vea el mundo real post-router — mismo resultado que la
+            # lectura fresca de DB que hacía la resolución posterior.
+            ctx.conversation["status"] = "human_takeover"
+
+    # ── B-2 Fase 0 (2026-08-28) — StateResolver al INICIO del turno ──
+    # Antes el estado se resolvía DESPUÉS de los resolvers que mutan (INV-B
+    # P10: tras 8 mutadores) — el per-state prompt veía el mundo post-mutación.
+    # Ahora se resuelve AQUÍ, post-router (que puede mutar conv.status → ya
+    # reflejado en ctx) y ANTES de los resolvers de dinero: el prompt
+    # per-state, el subset de tools, los guardrails y el routing de modelo
+    # usan el estado de ENTRADA del turno, leído UNA vez vía TurnContext.
+    # Misma función, mismo resolver. Los paths terminales de bypass conservan
+    # su re-resolución post-hoc al final (badge fresco tras sus mutaciones).
+    # Nuance aceptada (formulación §3 Fase 0, validada por founder 2026-08-28):
+    # en turnos donde un resolver pre-LLM muta y el turno SIGUE al LLM
+    # (consent otorgado / carrier elegido), el prompt ve el estado de entrada
+    # — la red de aceptación es el harness B-3.
+    _resolved_state = _resolve_and_persist_agentic_state(
+        supabase=supabase,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        contact=contact,
+        history=history,
+        turn_ctx=ctx,
+    )
+    # ─── /state machine (resolución al inicio) ───
 
     # Rev. 109 auditoría — pitch/tone YA NO se duplican en ai_agents.
     # Única fuente verdad: tenants.business_pitch + tenants.tono_comunicacion.
     # Filosofía completa inyectada como bloque dedicado al system_prompt.
-    system_prompt = build_system_prompt(
-        tenant_name=tenant_name,
-        catalog=catalog,
-        agent_name=_agent.get("name") or "Sara Camila",
-        tenant_pitch=tenant_pitch,
-        tenant_tone=tenant_tone,
-        contact_record=contact or {},
-        carriers=carriers_caps,
-        payment_methods=payment_methods_cfg,
-        tenant_philosophy=tenant_philosophy,
-        agent_role_description=_agent.get("role_description"),
-        active_coupons=active_coupons,
-        # A2 finiquito 2026-06-23 — business_ops block (cierra Bug #1 audit §1).
-        shipping_origin=tenant_shipping_origin,
-        store_locations=tenant_store_locations,
-        store_type=tenant_store_type,
-        support_schedule=tenant_support_schedule,
-        social_links=tenant_social_links,
-        after_hours_message=tenant_after_hours_message,
-    )
+    # B-2 Fase 0 (2026-08-28, INV-B P8): el monolito V2 ya NO se construye
+    # eager en el 100% de los turnos — se DESCARTABA cuando el build per-state
+    # (V3) tenía éxito (~todos los turnos sanos). Ahora es LAZY: solo se
+    # construye si el per-state no aplica (resolver None) o falla (fallback).
+    # Misma función, mismos kwargs — cero cambio de contenido cuando se usa.
+    def _build_v2_monolith_prompt(*, cart_snapshot: Optional[str] = None) -> str:
+        return build_system_prompt(
+            tenant_name=tenant_name,
+            catalog=catalog,
+            agent_name=_agent.get("name") or "Sara Camila",
+            tenant_pitch=tenant_pitch,
+            tenant_tone=tenant_tone,
+            contact_record=contact or {},
+            carriers=carriers_caps,
+            payment_methods=payment_methods_cfg,
+            tenant_philosophy=tenant_philosophy,
+            agent_role_description=_agent.get("role_description"),
+            active_coupons=active_coupons,
+            # A2 finiquito 2026-06-23 — business_ops block (cierra Bug #1 audit §1).
+            shipping_origin=tenant_shipping_origin,
+            store_locations=tenant_store_locations,
+            store_type=tenant_store_type,
+            support_schedule=tenant_support_schedule,
+            social_links=tenant_social_links,
+            after_hours_message=tenant_after_hours_message,
+            cart_snapshot=cart_snapshot,
+        )
+
+    system_prompt: Optional[str] = None
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──
     # Rev. 107 fix runtime founder 2026-05-24 conv 8c845cc0: bot preguntó
@@ -1160,18 +1179,16 @@ async def _run_agentic_full(
                     "credit" if "online_wompi" in available else "cod"
                 )
                 try:
-                    cart_q = (
-                        supabase.table("conversation_carts")
-                        .select("id")
-                        .eq("tenant_id", tenant_id)
-                        .eq("conversation_id", conversation_id)
-                        .in_("status", ["open", "checkout"])
-                        .order("created_at", desc=True).limit(1).execute()
-                    )
-                    if cart_q.data:
-                        supabase.table("conversation_carts").update({
-                            "payment_method": forced_method,
-                        }).eq("id", cart_q.data[0]["id"]).eq("tenant_id", tenant_id).execute()
+                    # B-2 Fase 0: cart del TurnContext (mismo filtro canónico
+                    # [open, checkout] + created_at DESC de hoy). La mutación
+                    # vía update_cart_fields deja el snapshot coherente SIN
+                    # re-leer — el COD block de abajo ve este cambio como lo
+                    # veía con su read-fresco.
+                    _avail_cart = ctx.get_cart()
+                    if _avail_cart:
+                        ctx.update_cart_fields(
+                            _avail_cart["id"], {"payment_method": forced_method},
+                        )
                 except Exception:
                     pass
     except Exception as exc:
@@ -1310,6 +1327,14 @@ async def _run_agentic_full(
                     "[AGENTIC_PRE_LLM] recipient_intent persist falló: %s",
                     _r_exc,
                 )
+            # B-2 Fase 0: este bloque pudo CREAR el cart (ensure_cart) o
+            # mutarlo (set_recipient) por fuera del TurnContext → refrescar el
+            # snapshot para que los consumidores posteriores (coupon block)
+            # vean el mundo real, como con el read-fresco de hoy.
+            try:
+                ctx.refresh_cart()
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] recipient_intent_resolver crashed: %s — skip",
@@ -1351,21 +1376,15 @@ async def _run_agentic_full(
 
         if cod_match:
             try:
-                cart_row = (
-                    supabase.table("conversation_carts")
-                    .select("id, payment_method")
-                    .eq("conversation_id", conversation_id)
-                    .eq("tenant_id", tenant_id)
-                    .in_("status", ["open", "checkout"])
-                    .order("created_at", desc=True).limit(1).execute()
-                )
-                if cart_row.data:
-                    cid = cart_row.data[0]["id"]
-                    cur_method = cart_row.data[0].get("payment_method", "credit")
+                # B-2 Fase 0: cart del TurnContext (mismo filtro canónico +
+                # created_at DESC). El snapshot ya refleja la mutación del
+                # bloque payment-availability (coherencia vía update_cart_fields).
+                _cod_cart = ctx.get_cart()
+                if _cod_cart:
+                    cid = _cod_cart["id"]
+                    cur_method = _cod_cart.get("payment_method", "credit")
                     if cur_method != "cod":
-                        supabase.table("conversation_carts").update({
-                            "payment_method": "cod",
-                        }).eq("id", cid).eq("tenant_id", tenant_id).execute()
+                        ctx.update_cart_fields(cid, {"payment_method": "cod"})
                         logger.info(
                             "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
                             "credit → cod (intent: %s)",
@@ -1380,19 +1399,11 @@ async def _run_agentic_full(
         elif credit_match:
             # Cliente cambió de COD a credit explícito — revertir.
             try:
-                cart_row = (
-                    supabase.table("conversation_carts")
-                    .select("id, payment_method")
-                    .eq("conversation_id", conversation_id)
-                    .eq("tenant_id", tenant_id)
-                    .in_("status", ["open", "checkout"])
-                    .order("created_at", desc=True).limit(1).execute()
-                )
-                if cart_row.data and cart_row.data[0].get("payment_method") == "cod":
-                    cid = cart_row.data[0]["id"]
-                    supabase.table("conversation_carts").update({
-                        "payment_method": "credit",
-                    }).eq("id", cid).eq("tenant_id", tenant_id).execute()
+                # B-2 Fase 0: cart del TurnContext (mismo filtro canónico).
+                _credit_cart = ctx.get_cart()
+                if _credit_cart and _credit_cart.get("payment_method") == "cod":
+                    cid = _credit_cart["id"]
+                    ctx.update_cart_fields(cid, {"payment_method": "credit"})
                     logger.info(
                         "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
                         "cod → credit (intent: %s)",
@@ -1437,18 +1448,13 @@ async def _run_agentic_full(
                 [str(c.get("code") or "") for c in active_coupons],
             )
         if _coupon_intent:
-            _cart_lookup = (
-                supabase.table("conversation_carts")
-                .select(
-                    "id, status, subtotal_cents, shipping_cents, "
-                    "total_cents, coupon_id, coupon_code, discount_cents"
-                )
-                .eq("tenant_id", tenant_id)
-                .eq("conversation_id", conversation_id)
-                .in_("status", ["open", "checkout"])
-                .order("created_at", desc=True).limit(1).execute()
-            )
-            _cart_rows = _cart_lookup.data or []
+            # B-2 Fase 0: cart del TurnContext — mismo filtro canónico
+            # [open, checkout] + created_at DESC de hoy; el SELECT canónico
+            # incluye las columnas de totales/cupón que este bloque consume.
+            # El snapshot ya refleja las mutaciones inline previas del turno
+            # (payment-availability / COD / recipient → refresh explícito).
+            _ctx_cart = ctx.get_cart()
+            _cart_rows = [_ctx_cart] if _ctx_cart else []
             _coupon_response: Optional[str] = None
             _coupon_event_type: Optional[str] = None
             _coupon_event_payload: dict = {}
@@ -2078,13 +2084,11 @@ async def _run_agentic_full(
             from tools.image_send_tool import (
                 handle_image_request_if_applicable as _handle_image_request,
             )
-            _recent_msgs = (
-                supabase.table("messages")
-                .select("direction, content, content_type, created_at")
-                .eq("conversation_id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .order("created_at", desc=True).limit(10).execute().data or []
-            )
+            # B-2 Fase 0: derivado del history del TurnContext (misma ventana
+            # de 25, mismas columnas direction/content/content_type/created_at)
+            # — antes leía `messages` INCONDICIONALMENTE en todo turno de texto
+            # (INV-B §2), antes de cualquier regex barata.
+            _recent_msgs = ctx.recent_messages_desc(limit=10)
             _img_result = await _handle_image_request(
                 supabase=supabase,
                 tenant_id=tenant_id,
@@ -2093,9 +2097,9 @@ async def _run_agentic_full(
                 recent_messages=_recent_msgs,
             )
             if _img_result.handled:
-                customer_phone = _get_conversation_customer_phone(
-                    supabase, tenant_id, conversation_id,
-                )
+                # B-2 Fase 0: phone del TurnContext (no cambia intra-turno) —
+                # antes se releía `conversations` aquí.
+                customer_phone = ctx.customer_phone
                 if _img_result.image_link:
                     # Rev. 109 fix BUG 27: send_whatsapp_message firma real es
                     # (to_phone, image_link, image_caption) — no media_url.
@@ -2176,18 +2180,10 @@ async def _run_agentic_full(
     # + audit log directo. Skip si no aplica contexto.
     try:
         from agentic.consent_intent_resolver import detect_consent_intent
-        # Leer último outbound del bot.
-        last_out_q = (
-            supabase.table("messages")
-            .select("content")
-            .eq("conversation_id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .eq("direction", "outbound")
-            .order("created_at", desc=True).limit(1).execute()
-        )
-        last_bot_msg = (
-            (last_out_q.data or [{}])[0].get("content") or ""
-        )
+        # B-2 Fase 0: último outbound del bot derivado del history del
+        # TurnContext (misma ventana de 25 — ver turn_context.last_bot_outbound).
+        # Antes leía `messages` incondicionalmente en todo turno de texto.
+        last_bot_msg = ctx.last_bot_outbound()
         consent_match = detect_consent_intent(content, last_bot_msg)
         if consent_match and contact_id:
             new_consent = consent_match["intent"] == "consent_granted"
@@ -2234,6 +2230,11 @@ async def _run_agentic_full(
                     if isinstance(contact, dict) else
                     {"consent_given": new_consent}
                 )
+                # B-2 Fase 0: el snapshot del TurnContext refleja la misma
+                # mutación (la reasignación de arriba crea un dict NUEVO y no
+                # toca ctx.contact).
+                if isinstance(ctx.contact, dict):
+                    ctx.contact["consent_given"] = new_consent
             except Exception as exc:
                 logger.warning(
                     "[AGENTIC_PRE_LLM] consent_intent persist falló conv=%s: %s",
@@ -2254,13 +2255,14 @@ async def _run_agentic_full(
         from agentic.carrier_select_resolver import (
             detect_carrier_selection_intent,
         )
-        # Reusar last_bot_msg que ya se leyó arriba (consent_intent_resolver).
+        # B-2 Fase 0: el frágil `'last_bot_msg' in locals()` (INV-B P11) muere —
+        # el último outbound lo da el TurnContext (derivado del history).
         carrier_match = detect_carrier_selection_intent(
             supabase,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             inbound_text=content,
-            last_bot_outbound=last_bot_msg if 'last_bot_msg' in locals() else "",
+            last_bot_outbound=ctx.last_bot_outbound(),
         )
         # A8 #1 — solo si el agente activo permite select_carrier.
         if carrier_match and _agent_permits_tool(_agent, "select_carrier"):
@@ -2729,17 +2731,11 @@ async def _run_agentic_full(
     # ─── /pre-LLM resolver ───
 
     # ── Rev. 109 — Agentic State Machine (helper unificado) ──
-    # Resolver determinístico del estado actual del Inbox.
-    # Reutilizado por: el LLM path (para per-state prompt) Y los pre-LLM
-    # bypass paths (purchase_intent / shipping_intent) para mantener
-    # `conversations.agentic_state` siempre actualizado.
-    _resolved_state = _resolve_and_persist_agentic_state(
-        supabase=supabase,
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
-        contact=contact,
-        history=history,
-    )
+    # B-2 Fase 0 (2026-08-28): la resolución que alimenta el per-state prompt
+    # se movió AL INICIO del turno (tras el agent router — ver "StateResolver
+    # al INICIO del turno" más arriba). `_resolved_state` ya está resuelto y
+    # persistido desde allí; los paths terminales de bypass siguen
+    # re-resolviendo post-hoc al final (badge UI fresco tras sus mutaciones).
     # ─── /state machine ───
 
     # ── Rev. 109 Día 2 — Per-state prompt + tools subset ──
@@ -2826,41 +2822,27 @@ async def _run_agentic_full(
                 conversation_id, "v3_build_error", _resolved_state.value, alert=True,
             )
             # BLOQUE J-2 (review): reconstruir V2 CON el cart_snapshot ya computado.
-            # Antes el fallback usaba el build eager de 1281 SIN cart_snapshot →
+            # Antes el fallback usaba el build eager SIN cart_snapshot →
             # perdía el CARRITO ACTUAL (ADR-0026) y el bot podía re-inventar totales.
             # _cart_snapshot está en scope (init a None ANTES del try, no dentro).
+            # B-2 Fase 0: con el build LAZY, el fallback reusa el mismo builder
+            # encapsulado (`_build_v2_monolith_prompt`) — cero kwargs duplicados.
             try:
-                system_prompt = build_system_prompt(
-                    tenant_name=tenant_name,
-                    catalog=catalog,
-                    agent_name=_agent.get("name") or "Sara Camila",
-                    tenant_pitch=tenant_pitch,
-                    tenant_tone=tenant_tone,
-                    contact_record=contact or {},
-                    carriers=carriers_caps,
-                    payment_methods=payment_methods_cfg,
-                    tenant_philosophy=tenant_philosophy,
-                    agent_role_description=_agent.get("role_description"),
-                    active_coupons=active_coupons,
-                    shipping_origin=tenant_shipping_origin,
-                    store_locations=tenant_store_locations,
-                    store_type=tenant_store_type,
-                    support_schedule=tenant_support_schedule,
-                    social_links=tenant_social_links,
-                    after_hours_message=tenant_after_hours_message,
-                    cart_snapshot=_cart_snapshot,
-                )
+                system_prompt = _build_v2_monolith_prompt(cart_snapshot=_cart_snapshot)
             except Exception as _rebuild_exc:
-                # El rebuild también falló → queda el system_prompt del build eager
-                # de 1281 (sin cart_snapshot, pero funcional). No romper el turno.
+                # El rebuild con snapshot falló → último recurso: monolito plano
+                # (sin snapshot). Si TAMBIÉN falla, propaga al degraded path del
+                # dispatch — equivalente al build eager de hoy fallando al inicio
+                # del turno (misma función, mismos inputs).
                 # WARNING (no ERROR, review LOW-pii): consistente con los siblings
                 # (cart_snapshot/catalog_view) y evita elevar str(exc) a ERROR
                 # (severidad reservada a alertas accionables).
                 logger.warning(
                     "[AGENTIC_FALLBACK_V2] rebuild V2 con cart_snapshot falló "
-                    "conv=%s: %s — se usa el build eager previo",
+                    "conv=%s: %s — último recurso: monolito plano",
                     conversation_id[:8], _rebuild_exc,
                 )
+                system_prompt = _build_v2_monolith_prompt()
             _allowed_tools = None  # monolito = todas las tools
     else:
         # BLOQUE J-2 (review): _resolved_state is None significa que el resolver
@@ -2870,6 +2852,10 @@ async def _run_agentic_full(
         # turno durante una degradación de DB. El cart tampoco es reconstruible aquí
         # (si la DB está caída, la lectura del carrito también fallaría).
         _report_agentic_v2_fallback(conversation_id, "resolver_none", "None", alert=False)
+        # B-2 Fase 0: con el build lazy, el monolito se construye AQUÍ (antes venía
+        # del build eager previo). Mismo contenido; si falla propaga al degraded
+        # path (equivalente al eager fallando al inicio del turno).
+        system_prompt = _build_v2_monolith_prompt()
 
     # A8 #2 finiquito (audit §6) — fsm_states_allowed enforcement + tools
     # intersection del agente activo. Helper puro testeable (ver
@@ -3022,26 +3008,22 @@ async def _run_agentic_full(
     try:
         from agentic.cod_intent_resolver import detect_cod_intent
         if detect_cod_intent(content):
-            _cart_post = (
-                supabase.table("conversation_carts")
-                .select("id, payment_method")
-                .eq("conversation_id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .in_("status", ["open", "checkout"])
-                .order("created_at", desc=True).limit(1).execute()
-            )
-            if _cart_post.data and _cart_post.data[0].get("payment_method") != "cod":
+            # B-2 Fase 0: refresh forzado — el loop LLM pudo crear/mutar el
+            # cart por fuera del ctx (add_to_cart, quote_shipping, etc.).
+            # Mismo filtro canónico [open, checkout] + created_at DESC de hoy.
+            _cart_post = ctx.get_cart(refresh=True)
+            if _cart_post and _cart_post.get("payment_method") != "cod":
                 # Verificar que tenant TIENE COD enabled antes de marcar.
                 try:
                     from lib.tenant_payment_methods import is_method_enabled
                     if is_method_enabled(supabase, tenant_id=tenant_id, method="cod"):
-                        supabase.table("conversation_carts").update({
-                            "payment_method": "cod",
-                        }).eq("id", _cart_post.data[0]["id"]).eq("tenant_id", tenant_id).execute()
+                        ctx.update_cart_fields(
+                            _cart_post["id"], {"payment_method": "cod"},
+                        )
                         logger.info(
                             "[AGENTIC_POST_LLM] conv=%s cart=%s marked COD "
                             "post-LLM (intent detected pre, cart created during)",
-                            conversation_id[:8], _cart_post.data[0]["id"][:8],
+                            conversation_id[:8], _cart_post["id"][:8],
                         )
                 except Exception:
                     pass
@@ -3388,14 +3370,17 @@ def _resolve_and_persist_agentic_state(
     conversation_id: str,
     contact: Optional[dict],
     history: Optional[list],
+    turn_ctx: Optional[Any] = None,
 ) -> Optional[Any]:
     """Resuelve + persiste el estado agentic en `conversations.agentic_state`.
 
     Reutilizable por:
-      • El LLM path principal (per-state prompt + tools subset).
+      • El LLM path principal (per-state prompt + tools subset) — B-2 Fase 0:
+        se invoca AL INICIO del turno con `turn_ctx` (snapshot TurnContext de
+        una sola lectura por entidad — 0 re-lecturas aquí).
       • Los pre-LLM bypass paths (purchase_intent / shipping_intent /
-        cod_intent) — mantiene el badge UI fresco aun cuando el LLM no
-        se invoca.
+        cod_intent) — sin `turn_ctx`: leen fresco de DB (post-mutación) para
+        mantener el badge UI actualizado.
 
     NO bloquea ningún turno si falla. Defensive a:
       • Migration `agentic_state` column pendiente en remote (skip persist).
@@ -3408,63 +3393,81 @@ def _resolve_and_persist_agentic_state(
         from agentic.state_machine import StateResolver
         from agentic.state_machine.resolver import build_context_from_records
 
-        try:
-            _conv_row = (
-                supabase.table("conversations")
-                .select("status, agentic_state")
-                .eq("id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .single()
-                .execute()
-            )
-            _has_state_column = True
-        except Exception:
-            _conv_row = (
-                supabase.table("conversations")
-                .select("status")
-                .eq("id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .single()
-                .execute()
-            )
-            _has_state_column = False
-        _conv = _conv_row.data or {}
+        if turn_ctx is not None:
+            # B-2 Fase 0 (2026-08-28): snapshot del inicio del turno.
+            if not turn_ctx.conversation_found:
+                # Paridad con el path de lectura directa de hoy: sin conv row
+                # el .single() lanzaba → el resolver retornaba None → el turno
+                # cae al prompt monolito V2.
+                logger.warning(
+                    "[AGENTIC_STATE] resolver falló conv=%s: %s",
+                    conversation_id[:8],
+                    "conversación no encontrada en el snapshot del turno",
+                )
+                return None
+            _conv = turn_ctx.conversation
+            _has_state_column = "agentic_state" in _conv
+            # get_cart() propaga ante error de lectura → cae al except externo
+            # (mismo outcome de hoy: resolver None → fallback monolito V2).
+            _cart = turn_ctx.get_cart()
+        else:
+            try:
+                _conv_row = (
+                    supabase.table("conversations")
+                    .select("status, agentic_state")
+                    .eq("id", conversation_id)
+                    .eq("tenant_id", tenant_id)
+                    .single()
+                    .execute()
+                )
+                _has_state_column = True
+            except Exception:
+                _conv_row = (
+                    supabase.table("conversations")
+                    .select("status")
+                    .eq("id", conversation_id)
+                    .eq("tenant_id", tenant_id)
+                    .single()
+                    .execute()
+                )
+                _has_state_column = False
+            _conv = _conv_row.data or {}
 
-        _cart_row = (
-            supabase.table("conversation_carts")
-            .select(
-                # BLOQUE J-3 (audit): + requires_requote. El resolver
-                # (build_context_from_records → resolver.py) lo usa para enrutar a
-                # SHIPPING_QUOTE cuando el cliente agregó/cambió items tras cotizar
-                # (hallazgo founder 2026-06-26). Sin la columna en el SELECT quedaba
-                # siempre falsy → la re-cotización NUNCA se disparaba (gate inerte).
-                "id, status, payment_method, shipping_cents, shipping_meta, "
-                "converted_order_id, requires_requote"
-            )
-            .eq("conversation_id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .in_("status", ["open", "checkout"])
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        _cart = (_cart_row.data or [None])[0]
-        if _cart:
-            _meta = _cart.get("shipping_meta") or {}
-            _cart["carrier_code"] = _meta.get("carrier") or None
-            _cart["payment_link"] = None
-            _items_count_row = (
-                supabase.table("conversation_cart_items")
-                .select("id", count="exact", head=True)
-                .eq("cart_id", _cart["id"])
+            _cart_row = (
+                supabase.table("conversation_carts")
+                .select(
+                    # BLOQUE J-3 (audit): + requires_requote. El resolver
+                    # (build_context_from_records → resolver.py) lo usa para enrutar a
+                    # SHIPPING_QUOTE cuando el cliente agregó/cambió items tras cotizar
+                    # (hallazgo founder 2026-06-26). Sin la columna en el SELECT quedaba
+                    # siempre falsy → la re-cotización NUNCA se disparaba (gate inerte).
+                    "id, status, payment_method, shipping_cents, shipping_meta, "
+                    "converted_order_id, requires_requote"
+                )
+                .eq("conversation_id", conversation_id)
                 .eq("tenant_id", tenant_id)
+                .in_("status", ["open", "checkout"])
+                .order("created_at", desc=True)
+                .limit(1)
                 .execute()
             )
-            _cart["items_count"] = int(
-                getattr(_items_count_row, "count", 0) or 0
-            )
-            if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
-                _cart["payment_link"] = "checkout"
+            _cart = (_cart_row.data or [None])[0]
+            if _cart:
+                _meta = _cart.get("shipping_meta") or {}
+                _cart["carrier_code"] = _meta.get("carrier") or None
+                _cart["payment_link"] = None
+                _items_count_row = (
+                    supabase.table("conversation_cart_items")
+                    .select("id", count="exact", head=True)
+                    .eq("cart_id", _cart["id"])
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+                _cart["items_count"] = int(
+                    getattr(_items_count_row, "count", 0) or 0
+                )
+                if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
+                    _cart["payment_link"] = "checkout"
 
         # FIX A11: cargar la última orden + su pago para que POST_PAYMENT sea
         # ALCANZABLE. Antes order/payment nunca se pasaban → has_active_order
@@ -3524,11 +3527,28 @@ def _resolve_and_persist_agentic_state(
                     "[AGENTIC_STATE] update failed conv=%s: %s",
                     conversation_id[:8], _upd_exc,
                 )
-            logger.info(
-                "[AGENTIC_STATE] conv=%s %s→%s (cart_items=%s consent=%s)",
+            # B-2 Fase 0 (2026-08-28): la matriz formal `state_machine/transitions.py`
+            # (antes con 0 callers fuera del paquete — INV-B P9) queda CABLEADA como
+            # telemetría de transiciones: log-only, NUNCA bloquea ni fuerza caminos
+            # (diseño del módulo: el LLM produce texto dentro de un estado, no
+            # transiciones). Un salto UNEXPECTED es señal de drift/corrupción del
+            # resolver → alimenta la construcción de los state handlers de B-2.
+            try:
+                from agentic.state_machine.states import AgenticState as _AS
+                from agentic.state_machine.transitions import (
+                    transition_reason as _t_reason_fn,
+                )
+                _prev_enum = _AS(str(_prev_state)) if _prev_state else None
+                _t_reason = _t_reason_fn(_prev_enum, _state)
+            except Exception:
+                _t_reason = f"{_prev_state or 'NULL'}→{_state.value}"
+            _state_log = (
+                logger.warning if _t_reason.startswith("UNEXPECTED") else logger.info
+            )
+            _state_log(
+                "[AGENTIC_STATE] conv=%s %s (cart_items=%s consent=%s)",
                 conversation_id[:8],
-                _prev_state or "NULL",
-                _state.value,
+                _t_reason,
                 _ctx.cart_items_count,
                 _ctx.contact_consent_given,
             )
