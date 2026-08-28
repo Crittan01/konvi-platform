@@ -355,7 +355,7 @@ Reglas:
 **Fuentes que consume el bot por mensaje** (orden de inyección al system prompt):
 
 1. **Identidad y comportamiento**: `ai_agents.name` + `ai_agents.role_description`. Default DB `'Vendedor Oficial'` (alineado con readiness check).
-2. **Tono**: `tenants.tono_comunicacion` → bloque pre-definido en `_TONO_INSTRUCCIONES` (5 estilos).
+2. **Tono**: `tenants.tono_comunicacion` → se inyecta directo como instrucción de tono en el prompt vivo (`agentic/system_prompt.py` / `agentic/prompt/builder.py`, default "cordial y profesional, en español Colombia"). El mapa `_TONO_INSTRUCCIONES` del path V1 fue retirado en B-2 Fase 0 (2026-08-28).
 3. **Cliente conocido**: `_load_customer_context_block` (lazy mode rev. 69) — pedidos activos + reclamos abiertos + saludo por primer nombre si `consent_given=true`.
 4. **Carrito previo cancelado**: `_load_cart_recovery_block` (rev. 70) si trigger lazy + última `orders.status='cancelled'` <`CART_RECOVERY_LOOKBACK_DAYS`.
 5. **SOBRE LA TIENDA** (`_build_store_info_section` rev. 71):

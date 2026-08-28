@@ -712,10 +712,16 @@ class OrchestratorOutput(BaseModel):
 # ─── Context Builder ──────────────────────────────────────────────────────────
 
 async def _get_conversation_history(supabase: Client, tenant_id: str, conversation_id: str) -> list:
-    """Retorna los últimos N mensajes de la conversación (contexto del chat)."""
+    """Retorna los últimos N mensajes de la conversación (contexto del chat).
+
+    B-2 Fase 0 (2026-08-28): el SELECT incluye `content_type` — el TurnContext
+    deriva de este history el recent-10 del image-request (que necesita saber
+    si un mensaje fue media) sin una segunda lectura de `messages` por turno.
+    Los consumidores leen por `.get()` — la columna extra es inerte para ellos.
+    """
     result = (
         supabase.table("messages")
-        .select("direction, content, created_at")
+        .select("direction, content, content_type, created_at")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .order("created_at", desc=True)
@@ -1137,9 +1143,6 @@ async def _send_outbound_text(
 from text_utils import normalize_text as _normalize_text, tokenize_text as _tokenize_text  # noqa: E402
 
 
-_NON_TEXT_WARNING_MARKER = "solo puedo atender mensajes de texto"
-
-
 def _product_title_tokens(title: str) -> set[str]:
     return {
         token
@@ -1164,14 +1167,6 @@ _CORRECTION_SIGNAL_TOKENS: frozenset[str] = frozenset({
     "equivocada", "cambiar", "cambio", "cambia", "error", "corregir",
     "corrige", "diferente", "otro", "otra", "no es", "no era",
 })
-
-
-_CORRECTION_PROMPT: dict[str, str] = {
-    "email":    "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
-    "name":     "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
-    "document": "Entendido 👍 ¿Cuál es tu tipo (CC/CE/NIT/PP/TI) y número de documento correctos?",
-    "address":  "Entendido 👍 Dame tu dirección correcta, por favor.",
-}
 
 
 # ── Cart-as-SoT — variant confirmation detector (rev. 103) ────────────────
@@ -1468,100 +1463,6 @@ from lib.response_format import (  # noqa: F401
 )
 
 
-_TONO_INSTRUCCIONES: dict[str, str] = {
-    "formal": (
-        "TONO: Formal y respetuoso. Trate de usted al cliente; tutee solo si el cliente lo hace primero.\n"
-        "Saluda así: \"Buenas tardes, ¿en qué puedo ayudarle?\". Confirma así: \"Perfecto, le confirmo enseguida.\".\n"
-        "Cierra así: \"Quedo atento.\". Evita coloquialismos, jergas y emojis.\n"
-        "Ejemplo natural: \"Le confirmo que el producto está disponible. ¿Para qué ciudad sería el envío?\""
-    ),
-    "profesional": (
-        "TONO: Profesional y preciso. Tono cordial pero claro, sin coloquialismos.\n"
-        "Saluda así: \"Hola, ¿en qué puedo ayudarte?\". Confirma así: \"Perfecto, lo reviso.\".\n"
-        "Usa frases breves. Evita muletillas y exclamaciones excesivas.\n"
-        "Ejemplo natural: \"Tenemos disponibilidad. Confírmame ciudad y te paso la cotización.\""
-    ),
-    "amigable": (
-        "TONO: Amigable y cercano. Tutea al cliente desde el inicio.\n"
-        "Saluda así: \"¡Hola! ¿En qué te puedo ayudar?\". Confirma así: \"Listo, eso lo manejamos.\".\n"
-        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Sin emojis.\n"
-        "Ejemplo natural: \"¡Sí! Lo tenemos disponible. Cuéntame para qué ciudad y te cotizo el envío.\""
-    ),
-    "cercano": (
-        "TONO: Muy cercano, casi como un amigo. Tutea siempre y conversa con calidez.\n"
-        "Saluda así: \"¡Hola! ¿Cómo estás? ¿En qué te ayudo?\". Confirma así: \"Listo, ya te ayudo con eso.\".\n"
-        "Permite expresiones colombianas naturales (\"vale\", \"con gusto\", \"de una\"). Sin emojis.\n"
-        "Ejemplo natural: \"¡Claro que sí! Eso lo tenemos. ¿Para dónde te lo enviaríamos?\""
-    ),
-    "juvenil": (
-        "TONO: Joven, dinámico y energético. Tutea siempre, usa frases cortas. Sin emojis.\n"
-        "Saluda así: \"¡Hey! ¿Qué necesitas?\". Confirma así: \"¡Listo! Eso lo tengo.\".\n"
-        "Evita textitos infantilizados o sobreuso de signos.\n"
-        "Ejemplo natural: \"¡Sí lo tenemos! ¿Para qué ciudad sería?\""
-    ),
-}
-
-
-# Guía de estilo humano que aplica a TODOS los tonos. Inyectado al system prompt.
-# Razón: evitar que el LLM caiga en fórmulas robóticas o repetitivas, asegurar
-# variación natural entre mensajes, y mantener registro adaptado al cliente.
-_HUMAN_STYLE_GUIDE = """
-GUÍA DE ESTILO HUMANO (aplica siempre, encima del tono):
-- Nunca uses fórmulas robóticas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida".
-- ESTILO PUNTUACIÓN WhatsApp (casual colombiano): NO uses los signos de apertura `¡` ni `¿`. Solo usa los de CIERRE `!` y `?`. Ejemplos correctos: "Hola!" (NO "¡Hola!"), "Cómo estás?" (NO "¿Cómo estás?"), "Te ayudo?" (NO "¿Te ayudo?"). Es el registro real de WhatsApp en Colombia. Aplica a TODOS los outbounds — saludos, preguntas, exclamaciones, listas con preguntas finales.
-- NO RE-SALUDES dentro de la misma conversación. "Hola!" SOLO en el primer mensaje saliente cuando el cliente saluda ("hola", "buenas"). Si el primer mensaje del cliente es una PREGUNTA DIRECTA (sin saludo, ej: "Qué productos tienes?", "Cuál es la política de devoluciones?"), abre con un conector cordial ("Claro", "Por supuesto", "Te cuento", "Con gusto", "Listo") + va al grano — NO uses "Hola!" si el cliente no saludó. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "Hola!".
-- No repitas la misma estructura sintáctica en mensajes consecutivos: varía inicios, transiciones y cierres.
-- Adáptate al registro del cliente: si escribe corto e informal, responde corto e informal; si escribe formal, mantén formalidad.
-- Confirma comprensión rotando expresiones: "Listo", "Perfecto", "Entendido", "Ya veo", "Claro" — no repitas la misma dos veces seguidas.
-- Para respuestas conversacionales cortas, usa prosa natural con `\\n\\n` entre ideas. Evita listas con bullets a menos que el cliente pida opciones explícitas.
-- Si el cliente usa emojis, puedes responder con emojis con moderación; si no los usa, modera el uso.
-- Sé empático cuando hay fricción (sin stock, pago fallido, demora): reconoce, ofrece alternativa, no pidas disculpa formularia.
-- Frases prohibidas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida y será atendida".
-"""
-
-
-# Salvaguarda determinística cuando Gemini retorna requires_human=True para
-# saludos/off_topic con response_text vacío. 5 variaciones por tono, rotativas
-# por (conversation_id + day_of_year). Si first_name está disponible, prefijar.
-_SAFETY_GREETING_BANK: dict[str, list[str]] = {
-    "formal": [
-        "Buenas, soy {agent} de {tenant}. ¿En qué puedo ayudarle?",
-        "Hola, soy {agent} de {tenant}. Cuénteme cómo puedo asistirle.",
-        "Buen día, soy {agent} de {tenant}. ¿Qué necesita hoy?",
-        "Hola, le saluda {agent} de {tenant}. ¿En qué le ayudo?",
-        "Bienvenido a {tenant}, soy {agent}. Estoy a sus órdenes.",
-    ],
-    "profesional": [
-        "Hola, soy {agent} de {tenant}. ¿En qué puedo ayudarte?",
-        "Hola, soy {agent} de {tenant}. Cuéntame qué necesitas.",
-        "Hola, soy {agent} de {tenant}. ¿Sobre qué te ayudo?",
-        "Hola, te saluda {agent} de {tenant}. ¿Qué necesitas hoy?",
-        "Hola, {agent} de {tenant} por aquí. ¿En qué te apoyo?",
-    ],
-    "amigable": [
-        "¡Hola! Soy {agent} de {tenant}  ¿En qué te ayudo?",
-        "¡Hola! Soy {agent} de {tenant}. Cuéntame, ¿qué necesitas?",
-        "¡Hola! Acá {agent} de {tenant}. ¿En qué te puedo ayudar?",
-        "¡Hola! Soy {agent} de {tenant}. ¿Qué se te ofrece hoy?",
-        "¡Hey, hola! Soy {agent} de {tenant}. ¿Cómo te ayudo?",
-    ],
-    "cercano": [
-        "¡Hola! ¿Cómo estás? Soy {agent} de {tenant}. Cuéntame.",
-        "¡Hola! Soy {agent} de {tenant}. ¿En qué te ayudo?",
-        "¡Hey! Acá {agent} de {tenant}. Dime, ¿qué necesitas?",
-        "¡Hola! Soy {agent} de {tenant}. ¿En qué te echo una mano?",
-        "¡Qué tal! Soy {agent} de {tenant}. Cuéntame qué buscas.",
-    ],
-    "juvenil": [
-        "¡Hey! Soy {agent} de {tenant}. ¿Qué necesitas?",
-        "¡Holaaa! Soy {agent} de {tenant}. Cuéntame.",
-        "¡Hey! Acá {agent} de {tenant}. ¿En qué te ayudo?",
-        "¡Hola! Soy {agent} de {tenant}. ¿Qué buscas?",
-        "¡Qué más! Soy {agent} de {tenant}. Dime, ¿qué necesitas?",
-    ],
-}
-
-
 def _co_time_of_day_greeting() -> tuple[str, str]:
     """Retorna (saludo_apropiado, etiqueta) según la hora actual en Colombia
     (UTC-5, sin DST). Usado por el bot para saludar naturalmente:
@@ -1576,92 +1477,6 @@ def _co_time_of_day_greeting() -> tuple[str, str]:
     if 12 <= hour < 19:
         return ("Buenas tardes", "tarde")
     return ("Buenas noches", "noche")
-
-
-# Bug 30 — frases que indican que el bot anuncia handover a humano. Si el
-# response_text del LLM contiene una de estas pero requires_human=False,
-# el cliente queda en limbo (texto promete asesor pero status=bot_active).
-# La salvaguarda fuerza requires_human=True para que la escalación real ocurra.
-_HANDOVER_PHRASES: tuple[str, ...] = (
-    "te paso con",
-    "te paso a",
-    "te conecto con",
-    "te transfiero",
-    "te derivo",
-    "te canalizo",
-    "paso a un asesor",
-    "paso al asesor",
-    "te comunicare con",
-    "te comunico con",
-    "lo paso con",
-    "lo conecto con",
-    "te atendera un",
-    "te atendera una",
-    "te ayudara un asesor",
-    "te ayudara una asesora",
-    "te ayudara nuestro",
-    "te ayudara nuestra",
-    "te ayudara de inmediato",
-    "te contactara un",
-    "te contactara una",
-    "un asesor te ayudara",
-    "una asesora te ayudara",
-    "un asesor te atendera",
-    "una asesora te atendera",
-    "un especialista te",
-    "una especialista te",
-    "un consultor te",
-    "una consultora te",
-    "un agente te",
-    "una agente te",
-    "asesor humano",
-)
-
-
-# Variantes humanas para mensajes determinísticos templated.
-# Razón: evitar que el cliente reciba siempre la misma string robótica.
-# Selección por seed = conversation_id + day_of_year (consistente en el día).
-_CANCEL_SUCCESS_VARIANTS = [
-    "Listo, cancelé tu pedido. \n\nCuando quieras volver a cotizar, aquí estoy.",
-    "Hecho, ya cancelé el pedido.\n\nSi cambias de idea o quieres ver otra cosa, me avisas.",
-    "Perfecto, lo cancelo. 👍\n\nPuedes volver a consultar el catálogo cuando gustes.",
-]
-_CANCEL_NONE_VARIANTS = [
-    "No tienes un pedido activo para cancelar en este momento. ¿En qué más te ayudo?",
-    "No veo ningún pedido pendiente para cancelar. ¿Hay algo más en lo que te apoye?",
-    "Por aquí no aparece pedido activo. ¿Qué necesitas?",
-]
-_REACTIVATION_VARIANTS = [
-    "¡Hola de nuevo!  Hace un rato que no hablábamos. ¿En qué te puedo ayudar hoy?",
-    "¡Hola! Ha pasado un tiempo desde tu última consulta. Cuéntame, ¿qué necesitas?",
-    "¡Hey! Por aquí estoy de nuevo. ¿En qué te ayudo?",
-]
-# Correcciones de datos: 2 variantes por campo (rotación por seed).
-_CORRECTION_PROMPT_VARIANTS: dict[str, list[str]] = {
-    "email": [
-        "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
-        "Listo, lo corregimos. ¿Me compartes el correo correcto?",
-    ],
-    "name": [
-        "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
-        "Sin problema. ¿Me confirmas tu nombre completo?",
-    ],
-    "document": [
-        "Entendido 👍 Compárteme tu tipo (CC/CE/NIT/PP/TI) y número de documento correctos.",
-        "Listo, lo ajustamos. ¿Me das el tipo y número de documento correcto?",
-    ],
-    "address": [
-        "Entendido 👍 Dame tu dirección correcta, por favor.",
-        "Listo, lo ajustamos. ¿Me compartes la dirección correcta?",
-    ],
-}
-
-
-# ISO weekday 1=Lu .. 7=Do (alineado con DaysSelector y _is_outside_support_hours).
-
-
-
-
 
 
 # Estado de disponibilidad de la tabla bot_source_log (rev. 71).

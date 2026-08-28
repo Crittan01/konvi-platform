@@ -244,7 +244,9 @@ def assert_time_aware_greeting_first_outbound(
 
 
 # ─── Invariant SMELL-3 — conector cordial para pregunta directa ─────────────
-# Operacionaliza la regla del prompt `_HUMAN_STYLE_GUIDE`: si el cliente
+# Operacionaliza la regla de estilo del prompt vivo (hoy en
+# `agentic/system_prompt.py` — la guía `_HUMAN_STYLE_GUIDE` del path V1
+# extinto fue retirada en B-2 Fase 0, 2026-08-28): si el cliente
 # abre con pregunta directa (sin saludo), el bot DEBE abrir con un conector
 # cordial ("Claro,", "Listo,", "Por supuesto,", "Te cuento,", "Con gusto,").
 # El LLM a veces va directo al contenido — este invariant lo corrige.
@@ -319,7 +321,7 @@ def assert_cordial_connector_for_direct_question(
 
     Si el cliente abrió con pregunta directa (sin saludo) y el bot va
     directamente al contenido sin un conector cordial, prefija "Claro, ".
-    Operacionaliza la regla del prompt `_HUMAN_STYLE_GUIDE`.
+    Operacionaliza la regla de estilo del prompt vivo (`agentic/system_prompt.py`).
 
     Solo aplica al primer outbound de la conversación.
     """

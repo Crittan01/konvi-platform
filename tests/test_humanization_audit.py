@@ -7,7 +7,6 @@ envían al cliente, falla el test.
 Falsos positivos: el catálogo de patrones es conservador. Si un patrón legítimo
 necesita aparecer (ej. mensaje legal), agregar al ALLOWLIST con justificación.
 """
-import os
 import re
 import unittest
 from pathlib import Path
@@ -33,14 +32,10 @@ _SCAN_DIRS = [
 # Excepciones explícitas: paths o frases que pueden contener un patrón sin ser
 # texto al cliente (ej. instrucciones AL LLM dentro del system prompt — donde
 # le DECIMOS al LLM que NO use esa frase).
-_ALLOWLIST: dict[str, str] = {
-    # archivo : justificación
-    "services/ai-orchestrator/orchestrator.py": (
-        "El system prompt y la guía humana incluyen las frases prohibidas "
-        "como NEGATIVAS (\"NUNCA uses Procesando su solicitud\") — eso es "
-        "intencional y no llega al cliente."
-    ),
-}
+# B-2 Fase 0 (2026-08-28): la allowlist quedó VACÍA — `orchestrator.py` ya no
+# contiene las frases (la guía de estilo muerta `_HUMAN_STYLE_GUIDE` fue
+# retirada con las 10 constantes de política del path V1 extinto).
+_ALLOWLIST: dict[str, str] = {}
 
 
 def _python_files(roots: list[Path]) -> list[Path]:
@@ -75,47 +70,6 @@ class HumanizationAuditTests(unittest.TestCase):
         if offenders:
             msg = "Frases robóticas detectadas en código que llega al cliente:\n  " + "\n  ".join(offenders)
             self.fail(msg)
-
-    def test_safety_greeting_bank_has_no_robotic_phrases(self):
-        # Importa el banco y verifica directamente.
-        import sys
-        sys.path.insert(0, str(REPO_ROOT / "services" / "ai-orchestrator"))
-        os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
-        os.environ.setdefault("SUPABASE_SECRET_KEY", "service-role")
-        os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
-        os.environ.setdefault("GEMINI_API_KEY", "test")
-        from orchestrator import _SAFETY_GREETING_BANK
-
-        for tono, variants in _SAFETY_GREETING_BANK.items():
-            for v in variants:
-                for pat in _FORBIDDEN_PATTERNS:
-                    self.assertFalse(
-                        re.search(pat, v),
-                        f"variante '{tono}' contiene patrón prohibido {pat!r}: {v!r}",
-                    )
-
-    def test_templated_variant_constants_have_no_robotic_phrases(self):
-        # Verifica los buckets de variantes determinísticas adicionales.
-        import sys
-        sys.path.insert(0, str(REPO_ROOT / "services" / "ai-orchestrator"))
-        os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
-        from orchestrator import (
-            _CANCEL_SUCCESS_VARIANTS,
-            _CANCEL_NONE_VARIANTS,
-            _REACTIVATION_VARIANTS,
-            _CORRECTION_PROMPT_VARIANTS,
-        )
-
-        all_strings: list[str] = []
-        all_strings.extend(_CANCEL_SUCCESS_VARIANTS)
-        all_strings.extend(_CANCEL_NONE_VARIANTS)
-        all_strings.extend(_REACTIVATION_VARIANTS)
-        for variants in _CORRECTION_PROMPT_VARIANTS.values():
-            all_strings.extend(variants)
-
-        for s in all_strings:
-            for pat in _FORBIDDEN_PATTERNS:
-                self.assertFalse(re.search(pat, s), f"variante con patrón prohibido: {s!r}")
 
 
 if __name__ == "__main__":

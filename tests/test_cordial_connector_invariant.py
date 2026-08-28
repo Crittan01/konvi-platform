@@ -1,6 +1,7 @@
 """Tests del invariant `assert_cordial_connector_for_direct_question` (rev. 104).
 
-Operacionaliza la regla del prompt `_HUMAN_STYLE_GUIDE`:
+Operacionaliza la regla de estilo del prompt vivo (hoy en `agentic/system_prompt.py`;
+antes `_HUMAN_STYLE_GUIDE` del path V1, retirada en B-2 Fase 0):
 > "Si el primer mensaje del cliente es una PREGUNTA DIRECTA (sin saludo),
 > abre con un conector cordial (Claro, Por supuesto, Te cuento, Con gusto,
 > Listo) + va al grano."
