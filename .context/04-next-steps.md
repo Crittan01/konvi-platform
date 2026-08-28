@@ -290,7 +290,16 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   y `use-media-query` cachea el mql por query a nivel módulo → el stub de
   matchMedia para ramas responsivas necesita `matches` como **getter**.
   Sonda live `scratch/t7_08_visual_verify.py` 19/19.
-- **T7.9 (opcional, al final)**: gesto swipe catálogo móvil + carrusel KPI en más módulos.
+- **T7.9 (opcional)** ✅ 2026-08-27 (bitácora PLAN.md §E): `SwipeActions` nuevo en el DS
+  (`ui/motion.tsx` — umbral 90px, snap al origen, hints contextuales, supresión de click
+  tras drag, snap instantáneo en reduced-motion) aplicado a `ProductMobileCard`
+  (swipe-right → ajuste rápido de stock — sheet directo con 1 variante, expande con
+  varias —; swipe-left → drawer de acciones; gesto nunca única vía ni destructivo
+  directo) + carruseles KPI móviles en catálogo y finanzas (doble render: carrusel
+  < sm con snap+dots, grid ≥ sm intacto). Tests +4 (vitest 435). Sonda live
+  `scratch/t7_09_visual_verify.py` 16/16 (asserts dialog-scoped tras cazar el falso
+  positivo del hint aria-hidden — Playwright trata opacity:0 como visible).
+  **Con T7.9 cerrado, Track 7 queda COMPLETO (T7.1-T7.12 + BUG-105-02).**
 - **T7.10 — Logout con despedida de marca** ✅ 2026-08-25 (con T7.1 — bitácora PLAN.md §E).
 - **T7.11 — Settings/Security con la firma** ✅ 2026-08-25 (bitácora PLAN.md §E).
   `components/ui/page-header.tsx` NUEVO — cabecera de módulo con identidad

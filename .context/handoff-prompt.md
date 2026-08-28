@@ -24,12 +24,12 @@ en este orden antes de actuar:
    auto-limpian**, jsdom: `afterEach(cleanup)` explícito en TODO test .tsx
    — RTL no auto-limpia sin vitest globals — + stubs matchMedia/observers
    para embla y matchMedia-getter para use-media-query).
-4. Los documentos del trabajo en curso que el estado señale (**Track 7 CERRADO
-   2026-08-27** — T7.1-T7.12 completos (consola contra Kaiu DS: `docs/ux/UX-UI.md`)
-   + BUG-105-02 cerrado (obsoleto, verificado live) — queda solo T7.9 opcional;
-   **sigue Track 3 — infra PRD**: dominio `api.konvi.co` + Render Projects (3.1),
-   pin Python 3.13 (3.2), dev cloud (3.3), G8b media privada (3.4) — detalle en
-   `docs/PLAN-CIERRE.md` §Orden paso 3 y `docs/PLAN.md`).
+4. Los documentos del trabajo en curso que el estado señale (**Track 7 COMPLETO
+   2026-08-27** — T7.1-T7.12 + T7.9 (consola contra Kaiu DS: `docs/ux/UX-UI.md`)
+   + BUG-105-02 cerrado (obsoleto, verificado live); **sigue Track 3 — infra
+   PRD**: dominio `api.konvi.co` + Render Projects (3.1), pin Python 3.13 (3.2),
+   dev cloud (3.3), G8b media privada (3.4) — detalle en `docs/PLAN-CIERRE.md`
+   §Orden paso 3 y `docs/PLAN.md`).
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).
 

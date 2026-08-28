@@ -246,7 +246,7 @@ Dependencia: `framer-motion` ^12.43.0 (instalada 2026-08-02). Usar preferentemen
 |---|---|---|
 | **Inbox** (`chat-panel.tsx`) | ✅ T7.2 (2026-08-25): `BubbleIn` + `AnimatePresence` del DS — entrada slide-up 200ms SOLO en burbujas nuevas (`useAnimatableMessageIds`: nunca carga inicial, prepend loadMore ni dedupe polling/realtime; verificado live con navegador) | Fade 150ms en reduced-motion; sin `exit` (la UI no borra mensajes) |
 | **Pedidos** (`orders-manager.tsx`) | ✅ T7.3 (2026-08-25): `LayoutItem` envuelve TODA card — al filtrar/paginar, las sobrevivientes se reubican suave (StaggerItem queda dentro para la entrada de las nuevas) | `layout` en la card; sin animación en carga inicial; reduced-motion sin layout (§4.1.1) |
-| **Catálogo móvil** (`catalog-table.tsx` ProductMobileCard) | Gesto swipe sobre la card: swipe-right → ajuste rápido de stock, swipe-left → acciones | Umbral con haptic-like snap; gesto nunca como única vía (botones visibles permanecen) |
+| **Catálogo móvil** (`catalog-table.tsx` ProductMobileCard) | ✅ T7.9 (2026-08-27): `SwipeActions` del DS (`ui/motion.tsx`) — swipe-right → ajuste rápido de stock (bottom-sheet directo si hay UNA variante; si hay varias, expande la card para elegir), swipe-left → drawer de acciones (editar/desactivar/eliminar con sus confirms propios); hints contextuales revelados bajo la card; supresión del click tras un drag real (no come el tap de expandir) | Umbral 90px con snap al origen (instantáneo en reduced-motion — el drag es dirigido por el usuario); el gesto NUNCA dispara destructivas directas ni es la única vía (botones visibles permanecen) |
 | **Pago confirmado / guía generada** (dashboard home + order detail) | ✅ T7.4 (2026-08-25): toast sonner con `CelebrationCheck` (pop spring único) + monto count-up al transicionar a `confirmed`/`delivered` vía realtime; isla `OrderStatusLive` en el detalle (celebra + refresh sin F5); dedupe por orden+estado | Una sola vez por evento; check estático y count-up al valor final en reduced-motion; sin confetti pesado |
 | **Bottom-nav** | ✅ T7.3 (2026-08-25): `NavPill` — pill `layoutId` que viaja entre destinos (250ms), respeta `aria-current` y el badge de takeover; estática en reduced-motion | Respeta `aria-current` existente |
 
@@ -270,7 +270,7 @@ Dependencia: `vaul` ^1.1.2 (instalada 2026-08-02).
 
 Dependencia: `embla-carousel-react` ^8.6.0 (instalada 2026-08-02). Crear wrapper `components/ui/carousel.tsx` (deuda §1.10).
 
-- **Carrusel KPIs móvil**: KPI bars horizontales con snap en dashboard home, catálogo (`products-manager.tsx` KPI bar de 4 cards) y finanzas — hoy se comprimen o hacen overflow-x; el carrusel da snap + indicador de posición.
+- **Carrusel KPIs móvil**: KPI bars horizontales con snap en dashboard home (✅ desde 894b7357), catálogo (`products-manager.tsx` KPI bar de 4 cards) y finanzas (`finance-dashboard.tsx`) — ✅ T7.9 (2026-08-27): doble render §2.5 — carrusel con snap + dots en `< sm` (antes se comprimían 2×2 / apilaban 1-col), grid intacto en `≥ sm`. Las cards se construyen UNA vez (array) y se montan en ambos contenedores.
 - **Galería de producto**: `product-edit-drawer.tsx` / `image-upload-box.tsx` — navegación swipe entre fotos con thumbnails; reordenable sigue por DnD desktop.
 - **Reglas**: `align: 'start'`, `containScroll: 'trimSnaps'`; dots con `aria-label`; loop desactivado en KPIs (son finitos y escaneables).
 
