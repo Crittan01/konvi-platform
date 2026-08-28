@@ -953,8 +953,9 @@ async def aveonline_guide_dry_run(
 def _public_webhook_base_url() -> str:
     """URL pública del API donde Aveonline hará POST.
 
-    En prod: `https://api.konvi.app`. En local: env var `PUBLIC_WEBHOOK_URL`
-    (ngrok). El endpoint final es:
+    En prod: `https://api.konvi.co` (dominio propio LIVE desde 2026-08-27,
+    Track 3.1 — seteado vía `PUBLIC_WEBHOOK_URL` en Render). En local: env var
+    `PUBLIC_WEBHOOK_URL` (ngrok). El endpoint final es:
       `{base}/api/v1/webhooks/aveonline/{tenant_id}` (secret en body
       como param1_value) — coherente con docstring del router.
     """

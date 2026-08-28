@@ -171,8 +171,10 @@ services:
         sync: false                              # fecha ISO del flip (ej. 2026-08-01); setear al activar
       # URL pública del API para registrar webhooks de providers externos
       # (Aveonline webhookEstadosGuias, futuro Envia, etc.). DEBE ser HTTPS.
+      # 2026-08-27: dominio propio api.konvi.co LIVE (Track 3.1 — DNS Cloudflare
+      # verificado + TLS emitido). El subdominio onrender sigue activo (transición).
       - key: PUBLIC_WEBHOOK_URL
-        value: https://konvi-api.onrender.com
+        value: https://api.konvi.co
       # Email transaccional Resend (notificaciones post-pago + Habeas Data).
       # Sin la var, notifications.py loguea en lugar de enviar (fallback graceful).
       - key: RESEND_API_KEY

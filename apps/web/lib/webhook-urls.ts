@@ -11,10 +11,11 @@
  *   - Resend:   prefix "/api/v1/webhooks"      + POST "/resend"         → /api/v1/webhooks/resend
  *     (Track 6 — plataforma, no per-tenant: se registra una vez por ambiente)
  *
- * Host: la API productiva vive en `konvi-api.onrender.com` (docs/HANDOFF.md —
- * konvi-api ✅ Live). El dominio `api.konvi.co` está pendiente de DNS
- * (ADR-0023 OQ-4, founder). Cuando el DNS entre en producción, basta setear
- * NEXT_PUBLIC_WEBHOOK_HOST=https://api.konvi.co — sin tocar componentes.
+ * Host: el dominio propio `api.konvi.co` está LIVE desde 2026-08-27 (Track 3.1 —
+ * DNS Cloudflare + TLS emitido + health 200; el subdominio `konvi-api.onrender.com`
+ * sigue activo en transición). El override `NEXT_PUBLIC_WEBHOOK_HOST` ya está
+ * seteado en Render apuntando al dominio — el default onrender queda como fallback
+ * de desarrollo local.
  */
 export const WEBHOOK_HOST =
   process.env.NEXT_PUBLIC_WEBHOOK_HOST?.replace(/\/+$/, '') ||
