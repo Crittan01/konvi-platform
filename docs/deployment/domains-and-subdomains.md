@@ -33,7 +33,12 @@
    ⚠️ Corrección: el intento de 2026-08-27 a.m. quedó marcado aquí como "migrado" — era el
    FAIL-SILENT del bug (`mechanism=None`, secret solo local). La cacería del founder con el
    panel vacío destapó la causa raíz (HS256 vs RS256) y el fix la cerró. El próximo evento
-   real de guía llega por el dominio.
+   real de guía llega por el dominio. **STG también configurado (2026-08-28):** cuenta demo
+   `demointegracion` → `200 OK "updated"` apuntando al túnel ngrok de STG
+   (`francesco-unoiled-damion.ngrok-free.dev`, `PUBLIC_WEBHOOK_URL` local) + secret oficial
+   en DB local + endpoint vía túnel 401 a secret inválido. OJO: el registro STG muere con el
+   túnel — si ngrok cambia de URL, re-click "Configurar webhook". El evento real E2E no se
+   puede forzar en la demo (15289 no es empresa sandbox — `avanzarEstado` solo 6077/25505).
 3. **Wompi (prod)** — cuando se configuren las keys prod ([F] Track 1/2), registrar el webhook
    en el dashboard Wompi con `https://api.konvi.co/api/v1/webhooks/wompi`.
 4. **Resend** — el registro del webhook en el dashboard Resend (pendiente [F] Track 6) usa
