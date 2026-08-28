@@ -239,10 +239,15 @@ completa: PLAN.md §E (2026-08-25, M2.4).
     console por WABA [F]; 3er dominio = $0.25/mes; orchestrator NO necesita dominio — superficie
     HTTP interna verificada contra `server.py`).
     Detalle: `docs/deployment/domains-and-subdomains.md`.
-  - **3.1(b)** — `protected` Production = **[F] 4 clicks** (Dashboard → Konvi → ••• Production
-    → All settings → Permissions → Protected; la REST API no lo permite — verificado: PATCH
-    no-op/405). `networking.isolation` = DIFERIR (decisión documentada: bloquea tráfico privado
-    ENTRE environments — no-op sin staging en Render; no corta webhooks públicos).
+  - **3.1(b)** — `protected` Production = **DIFERIDA** (2026-08-28, medido por el founder en el
+    Dashboard: activarla exige **plan Pro**). Con workspace de UN solo admin (el founder) no
+    protege contra nadie adicional y contra el propio admin no aplica — es control de gobierno
+    multi-miembro, no de seguridad. **Trigger: el primer colaborador con acceso al workspace
+    de Render** → ahí sí se paga Pro y se activa (4 clicks: Konvi → ••• Production → All
+    settings → Permissions → Protected). `networking.isolation` = DIFERIR (decisión documentada:
+    bloquea tráfico privado ENTRE environments — no-op sin staging en Render; no corta webhooks
+    públicos). La pregunta Pro sigue los criterios de `docs/deployment/render-upgrade-path.md`
+    (cold starts, worker nativo, SLA) — nunca por este toggle.
   - **3.3 [F] irreducible** — crear proyecto Supabase Free dev y entregar ref/keys/password;
     el replay + bootstrap + re-creación de secretos Vault los ejecuta [A] con `KONVI_SAFE_REFS`.
 
