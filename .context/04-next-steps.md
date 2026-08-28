@@ -215,7 +215,10 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   **Prep de Track 3 ejecutada por el agente (2026-08-27, evidencia medida — NO asumida):**
   - **Secrets del harness nocturno REGISTRADOS** en GH Actions (los 4: HARNESS_GEMINI_API_KEY,
     WOMPI_PRIVATE_KEY_SANDBOX, WOMPI_EVENTS_KEY_SANDBOX, AVEONLINE_DEMO_PASSWORD — valores sandbox
-    del STG local/Vault, nunca impresos). Nightly disparado a mano para verificación.
+    del STG local/Vault, nunca impresos). **Nightly VERDE verificado** (run 33135919388,
+    2026-08-27: 22 pasaron · 0 fallaron · 7 xfail, ~15 min). Recordatorio de arquitectura: el
+    nightly levanta un STG EFÍMERO en el runner de GH (no usa el STG local ni PRD) — corre con
+    la máquina del founder apagada.
   - **3.2**: la afirmación "compat ya verificada en CI" era FALSA (ningún job corría 3.13) →
     gate CI `py-compat-313` agregado (suite completa, 3 servicios, Python 3.13, gate DURO) —
     **✅ VERDE en su primera corrida (CI run 33136294349, 2026-08-27): el stack ES compatible
