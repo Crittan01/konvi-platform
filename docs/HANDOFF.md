@@ -27,7 +27,7 @@ Multi-tenant real: N tenants = los mismos 4 servicios; agregar un tenant son dat
 ## 2. Ramas y deploy
 
 - **`develop`** = integración (PRs + CI verde obligatorio). **`production`** = deploy target. **No existe `main`**.
-- Estado hoy (verificado con git): `develop` == `origin/develop` (`a66d45f7`, CI verde #30778777844); `origin/production` = `5fdad396`, 8 commits atrás — la promoción es decisión del founder (`docs/PLAN.md` §E).
+- Estado hoy (verificado con git): `production` = `d82d714c` (deploy 2026-08-27, autorizado founder — incluye las 7 migraciones Track 6/B-1/M2.4 aplicadas a PRD por protocolo migrate-before-deploy); `develop` == `origin/develop`. La promoción es decisión del founder (`docs/PLAN.md` §E).
 - **Desplegar:** gate local verde → `git push origin origin/develop:production` → Render redespliega los servicios cuyos archivos cambiaron → smoke checks (`/health` de los 4, Inbox, shipping quote).
 - **Rollback** de código y de esquema: `docs/deployment/rollout-and-rollback.md`.
 - Si el release toca DB: la migración se aplica a prod **antes** de pushear el código a `production` (interlock migrate-before-deploy, `docs/infra/environments.md` §4).
