@@ -217,6 +217,13 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   hygiene, smoke dinero real al cierre) → **Track 4** ops (A1 MFA cuando founder decida) →
   **AL FINAL el BLOQUE BOT** (inventario parche → B-2 dispatcher sobre contratos estables →
   B-4 observabilidad/métricas → bot GUI/API en consola).
+  **Estado real al 2026-08-28: Track 3 RESUELTO** (ver el bloque de abajo) · remanentes
+  Track 1/2 [F] con runbook consolidado `docs/operations/runbooks/founder-console-steps.md` ·
+  **BLOQUE BOT INICIADO: paso 6 ejecutado** — inventarios INV-A/INV-B completos
+  (`.audit/findings/2026-08-28-bot-*.md`) → **formulación arquitectónica
+  `docs/architecture/bot-dispatcher-reengineering.md` PENDIENTE DE VALIDACIÓN founder**
+  (6 decisiones §4 con opción recomendada; al validarla arranca Fase 0 de B-2 — gratis,
+  sin cambio de comportamiento). Hasta esa validación, el código del bot intacto.
 
   **TRACK 3 EJECUTADO por el agente (2026-08-27, autorización founder "procedo con todo
   pendiente" — evidencia medida en PLAN.md §E + PLAN-CIERRE §Track 3):**
