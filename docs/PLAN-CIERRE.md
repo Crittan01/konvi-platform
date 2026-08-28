@@ -173,6 +173,13 @@ AL FINAL — BLOQUE BOT (TODO el bot, inclusive su GUI, API y métricas):
      arquitectónica (validación pedida por founder 2026-08-23; los agentes
      explore cayeron por cuota — los briefs quedan en
      .audit/findings/2026-08-23-patch-inventory-brief.md como primer paso).
+     **✅ EJECUTADO 2026-08-28:** los dos inventarios corren con evidencia
+     archivo:línea — INV-A (outbound fuera del embudo: 70% de la política
+     transversal vive fuera del OutputValidator, 5 canales lo saltan) + INV-B
+     (34 bloques/turno, lecturas DB duplicadas medidas, 15 parches, plan de
+     extracción por riesgo) en `.audit/findings/2026-08-28-bot-*.md` →
+     **formulación escrita en `docs/architecture/bot-dispatcher-reengineering.md`
+     — PENDIENTE DE VALIDACIÓN founder (6 decisiones con recomendada, §4).**
   7. B-2 — Re-ingeniería del núcleo del dispatcher (state handlers por estado
      FSM + TurnContext único + TurnFinalizer único; strangler por fases, Fase 0
      sin riesgo primero) SOBRE los contratos de dominio ya estables. Resuelve
