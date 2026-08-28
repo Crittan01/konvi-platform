@@ -40,12 +40,14 @@
   NO-Meta viven en konvi-api; solo Meta vive en el connector. `PUBLIC_WEBHOOK_URL` y
   `NEXT_PUBLIC_WEBHOOK_HOST` → `https://api.konvi.co` (render.yaml + Render API) + redeploys
   live. Por proveedor: Telegram — sin tenant prod (futuros registros ya salen por el dominio) ·
-  **Aveonline — [F] 1 click**: Integraciones → Aveonline → "Configurar webhook" (re-registra
-  upsert por empresa con la URL nueva + rota secret con gracia 7d) · Wompi/Resend — registrar
-  en sus dashboards con las URLs del dominio cuando activen esos pendientes [F] · MeLi — S6 ·
-  **Meta — decisión documentada: queda en `konvi-connector.onrender.com`** (server-to-server;
-  moverlo a un futuro `connector.konvi.co` es opcional — el plan Hobby incluye 2 dominios y ya
-  se usan api+app). Detalle: `docs/deployment/domains-and-subdomains.md`.
+  **Aveonline — ✅ MIGRADO 2026-08-27** (founder 1 click en consola: URL `api.konvi.co` +
+  secret rotado con gracia 7d — verificado en DB + endpoint 401-live en el dominio) ·
+  Wompi/Resend — registrar en sus dashboards con las URLs del dominio cuando activen esos
+  pendientes [F] · MeLi — S6 · **Meta — queda en `konvi-connector.onrender.com`** ·
+  **`connector.konvi.co` mapeado como pendiente** (activación: CNAME [F] + custom domain/vars
+  [A] + Meta console por WABA [F]; costo medido: 3er dominio = $0.25/mes sobre las 2 incluidas
+  del Hobby ya usadas por api+app; orchestrator NO necesita dominio — superficie HTTP solo
+  interna, verificado contra `server.py`). Detalle: `docs/deployment/domains-and-subdomains.md`.
 - **3.1(b)** — Project "Konvi" ya existía con 1 environment "Production". `protected`: la REST API NO lo permite (PATCH silencioso no-op / 403-405; doc oficial: solo workspace Admin desde el Dashboard) → **paso [F] de 4 clicks**: Dashboard → proyecto Konvi → menú ••• del environment Production → All settings → Permissions → Edit → **Protected** → Save (https://render.com/docs/projects). `networking.isolation`: **decisión documentada = diferir** — la doc oficial lo define como bloqueo de tráfico de red PRIVADA entre environments (no corta webhooks públicos), y sin un segundo environment en Render es un no-op; reevaluar si algún día existe staging en Render (hoy STG = local podman).
 - **3.3 [F] irreducible** — crear proyecto Supabase Free para dev cloud: https://supabase.com/dashboard → New project (región cercana, free tier) → entregar al agente: project ref, URL, publishable+secret keys y DB password. Con eso [A] ejecuta `scripts/db/replay_migrations_dev.sh` + `bootstrap_dev_sandbox.py` con `KONVI_SAFE_REFS=<ref>` + re-crea los secretos del Vault del dev (pg_dump no copia la Vault root key).
 

@@ -217,11 +217,14 @@ completa: PLAN.md §E (2026-08-25, M2.4).
     `app.konvi.co/login` 200 (founder agregó los CNAME en Cloudflare DNS-only; verify vía
     Render API). **Fase 2 ejecutada donde hay algo que migrar:** `PUBLIC_WEBHOOK_URL` +
     `NEXT_PUBLIC_WEBHOOK_HOST` → `https://api.konvi.co` (render.yaml + Render) + redeploys
-    live. Telegram: sin tenant prod (nada que migrar) · **Aveonline: [F] 1 click** en la
-    consola (Integraciones → Aveonline → "Configurar webhook" — upsert con la URL nueva +
-    rotación con gracia 7d) · Wompi/Resend: registrarlos con las URLs del dominio cuando se
-    activen esos pendientes [F] · Meta: queda en el connector onrender (decisión documentada;
-    `connector.konvi.co` futuro es opcional vía `NEXT_PUBLIC_CONNECTOR_WEBHOOK_HOST`).
+    live. Telegram: sin tenant prod (nada que migrar) · **Aveonline: ✅ migrado 2026-08-27**
+    (founder 1 click "Configurar webhook" — URL `api.konvi.co` + secret rotado con gracia 7d,
+    verificado en DB + endpoint 401-live en el dominio) · Wompi/Resend: registrarlos con las
+    URLs del dominio cuando se activen esos pendientes [F] · Meta: queda en el connector
+    onrender (decisión documentada; **`connector.konvi.co` mapeado como pendiente**: CNAME [F] +
+    custom domain + `WHATSAPP_CONNECTOR_URL`/`NEXT_PUBLIC_CONNECTOR_WEBHOOK_HOST` [A] + Meta
+    console por WABA [F]; 3er dominio = $0.25/mes; orchestrator NO necesita dominio — superficie
+    HTTP interna verificada contra `server.py`).
     Detalle: `docs/deployment/domains-and-subdomains.md`.
   - **3.1(b)** — `protected` Production = **[F] 4 clicks** (Dashboard → Konvi → ••• Production
     → All settings → Permissions → Protected; la REST API no lo permite — verificado: PATCH

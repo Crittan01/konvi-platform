@@ -30,8 +30,9 @@ en este orden antes de actuar:
    `api.konvi.co` + `app.konvi.co` LIVE (CNAME Cloudflare DNS-only, verify vía API) +
    Fase 2 ejecutada (PUBLIC_WEBHOOK_URL/NEXT_PUBLIC_WEBHOOK_HOST → dominio; Meta queda
    en el connector — decisión documentada) · 3.1(b) protection [F] 4 clicks +
-   3.3 dev cloud [F] — detalle en `docs/PLAN-CIERRE.md` §Track 3) · **sigue**:
-   click Aveonline del founder (re-registro webhook) → remanentes
+   3.3 dev cloud [F] — detalle en `docs/PLAN-CIERRE.md` §Track 3) · Aveonline ✅
+   migrado al dominio (founder) · `connector.konvi.co` mapeado pendiente · **sigue**:
+   remanentes
    Track 1/2 [F] → Track 4 ops → BLOQUE BOT al final.
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).

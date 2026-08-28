@@ -26,18 +26,38 @@
 
 1. **Telegram** — sin tenant prod con Telegram conectado → nada que migrar; futuros setups
    (`POST /telegram/setup`) registran con el dominio nuevo vía `PUBLIC_WEBHOOK_URL`.
-2. **Aveonline** — tenant prod conectado: **[F] 1 click** en la consola: Integraciones →
-   Aveonline → sección "Webhook" → **"Configurar webhook"** → confirmar. El endpoint
-   re-registra (upsert por empresa, `webhookPersonalizadoApi` oficial) con la URL nueva
-   `https://api.konvi.co/api/v1/webhooks/aveonline/{tenant_id}` y rota el secret con gracia
-   de 7 días (el viejo sigue válido mientras Aveonline migra). La sección muestra la URL —
-   debe leerse `api.konvi.co` después del click.
+2. **Aveonline** — ✅ MIGRADO 2026-08-27 (founder, 1 click en la consola "Configurar webhook"):
+   URL registrada `https://api.konvi.co/api/v1/webhooks/aveonline/0fb0777e-…` + secret rotado
+   (verificado en DB: `tenant_webhook_secrets` rotated_at 2026-08-28T03:45Z, secret anterior en
+   gracia hasta 2026-09-04) + endpoint en el dominio responde 401 a secret inválido (ruta viva,
+   auth correcta). El próximo evento real de guía llega por el dominio.
 3. **Wompi (prod)** — cuando se configuren las keys prod ([F] Track 1/2), registrar el webhook
    en el dashboard Wompi con `https://api.konvi.co/api/v1/webhooks/wompi`.
 4. **Resend** — el registro del webhook en el dashboard Resend (pendiente [F] Track 6) usa
    desde ya `https://api.konvi.co/api/v1/webhooks/resend` (+ `RESEND_WEBHOOK_SECRET` en Render).
 5. **MeLi** — condicionado a S6.
 6. **Meta** — ver decisión arriba: no migrar (connector onrender).
+
+## Pendiente mapeado (2026-08-27, founder): `connector.konvi.co`
+
+Dominio propio para el **connector** (el webhook de Meta WhatsApp vive ahí:
+`/api/v1/whatsapp/webhook/{tenant_id}`). Activación cuando haya un tenant prod con
+WhatsApp conectado (hoy `disconnected`) o cuando el founder lo decida:
+
+1. **[F] DNS Cloudflare**: `CNAME connector → konvi-connector.onrender.com` (DNS only).
+2. **[A]** crear el custom domain en el servicio connector + verify (mismo patrón API) +
+   set `WHATSAPP_CONNECTOR_URL=https://connector.konvi.co` (env de konvi-api — backend
+   que le sirve la URL a Meta en setup) + `NEXT_PUBLIC_CONNECTOR_WEBHOOK_HOST` (web,
+   display en consola) + redeploys.
+3. **[F] Meta console**: por cada app/WABA tenant, actualizar la callback URL del webhook
+   (el verify_token NO cambia).
+- **Costo medido** (doc oficial de custom domains, fetch 2026-08-27): el plan Hobby
+  incluye 2 dominios custom — ya usados por `api` + `app`; el 3er dominio cuesta
+  **$0.25/mes**.
+- **Orchestrator NO necesita dominio** (verificado contra `server.py`): su superficie
+  HTTP es solo `/health`, `/status`, `/agentic/metrics` — todo interno; ningún webhook
+  entrante lo toca (es worker de polling/crons). Regla: solo reciben dominio propio los
+  servicios con webhooks entrantes de proveedores (api ✅, connector cuando active).
 
 ## Registro DNS — ✅ EJECUTADO 2026-08-27
 
