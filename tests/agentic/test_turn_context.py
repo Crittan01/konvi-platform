@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import types
 import unittest
 from pathlib import Path
 
@@ -29,81 +28,13 @@ sys.path.insert(
 )
 
 from agentic.turn_context import TurnContext  # noqa: E402
+# FakeSupabase compartido (tests/helpers — regla xdist M2.3: las factories
+# compartidas NO viven en test modules con side effects de colección).
+from helpers.supabase_mocks import FakeSupabase  # noqa: E402
 
 
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
-
-
-class _Chain:
-    """Cadena supabase mínima: todo método devuelve self salvo execute()."""
-
-    def __init__(self, fake, table):
-        self._fake = fake
-        self._table = table
-        self._single = False
-
-    def __getattr__(self, name):
-        if name == "execute":
-            return self._execute
-        if name == "single":
-            def _single(*a, **k):
-                self._single = True
-                return self
-            return _single
-
-        def _m(*args, **kwargs):
-            self._fake._record(self._table, name, args, kwargs)
-            return self
-        return _m
-
-    def _execute(self):
-        return self._fake._execute(self._table, single=self._single)
-
-
-class FakeSupabase:
-    """Fake con respuestas por tabla + registro de llamadas/updates.
-
-    `data[table]` puede ser una lista de filas (respuesta fija) o una lista de
-    LISTAS (cola: cada execute() consume la siguiente — para simular cambios de
-    estado entre lecturas).
-    """
-
-    def __init__(self):
-        self.data = {}
-        self.counts = {}
-        self.calls = []      # (table, method)
-        self.updates = []    # (table, fields)
-
-    def table(self, name):
-        return _Chain(self, name)
-
-    def _record(self, table, method, args, kwargs):
-        self.calls.append((table, method))
-        if method == "update" and args:
-            self.updates.append((table, args[0]))
-            # Aplicar el update a las filas fijas para que re-lecturas lo vean.
-            for row in self.data.get(table, []):
-                if isinstance(row, dict):
-                    row.update(args[0])
-
-    def _execute(self, table, single=False):
-        rows = self.data.get(table, [])
-        if rows and isinstance(rows[0], list):
-            # Cola de respuestas: consumir la primera (o repetir la última).
-            rows = rows.pop(0) if len(rows) > 1 else rows[0]
-        if single:
-            # Paridad con postgrest .single(): 0 filas → excepción.
-            if not rows:
-                raise Exception("PGRST116: 0 rows")
-            return types.SimpleNamespace(data=rows[0], count=1)
-        count = self.counts.get(table, len(rows))
-        return types.SimpleNamespace(data=rows, count=count)
-
-    def select_count(self, table):
-        return sum(
-            1 for t, m in self.calls if t == table and m == "select"
-        )
 
 
 class TurnContextLoadTests(unittest.TestCase):

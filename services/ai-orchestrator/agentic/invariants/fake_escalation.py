@@ -77,6 +77,23 @@ _ESCALATION_PROMISE_PATTERNS = (
         r"(?:un[a]?\s+)?(?:especialista|asesor|agente|operador)",
         re.IGNORECASE,
     ),
+    # Formas con infinitivo + pronombre enclítico (hallazgo founder 2026-08-28,
+    # s19 T4 live): "permíteme comunicarte con mi equipo", "déjame conectarte
+    # con un asesor" — la promesa pasaba SIN tool y SIN takeover (cliente
+    # colgado). El `_GOODBYE_CLEAN` y las frases neutras no matchean aquí.
+    re.compile(
+        r"\b(?:perm[íi]teme|d[ée]jame|voy\s+a|debo|quiero)\s+"
+        r"(?:comunicar|conectar|pasar|derivar|transferir|canalizar|contactar)"
+        r"(?:te|le)?\s+(?:con|a)\s+(?:un[a]?|mi|el|la|nuestr[oa]|tu)?\s*"
+        r"(?:especialista|asesor|asesora|agente|equipo|operador|encargad[oa])",
+        re.IGNORECASE,
+    ),
+    # "mi/nuestro equipo para que puedan/pueda/te …" — "comunicarte con mi
+    # equipo para que puedan revisar tu caso" (mismo hallazgo live).
+    re.compile(
+        r"\b(?:mi|nuestro|el)\s+equipo\s+para\s+que\s+(?:puedan?|te)\b",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -84,7 +101,11 @@ def detects_escalation_promise(text: str) -> bool:
     """True si el outbound promete handoff humano explícito."""
     if not text or not isinstance(text, str):
         return False
-    return any(p.search(text) for p in _ESCALATION_PROMISE_PATTERNS)
+    # 2026-08-28: tolerante al markdown de WhatsApp — `*mi equipo*` (negrita)
+    # no debe derrotar la detección (el candidato se preserva intacto; el
+    # strip es SOLO para detectar).
+    normalized = text.replace("*", "")
+    return any(p.search(normalized) for p in _ESCALATION_PROMISE_PATTERNS)
 
 
 def _executed_escalate_tool(tool_call_log: list[dict]) -> bool:

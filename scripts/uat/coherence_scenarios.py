@@ -589,8 +589,8 @@ SCENARIOS: dict[str, dict] = {
         # Anti-varianza (2026-08-24): el triage intermedio VARÍA por LLM —
         # la assertion de outcome va al punto de convergencia (último turno:
         # takeover REAL en DB), no a los turnos de triage. La derivada
-        # intermitente al flujo de compra/consent en el triage queda
-        # codificada como H11 en t8_reclamo_coherente (xfail).
+        # intermitente al flujo de compra/consent en el triage quedó
+        # CERRADA 2026-08-28 con el fix H11 (t8_reclamo_coherente sin xfail).
         "desc": "S19 — reclamo (producto dañado) → triage de pedido → handover",
         "turns": [
             ("Quiero poner un reclamo: el pedido que me llegó venía con un frasco roto", []),
@@ -756,14 +756,13 @@ SCENARIOS: dict[str, dict] = {
         ],
     },
     "t8_reclamo_coherente": {
-        # H11 (harness B-3, 2026-08-24): el triage de reclamo derivó
-        # INTERMITENTEMENTE al flujo de compra (prompt de consentimiento
-        # "¿Estás de acuerdo? SÍ o NO" respondiendo a "necesito que me
-        # solucionen lo del frasco roto"). Un reclamo NUNCA debe caer al
-        # guion de venta.
+        # H11 CERRADO 2026-08-28 (B-2, primer fix comportamental tras Fase 0):
+        # reglas de reclamo en los prompts por-estado (nunca PII en reclamo;
+        # sin pedido identificable → escalate_to_human con el motivo) +
+        # FakeEscalation cubre formas enclíticas/markdown (en live STG el LLM
+        # escaló SOLO vía tool) + consent con framing de reclamo en el embudo.
+        # xfail retirado — el runner obliga a mantenerlo verde (XPASS).
         "desc": "T8/H11 — reclamo no deriva al flujo de compra/consent (stays on-topic)",
-        "xfail": ("H11 — triage de reclamo deriva intermitentemente al flujo de "
-                  "compra/consentimiento (harness 2026-08-24, s19 T3)"),
         "turns": [
             ("Quiero poner un reclamo: el pedido que me llegó venía con un frasco roto",
              [mentions_any("reclamo", "pedido", "frasco", "lamento", "lamentamos"),
@@ -777,6 +776,12 @@ SCENARIOS: dict[str, dict] = {
         # B-0 verdad de pago (la parte de dinero PASA: no confirma sin webhook)
         # + H5 (E2E 2026-08-23): el gate stale re-pregunta "confirmas para
         # generar el link" cuando el link YA se entregó — xfail mientras se corrige.
+        # NOTA 2026-08-28: XPASSó 2 veces seguidas (run full + aislado) pero
+        # PARCIALMENTE VACUOSO para H5 — el log dice "sin link generado — no
+        # aplica": en estos runs el bot nunca llegó a entregar el link (flujo
+        # LLM), así que el gate stale NO se ejercitó. La verdad de pago
+        # (check_no_fake_payment_confirmation) sí pasó con aferta real. El
+        # marker se mantiene hasta un run que ejercite link-entregado.
         "desc": "T8 — 'ya pagué' falso: la orden sigue pending_payment y el bot no confirma",
         "xfail": ("H5 — línea stale del gate 'confirmas para generar el link' tras "
                   "entregar el link (run scripts/uat/runs/bot_e2e_stg_2026-08-23.md); "

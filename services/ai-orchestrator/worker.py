@@ -1960,7 +1960,7 @@ class OrchestratorWorker(WorkerCommerceCronsMixin):
                         conversation_id=conv_id,
                         tenant_id=tenant_id,
                         text=(
-                            "Ya estoy de vuelta por aquí 🙌 Gracias por tu "
+                            "Ya estoy de vuelta por aquí. Gracias por tu "
                             "paciencia — ¿en qué te ayudo?"
                         ),
                     )

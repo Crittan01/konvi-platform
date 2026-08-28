@@ -54,6 +54,20 @@ CONSENT_QUESTION_TEMPLATE = (
     "Si en algún momento quieres que los borre, solo dímelo. \n\n"
     "¿Estás de acuerdo? *SÍ* o *NO*."
 )
+# H11 (founder live 2026-08-28 + harness t8_reclamo_coherente): en contexto de
+# RECLAMO el framing de compra ("tu pedido / esta compra") descarrila la
+# conversación y la enreda en loop. Variante con framing de reclamo — la acción
+# legal es LA MISMA (tratamiento de datos, Ley 1581: previo + expreso +
+# informado + revocable). Conserva los markers que reconoce el detector de
+# consent (`consent_intent_resolver`): "autorización", "estás de acuerdo",
+# "*SÍ* o *NO*". La elige `_send_outbound_text` vía `is_claim_context`.
+CONSENT_QUESTION_TEMPLATE_CLAIM = (
+    "Entendido, y lamento lo que pasó. Para registrar tu reclamo y darte "
+    "seguimiento, con tu autorización usaré tus datos de contacto solo para "
+    "gestionar tu caso.\n\n"
+    "Si en algún momento quieres que los borre, solo dímelo.\n\n"
+    "¿Estás de acuerdo? *SÍ* o *NO*."
+)
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "Listo, te genero el link de pago.\n\n"
     "Por Wompi puedes pagar con tarjeta, PSE, Nequi, Daviplata, Bancolombia, "
@@ -864,11 +878,23 @@ async def _send_outbound_text(
             _server_greet, _ = _co_time_of_day_greeting()
         except Exception:
             _server_greet = None
+        # H11 (2026-08-28, founder live + harness t8_reclamo_coherente): si la
+        # conversación activa es un RECLAMO, la pregunta de consent usa el
+        # framing de reclamo — NUNCA el de compra (descarrilaba el reclamo y lo
+        # enredaba en loop). Misma acción legal (Ley 1581); la elige el embudo
+        # según el contexto reciente del history ya cargado arriba.
+        _consent_template = CONSENT_QUESTION_TEMPLATE
+        try:
+            from agentic.claim_intent_resolver import is_claim_context
+            if is_claim_context(recent.data or []):
+                _consent_template = CONSENT_QUESTION_TEMPLATE_CLAIM
+        except Exception:
+            pass  # fail-safe: template de compra (el de siempre)
         result = OutputValidator().validate(ValidationContext(
             candidate_text=text,
             history=recent.data or [],
             contact_consent_given=_consent_given,
-            consent_question_template=CONSENT_QUESTION_TEMPLATE,
+            consent_question_template=_consent_template,
             server_time_greeting=_server_greet,
             customer_name=_customer_name,
         ))

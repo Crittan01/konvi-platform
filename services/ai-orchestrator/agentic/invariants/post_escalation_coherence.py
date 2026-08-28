@@ -43,7 +43,7 @@ _TXN_CTA_RES = (
 _GOODBYE_CLEAN = (
     "Perfecto, ya le paso tu conversación a un especialista de nuestro "
     "equipo para que te ayude personalmente. Te escribimos por aquí mismo "
-    "a la brevedad. 🙌"
+    "a la brevedad."
 )
 
 
