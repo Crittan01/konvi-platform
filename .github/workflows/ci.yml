@@ -215,6 +215,52 @@ jobs:
           SLOW_TESTS: "1"
         run: python -m pytest tests/ -m 'not dbharness and not connector' -n auto -p no:cacheprovider
 
+  # Track 3.2 (2026-08-27): compat Python 3.13 — precondición del pin en Render.
+  # PLAN-CIERRE decía "compat ya verificada en CI" pero NINGÚN job corría 3.13
+  # (verificado 2026-08-27: PYTHON_VERSION=3.11 en ci.yml y harness-nightly.yml).
+  # Este job la verifica DE VERDAD como gate duro: los 3 servicios Python (set
+  # unificado post-G28) + suite completa (menos dbharness, que exige DB) bajo
+  # Python 3.13. Si falla, 3.2 NO se pinea hasta arreglar la incompatibilidad.
+  py-compat-313:
+    name: py-tests Python 3.13 (compat — precondición pin Render 3.2)
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sin cambios backend — compat 3.13 omitida
+        if: needs.changes.outputs.backend != 'true'
+        run: echo "No hubo cambios backend/Python/tests → compat 3.13 no aplica. ✅"
+
+      - name: Setup Python 3.13
+        if: needs.changes.outputs.backend == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            services/api/requirements.txt
+            services/ai-orchestrator/requirements.txt
+            services/connector-whatsapp/requirements.txt
+            packages/shared-py/pyproject.toml
+
+      - name: Install deps (3 servicios, set unificado post-G28)
+        if: needs.changes.outputs.backend == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/shared-py
+          pip install -r services/api/requirements.txt \
+                        -r services/ai-orchestrator/requirements.txt \
+                        -r services/connector-whatsapp/requirements.txt
+          pip install pytest pytest-xdist pytest-cov
+
+      - name: Suite completa bajo Python 3.13 (menos dbharness — requiere DB)
+        if: needs.changes.outputs.backend == 'true'
+        env:
+          SLOW_TESTS: "1"
+        run: python -m pytest tests/ -m 'not dbharness' -n auto -p no:cacheprovider
+
   db-harness:
     name: Harness DB ejecutable (RLS/authz/inbox)
     needs: changes
