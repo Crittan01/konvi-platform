@@ -163,6 +163,18 @@ abajo. Bitácora completa: PLAN.md §E (2026-08-25, M2.3).
   filas al final (`order_receipts` + `payments` + `order_items` + `orders`; ver
   `cleanup_orders` en `scratch/t7_04_visual_verify.py`). Síntoma: `assert 8 == 1` en
   `test_y_ademas_rls_lo_bloquearia_igual`.
+- **Verificar contra el PANEL/estado real del proveedor, no solo contra el response "ok"
+  del endpoint propio (Aveonline 2026-08-27)**: el flujo `webhook/configure` decía
+  "registrado" pero el panel "Mis integraciones" de Aveonline estaba vacío — el founder lo
+  cazó. Causa raíz: el servicio `api-integrations` exige JWT **RS256** (auth v3.0
+  `AuthProduct`) y nosotros enviábamos el JWT **HS256** de la v1.0 → `400 "Incorrect key
+  for this algorithm"` en ambas cuentas + el fallback legacy AveCRM daba 401. El endpoint
+  tragaba el fallo como `mechanism=None` con el secret guardado solo localmente. Lecciones:
+  (1) un fetch de doc NO prueba el auth — el registro debe verificarse con llamada real Y
+  comprobando el estado del lado proveedor (panel/API de listado); (2) un `mechanism=None`
+  en logs es un fail-silent a alarmar; (3) errores de JWT tipo "Wrong number of segments"/
+  "Incorrect key for this algorithm" = el token no es del tipo que el servicio espera
+  (decodificar el header `alg` PRIMERO).
 - **Vitest "Errors N errors" intermitente con todos los tests verdes = trabajo de React tras
   el teardown de jsdom (T7.8)**: RTL NO auto-limpia en este repo (vitest sin `globals: true` →
   el auto-cleanup de @testing-library/react nunca se registra). Un test jsdom sin
