@@ -27,10 +27,11 @@ en este orden antes de actuar:
 4. Los documentos del trabajo en curso que el estado señale (**Track 7 COMPLETO
    2026-08-27** + **Track 3 EJECUTADO 2026-08-27**: 3.2 ✅ pin Python 3.13.15 ×3
    servicios live · 3.4 ✅ G8b media privada aplicado en PRD · 3.1(a) custom domain
-   `api.konvi.co` creado (inerte hasta el CNAME [F] — pasos en
-   `docs/deployment/domains-and-subdomains.md`) · 3.1(b) protection [F] 4 clicks +
+   `api.konvi.co` + `app.konvi.co` LIVE (CNAME Cloudflare DNS-only, verify vía API) +
+   Fase 2 ejecutada (PUBLIC_WEBHOOK_URL/NEXT_PUBLIC_WEBHOOK_HOST → dominio; Meta queda
+   en el connector — decisión documentada) · 3.1(b) protection [F] 4 clicks +
    3.3 dev cloud [F] — detalle en `docs/PLAN-CIERRE.md` §Track 3) · **sigue**:
-   fase 2 de webhooks al dominio nuevo (cuando el CNAME exista) → remanentes
+   click Aveonline del founder (re-registro webhook) → remanentes
    Track 1/2 [F] → Track 4 ops → BLOQUE BOT al final.
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).

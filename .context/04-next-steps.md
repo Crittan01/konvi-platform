@@ -213,9 +213,16 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   - **3.2 ✅ CERRADO en PRD** — `PYTHON_VERSION=3.13.15` en los 3 servicios Python (deploys
     secuenciales live + health ×4 + versión en logs). Precondición honesta: gate CI
     `py-compat-313` creado (la "compat ya verificada" era falsa) y VERDE bajo CPython 3.13.15.
-  - **3.1(a) parcial** — custom domain `api.konvi.co` creado en Render (inerte hasta DNS).
-    **[F] irreducible: CNAME `api` → `konvi-api.onrender.com`** en el registrador de konvi.co
-    (detalle + fase 2 webhooks por proveedor en `docs/deployment/domains-and-subdomains.md`).
+  - **3.1(a) ✅ CERRADO** — AMBOS dominios live 2026-08-27: `api.konvi.co/health` 200 +
+    `app.konvi.co/login` 200 (founder agregó los CNAME en Cloudflare DNS-only; verify vía
+    Render API). **Fase 2 ejecutada donde hay algo que migrar:** `PUBLIC_WEBHOOK_URL` +
+    `NEXT_PUBLIC_WEBHOOK_HOST` → `https://api.konvi.co` (render.yaml + Render) + redeploys
+    live. Telegram: sin tenant prod (nada que migrar) · **Aveonline: [F] 1 click** en la
+    consola (Integraciones → Aveonline → "Configurar webhook" — upsert con la URL nueva +
+    rotación con gracia 7d) · Wompi/Resend: registrarlos con las URLs del dominio cuando se
+    activen esos pendientes [F] · Meta: queda en el connector onrender (decisión documentada;
+    `connector.konvi.co` futuro es opcional vía `NEXT_PUBLIC_CONNECTOR_WEBHOOK_HOST`).
+    Detalle: `docs/deployment/domains-and-subdomains.md`.
   - **3.1(b)** — `protected` Production = **[F] 4 clicks** (Dashboard → Konvi → ••• Production
     → All settings → Permissions → Protected; la REST API no lo permite — verificado: PATCH
     no-op/405). `networking.isolation` = DIFERIR (decisión documentada: bloquea tráfico privado
