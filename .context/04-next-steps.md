@@ -248,8 +248,18 @@ completa: PLAN.md §E (2026-08-25, M2.4).
     bloquea tráfico privado ENTRE environments — no-op sin staging en Render; no corta webhooks
     públicos). La pregunta Pro sigue los criterios de `docs/deployment/render-upgrade-path.md`
     (cold starts, worker nativo, SLA) — nunca por este toggle.
-  - **3.3 [F] irreducible** — crear proyecto Supabase Free dev y entregar ref/keys/password;
-    el replay + bootstrap + re-creación de secretos Vault los ejecuta [A] con `KONVI_SAFE_REFS`.
+  - **3.3 = DIFERIDO al día del lanzamiento** (decisión founder 2026-08-28, razonada): el
+    Supabase local (podman) ES el ambiente de desarrollo — homologado a PRD (certify 18/18)
+    y el harness nocturno corre su propio STG efímero en CI sin depender de la máquina.
+    El dev cloud solo agregaría UAT con webhooks reales sin túnel — y eso ya funciona vía
+    ngrok (el webhook Aveonline STG quedó registrado contra el túnel y responde 401 correcto).
+    **Triggers para retomarlo:** (1) UAT de lanzamiento con tenants reales exigiendo un
+    ambiente siempre alcanzable por proveedores (sin laptop + ngrok vivos — el dolor exacto:
+    el webhook STG muere si el túnel cambia de URL); (2) demo/UAT desde cualquier lugar;
+    (3) un segundo desarrollador que necesite ambiente compartido. Cuando se dispare: [F]
+    crea el proyecto Supabase Free y entrega ref/keys/password; el replay + bootstrap +
+    re-creación de secretos Vault los ejecuta [A] con `KONVI_SAFE_REFS` (pg_dump no copia la
+    Vault root key — HANDOFF §6).
 
 - **Harness nocturno B-3 OPERATIVO (2026-08-27):** los 4 secrets GH registrados
   (HARNESS_GEMINI_API_KEY, WOMPI_PRIVATE_KEY_SANDBOX, WOMPI_EVENTS_KEY_SANDBOX,

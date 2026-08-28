@@ -30,8 +30,9 @@ en este orden antes de actuar:
    `api.konvi.co` + `app.konvi.co` LIVE (CNAME Cloudflare DNS-only, verify vía API) +
    Fase 2 ejecutada (PUBLIC_WEBHOOK_URL/NEXT_PUBLIC_WEBHOOK_HOST → dominio; Meta queda
    en el connector — decisión documentada) · 3.1(b) protection DIFERIDA (exige Pro —
-   workspace de 1 admin; trigger = primer colaborador en Render) +
-   3.3 dev cloud [F] — detalle en `docs/PLAN-CIERRE.md` §Track 3) · Aveonline ✅
+   workspace de 1 admin; trigger = primer colaborador en Render) + 3.3 dev cloud DIFERIDO al
+   día del lanzamiento (el STG local ES el ambiente de desarrollo — decisión founder
+   2026-08-28) — detalle en `docs/PLAN-CIERRE.md` §Track 3) · Aveonline ✅
    migrado al dominio (founder) · `connector.konvi.co` mapeado pendiente · **sigue**:
    remanentes
    Track 1/2 [F] → Track 4 ops → BLOQUE BOT al final.
