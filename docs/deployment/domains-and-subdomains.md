@@ -15,22 +15,28 @@
 
 ## Paso [F] pendiente — registro DNS (único paso irreducible del founder)
 
-En el panel DNS del registrador de `konvi.co` (donde se compró el dominio):
+El DNS de `konvi.co` vive en **Cloudflare** (NS: laylah/trevor.ns.cloudflare.com —
+verificado 2026-08-27 con `dig NS konvi.co`). Pasos exactos (fuente oficial:
+https://render.com/docs/configure-cloudflare-dns):
 
-| Campo | Valor |
-|---|---|
-| Tipo | `CNAME` |
-| Nombre/Host | `api` |
-| Apunta a | `konvi-api.onrender.com` |
-| TTL | default (o 300) |
-
-- Render detecta el CNAME y emite el TLS automáticamente (Let's Encrypt) — la
-  verificación del custom domain pasa a `verified` sola.
-- Verificación del lado nuestro (una vez propagado, minutos–horas según TTL):
-  `curl -sf https://api.konvi.co/health` → 200 y el custom domain en Render
-  queda `verified`.
-- Fuente oficial: https://render.com/docs/custom-domains (sección "Add a custom
-  domain" → CNAME al subdominio onrender del servicio).
+1. [Cloudflare Dashboard](https://dash.cloudflare.com) → selecciona el dominio `konvi.co`.
+2. **DNS → Records → Add record**:
+   - Tipo: `CNAME`
+   - Nombre: `api`
+   - Target: `konvi-api.onrender.com`
+   - **Proxy status: `DNS only` (nube GRIS)** — OBLIGATORIO al inicio: con proxy
+     activado (nube naranja) Render no puede verificar el dominio ni emitir el TLS
+     (los requests irían a Cloudflare en vez de a Render). Una vez emitido el
+     certificado, puedes volver a `Proxied` si quieres (opcional, la doc lo permite).
+   - Save.
+3. Si existiera algún registro `AAAA` para `api` (hoy no existe — el subdominio no
+   resolvía antes de este paso), eliminarlo: Render usa IPv4 y los AAAA interfieren.
+4. **NO tocar** los registros existentes del apex/`www` de konvi.co (hoy resuelven
+   vía Cloudflare a otro destino — fuera del alcance).
+5. Avisa al agente — la verificación la dispara él vía API
+   (`POST …/custom-domains/{id}/verify` → 202, endpoint confirmado) y el TLS se
+   emite solo (Let's Encrypt). Cuando `verificationStatus=verified` y
+   `curl -sf https://api.konvi.co/health` → 200, se abre la Fase 2 (webhooks).
 
 ## Fase 2 — migración de webhooks al dominio nuevo (SOLO cuando `api.konvi.co/health` responda 200)
 
