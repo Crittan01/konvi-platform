@@ -3,7 +3,10 @@
 > **Estado: ✅ VALIDADO por founder 2026-08-28 — 6/6 hacia la opción recomendada, bajo la premisa
 > founder vigente: "efectividad y calidad de implementación sin importar tiempo ni esfuerzo" — la
 > premisa resuelve las 6 hacia la opción arquitectónicamente correcta (resolución por decisión en §4).
-> Fase 0 AUTORIZADA (arranca 2026-08-28).**
+> FASE 0 ✅ EJECUTADA 2026-08-28** (commits `fc4f72e6`/`56a52bc8` — TurnContext v0 + StateResolver al
+> inicio + V2 lazy + transitions cableada + 10 constantes muertas fuera) **+ H11 ✅ CERRADO**
+> (commit `6f41b992` — primer fix comportamental, founder live PRD; incluye D4 ejecutada).
+> **SIGUE: Fase 1** (gates legales sobre ctx + normalizadores + Finalizer v1).
 > Origen: directiva founder 2026-08-23 ("validar si existen inclusiones parches… formular de forma
 > arquitectónica") sobre la auditoría profunda del bot (`.audit/findings/2026-08-21-bot-deep-audit.md`)
 > + los dos inventarios ejecutados 2026-08-28 (`.audit/findings/2026-08-28-bot-patch-inventory-outbound.md`
@@ -100,10 +103,28 @@ Tres reglas permanentes que esto formaliza:
 
 Cada fase deja el turno funcionando igual y se certifica con el harness (§5).
 
-**Fase 0 — gratis (sin cambio de comportamiento):** V2 lazy (`dispatcher.py:1104`) ·
-StateResolver al inicio del turno · borrar/cablear `transitions.py` muerto · **TurnContext v0**
-(una lectura por entidad; colapsa las duplicaciones sin tocar decisiones) · retirar las 10
-constantes muertas de `orchestrator.py` (solo las referencian tests).
+**Fase 0 — gratis (sin cambio de comportamiento):** ✅ **EJECUTADA 2026-08-28** (commits
+`fc4f72e6` + `56a52bc8`; 12 tests nuevos en `tests/agentic/test_turn_context.py`): V2 lazy ·
+StateResolver al inicio del turno (post agent-router, pre-resolvers de dinero; `turn_ctx=`
+al resolver) · `transitions.py` CABLEADA como telemetría log-only (UNEXPECTED→WARNING) ·
+**TurnContext v0** (`agentic/turn_context.py`: una lectura por entidad; cart refrescable con
+`update_cart_fields` coherente; derivados del history) · las 10 constantes muertas de
+`orchestrator.py` retiradas (con sus tests muertos). Nuances documentadas en los comentarios
+del código: prompt per-state ve el estado de ENTRADA (turnos consent/carrier que siguen al
+LLM) · badge en el path LLM refleja el estado de entrada hasta el próximo turno (los bypass
+terminales lo refrescan post-mutación como hoy) · los lookups con filtro divergente
+(`status='open'` del shipping/abandoned, `get_cart_with_items` del recipient) NO migraron —
+son scope de sus handlers (Fase 2-3).
+
+**Fase 0+ — H11 (primer fix comportamental, founder live PRD 2026-08-28):** ✅ CERRADO
+(commit `6f41b992`, 18 tests nuevos en `tests/agentic/test_h11_claim_flow.py`): el reclamo
+sin pedido identificable ya NO deriva al consent de compra ni en loop. Diseño: la VOZ la
+lleva el LLM (reglas de reclamo en `greeting`/`exploring`/`post_payment` prompts) y lo
+determinístico es la ACCIÓN (FakeEscalation cubre enclíticos + markdown; la promesa de
+especialista siempre fuerza takeover real) + consent con framing de reclamo en el embudo
+(`CONSENT_QUESTION_TEMPLATE_CLAIM` vía `is_claim_context` — D3 matizada: UN template por
+CONTEXTO, ambos desde el embudo) + D4 EJECUTADA (🙌 fuera de `_GOODBYE_CLEAN` y del
+auto-exit del worker). xfail `t8_reclamo_coherente` retirado (pasa).
 
 **Fase 1 — gates y normalizadores (bajo):** gates legales → etapa sobre ctx · normalizadores
 de inbound · filtro de dominio terminal · image-request tras regex barata (hoy lee messages en
@@ -143,9 +164,14 @@ Resolución y razón por decisión:
    previo + expreso + informado + REVOCABLE — menciona el borrado) y ya es el aprobado en producción
    que ve la mayoría de paths; unificar sobre él no introduce texto legal nuevo, mata el duplicado
    (el rewrite de `consent_required.py:82-89` pasa a consumirlo).
-4. **Política de emojis → (a) quitar 🙌** de `_GOODBYE_CLEAN` (`post_escalation_coherence.py:43-47`)
-   y del auto-exit (`worker.py:1963`). Razón: el 🙌 sobrevive por el bug first-rewrite-wins, no por
-   decisión de marca; la whitelist del DS ya está definida (📋🚚✅💵). Consistencia = calidad.
+   *Matiz ejecutado 2026-08-28 (H11, commit `6f41b992`):* UN template por CONTEXTO — en contexto de
+   reclamo el embudo usa `CONSENT_QUESTION_TEMPLATE_CLAIM` (misma acción legal, framing on-topic);
+   el de compra sigue único para el contexto de compra. La migración del rewrite del invariant
+   (`consent_required.py`) queda para Fase 2 (con el embudo consolidado).
+4. **Política de emojis → (a) quitar 🙌** — ✅ EJECUTADA 2026-08-28 (commit `6f41b992`): fuera de
+   `_GOODBYE_CLEAN` (`post_escalation_coherence.py:43-47`) y del auto-exit (`worker.py:1963`).
+   Razón: el 🙌 sobrevive por el bug first-rewrite-wins, no por decisión de marca; la whitelist del
+   DS ya está definida (📋🚚✅💵). Consistencia = calidad.
 5. **Captions de imagen y la cola pgmq → (a) extender el embudo** a captions + contrato "solo texto
    post-embudo entra a la cola" (las notificaciones de refund/envío pasan por el embudo al encolar,
    Fase 2).

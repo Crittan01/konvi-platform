@@ -219,11 +219,21 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   B-4 observabilidad/métricas → bot GUI/API en consola).
   **Estado real al 2026-08-28: Track 3 RESUELTO** (ver el bloque de abajo) · remanentes
   Track 1/2 [F] con runbook consolidado `docs/operations/runbooks/founder-console-steps.md` ·
-  **BLOQUE BOT INICIADO: paso 6 ejecutado** — inventarios INV-A/INV-B completos
-  (`.audit/findings/2026-08-28-bot-*.md`) → **formulación arquitectónica
-  `docs/architecture/bot-dispatcher-reengineering.md` PENDIENTE DE VALIDACIÓN founder**
-  (6 decisiones §4 con opción recomendada; al validarla arranca Fase 0 de B-2 — gratis,
-  sin cambio de comportamiento). Hasta esa validación, el código del bot intacto.
+  **BLOQUE BOT EN EJECUCIÓN — paso 7 (B-2): FASE 0 + H11 ✅ CERRADOS 2026-08-28** —
+  formulación `docs/architecture/bot-dispatcher-reengineering.md` VALIDADA por founder
+  (6/6 §4 hacia la recomendada; premisa vigente: calidad/efectividad sin importar
+  tiempo/esfuerzo). Fase 0 (sin cambio de comportamiento): `agentic/turn_context.py`
+  (una lectura por entidad/turno + cart refrescable) · StateResolver al INICIO del turno
+  · V2 lazy · transitions.py cableada (telemetría UNEXPECTED→WARNING) · 10 constantes
+  muertas de orchestrator.py fuera. **H11** (founder live PRD: reclamo→consent-de-compra
+  en loop + escalación falsa): voz LLM (reglas de reclamo en prompts por-estado) +
+  acción determinística garantizada (FakeEscalation cubre enclíticos/markdown) +
+  consent con framing de reclamo en el embudo + D4 (🙌 fuera) — xfail
+  `t8_reclamo_coherente` retirado (pasa) · harness s19/money_full_flow ✅ · validate
+  --ci 25/25 · commits `fc4f72e6`/`56a52bc8`/`b9a482d7`/`6f41b992`. **SIGUE: B-2 Fase 1**
+  (gates legales → etapa sobre ctx · normalizadores inbound · filtro de dominio terminal ·
+  image-request tras regex barata · Finalizer v1: trace+audit+summary+race-gate+
+  escalaciones+degraded unificados).
 
   **TRACK 3 EJECUTADO por el agente (2026-08-27, autorización founder "procedo con todo
   pendiente" — evidencia medida en PLAN.md §E + PLAN-CIERRE §Track 3):**
