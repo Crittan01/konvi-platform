@@ -318,9 +318,13 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   `scratch/t7_12_visual_verify.py` 17/17 (30 rutas — las 27 de T7.6 +
   legal/retention/account-closure — + tile por ruta + detalle pedido real + ambos
   temas + móvil + reduced-motion estático + 0 errores consola). **Track 7 queda
-  cerrado salvo T7.9 (opcional, al final) y la verificación BUG-105-02.**
-- **También**: BUG-105-02 del tracker (inbox "no refresca sin F5") — probablemente obsoleto
-  (Realtime+polling ya viven en `inbox-manager.tsx:152,180`): verificar live y cerrar entrada.
+  cerrado salvo T7.9 (opcional, al final).**
+- **BUG-105-02 ✅ CERRADO 2026-08-27 (obsoleto, verificado live)** — el inbox SÍ
+  refresca sin F5: realtime por conversación (`use-messages.ts`) + realtime
+  conversations con select anti-truncamiento + polling fallback (`use-conversations.ts`).
+  Sonda `scratch/bug105_02_verify.py` 6/6 (mensaje SQL → burbuja ≤15s sin F5 ×2,
+  preview en lista sin F5, 0 errores, auto-limpieza). Entrada del tracker cerrada
+  con la evidencia.
 
 **Reglas Kaiu inviolables (§4.1):** todo motion pasa por `@/components/ui/motion`
 (prohibido `motion` crudo) · solo tokens semánticos (la excepción documentada del login

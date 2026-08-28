@@ -24,14 +24,12 @@ en este orden antes de actuar:
    auto-limpian**, jsdom: `afterEach(cleanup)` explícito en TODO test .tsx
    — RTL no auto-limpia sin vitest globals — + stubs matchMedia/observers
    para embla y matchMedia-getter para use-media-query).
-4. Los documentos del trabajo en curso que el estado señale (hoy Track 7 —
-   UX/UI de la consola contra Kaiu DS: `docs/ux/UX-UI.md`; brief T7.1-T7.12 en
-   `.context/04-next-steps.md` §"Track 7 — brief de implementación" — cerrados
-   T7.1/T7.2/T7.3/T7.4/T7.5/T7.6/T7.7/T7.8/T7.10/T7.11 al 2026-08-25; sigue
-   **T7.12 — cabeceras de módulo transversales con `PageHeader` (componente ya
-   creado y pilotado en security; plan de rollout archivo-por-archivo LISTO en
-   el brief §T7.12, no re-derivar)**; luego T7.9 opcional y la verificación
-   BUG-105-02).
+4. Los documentos del trabajo en curso que el estado señale (**Track 7 CERRADO
+   2026-08-27** — T7.1-T7.12 completos (consola contra Kaiu DS: `docs/ux/UX-UI.md`)
+   + BUG-105-02 cerrado (obsoleto, verificado live) — queda solo T7.9 opcional;
+   **sigue Track 3 — infra PRD**: dominio `api.konvi.co` + Render Projects (3.1),
+   pin Python 3.13 (3.2), dev cloud (3.3), G8b media privada (3.4) — detalle en
+   `docs/PLAN-CIERRE.md` §Orden paso 3 y `docs/PLAN.md`).
 5. `docs/PLAN.md` §E — bitácoras de ejecución (cómo se cerró cada fase, con
    evidencia y lecciones).
 

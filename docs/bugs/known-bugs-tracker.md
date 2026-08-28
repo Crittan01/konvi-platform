@@ -72,48 +72,18 @@ SKU si el catálogo los expone.
 
 ---
 
-## BUG-105-02 — Tenant Console Inbox no refresca conversaciones automáticamente
+## BUG-105-02 — ✅ CERRADO (obsoleto, verificado live 2026-08-27)
 
-**Reportado**: 2026-05-06 · UAT Sem 4 H.4.1 P2 · Founder · 🟡 media
-
-### Reproducción
-
-1. Abrir Tenant Console → Inbox con una conversación seleccionada
-2. Cliente envía mensaje desde WhatsApp
-3. Bot procesa + responde
-4. **Operador NO ve los nuevos mensajes en la UI hasta hacer F5 manual**
-
-### Comportamiento esperado
-
-Inbox debería refrescar la lista de conversaciones + mensajes de la conversación
-seleccionada en tiempo real (o al menos cada N segundos vía polling). Operador
-no debería tener que recargar la página para ver actividad nueva.
-
-### Causa probable (sin investigar a fondo)
-
-- Subscription Supabase Realtime puede no estar activa o estar mal configurada
-- Polling fallback puede no estar implementado
-- Service worker / cache HTTP puede estar interfiriendo
-
-### Componente afectado
-
-`apps/web/app/dashboard/inbox/page.tsx` — investigar:
-- ¿Hay subscription `supabase.channel(...).on('postgres_changes', ...)` para
-  conversations + messages?
-- ¿Hay setInterval polling como fallback?
-- ¿WebSocket Realtime conecta correctamente al cargar la página?
-
-### Plan de fix
-
-**NO fix ahora** (fuera de scope Sem 4 P0 integraciones). Candidato a:
-- Sem 11 P2 robustez/observability (Plan J.2.7) — junto con OpenTelemetry
-- O sesión dedicada UI hardening si se reporta más tenants afectados
-
-### Workaround actual
-
-Operador presiona F5 / Ctrl+R para refrescar manualmente.
-
----
+El wiring de refresh ya existía y funciona: realtime `postgres_changes` por
+conversación en `_hooks/use-messages.ts` (canal `messages:<id>` + polling
+fallback si el canal erra) y realtime + polling 20s en
+`_hooks/use-conversations.ts` (canal `conversations:all` con select explícito
+anti-truncamiento Track 6). Verificación live STG (`scratch/bug105_02_verify.py`,
+6/6): INSERT SQL directo a `messages` → burbuja visible en el panel SIN F5 en
+≤15s ×2 mensajes · la lista de conversaciones muestra el preview nuevo sin F5 ·
+0 errores de consola/hidratación · filas sintéticas eliminadas al final.
+El bug (2026-05-06) precede al refactor inbox de 2026-05-29 y a Track 6
+(2026-08-22). No requiere fix.
 
 <!--
 Plantilla para nuevos bugs:
