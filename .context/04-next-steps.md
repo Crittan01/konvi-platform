@@ -205,6 +205,12 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   hygiene, smoke dinero real al cierre) → **Track 4** ops (A1 MFA cuando founder decida) →
   **AL FINAL el BLOQUE BOT** (inventario parche → B-2 dispatcher sobre contratos estables →
   B-4 observabilidad/métricas → bot GUI/API en consola).
+  **⚠️ Track 3 es founder-gated** (PLAN-CIERRE §Track 3, owner [F] en 3.1/3.2/3.3): 3.1 requiere
+  consola Render + DNS (custom domain `api.konvi.co` + Project con 2 environments) · 3.2 el pin
+  de Python 3.13 se hace en Render Settings por servicio · 3.3 crea un proyecto Supabase nuevo ·
+  3.4 (G8b media privada) la ejecuta [A] en PRD **solo con autorización explícita del founder**
+  (script `scripts/admin/migrate_inbox_media_private.py` — dry-run → --apply). Sin esas acciones
+  del founder no hay nada ejecutable por el agente en Track 3.
 
 ### Track 7 — brief de implementación (gap analysis verificado contra `develop` 2026-08-25)
 
