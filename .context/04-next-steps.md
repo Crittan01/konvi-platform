@@ -212,6 +212,31 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   (script `scripts/admin/migrate_inbox_media_private.py` — dry-run → --apply). Sin esas acciones
   del founder no hay nada ejecutable por el agente en Track 3.
 
+  **Prep de Track 3 ejecutada por el agente (2026-08-27, evidencia medida — NO asumida):**
+  - **Secrets del harness nocturno REGISTRADOS** en GH Actions (los 4: HARNESS_GEMINI_API_KEY,
+    WOMPI_PRIVATE_KEY_SANDBOX, WOMPI_EVENTS_KEY_SANDBOX, AVEONLINE_DEMO_PASSWORD — valores sandbox
+    del STG local/Vault, nunca impresos). Nightly disparado a mano para verificación.
+  - **3.2**: la afirmación "compat ya verificada en CI" era FALSA (ningún job corría 3.13) →
+    gate CI `py-compat-313` agregado (suite completa, 3 servicios, Python 3.13, gate DURO).
+    El pin en Render (4 servicios, `PYTHON_VERSION=3.13` — hoy sin setear, verificado vía API)
+    queda listo para [F] cuando el gate salga verde.
+  - **3.4**: dry-runs ejecutados — STG local 0 objetos · PRD **1 objeto** legado en
+    `inbox-attachments/` (0 errores; el re-apunte de `messages.media_url` solo ocurre en
+    --apply). Blast radius mínimo medido → listo para --apply con autorización.
+  - **3.1** (estado medido vía Render API): project "Konvi" ya existe con UN environment
+    "Production" (unprotected, sin network isolation; los 4 servicios dentro) · konvi-api sin
+    custom domains. Ejecutable por [A] con autorización: crear el custom domain
+    `api.konvi.co` (INERTE hasta que el DNS exista — el subdominio onrender sigue
+    funcionando) + activar `protected` en Production (doc oficial: solo admins podrán hacer
+    cambios destructivos — cero impacto de tráfico). **Pendiente [F] irreducible:** el CNAME
+    en el DNS de konvi.co (apuntando a `konvi-api.onrender.com`). **Decisión documentada:**
+    `networking.isolation` en Production — la doc oficial lo define como bloqueo de tráfico de
+    red PRIVADA cruzando el boundary del environment (NO el ingreso público: los webhooks
+    Meta/Wompi no se cortan) — solo tiene efecto práctico cuando exista un segundo environment
+    (staging Render); con la topología actual (STG local podman) es un no-op. Activarlo o no es
+    decisión del founder; la recomendación del agente es `protected`=sí, `isolation`=diferir
+    hasta que exista un staging en Render.
+
 ### Track 7 — brief de implementación (gap analysis verificado contra `develop` 2026-08-25)
 
 > Derivado con auditoría completa de la consola contra `docs/ux/UX-UI.md` (Kaiu DS).
