@@ -93,5 +93,5 @@
 ## 5. Notas de alcance
 
 - ~~La migración se aplicó a STG local vía psql directo (no queda registrada en `supabase_migrations.schema_migrations` local; en PRD la registrará el flujo normal de migraciones y al ser idempotente no hay conflicto)~~ **Migración aplicada a PRD el 2026-08-29** (smoke→apply→repair; ledger 270=270; verificación post completa en §3-7). En STG local quedó aplicada vía psql directo sin registro en el ledger local (al ser idempotente, un `supabase migration up` posterior no falla).
-- El código de este cierre (web/Python) aún no está desplegado: sube con el próximo push de `develop`.
+- **Código desplegado 2026-08-29**: commit `199f4108` → push develop→production (FF) → autoDeploy ×4 live. Post-deploy verificado: health ×5 200 · API reporta version `199f4108` · OpenAPI/docs 404 en los 3 servicios (G16 live) · `/status` 401 sin secret (G17 live) · webhook MeLi 403 allowlist intacto (Y3 fail-closed operativo sin romper: `TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip` ya estaba seteada en Render).
 - Los secretos de Meta comprometidos fueron **validados como rotados el 2026-08-29** (sonda activa + timestamps de Vault — §3-1). La única ventana que permanece abierta es la disponibilidad del objeto git huérfano (§3-3), que ya no contiene credenciales vivas verificables.
