@@ -154,11 +154,16 @@ class DispatcherWiringTests(unittest.TestCase):
     def test_run_agentic_full_escala_invariant_block(self):
         import inspect
         from agentic import dispatcher
+        from agentic import turn_finalizer
+        # B-2 Fase 1: la etapa post-decisión (incl. la escalación por BLOCK)
+        # vive en el TurnFinalizer único — el dispatcher la invoca.
         src = inspect.getsource(dispatcher._run_agentic_full)
-        self.assertIn("escalate_invariant_block", src)
-        self.assertIn("InvariantOutcome.BLOCK", src)
+        self.assertIn("finalize_agentic_turn", src)
+        fsrc = inspect.getsource(turn_finalizer.finalize_agentic_turn)
+        self.assertIn("escalate_invariant_block", fsrc)
+        self.assertIn("InvariantOutcome.BLOCK", fsrc)
         # Condición anti-duplicados con el bloque requires_silent_escalation.
-        self.assertIn("not is_silent_escalation", src)
+        self.assertIn("not inp.is_silent_escalation", fsrc)
 
 
 if __name__ == "__main__":

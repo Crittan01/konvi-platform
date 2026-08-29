@@ -9,7 +9,7 @@ Extraído verbatim 2026-08-13 — comportamiento idéntico. Los lazy imports
 dispatcher.py los re-importa a su namespace (callers/tests intactos).
 """
 import logging
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -321,12 +321,20 @@ async def _escalate_conversation_to_human(
     tenant_id: str,
     conversation_id: str,
     reason: str,
+    source: str = "nontext_dispatch",
+    severity: Optional[str] = None,
 ) -> None:
     """Marca conversation.status='human_takeover' + audit + notifica al equipo.
 
     F5 bot_engine #3 — reusa el patrón canónico del tool escalate_to_human
     (agentic/tools/escalation.py) para el path no-texto (document). Best-effort:
     ni el audit ni la notificación bloquean; el cambio de status es lo crítico.
+
+    B-2 Fase 1 (P13): `source` distingue el origen en el audit append-only y
+    `severity` se pasa a Telegram cuando aplica. Y si el UPDATE de status falla,
+    la notificación al operador se intenta IGUAL (es la señal de escalación —
+    antes el early-return la tragaba: sin fila ni aviso = cliente colgado en
+    silencio en el edge de fallo).
     """
     try:
         supabase.table("conversations").update({
@@ -334,10 +342,10 @@ async def _escalate_conversation_to_human(
         }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
     except Exception as exc:
         logger.warning(
-            "[NONTEXT_ESCALATE] conv=%s no pude marcar human_takeover: %s",
+            "[ESCALATE] conv=%s no pude marcar human_takeover: %s — "
+            "continúo al audit + notificación (son la señal de escalación)",
             conversation_id[:8], exc,
         )
-        return
     try:
         supabase.table("messages").insert({
             "conversation_id": conversation_id,
@@ -345,7 +353,7 @@ async def _escalate_conversation_to_human(
             "direction": "outbound",
             "content_type": "escalation_audit",
             "content": "",
-            "payload": {"reason": reason, "source": "nontext_dispatch"},
+            "payload": {"reason": reason, "source": source},
             "processed": True,
             "processing_status": "processed",
         }).execute()
@@ -353,11 +361,13 @@ async def _escalate_conversation_to_human(
         pass
     try:
         from telegram_notifications import notify_escalation_async
+        _kw = {"severity": severity} if severity else {}
         await notify_escalation_async(
             supabase,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             reason=reason,
+            **_kw,
         )
     except Exception:
         pass

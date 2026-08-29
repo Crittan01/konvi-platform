@@ -85,6 +85,68 @@ class TurnContextLoadTests(unittest.TestCase):
         self.assertEqual(ctx.history, [])
 
 
+class TurnContextTwoPhaseTests(unittest.TestCase):
+    """B-2 Fase 1: el ctx nace en dispatch_message con SOLO la conversación
+    (`for_gates` — 1 query, la que el skip gate ya hacía) y el path agentic
+    completa con `ensure_core` (contact + history)."""
+
+    def test_for_gates_solo_lee_la_conversacion(self):
+        sb = FakeSupabase()
+        sb.data["conversations"] = [{
+            "status": "bot_active", "agentic_state": None,
+            "customer_phone": "573001112233",
+        }]
+        ctx = TurnContext.for_gates(
+            sb, tenant_id="t1", conversation_id="c1", message_id="m1",
+        )
+        self.assertEqual(ctx.conversation["status"], "bot_active")
+        self.assertEqual(ctx.customer_phone, "573001112233")
+        self.assertEqual(sb.select_count("conversations"), 1)
+        # NADA más se leyó (contact/history quedan para ensure_core).
+        self.assertEqual(sb.select_count("contacts"), 0)
+        self.assertEqual(sb.select_count("messages"), 0)
+        self.assertFalse(ctx._contact_loaded)
+        self.assertFalse(ctx._history_loaded)
+
+    def test_ensure_core_completa_contact_e_history(self):
+        sb = FakeSupabase()
+        sb.data["conversations"] = [{
+            "status": "bot_active", "agentic_state": None,
+            "customer_phone": "573001112233",
+        }]
+        sb.data["contacts"] = [{"id": "ct1", "consent_given": False}]
+        sb.data["messages"] = [
+            {"direction": "inbound", "content": "hola", "content_type": "text",
+             "created_at": "2026-08-28T10:00:00"},
+        ]
+        ctx = TurnContext.for_gates(
+            sb, tenant_id="t1", conversation_id="c1", message_id="m1",
+        )
+        _run(ctx.ensure_core())
+        self.assertEqual(ctx.contact_id, "ct1")
+        self.assertEqual(len(ctx.history), 1)
+        self.assertIn(("contacts", "upsert"), sb.calls)  # write heredado
+        # Idempotente: segunda llamada no re-lee.
+        _run(ctx.ensure_core())
+        self.assertEqual(sb.select_count("contacts"), 1)
+        self.assertEqual(sb.select_count("messages"), 1)
+
+    def test_load_equivale_a_las_dos_fases(self):
+        sb = FakeSupabase()
+        sb.data["conversations"] = [{
+            "status": "bot_active", "agentic_state": None,
+            "customer_phone": "573001112233",
+        }]
+        sb.data["contacts"] = [{"id": "ct1", "consent_given": True}]
+        sb.data["messages"] = []
+        ctx = _run(TurnContext.load(
+            sb, tenant_id="t1", conversation_id="c1", message_id="m1",
+        ))
+        self.assertTrue(ctx.conversation_found)
+        self.assertEqual(ctx.contact_id, "ct1")
+        self.assertTrue(ctx._history_loaded)
+
+
 class TurnContextCartTests(unittest.TestCase):
 
     def _ctx_con_cart(self, sb):

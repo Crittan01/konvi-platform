@@ -39,6 +39,11 @@ from agentic.deterministic_gates import (  # noqa: F401
     _handle_reoptin_if_keyword,
 )
 
+# B-2 Fase 1 (2026-08-28): normalizadores de inbound (multimodal rev. 109 +
+# content_type no-texto F5) extraídos de `_run_agentic_full` — strangler,
+# comportamiento idéntico.
+from agentic.inbound_normalizers import normalize_inbound
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,15 +69,6 @@ def _report_agentic_v2_fallback(
         logger.error(msg, *args)
     else:
         logger.warning(msg, *args)
-
-
-# F5 bot_engine #3 — content_types entrantes no-texto/no-multimodal
-# (document/sticker/location). Manejados determinísticamente antes del loop
-# agentic (ver agentic/nontext_content.py).
-try:
-    from agentic.nontext_content import NONTEXT_CONTENT_TYPES as _NONTEXT_CONTENT_TYPES
-except Exception:  # pragma: no cover - import defensivo
-    _NONTEXT_CONTENT_TYPES = frozenset({"document", "sticker", "location"})
 
 
 # Cache TTL del meta agentic per-tenant (perf rev. 114). Sus dos consumidores —el
@@ -229,6 +225,17 @@ async def dispatch_message(
         # FAIL-SAFE: si era keyword de re-optin y falló, NO reactivar — la conv
         # sigue opted_out → skip natural abajo. Sin re-engagement accidental.
 
+    # B-2 Fase 1 (2026-08-28) — el TurnContext nace AQUÍ: tras el reoptin gate
+    # (que es terminal-on-match y puede mutar conv.status) y ANTES del skip
+    # gate. UNA lectura de la conversación (1 query — la misma que el skip gate
+    # ya hacía) compartida por los gates y el path agentic: antes el skip gate
+    # leía por su cuenta y el contexto del turno re-leía (INV-B §2 conv×7).
+    from agentic.turn_context import TurnContext
+    turn_ctx = TurnContext.for_gates(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+        message_id=message_id,
+    )
+
     # Gate de conversation status — rev. 107 cierre runtime KAIU 2026-05-23.
     # El bot legacy ya tenía este gate en orchestrator.py:6754, pero el
     # agentic dispatcher saltaba al `_run_agentic_full` SIN verificar.
@@ -238,7 +245,13 @@ async def dispatch_message(
     # (ventana del operador post-resolve) se marca con processed=False para que
     # el sweeper de cortesía la re-encole cuando el operador guarde silencio
     # (defer, no drop — el mensaje del cliente nunca se pierde).
-    _skip_reason = _skip_reason_for_conv(supabase, tenant_id, conversation_id)
+    _skip_reason = _skip_reason_for_conv(
+        supabase, tenant_id, conversation_id,
+        conv_status=(
+            turn_ctx.conversation.get("status")
+            if turn_ctx.conversation_found else None
+        ),
+    )
     if _skip_reason:
         _mark_message_skipped(
             supabase, tenant_id, message_id,
@@ -253,19 +266,22 @@ async def dispatch_message(
     # Resuelve compliance regulatorio + UX: cliente envía STOP → confirmación
     # canónica + revoca consent + marca conv opted_out + NO invoca LLM.
     try:
-        await _handle_optout_if_keyword(
+        # B-2 Fase 1 (INV-B P11): el return del handler BASTA — True ⟺ procesó
+        # el opt-out completo (consent revocado + conv marcada + confirmación
+        # enviada + message processed). Muere la re-lectura post-hoc de status
+        # (patrón frágil: ignoraba el return y re-leía `conversations` en todo
+        # turno). Nuance aceptada: si el handler procesó pero el UPDATE de
+        # status falló (doble fallo), hoy se re-leía y se seguía al LLM tras
+        # haber confirmado la baja al cliente; ahora el turno termina — la
+        # dirección segura tras una confirmación de opt-out.
+        if await _handle_optout_if_keyword(
             supabase,
             message_id=message_id,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             content=content,
             content_type=content_type,
-        )
-        # Si el detector procesó el opt-out, _handle_optout_if_keyword marca
-        # el message como processed y retorna True. Verificamos status conv
-        # post-handle: si quedó opted_out, no avanzar al LLM.
-        post_handle_status = _get_conversation_status_safe(supabase, tenant_id, conversation_id)
-        if post_handle_status == "opted_out":
+        ):
             return
     except Exception as exc:
         logger.warning("[OPTOUT_GATE] error en optout handler: %s", exc)
@@ -346,6 +362,7 @@ async def dispatch_message(
                 conversation_id=conversation_id,
                 content=content,
                 content_type=content_type,
+                turn_ctx=turn_ctx,
             )
             return
         except Exception as exc:
@@ -478,34 +495,24 @@ async def _emit_degraded_response_and_escalate(
         )
 
     if is_repeat_failure:
-        try:
-            supabase.table("conversations").update({
-                "status": "human_takeover",
-            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
-        except Exception as st_exc:
-            logger.warning(
-                "[AGENTIC_DEGRADED] status update falló conv=%s: %s",
-                conversation_id, st_exc,
-            )
-        try:
-            from telegram_notifications import notify_escalation_async
-            await notify_escalation_async(
-                supabase, tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                reason=(
-                    f"🚨 *Cliente con fallas repetidas*\n"
-                    f"{failed_recent} mensajes consecutivos sin procesar "
-                    f"en últimos 10 min.\n\nÚltimo error: "
-                    f"`{str(error)[:200]}`\n\nConversación pasó a "
-                    f"human_takeover. Acción: responder cliente + revisar "
-                    f"logs orchestrator."
-                ),
-                severity="critical",
-            )
-        except Exception as tg_exc:
-            logger.warning(
-                "[AGENTIC_DEGRADED] telegram notif falló: %s", tg_exc,
-            )
+        # B-2 Fase 1 (P13): la escalación del degraded path reusa el helper
+        # canónico `_escalate_conversation_to_human` (takeover + audit
+        # append-only + Telegram) en vez de re-implementarla — con la
+        # severidad critical propia de este path y source distinguishable.
+        await _escalate_conversation_to_human(
+            supabase, tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            reason=(
+                f"🚨 *Cliente con fallas repetidas*\n"
+                f"{failed_recent} mensajes consecutivos sin procesar "
+                f"en últimos 10 min.\n\nÚltimo error: "
+                f"`{str(error)[:200]}`\n\nConversación pasó a "
+                f"human_takeover. Acción: responder cliente + revisar "
+                f"logs orchestrator."
+            ),
+            source="agentic_degraded",
+            severity="critical",
+        )
 
     logger.info(
         "[AGENTIC_DEGRADED] conv=%s failed_recent=%d repeat=%s",
@@ -723,164 +730,28 @@ async def _run_agentic_full(
     conversation_id: str,
     content: str,
     content_type: str,
+    turn_ctx: Optional[Any] = None,
 ) -> None:
     """Cutover: agentic compone outbound y lo envía al cliente."""
-    # Imports early (rev. 109 fix UAT live BUG 23): el multimodal block
-    # de abajo necesita _send_outbound_text + _mark_message_processing
-    # para responder degraded honesto al cliente cuando Gemini multimodal
-    # falla. Importarlos al inicio evita NameError + silent fallthrough.
+    # Imports early: los usan los bloques posteriores de esta función (gates
+    # determinísticos, bypasses pre-LLM, degraded paths). Originalmente eran
+    # para el multimodal block (rev. 109 fix UAT live BUG 23), que en B-2
+    # Fase 1 se extrajo a agentic/inbound_normalizers.py (ahí se importan
+    # lazy). Importarlos al inicio evita NameError + silent fallthrough.
     from orchestrator import (
         _send_outbound_text,
         _mark_message_processing,
         PROCESSING_STATUS_PROCESSED,
     )
 
-    # ── Rev. 109 Día 4 — Multimodal pipeline ──
-    # Si el inbound es audio/imagen/video, descargamos el media de Meta y
-    # pedimos a Gemini multimodal una interpretación textual. El resto del
-    # flow agentic ve el content reemplazado (transparente).
-    if content_type in {"audio", "image", "video"}:
-        try:
-            from agentic.multimodal import (
-                process_inbound_media, format_for_agentic,
-            )
-            # Cargar media_id + media_mime desde columnas directas
-            # (connector-whatsapp/parser.py persiste así en messages).
-            _mrow = (
-                supabase.table("messages")
-                .select("media_id, media_mime, media_url")
-                .eq("id", message_id)
-                .eq("tenant_id", tenant_id)
-                .single()
-                .execute()
-            )
-            _m = _mrow.data or {}
-            _media_id = _m.get("media_id")
-            _media_mime = _m.get("media_mime")
-            mm_result = await process_inbound_media(
-                tenant_id=tenant_id,
-                supabase=supabase,
-                media_id=_media_id,
-                media_mime=_media_mime,
-                media_type=content_type,
-                caption=content if not content.startswith("[") else None,
-            )
-            if mm_result and mm_result.text:
-                original_content = content
-                content = format_for_agentic(mm_result, original_content)
-                logger.info(
-                    "[MULTIMODAL_DISPATCH] conv=%s type=%s replaced chars=%d→%d",
-                    conversation_id[:8], content_type,
-                    len(original_content), len(content),
-                )
-                # Rev. 109 fix UX founder: persistir transcripción en
-                # messages.content para que el operador del Inbox vea el
-                # TEXTO REAL del audio/imagen/video, no el placeholder
-                # "[Audio recibido]". media_id / media_url quedan intactos
-                # (audio original sigue accesible).
-                _media_label = {
-                    "audio": "🎤 Audio",
-                    "image": "📷 Imagen",
-                    "video": "🎬 Video",
-                }.get(content_type, content_type.capitalize())
-                _inbox_text = f"{_media_label}: {mm_result.text}"
-                try:
-                    supabase.table("messages").update({
-                        "content": _inbox_text,
-                    }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
-                except Exception as _upd_exc:
-                    logger.warning(
-                        "[MULTIMODAL_DISPATCH] persist transcription falló "
-                        "conv=%s: %s", conversation_id[:8], _upd_exc,
-                    )
-            else:
-                # Rev. 109 fix UAT live: multimodal degraded → bot DEBE
-                # informar honestamente al cliente, no responder genérico.
-                # Mensaje empático que invita a reintentar / escribir.
-                logger.warning(
-                    "[MULTIMODAL_DISPATCH] conv=%s type=%s DEGRADED → "
-                    "responde al cliente honesto, no procesar como texto",
-                    conversation_id[:8], content_type,
-                )
-                _media_label = {
-                    "audio": "audio",
-                    "image": "imagen",
-                    "video": "video",
-                }.get(content_type, "media")
-                _degraded_msg = (
-                    f"Recibí tu {_media_label}, pero estoy teniendo "
-                    f"dificultades técnicas para procesarlo en este momento. "
-                    f"Podrías escribirme el mensaje, o intentar de nuevo "
-                    f"en unos minutos? Si prefieres, te conecto con un "
-                    f"especialista del equipo."
-                )
-                await _send_outbound_text(
-                    supabase=supabase, conversation_id=conversation_id,
-                    tenant_id=tenant_id, text=_degraded_msg,
-                )
-                _mark_message_processing(
-                    supabase, tenant_id, message_id,
-                    processing_status=PROCESSING_STATUS_PROCESSED,
-                )
-                # history/contact aún no cargados en este punto — passes
-                # vacíos para state machine (igual el state resolver lee
-                # cart/conv directo de DB, no depende del history).
-                _resolve_and_persist_agentic_state(
-                    supabase=supabase, tenant_id=tenant_id,
-                    conversation_id=conversation_id, contact={},
-                    history=[],
-                )
-                return
-        except Exception as mm_exc:
-            logger.warning(
-                "[MULTIMODAL_DISPATCH] conv=%s type=%s falló: %s — content original",
-                conversation_id[:8], content_type, mm_exc,
-            )
-    # ── /multimodal ──
-
-    # ── F5 bot_engine #3 — content_type no-texto/no-multimodal ──
-    # document/sticker/location NO pasan por el pipeline multimodal (arriba,
-    # solo audio/image/video). Antes caían al agentic como si su placeholder
-    # ("[Documento recibido]") fuera texto del cliente → el LLM improvisaba.
-    # Ahora se responden determinísticamente (sin costo LLM) y, para document,
-    # se deriva a humano (riesgo de fraude en comprobantes — principio #4).
-    if content_type in _NONTEXT_CONTENT_TYPES:
-        try:
-            from agentic.nontext_content import handle_nontext_content
-            _nt = handle_nontext_content(content_type)
-        except Exception as _nt_exc:
-            logger.warning(
-                "[NONTEXT_DISPATCH] conv=%s type=%s handler falló: %s",
-                conversation_id[:8], content_type, _nt_exc,
-            )
-            _nt = None
-        if _nt is not None:
-            await _send_outbound_text(
-                supabase=supabase, conversation_id=conversation_id,
-                tenant_id=tenant_id, text=_nt.reply_text,
-            )
-            if _nt.escalate:
-                await _escalate_conversation_to_human(
-                    supabase, tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    reason=_nt.escalation_reason or f"inbound {content_type}",
-                )
-            _mark_message_processing(
-                supabase, tenant_id, message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
-            # Persistir estado FSM (lee cart/conv de DB, no depende de history).
-            _resolve_and_persist_agentic_state(
-                supabase=supabase, tenant_id=tenant_id,
-                conversation_id=conversation_id, contact={},
-                history=[],
-            )
-            logger.info(
-                "[NONTEXT_DISPATCH] conv=%s type=%s manejado (escalate=%s)",
-                conversation_id[:8], content_type, _nt.escalate,
-            )
-            return
-    # ── /content_type no-texto ──
+    # B-2 Fase 1 (2026-08-28) — normalización de inbound (multimodal rev. 109
+    # + content_type no-texto F5) extraída a agentic/inbound_normalizers.py
+    # (strangler, comportamiento idéntico — el harness B-3 certifica).
+    _norm = await normalize_inbound(supabase, message_id=message_id, tenant_id=tenant_id,
+                                    conversation_id=conversation_id, content=content, content_type=content_type)
+    if _norm is None:
+        return  # turno terminado por el normalizador (media degraded / no-texto)
+    content, content_type = _norm.content, _norm.content_type
 
     # Import los tools para que se auto-registren.
     import agentic.tools.catalog  # noqa: F401
@@ -929,14 +800,17 @@ async def _run_agentic_full(
     # ctx.get_cart() (refrescable) — lo consume la resolución de estado al
     # inicio del turno (más abajo) y los bloques con el filtro canónico.
     # (`_send_outbound_text`/`_mark_message_processing`/`PROCESSING_STATUS_*`
-    # ya se importaron al inicio de la función, en el bloque multimodal.)
+    # ya se importaron al inicio de la función.)
+    # B-2 Fase 1 (2026-08-28): el TurnContext nace en `dispatch_message`
+    # (`for_gates` — la conversación ya está leída y compartida con los gates);
+    # aquí se COMPLETA con `ensure_core` (upsert + contact + history). Si el
+    # caller no lo pasó (tests/llamadas directas), se construye aquí entero.
     from agentic.turn_context import TurnContext
-    ctx = await TurnContext.load(
-        supabase,
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
+    ctx = turn_ctx if turn_ctx is not None else TurnContext.for_gates(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
         message_id=message_id,
     )
+    await ctx.ensure_core()
     history = ctx.history
     customer_phone = ctx.customer_phone
     contact_id, contact = ctx.contact_id, ctx.contact
@@ -1150,56 +1024,12 @@ async def _run_agentic_full(
     # NO es parche — es el mismo patrón ya usado por `image_send_tool`,
     # `shipping_quote_tool`, `order_status_tool` en flow legacy V1.
 
-    # PRE-LLM #-0.5: Payment method AVAILABILITY (rev. 108 modular).
-    # Antes de COD/credit intent resolvers, verificar si el método que
-    # el cliente está mencionando está habilitado per-tenant.
-    # Si NO disponible → forzar cart al método AVAILABLE + marcar contexto.
-    # El LLM (con [MÉTODOS DE PAGO] block en system_prompt) compone
-    # respuesta asertiva naturalmente. Esto NO bypassea — modifica state
-    # determinísticamente y deja al LLM hacer gloss natural.
-    try:
-        from agentic.payment_method_availability_resolver import (
-            detect_unavailable_payment_method,
-        )
-        unavailable_pm = detect_unavailable_payment_method(
-            supabase, tenant_id=tenant_id, inbound_text=content,
-        )
-        if unavailable_pm:
-            logger.info(
-                "[AGENTIC_PRE_LLM] payment_method_availability conv=%s "
-                "requested=%s enabled=%s — forcing cart al método disponible",
-                conversation_id[:8],
-                unavailable_pm["requested_method"],
-                unavailable_pm["available_methods"],
-            )
-            # Forzar cart al primer método disponible (si hay).
-            available = unavailable_pm["available_methods"]
-            if available:
-                forced_method = (
-                    "credit" if "online_wompi" in available else "cod"
-                )
-                try:
-                    # B-2 Fase 0: cart del TurnContext (mismo filtro canónico
-                    # [open, checkout] + created_at DESC de hoy). La mutación
-                    # vía update_cart_fields deja el snapshot coherente SIN
-                    # re-leer — el COD block de abajo ve este cambio como lo
-                    # veía con su read-fresco.
-                    _avail_cart = ctx.get_cart()
-                    if _avail_cart:
-                        ctx.update_cart_fields(
-                            _avail_cart["id"], {"payment_method": forced_method},
-                        )
-                except Exception:
-                    pass
-    except Exception as exc:
-        logger.warning(
-            "[AGENTIC_PRE_LLM] payment_method_availability crashed: %s — skip",
-            exc,
-        )
-
     # PRE-LLM #-1: Domain filter — Meta Business Policy + Ley 23/1981
     # Colombia (ejercicio ilegal de medicina) + INVIMA (cosméticos NO son
     # medicamentos). Rev. 109 fix UAT live BUG 36.
+    # B-2 Fase 1 (2026-08-28): gate TERMINAL PURO — corre ANTES de los
+    # resolvers de dinero (antes corría tras payment-availability, que podía
+    # mutar el cart en un turno que se terminaba aquí). No muta nada.
     # Si el cliente pregunta consulta médica/diagnóstico O intenta comprar
     # medicamento → bot redirige a profesional/droguería y NO procesa con
     # LLM (LLM tendía a "recomendar productos para curar gripa" — claim
@@ -1269,6 +1099,53 @@ async def _run_agentic_full(
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] domain_filter crashed: %s — fall-through LLM",
+            exc,
+        )
+
+    # PRE-LLM #-0.5: Payment method AVAILABILITY (rev. 108 modular).
+    # Antes de COD/credit intent resolvers, verificar si el método que
+    # el cliente está mencionando está habilitado per-tenant.
+    # Si NO disponible → forzar cart al método AVAILABLE + marcar contexto.
+    # El LLM (con [MÉTODOS DE PAGO] block en system_prompt) compone
+    # respuesta asertiva naturalmente. Esto NO bypassea — modifica state
+    # determinísticamente y deja al LLM hacer gloss natural.
+    try:
+        from agentic.payment_method_availability_resolver import (
+            detect_unavailable_payment_method,
+        )
+        unavailable_pm = detect_unavailable_payment_method(
+            supabase, tenant_id=tenant_id, inbound_text=content,
+        )
+        if unavailable_pm:
+            logger.info(
+                "[AGENTIC_PRE_LLM] payment_method_availability conv=%s "
+                "requested=%s enabled=%s — forcing cart al método disponible",
+                conversation_id[:8],
+                unavailable_pm["requested_method"],
+                unavailable_pm["available_methods"],
+            )
+            # Forzar cart al primer método disponible (si hay).
+            available = unavailable_pm["available_methods"]
+            if available:
+                forced_method = (
+                    "credit" if "online_wompi" in available else "cod"
+                )
+                try:
+                    # B-2 Fase 0: cart del TurnContext (mismo filtro canónico
+                    # [open, checkout] + created_at DESC de hoy). La mutación
+                    # vía update_cart_fields deja el snapshot coherente SIN
+                    # re-leer — el COD block de abajo ve este cambio como lo
+                    # veía con su read-fresco.
+                    _avail_cart = ctx.get_cart()
+                    if _avail_cart:
+                        ctx.update_cart_fields(
+                            _avail_cart["id"], {"payment_method": forced_method},
+                        )
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] payment_method_availability crashed: %s — skip",
             exc,
         )
 
@@ -3166,198 +3043,30 @@ async def _run_agentic_full(
         else result.outbound_text
     )
 
-    # A11 2026-06-26 — OBSERVABILIDAD: trace estructurado por turno (1 línea
-    # greppable). Hace visible la decisión del bot — estado FSM resuelto, tools
-    # invocados, invariant que intervino, si hubo rewrite — para diagnosticar
-    # incoherencias al instante (antes había que leer código). Lo consume también
-    # el harness adversarial (scripts/uat/coherence_scenarios.py).
-    try:
-        _trace_tools = [t.get("tool") for t in (result.tool_call_log or [])]
-        _trace_inv = (
-            f"{invariant_result.invariant_name}:{invariant_result.outcome.value}"
-            if invariant_result.outcome != InvariantOutcome.OK else "ok"
-        )
-        logger.info(
-            "[AGENTIC_TRACE] conv=%s state=%s tools=%s invariant=%s rewrote=%s model=%s",
-            conversation_id[:8],
-            getattr(_resolved_state, "value", None) or "fallback",
-            _trace_tools,
-            _trace_inv,
-            invariant_result.outcome != InvariantOutcome.OK,
-            getattr(result, "model_used", None) or "?",
-        )
-    except Exception:
-        pass  # el trace NUNCA debe romper el turno
-
-    # Enviar outbound al cliente.
-    # B-1 (F7, auditoría bot 2026-08-21): race operador↔bot — si el operador
-    # tomó la conversación Y ya habló mientras este turno se procesaba
-    # (outbound sent_by='operator' posterior al inicio del turno LLM), el
-    # outbound compuesto se descarta: la palabra la tiene el humano (antes el
-    # bot vendía ENCIMA del operador — gate de status solo se chequeaba al
-    # inicio del turno). Las escalaciones propias del turno (tool / FakeEsc /
-    # silent) no escriben sent_by='operator' → su despedida sí sale.
-    try:
-        _op_msgs = (
-            supabase.table("messages")
-            .select("id", count="exact", head=True)
-            .eq("conversation_id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .eq("direction", "outbound")
-            .eq("payload->>sent_by", "operator")
-            .gt("created_at", started_iso)
-            .execute()
-        )
-        if getattr(_op_msgs, "count", 0) or 0:
-            logger.warning(
-                "[AGENTIC_DISPATCH] operador activo mid-turn conv=%s — "
-                "outbound descartado (la palabra la tiene el humano)",
-                conversation_id[:8],
-            )
-            _mark_message_processing(
-                supabase, tenant_id, message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
-            return
-    except Exception as _race_exc:  # noqa: BLE001 — fail-open: no dropear por un check
-        logger.info(
-            "[AGENTIC_DISPATCH] race-check operador falló (fail-open): %s",
-            _race_exc,
-        )
-
-    await _send_outbound_text(
+    # B-2 Fase 1 (2026-08-28) — TurnFinalizer ÚNICO (INV-B §4 ítem 9): la etapa
+    # post-decisión del turno (trace, race-gate operador↔bot, envío por el
+    # embudo, escalaciones post-envío BLOCK/silent, audit del turno, regen del
+    # resumen rodante) vive en `agentic/turn_finalizer.py` — extraída VERBATIM
+    # de aquí (comportamiento idéntico; el harness B-3 certifica). Si el
+    # race-gate descarta el outbound, el finalizer marca processed y termina
+    # sin audit/summary (comportamiento de siempre).
+    from agentic.turn_finalizer import FinalizeTurnInput, finalize_agentic_turn
+    await finalize_agentic_turn(FinalizeTurnInput(
         supabase=supabase,
-        conversation_id=conversation_id,
         tenant_id=tenant_id,
-        text=final_text,
-    )
-    _mark_message_processing(
-        supabase, tenant_id, message_id,
-        processing_status=PROCESSING_STATUS_PROCESSED,
-    )
-
-    # B-0 F4 2026-08-21 — BLOCK de invariant (guard de dinero/verdad caído
-    # — fail-closed A4 — o intervención de dinero): el cliente recibe
-    # DEGRADED_GENERIC ("te respondo en un momento") pero antes NADIE era
-    # notificado → seguimiento prometido que no existía. Escalación
-    # silenciosa (human_takeover + audit + Telegram) con throttle de 10 min
-    # por conversación. No aplica en el path `requires_silent_escalation`:
-    # ese ya escala en el bloque de abajo (su invariant_set es solo
-    # cosmético, pero por defensa evitamos doble escalación).
-    if (
-        invariant_result.outcome == InvariantOutcome.BLOCK
-        and not is_silent_escalation
-    ):
-        try:
-            from agentic.invariant_escalation import escalate_invariant_block
-            await escalate_invariant_block(
-                supabase,
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                invariant_name=invariant_result.invariant_name,
-                reason=invariant_result.reason,
-            )
-        except Exception as _ib_exc:
-            logger.warning(
-                "[AGENTIC_DISPATCH] invariant_block escalation falló "
-                "conv=%s: %s",
-                conversation_id[:8], _ib_exc,
-            )
-
-    # Rev. 107 founder feedback: si el agente agotó recoveries y produjo
-    # mensaje degraded ("déjame revisar con mi equipo"), escalar
-    # silenciosamente para que un especialista del equipo intervenga.
-    # Evita el patrón "bot mudo" — el cliente percibe que algo se está
-    # gestionando con humanos, no que el bot falló.
-    if getattr(result, "requires_silent_escalation", False):
-        try:
-            supabase.table("conversations").update({
-                "status": "human_takeover",
-            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
-            logger.info(
-                "[AGENTIC_DISPATCH] silent_escalation conv=%s reason=%s — "
-                "operador debe intervenir",
-                conversation_id[:8],
-                result.truncated_reason,
-            )
-            # Best-effort notificación al operador.
-            try:
-                from telegram_notifications import notify_escalation_async
-                await notify_escalation_async(
-                    supabase,
-                    tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    reason=(
-                        f"silent_escalation: agentic agotó recoveries "
-                        f"({result.truncated_reason})"
-                    ),
-                )
-            except Exception:
-                pass
-        except Exception as exc:
-            logger.warning(
-                "[AGENTIC_DISPATCH] silent_escalation falló conv=%s: %s",
-                conversation_id[:8], exc,
-            )
-
-    # Audit log estructurado del tool_call_log completo (production-grade
-    # observability — sin esto los bugs runtime son ciegos).
-    for idx, call in enumerate(result.tool_call_log):
-        result_data = call.get("result") or {}
-        is_failure = "error" in result_data
-        log_fn = logger.warning if is_failure else logger.info
-        log_fn(
-            "[AGENTIC_TOOL] conv=%s call[%d]=%s success=%s result=%s",
-            conversation_id[:8], idx, call.get("tool"),
-            not is_failure,
-            json.dumps(result_data, default=str)[:300],
-        )
-
-    logger.info(
-        "[AGENTIC_FULL] conv=%s tools=%d elapsed=%.2fs invariant=%s finish=%s",
-        conversation_id[:8], result.tool_calls_executed, elapsed,
-        invariant_result.invariant_name, result.finish_reason,
-    )
-
-    # Persistir audit DESPUÉS de enviar outbound (rev. 107 cierre arquitectónico).
-    # Aunque el send falle abajo, el audit habrá sido escrito — más útil
-    # tener registro de "intentamos enviar X" que no tener nada.
-    _persist_turn_audit(
-        supabase,
-        mode="cutover",
+        conversation_id=conversation_id,
         message_id=message_id,
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
         inbound_text=content,
         result=result,
-        elapsed_s=elapsed,
         final_text=final_text,
-        invariant_outcome=invariant_result.outcome.value
-        if hasattr(invariant_result.outcome, "value")
-        else str(invariant_result.outcome),
-        invariant_name=invariant_result.invariant_name,
+        invariant_result=invariant_result,
+        is_silent_escalation=is_silent_escalation,
+        resolved_state=_resolved_state,
         system_prompt_chars=system_prompt_chars,
         history_turns=history_turns,
-    )
-
-    # B-1 (memoria): regenerar el resumen rodante si la conversación lo
-    # amerita (>ventana + >=SUMMARY_REGEN_MIN_NEW mensajes nuevos). El
-    # outbound recién enviado ya está persistido (queda dentro de la ventana;
-    # se plegará en futuras regeneraciones). Fire-and-forget.
-    try:
-        from agentic.conversation_summary import maybe_update_conversation_summary
-        from orchestrator import CONVERSATION_HISTORY_LIMIT as _HIST_LIMIT
-        await maybe_update_conversation_summary(
-            supabase,
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            history_limit=_HIST_LIMIT,
-        )
-    except Exception as _sum_exc:  # noqa: BLE001 — NUNCA rompe el turno
-        logger.info(
-            "[SUMMARY] update post-turn falló conv=%s: %s (best-effort)",
-            conversation_id[:8], _sum_exc,
-        )
+        elapsed=elapsed,
+        started_iso=started_iso,
+    ))
 
 
 # ─── State machine helper unificado (rev. 109) ─────────────────────────────
@@ -3747,26 +3456,34 @@ def _should_skip_for_conv_status(supabase: Any, tenant_id: str, conversation_id:
     return _skip_reason_for_conv(supabase, tenant_id, conversation_id) is not None
 
 
-def _skip_reason_for_conv(supabase: Any, tenant_id: str, conversation_id: str) -> str | None:
+def _skip_reason_for_conv(
+    supabase: Any, tenant_id: str, conversation_id: str,
+    *, conv_status: Optional[str] = None,
+) -> str | None:
     """Razón del skip ('conv_status_no_bot' | 'operator_courtesy') o None.
 
     La distinción importa para el lifecycle del mensaje: la cortesía es un
     DEFER (processed=False, re-encolable por el sweeper de cortesía), el resto
     es un drop terminal (processed=True).
+
+    B-2 Fase 1: `conv_status` (opcional) = el status ya leído por el
+    TurnContext del turno — se reusa en vez de re-leer `conversations`.
     """
     try:
-        res = (
-            supabase.table("conversations")
-            .select("status")
-            .eq("id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return None
-        status = (rows[0].get("status") or "").lower()
+        if conv_status is None:
+            res = (
+                supabase.table("conversations")
+                .select("status")
+                .eq("id", conversation_id)
+                .eq("tenant_id", tenant_id)
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+            if not rows:
+                return None
+            conv_status = rows[0].get("status")
+        status = (conv_status or "").lower()
         if status in _SKIP_STATUSES:
             return "conv_status_no_bot"
         if status == "bot_active" and _operator_spoke_recently(
@@ -3865,23 +3582,8 @@ def _compute_agent_allowed_tools(state_tools, agent, resolved_state):
 
 
 # ─── Opt-out gate (Rev. 109 founder 2026-05-29) ─────────────────────────────
-
-
-def _get_conversation_status_safe(supabase: Any, tenant_id: str, conversation_id: str) -> str:
-    """Lee status conv silencioso — usado por opt-out gate post-handle."""
-    try:
-        res = (
-            supabase.table("conversations")
-            .select("status")
-            .eq("id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        return (rows[0].get("status") or "").lower() if rows else ""
-    except Exception:
-        return ""
+# B-2 Fase 1: `_get_conversation_status_safe` quedó sin callers al pasar el
+# gate de opt-out al return del handler (P11) — retirado.
 
 
 def _optout_failclosed_should_skip(content: Any) -> bool:

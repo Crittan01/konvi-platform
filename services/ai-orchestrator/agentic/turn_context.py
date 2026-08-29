@@ -80,8 +80,130 @@ class TurnContext:
     contact: dict = field(default_factory=dict)
     _cart: Optional[dict] = field(default=None, repr=False)
     _cart_loaded: bool = field(default=False, repr=False)
+    _contact_loaded: bool = field(default=False, repr=False)
+    _history_loaded: bool = field(default=False, repr=False)
 
-    # ── Carga base del turno ────────────────────────────────────────────────
+    # ── Carga del turno en DOS tiempos (B-2 Fase 1) ─────────────────────────
+    #
+    # El ctx nace en `dispatch_message` (ANTES de los gates) con SOLO la
+    # lectura de la conversación (`for_gates` — 1 query, la misma que el skip
+    # gate ya hacía): los gates legales la comparten en vez de re-leer.
+    # El path agentic completa la carga con `ensure_core()` (upsert contact +
+    # fetch contact + history). `load()` = for_gates + ensure_core (compat con
+    # el call site de Fase 0).
+
+    @classmethod
+    def for_gates(
+        cls,
+        supabase: Any,
+        *,
+        tenant_id: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> "TurnContext":
+        """Crea el ctx con la conversación leída (1 query — compartida por los
+        gates y el path agentic). Sync: los gates son síncronos."""
+        ctx = cls(
+            supabase=supabase, tenant_id=tenant_id,
+            conversation_id=conversation_id, message_id=message_id,
+        )
+        ctx._read_conversation()
+        return ctx
+
+    def _read_conversation(self) -> None:
+        """Lee la conversación del turno (status + agentic_state + phone) UNA
+        vez, con defensa espejo del resolver de estado (fallback sin
+        agentic_state si la columna aún no existe en este ambiente)."""
+        try:
+            res = (
+                self.supabase.table("conversations")
+                .select(_CONV_SELECT)
+                .eq("id", self.conversation_id)
+                .eq("tenant_id", self.tenant_id)
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+            self.conversation = rows[0] if rows else {}
+            self.conversation_found = bool(rows)
+        except Exception:
+            try:
+                res = (
+                    self.supabase.table("conversations")
+                    .select(_CONV_SELECT_FALLBACK)
+                    .eq("id", self.conversation_id)
+                    .eq("tenant_id", self.tenant_id)
+                    .limit(1)
+                    .execute()
+                )
+                rows = res.data or []
+                self.conversation = rows[0] if rows else {}
+                self.conversation_found = bool(rows)
+            except Exception as exc:
+                # Fail-open como los gates de hoy: sin conv row el turno sigue
+                # (el resolver de estado degradará a None → monolito V2).
+                logger.warning(
+                    "[TURN_CONTEXT] fallo leyendo conversations conv=%s: %s",
+                    self.conversation_id[:8], exc,
+                )
+                self.conversation = {}
+                self.conversation_found = False
+        # Misma normalización que `_get_conversation_customer_phone`.
+        _phone_raw = self.conversation.get("customer_phone")
+        self.customer_phone = (
+            str(_phone_raw).strip() or None if _phone_raw is not None else None
+        )
+
+    async def ensure_core(self) -> "TurnContext":
+        """Completa la carga del path agentic: upsert de contacto heredado
+        (write incondicional — paridad con el flujo previo) → fetch del
+        contacto → history. Idempotente: si un gate ya cargó el contacto, no
+        re-lee salvo que el upsert pudo crearlo (contacto vacío previo)."""
+        from orchestrator import (
+            _fetch_contact_for_phone,
+            _get_conversation_history,
+        )
+
+        # Upsert de contacto heredado (rev. 108 — paridad V1): crea el contact
+        # si no existe para que record_consent/save_pii no fallen con
+        # NO_CONTACT. consent_given=False default — consent explícito después.
+        if self.customer_phone:
+            try:
+                self.supabase.table("contacts").upsert(
+                    {
+                        "tenant_id": self.tenant_id,
+                        "phone": self.customer_phone,
+                        "shipping_phone": self.customer_phone,
+                        "consent_given": False,
+                    },
+                    on_conflict="tenant_id,phone",
+                    ignore_duplicates=True,
+                ).execute()
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_DISPATCH] contact upsert falló phone=%s: %s",
+                    self.customer_phone, exc,
+                )
+
+        # Contacto (misma lectura de siempre, vía helper canónico). Si un gate
+        # ya lo cargó vacío (no existía) y el upsert pudo crearlo, re-leer.
+        if self.customer_phone and (
+            not self._contact_loaded or not self.contact
+        ):
+            self.contact_id, self.contact = _fetch_contact_for_phone(
+                self.supabase, self.tenant_id, self.customer_phone,
+            )
+            self._contact_loaded = True
+
+        # History (últimos CONVERSATION_HISTORY_LIMIT, orden cronológico;
+        # incluye content_type desde B-2 Fase 0 para derivar el recent-10 del
+        # image-request sin una segunda lectura).
+        if not self._history_loaded:
+            self.history = await _get_conversation_history(
+                self.supabase, self.tenant_id, self.conversation_id,
+            )
+            self._history_loaded = True
+        return self
 
     @classmethod
     async def load(
@@ -92,104 +214,13 @@ class TurnContext:
         conversation_id: str,
         message_id: str,
     ) -> "TurnContext":
-        """Carga base del turno (bloque #3 del dispatcher, mismo orden que hoy):
-
-        conversación → customer_phone → upsert de contacto (write heredado,
-        incondicional — paridad con el flujo previo) → fetch del contacto →
-        history (últimos 25, cronológico).
-
-        El cart NO se carga aquí: lo trae `get_cart()` on-demand (lo consume la
-        resolución de estado al inicio del turno; los early-returns
-        multimodal/no-texto nunca lo leen).
-        """
-        from orchestrator import (
-            _fetch_contact_for_phone,
-            _get_conversation_history,
+        """Carga completa (conv + contact + history) — = for_gates +
+        ensure_core. Compat con el call site original de Fase 0."""
+        ctx = cls.for_gates(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            message_id=message_id,
         )
-
-        ctx = cls(
-            supabase=supabase, tenant_id=tenant_id,
-            conversation_id=conversation_id, message_id=message_id,
-        )
-
-        # 1. Conversación (una lectura: status + agentic_state + phone).
-        try:
-            res = (
-                supabase.table("conversations")
-                .select(_CONV_SELECT)
-                .eq("id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .limit(1)
-                .execute()
-            )
-            rows = res.data or []
-            ctx.conversation = rows[0] if rows else {}
-            ctx.conversation_found = bool(rows)
-        except Exception:
-            try:
-                res = (
-                    supabase.table("conversations")
-                    .select(_CONV_SELECT_FALLBACK)
-                    .eq("id", conversation_id)
-                    .eq("tenant_id", tenant_id)
-                    .limit(1)
-                    .execute()
-                )
-                rows = res.data or []
-                ctx.conversation = rows[0] if rows else {}
-                ctx.conversation_found = bool(rows)
-            except Exception as exc:
-                # Fail-open como los gates de hoy: sin conv row el turno sigue
-                # (el resolver de estado degradará a None → monolito V2).
-                logger.warning(
-                    "[TURN_CONTEXT] fallo leyendo conversations conv=%s: %s",
-                    conversation_id[:8], exc,
-                )
-                ctx.conversation = {}
-                ctx.conversation_found = False
-
-        # Misma normalización que `_get_conversation_customer_phone`.
-        _phone_raw = ctx.conversation.get("customer_phone")
-        ctx.customer_phone = (
-            str(_phone_raw).strip() or None if _phone_raw is not None else None
-        )
-
-        # 2. Upsert de contacto heredado (rev. 108 — paridad V1): crea el
-        # contact si no existe para que record_consent/save_pii no fallen con
-        # NO_CONTACT. consent_given=False default — consent explícito después.
-        if ctx.customer_phone:
-            try:
-                supabase.table("contacts").upsert(
-                    {
-                        "tenant_id": tenant_id,
-                        "phone": ctx.customer_phone,
-                        "shipping_phone": ctx.customer_phone,
-                        "consent_given": False,
-                    },
-                    on_conflict="tenant_id,phone",
-                    ignore_duplicates=True,
-                ).execute()
-            except Exception as exc:
-                logger.warning(
-                    "[AGENTIC_DISPATCH] contact upsert falló phone=%s: %s",
-                    ctx.customer_phone, exc,
-                )
-
-        # 3. Contacto (misma lectura de siempre, vía helper canónico).
-        if ctx.customer_phone:
-            ctx.contact_id, ctx.contact = _fetch_contact_for_phone(
-                supabase, tenant_id, ctx.customer_phone,
-            )
-        else:
-            ctx.contact_id, ctx.contact = None, {}
-
-        # 4. History (últimos CONVERSATION_HISTORY_LIMIT, orden cronológico;
-        # incluye content_type desde B-2 Fase 0 para derivar el recent-10 del
-        # image-request sin una segunda lectura).
-        ctx.history = await _get_conversation_history(
-            supabase, tenant_id, conversation_id,
-        )
-        return ctx
+        return await ctx.ensure_core()
 
     # ── Cart del turno (refrescable) ────────────────────────────────────────
 
