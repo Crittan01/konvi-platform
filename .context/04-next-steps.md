@@ -230,10 +230,18 @@ completa: PLAN.md §E (2026-08-25, M2.4).
   acción determinística garantizada (FakeEscalation cubre enclíticos/markdown) +
   consent con framing de reclamo en el embudo + D4 (🙌 fuera) — xfail
   `t8_reclamo_coherente` retirado (pasa) · harness s19/money_full_flow ✅ · validate
-  --ci 25/25 · commits `fc4f72e6`/`56a52bc8`/`b9a482d7`/`6f41b992`. **SIGUE: B-2 Fase 1**
-  (gates legales → etapa sobre ctx · normalizadores inbound · filtro de dominio terminal ·
-  image-request tras regex barata · Finalizer v1: trace+audit+summary+race-gate+
-  escalaciones+degraded unificados).
+  --ci 25/25 · commits `fc4f72e6`/`56a52bc8`/`b9a482d7`/`6f41b992`. **FASE 1 ✅ CERRADA
+  2026-08-28** (commit `aaab646b` — normalizadores de inbound extraídos · TurnContext a
+  dos tiempos en `dispatch_message` (gates comparten la lectura de la conversación;
+  opt-out por return del handler — P11) · filtro de dominio antes de los resolvers de
+  dinero · **TurnFinalizer único** (`turn_finalizer.py`) · degraded deduplicado (P13) ·
+  dispatcher.py 3909→3631 LOC · suite agentic 819 · validate 25/25 · harness clave ✅;
+  full run con falla única = cuota Gemini free-tier agotada por la carga del día —
+  provider-side probado en log, red limpia = nightly) **+ DEPLOY PRD `d8684b97` LIVE**
+  (autorizado founder: Fase 0 + H11, código puro; 3 servicios que no auto-dispararon
+  desplegados vía Render API sobre el mismo commit; health ×5 verde). **SIGUE: B-2
+  Fase 2** (embudo consolidado + handlers sin dinero: consent/PII_COLLECTION, recipient,
+  routing tools/guardrails unificado, detección COD unificada en ctx).
 
   **TRACK 3 EJECUTADO por el agente (2026-08-27, autorización founder "procedo con todo
   pendiente" — evidencia medida en PLAN.md §E + PLAN-CIERRE §Track 3):**

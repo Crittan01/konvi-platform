@@ -5,8 +5,14 @@
 > premisa resuelve las 6 hacia la opción arquitectónicamente correcta (resolución por decisión en §4).
 > FASE 0 ✅ EJECUTADA 2026-08-28** (commits `fc4f72e6`/`56a52bc8` — TurnContext v0 + StateResolver al
 > inicio + V2 lazy + transitions cableada + 10 constantes muertas fuera) **+ H11 ✅ CERRADO**
-> (commit `6f41b992` — primer fix comportamental, founder live PRD; incluye D4 ejecutada).
-> **SIGUE: Fase 1** (gates legales sobre ctx + normalizadores + Finalizer v1).
+> (commit `6f41b992` — primer fix comportamental, founder live PRD; incluye D4 ejecutada)
+> **+ FASE 1 ✅ EJECUTADA 2026-08-28** (commit `aaab646b` — normalizadores de inbound extraídos
+> a `inbound_normalizers.py` + TurnContext a dos tiempos naciendo en `dispatch_message` (gates
+> sobre ctx; opt-out por return — P11) + filtro de dominio antes de los resolvers de dinero +
+> **TurnFinalizer único** (`turn_finalizer.py`) + degraded deduplicado (P13: helper con
+> source/severity, notifica aunque el update de status falle) · dispatcher.py 3909→3631 LOC)
+> **+ DEPLOY PRD `d8684b97` live** (Fase 0 + H11, código puro, health ×5).
+> **SIGUE: Fase 2** (embudo consolidado + handlers sin dinero).
 > Origen: directiva founder 2026-08-23 ("validar si existen inclusiones parches… formular de forma
 > arquitectónica") sobre la auditoría profunda del bot (`.audit/findings/2026-08-21-bot-deep-audit.md`)
 > + los dos inventarios ejecutados 2026-08-28 (`.audit/findings/2026-08-28-bot-patch-inventory-outbound.md`
@@ -126,9 +132,21 @@ especialista siempre fuerza takeover real) + consent con framing de reclamo en e
 CONTEXTO, ambos desde el embudo) + D4 EJECUTADA (🙌 fuera de `_GOODBYE_CLEAN` y del
 auto-exit del worker). xfail `t8_reclamo_coherente` retirado (pasa).
 
-**Fase 1 — gates y normalizadores (bajo):** gates legales → etapa sobre ctx · normalizadores
-de inbound · filtro de dominio terminal · image-request tras regex barata (hoy lee messages en
-TODO turno) · **Finalizer v1** (trace+audit+summary+race-gate+escalaciones+degraded unificados).
+**Fase 1 — gates y normalizadores (bajo):** ✅ **EJECUTADA 2026-08-28** (commit `aaab646b`;
+10 tests nuevos — 3 two-phase ctx + 3 wiring dispatch + 7 normalizadores — incl.
+`test_inbound_normalizers.py`): normalizadores de inbound extraídos a
+`agentic/inbound_normalizers.py` (multimodal + no-texto VERBATIM; terminal ⟺ None) ·
+TurnContext a dos tiempos (`for_gates` sync en `dispatch_message` + `ensure_core` async en
+el path agentic) — los gates comparten la lectura de la conversación (skip gate con
+`conv_status` del ctx) · opt-out por RETURN del handler (P11; `_get_conversation_status_safe`
+retirado) · filtro de dominio movido ANTES de los resolvers de dinero (gate terminal puro) ·
+**Finalizer v1** EJECUTADO: `agentic/turn_finalizer.py` — trace+audit+summary-regen+
+race-gate+escalaciones unificadas verbatim; el race-gate descarta sin audit/summary como
+siempre · P13: degraded path reusa `_escalate_conversation_to_human` (params `source`/
+`severity`; el helper ahora notifica al operador AUNQUE el update de status falle).
+dispatcher.py 3909→3631 LOC. Nota image-request: su lectura incondicional de `messages`
+ya murió en Fase 0 (deriva del ctx.history); el handler ya tenía early-exit barato
+(`is_image_request_query` antes de tocar DB) — ítem cubierto.
 
 **Fase 2 — embudo consolidado + handlers sin dinero (medio):** la corriente de INV-A —
 **el OutputValidator absorbe la batería de formato + la política de cortesía/PII/dinero
