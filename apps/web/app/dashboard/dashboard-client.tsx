@@ -18,7 +18,8 @@ import {
 } from 'recharts'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { Carousel, CarouselContent, CarouselItem, CarouselDots } from '@/components/ui/carousel'
-import { Pressable } from '@/components/ui/motion'
+import { EASE_OUT, FadeIn, Pressable } from '@/components/ui/motion'
+import { BentoCard, BentoGrid } from '@/components/ui/bento'
 import { useCountUp } from '@/lib/use-count-up'
 import { maybeCelebrateFromPayload } from './money-celebration'
 import { formatCOP, formatCOPNegative } from './finance/lib/format'
@@ -322,14 +323,17 @@ export default function DashboardClient({
           className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
         >
 
-          {/* BLOQUE G-2: dinero real a la vista en el home operativo. */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          {/* BLOQUE G-2: dinero real a la vista en el home operativo.
+              BentoGrid: cascada de entrada (§4.1); las cards de dinero llevan
+              span=2 (mayor jerarquía del home) → fila completa en ≥lg. */}
+          <BentoGrid>
             <MoneyKpiCard label="Ventas hoy" value={revenue.today} />
             <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
-          </div>
+          </BentoGrid>
 
           {/* Alertas operacionales — Spec WOW §4.5: en < lg carrusel horizontal
-              con snap + dots (embla); en ≥ lg el grid de siempre. Mismas cards. */
+              con snap + dots (embla); en ≥ lg BentoGrid con cascada (§4.1).
+              Mismas cards. */
           }
           {(() => {
             // BLOQUE G-1: cada card deep-linkea con el filtro que la alerta promete
@@ -374,9 +378,9 @@ export default function DashboardClient({
             ]
             return (
               <>
-                <div className="hidden lg:grid lg:grid-cols-4 gap-3 sm:gap-4">
+                <BentoGrid className="hidden lg:grid gap-3 sm:gap-4">
                   {opsCards.map(c => <OpsCard key={c.href} {...c} />)}
-                </div>
+                </BentoGrid>
                 <div className="lg:hidden">
                   <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
                     <CarouselContent className="-ml-3">
@@ -425,9 +429,13 @@ export default function DashboardClient({
             </div>
           </div>
 
-          {/* Actividad reciente — mini gráfica inline */}
+          {/* Actividad reciente — mini gráfica inline. Entra como cola de la
+              coreografía del home (KPIs bento → quick links → chart): FadeIn
+              con delay en vez de aparecer de golpe. La animación interna de
+              recharts queda intacta (corre en paralelo al fade). */}
           {messagesPerDay.some(d => d.total > 0) && (
-            <div className="rounded-xl border border-border bg-card p-5">
+            <FadeIn transition={{ duration: 0.2, ease: EASE_OUT, delay: 0.25 }}>
+              <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-medium text-foreground mb-4">Actividad de mensajes — últimos 7 días</p>
               <ResponsiveContainer width="100%" height={100}>
                 <AreaChart data={messagesPerDay} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
@@ -443,7 +451,8 @@ export default function DashboardClient({
                   <Area type="monotone" dataKey="total" stroke={CHART_MESSAGES} fill="url(#msgGrad)" strokeWidth={2} name="Mensajes" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
+              </div>
+            </FadeIn>
           )}
         </div>
       )}
@@ -459,13 +468,13 @@ export default function DashboardClient({
 
           {/* BLOQUE G-2: dinero real — ventas NETAS (confirmadas − reembolsos). Antes
               el tab Negocio no tenía un solo KPI de dinero, solo counts acumulados →
-              no era control de negocio real. */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              no era control de negocio real. BentoGrid: cascada + span=2 (§4.1). */}
+          <BentoGrid>
             <MoneyKpiCard label="Ventas hoy" value={revenue.today} />
             <MoneyKpiCard label="Ventas este mes" value={revenue.month} />
-          </div>
+          </BentoGrid>
 
-          {/* Totales acumulados — mismo patrón §4.5: carrusel < lg, grid ≥ lg */}
+          {/* Totales acumulados — mismo patrón §4.5: carrusel < lg, BentoGrid ≥ lg */}
           {(() => {
             const kpiCards = [
               { label: 'Conversaciones', value: stats.conversations },
@@ -475,9 +484,9 @@ export default function DashboardClient({
             ]
             return (
               <>
-                <div className="hidden lg:grid lg:grid-cols-4 gap-3 sm:gap-4">
+                <BentoGrid className="hidden lg:grid gap-3 sm:gap-4">
                   {kpiCards.map(c => <KpiCard key={c.label} {...c} />)}
-                </div>
+                </BentoGrid>
                 <div className="lg:hidden">
                   <Carousel opts={{ align: 'start', containScroll: 'trimSnaps', dragFree: true, loop: false }}>
                     <CarouselContent className="-ml-3">
@@ -494,7 +503,10 @@ export default function DashboardClient({
             )
           })()}
 
-          {/* Gráficas */}
+          {/* Gráficas — entrada coreografiada (cola de la escena del tab:
+              KPIs bento → charts). FadeIn con delay; recharts anima sus datos
+              en paralelo (isAnimationActive intacto). */}
+          <FadeIn transition={{ duration: 0.2, ease: EASE_OUT, delay: 0.25 }}>
           <div className="grid md:grid-cols-2 gap-5">
 
             {/* Mensajes por día — barras */}
@@ -560,9 +572,12 @@ export default function DashboardClient({
               )}
             </div>
           </div>
+          </FadeIn>
 
           {/* Resumen de KPIs acumulados — derivado de cifras ya visibles arriba,
-              no protege nada por rol (antes gated tras canWrite sin motivo). */}
+              no protege nada por rol (antes gated tras canWrite sin motivo).
+              Cierra la escena del tab tras las gráficas (delay 0.35). */}
+          <FadeIn transition={{ duration: 0.2, ease: EASE_OUT, delay: 0.35 }}>
           <div className="rounded-xl border border-border bg-card p-5">
             <p className="text-sm font-medium text-foreground mb-4">Resumen general del negocio</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -580,6 +595,7 @@ export default function DashboardClient({
               ))}
             </div>
           </div>
+          </FadeIn>
         </div>
       )}
     </div>
@@ -632,14 +648,19 @@ function OpsCard({
   // Count-up (Spec WOW §4.7): rAF con reduced-motion → valor final directo.
   const animated = useCountUp(value)
   return (
-    // Pressable reemplaza al transform de card-hover (conflicto con
-    // framer-motion); el hover de borde/sombra se mantiene en CSS.
-    <Pressable className="h-full">
+    // BentoCard interactive: la card NAVEGA al click (deep-link con filtro) →
+    // hover con elevación vía card-hover (F1 — patrón DS para cards
+    // interactivas). El chrome (borde/fondo/sombra + tinte urgent) vive en el
+    // Card; el Link queda como área clickable. Dentro de BentoGrid entra en
+    // cascada (StaggerItem); en el carrusel <lg no hay StaggerList padre →
+    // estática.
+    <BentoCard
+      interactive
+      className={`rounded-xl ${urgent ? 'border-primary/40 bg-primary/5' : ''}`}
+    >
       <Link
         href={href}
-        className={`group block h-full rounded-xl border bg-card p-4 sm:p-5 shadow-xs hover:shadow-md hover:border-primary/40 transition-[border-color,box-shadow] duration-200 ${
-          urgent ? 'border-primary/40 bg-primary/5' : 'border-border'
-        }`}
+        className="group block h-full rounded-xl p-4 sm:p-5"
       >
         <div className="flex items-center justify-between mb-2">
           <Icon className={`h-4 w-4 ${color}`} />
@@ -649,18 +670,21 @@ function OpsCard({
         <p className="text-xs font-medium text-foreground mt-1 leading-snug">{label}</p>
         <p className="text-xs text-muted-foreground leading-snug">{description}</p>
       </Link>
-    </Pressable>
+    </BentoCard>
   )
 }
 
 function KpiCard({ label, value }: { label: string; value: number }) {
   const animated = useCountUp(value)
   return (
-    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-xs h-full">
+    // BentoCard estática (no navega → sin card-hover, F1). Mismo chrome de
+    // antes (rounded-xl border bg-card p-4 sm:p-5 shadow-xs h-full); dentro
+    // de BentoGrid entra en cascada, en el carrusel <lg queda estática.
+    <BentoCard className="rounded-xl p-4 sm:p-5">
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className="text-2xl sm:text-3xl font-bold text-primary tabular-nums">{Math.round(animated)}</p>
       <p className="text-xs mt-1 text-muted-foreground">Total acumulado</p>
-    </div>
+    </BentoCard>
   )
 }
 
@@ -675,7 +699,9 @@ function MoneyKpiCard({ label, value }: { label: string; value: number | null })
   const text = negative ? 'text-red-700' : 'text-emerald-700'
   const animated = useCountUp(value ?? 0)
   return (
-    <div className={`rounded-xl border p-4 sm:p-5 shadow-xs ${border}`}>
+    // BentoCard estática (no navega → sin card-hover, F1) con span=2: el
+    // dinero es la card de mayor jerarquía del bento → 2 col en ≥lg.
+    <BentoCard span={2} className={`rounded-xl p-4 sm:p-5 ${border}`}>
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${text}`}>
         {value === null ? '—' : negative ? formatCOPNegative(Math.round(animated)) : formatCOP(Math.round(animated))}
@@ -683,7 +709,7 @@ function MoneyKpiCard({ label, value }: { label: string; value: number | null })
       <p className="text-xs mt-1 text-muted-foreground">
         {value === null ? 'No disponible' : 'Neto de reembolsos'}
       </p>
-    </div>
+    </BentoCard>
   )
 }
 

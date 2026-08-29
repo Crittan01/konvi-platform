@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { OrderStatusLive } from './_components/order-status-live'
 
+export const metadata = { title: 'Pedido' }
+
 // ─── Contrato de estados (espejo del listado / orders.py VALID_STATUSES) ──────
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pendiente',

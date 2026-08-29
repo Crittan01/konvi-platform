@@ -109,6 +109,61 @@
   }
 }
 
+@utility empty-state-pop {
+  /* Pop de entrada de EmptyState (UNA vez, sin loop): fade + scale suave con
+     el easing del DS [0.16,1,0.3,1]. CSS puro a propósito: EmptyState se usa
+     desde server components (audit, media) y así sigue server-safe — cero
+     frontera client, hidratación trivial. Respeta prefers-reduced-motion. */
+  animation: empty-state-pop 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@utility icon-float {
+  /* Flotación lenta del icono de EmptyState (solo transform, 4s ease-in-out
+     infinite). CSS puro por la misma razón que empty-state-pop. Estática con
+     prefers-reduced-motion. */
+  animation: icon-float 4s ease-in-out infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes empty-state-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes icon-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* ── View Transitions entre rutas del dashboard (CABO 1, 2026-08-28) ────────
+   Flag experimental.viewTransition en next.config.js + wrapper
+   <ViewTransition name="dashboard-page"> en app/dashboard/layout.tsx.
+   El nombre propio (no `root`) es deliberado: React genera los pseudos sobre
+   el elemento envuelto → targetearlo es determinista. Crossfade/morph sutil
+   (180ms, easing del DS); invisible salvo sensación de fluidez.
+   prefers-reduced-motion → sin animación (la navegación cambia de golpe). */
+::view-transition-group(dashboard-page),
+::view-transition-old(dashboard-page),
+::view-transition-new(dashboard-page) {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(dashboard-page),
+  ::view-transition-old(dashboard-page),
+  ::view-transition-new(dashboard-page) {
+    animation: none;
+  }
+}
+
 @layer base {
   /* `.light` recibe los MISMOS tokens que :root (sin duplicar) → permite forzar
      tema claro en un subárbol aunque <html> tenga .dark (ej. páginas de auth con

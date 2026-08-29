@@ -16,6 +16,8 @@ import { KB_CATEGORIES } from './categories'
 import { ok, fail, type ActionResult } from '@/lib/action-result'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
+export const metadata = { title: 'Base de Conocimiento' }
+
 const MAX_DOCS    = 30
 const MAX_CONTENT = 3000
 const MAX_TITLE   = 120

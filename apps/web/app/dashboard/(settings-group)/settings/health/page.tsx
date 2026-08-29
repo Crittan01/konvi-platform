@@ -18,6 +18,8 @@ import { Activity } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import type { HealthRow } from './_components/types'
 
+export const metadata = { title: 'Salud integraciones' }
+
 export const dynamic = 'force-dynamic'
 
 async function getOwnerOrManagerTenant(): Promise<string> {

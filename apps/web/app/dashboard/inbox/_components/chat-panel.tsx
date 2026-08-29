@@ -41,6 +41,7 @@ import type { ConvContext, Conversation, Message } from '../_lib/types'
 import { STATUS_CONFIG } from '../_lib/constants'
 import { formatDateTime, formatPhone, timeAgo } from '../_lib/format'
 import { wrapSelection } from '../_lib/editor'
+import { useMediaQuery } from '@/lib/use-media-query'
 import { useAnimatableMessageIds } from '../_hooks/use-animatable-messages'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
 import { InboxImage } from './inbox-image'
@@ -129,6 +130,14 @@ export function ChatPanel({
   onToggleContextPanel,
 }: Props) {
   const confirm = useConfirm()
+
+  // Bug audit UX v1 (móvil 390px): el placeholder largo del composer (atajos
+  // de teclado) envolvía a 2 líneas y el texto final se truncaba detrás del
+  // área de input. Los atajos son irrelevantes en táctil → placeholder mínimo
+  // cuando la ventana es estrecha O el puntero es grueso. useMediaQuery es
+  // SSR-seguro (server snapshot false → desktop; el valor real aplica tras
+  // hidratar, sin mismatch).
+  const compactHint = useMediaQuery('(max-width: 639px), (pointer: coarse)')
 
   // T7.2 — ids de mensajes que entran con animación (solo los NUEVOS tras la
   // carga inicial; nunca el historial, el prepend de loadMore ni los dedupes).
@@ -634,7 +643,11 @@ export function ChatPanel({
                     }
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSendMessage() }
                   }}
-                  placeholder="Escribe tu respuesta...  (Enter envía · Shift+Enter salto de línea · Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código)"
+                  placeholder={
+                    compactHint
+                      ? 'Escribe tu respuesta…'
+                      : 'Escribe tu respuesta...  (Enter envía · Shift+Enter salto de línea · Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código)'
+                  }
                   disabled={sending}
                   rows={2}
                   className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50"

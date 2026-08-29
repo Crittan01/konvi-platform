@@ -62,7 +62,7 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 | Capa | Versión real (2026-08-02) |
 |---|---|
 | Frontend | Next.js **16.2.11** + React ^19 + TypeScript ^5 |
-| UI | TailwindCSS **4.3.3** (tokens en `globals.css`) + shadcn/ui — **27 componentes (incl. empty-state, motion, page-header)** en `apps/web/components/ui/` |
+| UI | TailwindCSS **4.3.3** (tokens en `globals.css`) + shadcn/ui — **29 componentes (incl. empty-state, motion, page-header, glow-button, bento)** en `apps/web/components/ui/` |
 | Backend | Python **3.11** + FastAPI **0.139.0** (api + orchestrator; connector-whatsapp va una minor atrás) |
 | DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) — 269 migraciones repo / 262 ledger prod (7 pendientes de deploy), 79 tablas live |
 | IA | `google-genai==2.11.0` — Gemini 3.x (primario prod `gemini-3.1-flash-lite`) |

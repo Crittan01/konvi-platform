@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/ui/page-header'
 import ClaimsManager from './_components/claims-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
+export const metadata = { title: 'Reclamos' }
+
 // Cap de lectura alineado con el límite del router API (claims.py: limit<=200).
 // Evita el full-table-fetch del tenant en tenants con historial largo.
 const CLAIMS_LIMIT = 200

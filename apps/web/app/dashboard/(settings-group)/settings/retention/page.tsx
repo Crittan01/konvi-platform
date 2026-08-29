@@ -19,6 +19,8 @@ import RetentionPoliciesForm, {
   type Entity,
 } from './_components/retention-policies-form'
 
+export const metadata = { title: 'Retención datos' }
+
 type Policy = {
   id: string
   tenant_id: string | null

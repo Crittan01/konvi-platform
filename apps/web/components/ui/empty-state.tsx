@@ -8,6 +8,12 @@ import { cn } from "@/lib/utils"
 // el <EmptyState> local de finance-dashboard (borde dashed + icono muted +
 // título + descripción). `plain` es para vacíos que viven dentro de una Card
 // o panel ya enmarcado (audit, inbox list) y no deben doblar el borde.
+// Pulido WOW (frente 2): pop de entrada una vez (`empty-state-pop`) + halo
+// radial estático tras el icono + flotación lenta (`icon-float`). Ambas
+// animaciones son UTILITIES CSS del DS (globals.css) y no framer-motion a
+// propósito: EmptyState se usa desde server components (audit, media) y así
+// el módulo sigue server-safe — cero frontera client, hidratación trivial y
+// reduced-motion por media query (mismo patrón que card-hover, §4.1).
 const emptyStateVariants = cva(
   "flex flex-col items-center justify-center text-center",
   {
@@ -43,9 +49,13 @@ function EmptyState({
   ...props
 }: EmptyStateProps) {
   return (
-    <div className={cn(emptyStateVariants({ variant }), className)} {...props}>
+    <div className={cn(emptyStateVariants({ variant }), "empty-state-pop", className)} {...props}>
       {Icon && (
-        <Icon className="h-10 w-10 text-muted-foreground/40 mb-3" aria-hidden />
+        <div className="relative mb-3">
+          {/* Halo radial estático detrás del icono (pulido WOW frente 2). */}
+          <div aria-hidden className="absolute inset-0 -m-2 rounded-full bg-primary/10 blur-lg" />
+          <Icon className="icon-float relative h-10 w-10 text-muted-foreground/40" aria-hidden />
+        </div>
       )}
       {title && <p className="text-sm font-medium text-foreground">{title}</p>}
       {description && (

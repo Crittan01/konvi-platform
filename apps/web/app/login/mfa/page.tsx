@@ -51,7 +51,7 @@ export default async function MfaChallengePage(
     <AuthScene>
       <AuthBrand subtitle="Verificación en dos pasos — ingresa el código de tu authenticator" />
       <AuthCardReveal>
-        <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+        <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
           <CardContent className="pt-6">
             <MfaChallengeForm
               factorId={totpFactor.id}

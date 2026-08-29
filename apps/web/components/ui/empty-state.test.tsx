@@ -46,4 +46,19 @@ describe('EmptyState', () => {
     render(<EmptyState description="Solo descripción" />)
     expect(screen.getByText('Solo descripción').className).not.toContain('mt-1')
   })
+
+  it('pop de entrada: la raíz lleva la utility empty-state-pop del DS', () => {
+    render(<EmptyState title="Con pop" />)
+    const root = screen.getByText('Con pop').closest('div')!
+    expect(root.className).toContain('empty-state-pop')
+  })
+
+  it('icono con vida: flotación (icon-float) + halo radial estático aria-hidden', () => {
+    const { container } = render(<EmptyState icon={Inbox} title="Vivo" />)
+    const svg = container.querySelector('svg')!
+    expect(svg.classList.contains('icon-float')).toBe(true)
+    const halo = container.querySelector('.bg-primary\\/10')
+    expect(halo).not.toBeNull()
+    expect(halo!.getAttribute('aria-hidden')).toBe('true')
+  })
 })

@@ -72,7 +72,7 @@ export default async function SetPasswordPage(
     <AuthScene>
       <AuthBrand subtitle="Consola de administración de tu negocio" />
       <AuthCardReveal>
-        <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+        <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
           <CardHeader className="space-y-1">
             <div className="flex items-center gap-2 mb-1">
               <ShieldCheck className="h-5 w-5 text-primary" />

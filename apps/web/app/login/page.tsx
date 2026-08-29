@@ -127,7 +127,7 @@ export default async function LoginPage(
       <AuthCardReveal>
         {data?.user && !forceLogin ? (
           /* Sesión activa SIN ?force → pantalla intermedia con opciones */
-          (<Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+          (<Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
             <CardContent className="pt-6 space-y-4">
               <div className="text-center space-y-1">
                 <p className="text-sm text-muted-foreground">Sesión activa</p>
@@ -156,7 +156,7 @@ export default async function LoginPage(
             </CardContent>
           </Card>)
         ) : (
-          <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+          <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
             <CardContent className="pt-6">
               <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} next={nextParam} />
             </CardContent>

@@ -21,6 +21,8 @@ import {
   describeActor,
 } from './audit-labels'
 
+export const metadata = { title: 'Auditoría' }
+
 export const dynamic = 'force-dynamic'
 
 const EXPORT_CAP = 5000

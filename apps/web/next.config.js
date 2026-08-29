@@ -92,6 +92,15 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // CABO 1 (programa WOW 2026-08-28): View Transitions de React en App Router.
+  // Habilita que las navegaciones de ruta se ejecuten como transiciones del
+  // navegador; el crossfade sutil del contenido de página lo disparan el
+  // wrapper <ViewTransition> de app/dashboard/layout.tsx + el CSS
+  // ::view-transition-* de globals.css (con reduced-motion respetado).
+  experimental: {
+    viewTransition: true,
+  },
+
   // STG local (2026-08-21): permitir ver el dev server desde otro equipo de la
   // LAN (la IP de la VM). Sin esto, Next 16 bloquea el origen por protección
   // anti-DNS-rebinding: el HMR ws moría con ERR_INVALID_HTTP_RESPONSE y la

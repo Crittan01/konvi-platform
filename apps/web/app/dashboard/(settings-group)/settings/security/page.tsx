@@ -29,6 +29,8 @@ import SetPasswordForm from '@/app/set-password/set-password-form'
 import { SecurityForm } from './_components/security-form'
 import { RecoveryChangePassword } from './_components/recovery-change-password'
 
+export const metadata = { title: 'Seguridad' }
+
 export const dynamic = 'force-dynamic'
 
 interface MfaState {

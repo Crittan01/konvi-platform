@@ -7,6 +7,8 @@ import { StatusBadge } from './status-badge'
 import { ShipmentTimeline, type TrackingEvent } from './shipment-timeline'
 import Link from 'next/link'
 
+export const metadata = { title: 'Cotizador' }
+
 type Shipment = {
   id: string
   status: string

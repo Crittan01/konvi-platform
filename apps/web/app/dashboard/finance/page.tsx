@@ -8,6 +8,8 @@ import { Landmark, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 
+export const metadata = { title: 'Finanzas' }
+
 export const dynamic = 'force-dynamic'
 
 // PostgREST corta en max-rows (default 1000) SIN error. Por encima de esto la

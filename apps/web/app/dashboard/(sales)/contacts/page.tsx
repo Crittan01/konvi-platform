@@ -8,6 +8,8 @@ import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 import { uploadConsentEvidence } from './_components/helpers/upload-evidence'
 
+export const metadata = { title: 'Contactos' }
+
 // Rev. 102 — module-level scope.
 // Bug previo: estaban definidas DENTRO de ContactsPage; los server actions
 // inline (addContact/editContact) capturaban CONSENT_SOURCES y

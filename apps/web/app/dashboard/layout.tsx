@@ -1,4 +1,6 @@
+/// <reference types="react/experimental" />
 import * as React from "react"
+import { ViewTransition } from 'react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
@@ -173,9 +175,13 @@ export default async function DashboardLayout({
           </div>
         )}
 
-        {/* Page content — pb extra en móvil para no quedar bajo el bottom-nav */}
+        {/* Page content — pb extra en móvil para no quedar bajo el bottom-nav.
+            ViewTransition (CABO 1, flag experimental.viewTransition): las
+            navegaciones entre rutas del dashboard cruzan con un crossfade
+            sutil del contenido (CSS ::view-transition-* en globals.css,
+            180ms, easing DS; reduced-motion → sin animación). */}
         <div className="px-4 pt-4 pb-24 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 lg:pb-8">
-          {children}
+          <ViewTransition name="dashboard-page">{children}</ViewTransition>
         </div>
       </main>
 

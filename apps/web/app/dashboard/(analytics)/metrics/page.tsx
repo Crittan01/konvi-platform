@@ -23,6 +23,8 @@ import {
   type OrderRow, type OrderItemRow, type ClaimRow, type OrdersSummary,
 } from './_lib/metrics'
 
+export const metadata = { title: 'Métricas' }
+
 const VALID_PERIODS = ['7', '30', '90', 'all'] as const
 
 const cop = (n: number) => `$${n.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`

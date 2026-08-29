@@ -5,6 +5,8 @@ import DashboardClient from './dashboard-client'
 import { AlertTriangle } from 'lucide-react'
 import { buildQuickLinks, messageDayBuckets, ORDER_STATUSES } from './dashboard-logic'
 
+export const metadata = { title: 'Panel' }
+
 export default async function DashboardPage() {
   // Sem 5 perf: getCachedUser/Meta comparten cache con DashboardLayout
   // (mismo render tree). Ahorra 1 round-trip auth.getUser.

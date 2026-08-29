@@ -9,6 +9,8 @@ import { ReadinessCard } from './readiness-card'
 import { AgentsList } from './agents-list'
 import { guardrailsForRole } from './agent-guardrails'
 
+export const metadata = { title: 'Agentes IA' }
+
 // Sincronizado 1:1 con el enum de Ajustes → General (settings/page.tsx:236-240).
 // NO agregar valores fantasma (antes había 'neutro'/'energico' que ningún tenant
 // puede tener); si el tono no está en el mapa, la card cae al slug crudo.

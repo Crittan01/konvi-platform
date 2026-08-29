@@ -39,7 +39,7 @@ export default function LogoutFarewell({ action }: Props) {
   }, [action, router])
 
   return (
-    <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+    <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
       <CardContent className="pt-6 pb-6 flex flex-col items-center gap-3 text-center">
         <p className="text-sm text-muted-foreground flex items-center gap-2" role="status" aria-live="polite">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

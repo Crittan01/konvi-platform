@@ -17,7 +17,9 @@ import {
   type Variants,
 } from 'framer-motion'
 
-const EASE_OUT = [0.16, 1, 0.3, 1] as const
+// Easing canónico del DS — exportado para wrappers nuevos fuera de este
+// archivo (glow-button, auth-scene) que deben replicar el patrón sin duplicar.
+export const EASE_OUT = [0.16, 1, 0.3, 1] as const
 
 /**
  * useReducedMotionDS — `useReducedMotion` hidratación-seguro.
@@ -33,8 +35,11 @@ const EASE_OUT = [0.16, 1, 0.3, 1] as const
  * `whileTap` — atributo SSR-visible que también diverge, expuesto por la
  * verificación live T7.4). BubbleIn no lo necesita (superficie client-only
  * tras auth: lee el valor real directo).
+ * Exportado para wrappers nuevos fuera de este archivo (glow-button,
+ * auth-scene, aurora-canvas): cualquier rama SSR-visible condicionada por
+ * reduce debe pasar por este hook, no duplicar el patrón.
  */
-function useReducedMotionDS(): boolean {
+export function useReducedMotionDS(): boolean {
   const reduce = useReducedMotion()
   const [hydrated, setHydrated] = React.useState(false)
   React.useEffect(() => setHydrated(true), [])

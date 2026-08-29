@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
+import { GlowButton } from '@/components/ui/glow-button'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -35,6 +35,10 @@ export default function LoginForm({ action, message, next }: Props) {
           placeholder="tu@negocio.com"
           required
           autoComplete="email"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="next"
         />
       </div>
 
@@ -53,6 +57,7 @@ export default function LoginForm({ action, message, next }: Props) {
             type={showPwd ? 'text' : 'password'}
             required
             autoComplete="current-password"
+            enterKeyHint="go"
             className="pr-10"
           />
           <button
@@ -71,11 +76,11 @@ export default function LoginForm({ action, message, next }: Props) {
         <p className="text-sm text-destructive text-center" role="alert" aria-live="assertive">{message}</p>
       )}
 
-      <Button className="w-full" type="submit" disabled={isPending}>
+      <GlowButton className="w-full" type="submit" disabled={isPending}>
         {isPending
           ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Ingresando...</>
           : 'Entrar'}
-      </Button>
+      </GlowButton>
     </form>
   )
 }

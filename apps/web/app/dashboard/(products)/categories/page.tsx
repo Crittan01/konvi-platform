@@ -2,6 +2,8 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { createClient } from '@/utils/supabase/server'
 import CategoriesManager, { type CategoryRow, type AttributeDef } from './_components/categories-manager'
 
+export const metadata = { title: 'Categorías' }
+
 // ADR-0027 — gestión de categorías OPERATIVAS per-tenant (las que el bot presenta al cliente).
 // READ directo (RLS via JWT, como el catálogo); WRITE vía API (actions.ts → RBAC + audit).
 

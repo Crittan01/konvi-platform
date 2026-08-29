@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import OrdersManager from './_components/orders-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
+export const metadata = { title: 'Pedidos' }
+
 type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
 type Product   = { id: string; title: string; product_variations: Variation[] }
 type Contact   = { id: string; phone: string; name: string | null }

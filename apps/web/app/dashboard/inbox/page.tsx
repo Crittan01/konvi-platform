@@ -11,6 +11,8 @@ import { redirect } from 'next/navigation'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import InboxManager from './_components/inbox-manager'
 
+export const metadata = { title: 'Inbox' }
+
 export default async function InboxPage() {
   // Sem 5 perf: getCachedUser/getCachedTenantMeta cachean por request.
   const user = await getCachedUser()

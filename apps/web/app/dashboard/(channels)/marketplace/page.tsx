@@ -5,7 +5,10 @@ import { Store, ExternalLink, Eye } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import MarketplaceManager, { type MeliItem } from './_components/marketplace-manager'
+import { EmptyState } from '@/components/ui/empty-state'
 import { CORE_API_URL } from '@/lib/runtime-env'
+
+export const metadata = { title: 'Mercado Libre' }
 
 const PAGE_SIZE = 50
 
@@ -39,25 +42,25 @@ export default async function MarketplacePage(props: {
   const meliConnectedInDb = meliInt?.status === 'connected'
 
   if (!meliConnectedInDb) {
+    // Gate migrado al EmptyState del DS (CABO 2, programa WOW): halo +
+    // flotación + pop de entrada. Texto y CTA preservados verbatim.
     return (
       <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
-        <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
-          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-700/20 flex items-center justify-center">
-            <Store className="h-7 w-7 text-yellow-700" />
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-base font-semibold">Mercado Libre no conectado</h2>
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              Conecta tu cuenta vendedor de Mercado Libre para gestionar tus publicaciones y sincronizar stock automáticamente.
-            </p>
-          </div>
-          <a
-            href="/dashboard/integrations"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-sm font-medium transition-colors"
-          >
-            <ExternalLink className="h-4 w-4" /> Configurar integración
-          </a>
-        </div>
+        <EmptyState
+          variant="plain"
+          icon={Store}
+          className="max-w-sm px-4"
+          title="Mercado Libre no conectado"
+          description="Conecta tu cuenta vendedor de Mercado Libre para gestionar tus publicaciones y sincronizar stock automáticamente."
+          action={
+            <a
+              href="/dashboard/integrations"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-sm font-medium transition-colors"
+            >
+              <ExternalLink className="h-4 w-4" /> Configurar integración
+            </a>
+          }
+        />
       </div>
     )
   }
@@ -129,26 +132,24 @@ export default async function MarketplacePage(props: {
   }
 
   if (!connected) {
+    // Mismo patrón que el gate "no conectado" → EmptyState del DS (CABO 2).
     return (
       <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
-        <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
-          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-700/20 flex items-center justify-center">
-            <Store className="h-7 w-7 text-yellow-700" />
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-base font-semibold">Mercado Libre requiere reconexión</h2>
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              El tenant aparece conectado, pero el API no pudo validar la sesión actual de Mercado Libre.
-              Vuelve a conectar para restablecer el acceso.
-            </p>
-          </div>
-          <a
-            href="/dashboard/integrations"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-sm font-medium transition-colors"
-          >
-            <ExternalLink className="h-4 w-4" /> Configurar integración
-          </a>
-        </div>
+        <EmptyState
+          variant="plain"
+          icon={Store}
+          className="max-w-sm px-4"
+          title="Mercado Libre requiere reconexión"
+          description="El tenant aparece conectado, pero el API no pudo validar la sesión actual de Mercado Libre. Vuelve a conectar para restablecer el acceso."
+          action={
+            <a
+              href="/dashboard/integrations"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-sm font-medium transition-colors"
+            >
+              <ExternalLink className="h-4 w-4" /> Configurar integración
+            </a>
+          }
+        />
       </div>
     )
   }

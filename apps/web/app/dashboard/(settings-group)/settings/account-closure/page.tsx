@@ -18,6 +18,8 @@ import { TriangleAlert } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { ClosureForm } from './_components/closure-form'
 
+export const metadata = { title: 'Cerrar cuenta' }
+
 export const dynamic = 'force-dynamic'
 
 interface OffboardingStatus {

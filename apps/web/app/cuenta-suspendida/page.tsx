@@ -15,7 +15,7 @@ export default function CuentaSuspendidaPage() {
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Konvi</h1>
         </div>
-        <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+        <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
           <CardContent className="pt-6 text-center space-y-5">
             <div className="flex justify-center">
               <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-700/30 flex items-center justify-center">

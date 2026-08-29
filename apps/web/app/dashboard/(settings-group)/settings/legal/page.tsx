@@ -23,6 +23,8 @@ import { ok, fail, type ActionResult } from '@/lib/action-result'
 import LegalAcceptanceClient from './_components/legal-acceptance-client'
 import { SicReportDownload } from './_components/sic-report-download'
 
+export const metadata = { title: 'Legal' }
+
 const CURRENT_VERSIONS = {
   dpa: 'v2026-05-01',
   privacy_policy: 'v2026-05-01',

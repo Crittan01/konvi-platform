@@ -6,6 +6,8 @@ import type { Product, AttributeDef } from './types'
 import { CORE_API_URL } from '@/lib/runtime-env'
 import { ok, fail, type ActionResult } from '@/lib/action-result'
 
+export const metadata = { title: 'Productos' }
+
 const DEFAULT_THRESHOLD = 5
 
 // Extrae un mensaje legible del cuerpo de error del Core API (FastAPI `{detail}`,

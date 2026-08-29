@@ -7,6 +7,8 @@ import PurchasesClient from './_components/purchases-client'
 import type { PurchaseOrder } from './_components/purchase-orders-manager'
 import type { Supplier } from './_components/suppliers-manager'
 
+export const metadata = { title: 'Compras' }
+
 export const dynamic = 'force-dynamic'
 
 // Ventana de listado: acotamos el historial para no traer joins anidados sin
