@@ -29,7 +29,9 @@ los scripts corren, pero SIEMPRE avisando por stderr contra qué están corriend
 Config (env):
 - `KONVI_SAFE_REFS`   : refs de dev permitidos, coma-separado (vacío por default:
                         ya no hay proyecto dev; local sigue siendo seguro).
-- `KONVI_PROD_REF`    : ref de prod (solo para un mensaje de error explícito).
+- `KONVI_PROD_REF`    : ref de prod. REQUERIDO para que el guard reconozca prod;
+                        sin él, fail-closed: TODO destino cloud no-local aborta
+                        (no se puede descartar que sea prod).
 - `KONVI_LAUNCHED=1`  : fuerza modo post-lanzamiento sin tocar código.
 - `KONVI_ALLOW_PROD=1`: override auditable para correr contra un destino no-dev.
 
@@ -46,9 +48,13 @@ import sys
 import urllib.parse
 from typing import Optional
 
-# Ref inmutable del proyecto Supabase de producción (konvi-prod). El project-ref
-# no cambia aunque se renombre el proyecto (ver docs/infra/environments.md).
-PROD_REF = os.getenv("KONVI_PROD_REF", "xmelwnhhphksbpdjmbbp").strip().lower()
+# Ref del proyecto Supabase de producción (konvi-prod). NUNCA hardcodeado: este
+# repo es público, así que se lee de `KONVI_PROD_REF` (placeholder en .env.example;
+# el valor real va en los .env* gitignored o en env vars de la VM/CI). Si falta,
+# classify() no puede reconocer prod → todo destino cloud no-local cae en
+# 'unknown' y aborta (fail-closed — ver assert_safe_target). El project-ref no
+# cambia aunque se renombre el proyecto (ver docs/infra/environments.md).
+PROD_REF = os.environ.get("KONVI_PROD_REF", "").strip().lower()
 
 # >>> CAMBIAR A True EL DÍA DEL LANZAMIENTO REAL (ver docstring). <<<
 # False = pre-lanzamiento: konvi-prod se clasifica 'prelaunch' y los scripts
@@ -251,9 +257,18 @@ def assert_safe_target(creds: dict, *, action: str = "operación destructiva") -
         if kind == "prod"
         else f"apunta a un destino NO reconocido como dev ({target})"
     )
+    # Sin KONVI_PROD_REF el guard no puede distinguir prod de un dev desconocido:
+    # se lo dice explícito al operador (la causa más probable de este aborto).
+    no_ref_note = (
+        "  KONVI_PROD_REF no está configurado: no se pudo descartar que el destino\n"
+        "  sea prod (fail-closed). Exportá KONVI_PROD_REF=<project-ref> en tu .env.\n"
+        if not PROD_REF
+        else ""
+    )
     print(
         f"ABORTADO: «{action}» {reason}.\n"
         f"  Este script es testing-only y borra datos sin preservar audit.\n"
+        f"{no_ref_note}"
         f"  Solo corre contra un Supabase local o un ref listado en KONVI_SAFE_REFS.\n"
         f"  Si REALMENTE necesitás correr contra este destino, exportá KONVI_ALLOW_PROD=1.",
         file=sys.stderr,

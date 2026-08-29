@@ -30,11 +30,13 @@ def tokenize_text(text: str) -> list[str]:
 
 
 def normalize_phone(phone: str) -> str:
-    """Normaliza teléfono: elimina '+' y espacios.
+    """Normaliza teléfono: whitelist estricta de dígitos (OWASP 2026-08-23,
+    GREEN-15 — antes solo quitaba '+' y espacios: `, ( ) *` sobrevivían y
+    rompían la gramática del filtro PostgREST `.or_(f"phone.eq.{p},...")`).
 
     Ej: '+57 312 583 5649' → '573125835649'
     """
-    return re.sub(r"[\s+]", "", str(phone or "")).strip()
+    return re.sub(r"\D", "", str(phone or ""))
 
 
 def safe_float(value: object) -> Optional[float]:

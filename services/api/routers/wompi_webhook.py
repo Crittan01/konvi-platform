@@ -958,7 +958,8 @@ def _enqueue_payment_failed_msg(supabase, *, conversation_id: str, tenant_id: st
     Usa el escalation_role configurado por tenant (asesor/especialista/consultor/agente)."""
     import hashlib
     short_id = order_id[:8].upper()
-    idx = int(hashlib.md5(order_id.encode("utf-8")).hexdigest(), 16) % len(_PAYMENT_FAILED_VARIANTS)
+    # md5 solo para selección ESTABLE de variante de mensaje (no criptográfico).
+    idx = int(hashlib.md5(order_id.encode("utf-8"), usedforsecurity=False).hexdigest(), 16) % len(_PAYMENT_FAILED_VARIANTS)  # nosec B324
     role = _get_tenant_escalation_role(supabase, tenant_id)
     text = _PAYMENT_FAILED_VARIANTS[idx].format(short_id=short_id, role=role)
     _enqueue_outbound_text(supabase, conversation_id=conversation_id, tenant_id=tenant_id, text=text)

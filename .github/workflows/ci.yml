@@ -14,6 +14,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# YELLOW-9 (auditoría OWASP 2026-08-23): GITHUB_TOKEN con privilegio mínimo.
+# Ningún job escribe al repo (el deploy es Render autoDeploy); el trigger
+# pull_request ejecuta código de forks sobre un repo público.
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.11"
   # Node 22: FIDELIDAD PROD. Render corre Node 22.22.0 en konvi-web (default de servicios

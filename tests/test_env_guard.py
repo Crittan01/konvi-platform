@@ -23,6 +23,11 @@ _GUARD_PATH = os.path.join(
     "_env_guard.py",
 )
 
+# Desde 2026-08-28 el guard NO hardcodea el ref de prod (repo público): lo lee de
+# KONVI_PROD_REF al importarse. Los tests usan un ref SINTÉTICO con forma de ref
+# cloud (20 chars [a-z0-9]); setdefault respeta un valor ya exportado en el entorno.
+os.environ.setdefault("KONVI_PROD_REF", "fakeprodref000000000")
+
 
 def _load_guard():
     """Importa scripts/_env_guard.py por path (scripts no es paquete)."""

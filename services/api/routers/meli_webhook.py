@@ -213,8 +213,31 @@ def _extract_request_ip(request: Request) -> str:
     return "" if ip == "unknown" else ip
 
 
+def _is_production_env() -> bool:
+    """Mismo criterio que config.validate_critical (APP_ENV ∈ {production, prod})."""
+    return os.getenv("APP_ENV", "").strip().lower() in ("production", "prod")
+
+
 def _verify_meli_origin(request: Request, supabase=None) -> None:
     """Dependency: valida origen IP + rate-limit. <1ms en happy path."""
+    # OWASP 2026-08-23 (YELLOW-3) — fail-closed en producción: sin ancla de IP
+    # confiable (TRUSTED_CLIENT_IP_HEADER / XFF_TRUSTED_HOPS_FROM_RIGHT), la
+    # resolución cae al XFF leftmost spoofeable y el allowlist MeLi se evade
+    # gratis (MeLi NO firma webhooks). Mejor 503 que allowlist decorativo.
+    # En dev/test se mantiene el comportamiento histórico (warning).
+    from dependencies.security import client_ip_trust_configured
+    if not client_ip_trust_configured():
+        if _is_production_env():
+            logger.error(
+                "meli_webhook.misconfigured_ip_trust — falta TRUSTED_CLIENT_IP_HEADER/"
+                "XFF_TRUSTED_HOPS_FROM_RIGHT en producción: allowlist spoofeable. "
+                "Fail-closed 503 hasta corregir la config."
+            )
+            raise HTTPException(status_code=503, detail="Webhook no disponible")
+        logger.warning(
+            "meli_webhook.ip_trust_not_configured — IP resuelta por XFF leftmost "
+            "(spoofeable); aceptable solo en dev/test"
+        )
     ip = _extract_request_ip(request)
     if ip not in _ALLOWED_MELI_IPS:
         ua = request.headers.get("user-agent", "")[:80]

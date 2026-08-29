@@ -219,7 +219,8 @@ def _build_order_response(order: dict, items_count: int, tracking: Optional[dict
             "Aún no tenemos número de guía. ¿Quieres que te conecte con un asesor para revisarlo?",
             "El transportador aún no nos comparte la guía. Si la necesitas urgente, dime y te paso con un asesor.",
         ]
-        _idx = int(_h.md5(_order_id.encode("utf-8")).hexdigest(), 16) % len(_tracking_unavailable) if _order_id else 0
+        # md5 solo para selección ESTABLE de variante de mensaje (no criptográfico).
+        _idx = int(_h.md5(_order_id.encode("utf-8"), usedforsecurity=False).hexdigest(), 16) % len(_tracking_unavailable) if _order_id else 0  # nosec B324
         lines.append(_tracking_unavailable[_idx])
 
     if status_raw == "delivered":

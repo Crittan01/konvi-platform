@@ -12,6 +12,7 @@ Eventos:
 - sar_received (rev. 94) — solicitud Habeas Data del titular.
 """
 import logging
+import hashlib
 import html
 import os
 import re
@@ -39,6 +40,13 @@ def _mask_email_addr(email: str) -> str:
     if not sep:
         return "***"
     return f"{local[:2]}***@{domain}"
+
+
+def _subject_hash(subject: str) -> str:
+    """sha256(subject) truncado (12 hex) para logs: correlaciona envíos sin
+    exponer PII del asunto (GREEN-20, OWASP 2026-08-23 — el subject puede
+    llevar nombre del comprador / nº de pedido)."""
+    return hashlib.sha256((subject or "").encode("utf-8")).hexdigest()[:12]
 
 
 def _is_suppressed(supabase: Any, email: str) -> bool:
@@ -253,15 +261,15 @@ async def _send_email_via_resend(
     """
     if not RESEND_API_KEY:
         logger.info(
-            "[EMAIL][NO_KEY] Email simulated to=%s subject=%r (RESEND_API_KEY not set)",
-            to, subject,
+            "[EMAIL][NO_KEY] Email simulated to=%s subject_hash=%s (RESEND_API_KEY not set)",
+            _mask_email_addr(to), _subject_hash(subject),
         )
         return True
 
     if supabase is not None and _is_suppressed(supabase, to):
         logger.info(
-            "[EMAIL][SUPPRESSED] envío omitido (suppression list) to=%s subject=%r",
-            _mask_email_addr(to), subject,
+            "[EMAIL][SUPPRESSED] envío omitido (suppression list) to=%s subject_hash=%s",
+            _mask_email_addr(to), _subject_hash(subject),
         )
         return False
 
@@ -304,7 +312,12 @@ async def _send_email_via_resend(
         if _qd or _qm:
             logger.info("[EMAIL] resend quota daily=%s monthly=%s", _qd, _qm)
         if 200 <= res.status_code < 300:
-            logger.info("[EMAIL][SENT] to=%s subject=%r", to, subject)
+            # GREEN-20 (OWASP 2026-08-23): email enmascarado + subject como hash —
+            # el log no debe llevar PII del comprador.
+            logger.info(
+                "[EMAIL][SENT] to=%s subject_hash=%s",
+                _mask_email_addr(to), _subject_hash(subject),
+            )
             return True
         logger.error(
             "[EMAIL][ERROR] status=%s body=%s",

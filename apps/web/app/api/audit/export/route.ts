@@ -69,8 +69,15 @@ export async function GET(request: NextRequest) {
     if (userEmail) filters.user      = userEmail
     if (fromDate)  filters.from_date = fromDate
     if (toDate)    filters.to_date   = toDate
-    const fwd = request.headers.get('x-forwarded-for')
-    const ip = (fwd ? fwd.split(',')[0] : request.headers.get('x-real-ip'))?.trim() ?? null
+    // GREEN-19 (auditoría OWASP 2026-08-23): el PRIMER valor de XFF lo controla
+    // el cliente (spoofeable — sin valor probatorio en pii_access_log). El
+    // ÚLTIMO no vacío lo anexó el proxy más cercano (Render). Fallback a
+    // x-real-ip si no hay XFF.
+    const parts = (request.headers.get('x-forwarded-for') ?? '')
+      .split(',').map(s => s.trim()).filter(Boolean)
+    const ip = parts.length
+      ? parts[parts.length - 1]
+      : (request.headers.get('x-real-ip')?.trim() ?? null)
     const { error: logError } = await supabase.rpc('log_audit_export', {
       p_row_count:  rows.length,
       p_filters:    filters,

@@ -37,14 +37,22 @@ export type UploadEvidenceResult =
  * Validaciones: size ≤ 5MB · MIME en allowlist (PDF/JPG/PNG/WEBP) con
  * fallback por extensión si el browser no envió un MIME estándar.
  *
- * RLS server-side cubre el caso defensivo: si por alguna razón el caller
- * intenta escribir fuera de su tenant, la policy lo rechaza.
+ * YELLOW-13 (auditoría OWASP 2026-08-23): el tenant_id se deriva SIEMPRE de
+ * la sesión (app_metadata del JWT) — nunca de un argumento del cliente
+ * ('use server' = endpoint invocable con argumentos arbitrarios). Defensa en
+ * profundidad: la policy de Storage sigue siendo la barrera última — si por
+ * alguna razón se intenta escribir fuera del tenant, la policy lo rechaza.
  */
 export async function uploadConsentEvidence(
   formData: FormData,
   contactId: string,
-  tenantId: string,
 ): Promise<UploadEvidenceResult> {
+  const sb = await createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  const m = (user?.app_metadata ?? {}) as { tenant_id?: string }
+  if (!user || !m.tenant_id) return { status: 'error', message: 'No autenticado' }
+  const tenantId = m.tenant_id
+
   const file = formData.get('consent_evidence_file')
   if (!file || !(file instanceof File)) {
     return { status: 'skipped', reason: 'no_file' }
@@ -75,7 +83,6 @@ export async function uploadConsentEvidence(
     }
   }
 
-  const sb = await createClient()
   const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 100)
   const path = `${tenantId}/${contactId}/${Date.now()}-${safeName}`
 

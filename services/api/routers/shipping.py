@@ -243,29 +243,37 @@ async def _quote_via_aveonline(
             },
         )
     except AveonlineAuthError as exc:
+        # GREEN-18 (OWASP 2026-08-23): str(exc) solo en logs — no al cliente.
+        # El prefijo estático se conserva: el orchestrator lo matchea por
+        # substring ("aveonline no autenticado") para escalar a humano.
+        logger.warning("[SHIPPING] quote auth error tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=400,
-            detail=f"Aveonline no autenticado: {exc}. Reconecta en /dashboard/integrations/aveonline.",
+            detail="Aveonline no autenticado. Reconecta en /dashboard/integrations/aveonline.",
         )
     except AveonlineNoCarriersError as exc:
+        logger.info("[SHIPPING] quote sin carriers tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=404,
-            detail=f"Sin carriers Aveonline para {req.destination.city}: {exc}",
+            detail=f"Sin carriers Aveonline para {req.destination.city}.",
         )
     except AveonlinePackageLimitError as exc:
+        logger.info("[SHIPPING] quote paquete fuera de límite tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=422,
-            detail=f"Paquete excede límites Aveonline: {exc}",
+            detail="Paquete excede límites Aveonline. Divide el envío o ajusta peso/dimensiones.",
         )
     except AveonlineTransientError as exc:
+        logger.warning("[SHIPPING] quote transient tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=503,
-            detail=f"Aveonline temporalmente no disponible: {exc}",
+            detail="Aveonline temporalmente no disponible. Intenta en unos segundos.",
         )
     except AveonlinePermanentError as exc:
+        logger.warning("[SHIPPING] quote error permanente tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=502,
-            detail=f"Aveonline error: {exc}",
+            detail="Aveonline error al cotizar. Intenta más tarde.",
         )
 
     # Mapear QuoteOption → shape `normalized_rates` Envia-compat + campos

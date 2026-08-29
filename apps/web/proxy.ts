@@ -132,17 +132,23 @@ export async function proxy(request: NextRequest) {
           return NextResponse.redirect(url)
         }
       } catch (e) {
-        // Decisión FAIL-OPEN (NO cambiar a fail-closed): si el check de AAL
-        // falla (network/timeout/outage de Supabase Auth) se prefiere dejar
-        // pasar el request antes que bloquear a TODOS los users con MFA por un
-        // outage ajeno. El riesgo — gate MFA desactivado de facto mientras dure
-        // el fallo — se mitiga con señalización (F6: antes el catch era vacío;
-        // G6 auditoría frontend seguridad: el console.error queda en los logs
-        // de Render, greppable).
+        // FAIL-OPEN ACOTADO (auditoría OWASP 2026-08-23, YELLOW-7): si el check
+        // de AAL falla (network/timeout/outage de Supabase Auth) se dejan pasar
+        // SOLO lecturas (GET/HEAD) — no bloquear la consola entera por un
+        // outage ajeno. Para métodos mutadores (POST/PUT/PATCH/DELETE) el
+        // fail-open es inaceptable (escrituras sin gate MFA mientras dure el
+        // fallo): se responde 503 fail-closed. La señalización se mantiene
+        // (console.error greppable en los logs de Render).
         console.error(
-          '[proxy] AAL2 check falló — fail-open (gate MFA omitido en este request):',
+          '[proxy] AAL2 check falló — fail-open solo GET/HEAD (gate MFA omitido en este request):',
           e instanceof Error ? e.message : e,
         )
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          return NextResponse.json(
+            { detail: 'Verificación MFA temporalmente no disponible. Reintenta.' },
+            { status: 503 },
+          )
+        }
       }
     }
   }

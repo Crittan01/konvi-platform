@@ -60,7 +60,16 @@ async def lifespan(_app: FastAPI):
                 pass
 
 
-app = FastAPI(title="WhatsApp Webhook Connector", lifespan=lifespan)
+# GREEN-16 (OWASP 2026-08-23): /docs, /redoc y /openapi.json off en producción.
+_is_prod_env = os.getenv("APP_ENV", "").strip().lower() in ("production", "prod")
+
+app = FastAPI(
+    title="WhatsApp Webhook Connector",
+    lifespan=lifespan,
+    docs_url=None if _is_prod_env else "/docs",
+    redoc_url=None if _is_prod_env else "/redoc",
+    openapi_url=None if _is_prod_env else "/openapi.json",
+)
 
 app.include_router(webhook.router, prefix="/api/v1/whatsapp")
 

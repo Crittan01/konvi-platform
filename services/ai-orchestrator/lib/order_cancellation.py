@@ -312,8 +312,8 @@ async def cancel_order(
         payment_row = payments[0] if payments else None
         if payment_row:
             _hydrate_payment_from_webhook(payment_row)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("order_cancellation.hydrate_payment swallow: %s", type(_exc).__name__)
 
     shipment_row = None
     try:
@@ -325,8 +325,8 @@ async def cancel_order(
             .order("created_at", desc=True).limit(1).execute()
         ).data or []
         shipment_row = shipments[0] if shipments else None
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("order_cancellation.load_shipment swallow: %s", type(_exc).__name__)
 
     # 3. Triage escalation
     escalation_reasons = detect_escalation_reasons(
@@ -618,8 +618,8 @@ def _restore_stock(
         ).data or []
         for c in carts:
             sr.release_by_cart(supabase, tenant_id=tenant_id, cart_id=c["id"])
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("order_cancellation.release_stock swallow: %s", type(_exc).__name__)
 
     # Reverse stock_movements consumed (caso post-confirmed cancel).
     # Inserta movement '+qty' reverso para cada movement original con
@@ -813,8 +813,8 @@ async def _cancel_shipping(
                 supabase.table("shipments").update({
                     "status": "cancelled",
                 }).eq("tracking_number", tracking).eq("tenant_id", tenant_id).execute()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("order_cancellation.mark_shipment_cancelled swallow: %s", type(_exc).__name__)
             return True, "aveonline_api"
         return False, "manual_operator_call"
     except Exception as exc:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import * as XLSX from 'xlsx-js-style'
+import * as XLSX from 'xlsx'
 import {
   IMPORT_COLUMNS, buildExampleRow, groupRowsToProducts, pickDataSheet,
 } from './import-template'

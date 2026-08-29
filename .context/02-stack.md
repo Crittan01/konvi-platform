@@ -25,6 +25,13 @@ primitivas del contrato de domain services (`Actor`, `DomainError`, `DomainEvent
 
 ## Backend — servicios Python
 
+> **Dependency locking (YELLOW-10, 2026-08-29)**: `services/{api,ai-orchestrator,connector-whatsapp}/requirements.lock`
+> son locks con hashes (`pip-compile --generate-hashes`) — Render instala con
+> `pip install --require-hashes -r requirements.lock` (render.yaml). Tras cambiar un
+> `requirements.txt`: regenerar con `pip-compile --generate-hashes -o requirements.lock requirements.txt`
+> (pip-tools en venv aislado: `scratch/venv-piptools`). `packages/shared-py` queda fuera del lock
+> (editable local, no hasheable) y se instala en comando aparte del buildCommand.
+
 | Elemento | Versión real |
 |---------|-------------|
 | Python (VM) | **3.11.13 disponible** (`/usr/bin/python3.11`) y `python3` actualmente apunta a 3.9.25 |

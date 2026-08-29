@@ -103,7 +103,18 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Konvi Core API", description="Síncrona REST", lifespan=lifespan)
+# GREEN-16 (OWASP 2026-08-23): el schema OpenAPI (/docs, /redoc, /openapi.json)
+# no se expone en producción — revela la superficie completa del API a atacantes.
+_is_prod_env = get_settings().APP_ENV.strip().lower() in ("production", "prod")
+
+app = FastAPI(
+    title="Konvi Core API",
+    description="Síncrona REST",
+    lifespan=lifespan,
+    docs_url=None if _is_prod_env else "/docs",
+    redoc_url=None if _is_prod_env else "/redoc",
+    openapi_url=None if _is_prod_env else "/openapi.json",
+)
 
 # ─── CORS — restringido a dominios permitidos ──────────────────────────────────
 # En desarrollo: ALLOWED_ORIGINS=http://localhost:3000

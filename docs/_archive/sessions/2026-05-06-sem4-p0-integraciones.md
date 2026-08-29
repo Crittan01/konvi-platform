@@ -288,7 +288,7 @@ si auditoría pide trail de opt-outs respetados.
 | Q1 | 11 patrones canónicos confirmados |
 | Q2 | "Has sido dado de baja. Ya no recibirás mensajes nuestros. Si cambias de opinión, escríbenos un nuevo mensaje cuando quieras." |
 | Q3 | NO bloquea conversación futura (recomendación mía aceptada) |
-| Q4 | Pruebas con `+573125835649` |
+| Q4 | Pruebas con `+57312XXXXXX649` |
 | Q5 | FIX IN PLACE si UAT falla (no rollback) |
 
 ### Cambios

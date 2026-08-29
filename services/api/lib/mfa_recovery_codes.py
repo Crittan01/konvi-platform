@@ -5,7 +5,7 @@ cuando el usuario pierde su authenticator TOTP. Supabase Auth maneja MFA
 TOTP nativo; recovery codes son adicionales custom.
 
 Funciones:
-  - generate_codes(): genera 8 plaintexts URL-safe (32 bytes c/u).
+  - generate_codes(): genera 8 plaintexts hex (8 bytes c/u = 64-bit, ver abajo).
   - regenerate_for_user(sb, user_id, codes): bcrypt hash + UPSERT vía RPC.
   - verify_and_consume(sb, user_id, plaintext): bcrypt-compare contra todos
     los hashes no-usados del user; si match, RPC marca consumed atómico.
@@ -14,7 +14,13 @@ Funciones:
 Diseño:
   - bcrypt en lugar de SHA porque MFA codes son secretos compartidos
     igual que passwords (resist offline cracking si DB se filtra).
-  - Cada code es 32 bytes URL-safe (~43 chars base64). Entropía 256-bit.
+  - Cada code es 8 bytes hex (16 chars [0-9a-f], formato XXXX-XXXX-XXXX-XXXX).
+    Entropía REAL: 64-bit (secrets.token_hex(8)). Suficiente SOLO combinada
+    con el rate limit RL_MFA_VERIFY (5 intentos/min por usuario, ver
+    dependencies/security.py) — 64-bit sin rate limit sería brute-forced
+    offline-farmeable. NO reducir ese rate limit sin subir la entropía a
+    128-bit (token_hex(16)). Fix docstring OWASP 2026-08-23 (GREEN-22):
+    versiones previas afirmaban 256-bit/32 bytes — falso.
   - Single-use: tras consume, used_at NOT NULL. RPC valida atómico FOR UPDATE.
 """
 from __future__ import annotations
@@ -27,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 # Defaults conservadores. 8 codes es el estándar Industry (GitHub, Google).
 DEFAULT_NUM_CODES = 8
-CODE_BYTES = 24  # 24 bytes → ~32 chars base64url. Más que suficiente.
 
 
 class MFARecoveryCodesError(Exception):

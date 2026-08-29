@@ -89,7 +89,7 @@ make -C /home/ansible/commerce-ops-local status
 # (Si está en production, switchear a sandbox para tests $1.000)
 
 # 3. Verificar email contact
-psql ... -c "SELECT email FROM contacts WHERE phone='+573125835649';"
+psql ... -c "SELECT email FROM contacts WHERE phone='+57312XXXXXX649';"
 # Debe ser tu email real para recibir notificaciones
 ```
 
@@ -97,7 +97,7 @@ psql ... -c "SELECT email FROM contacts WHERE phone='+573125835649';"
 
 ```
 1. Reset:
-   python3.11 scripts/wipe_conversation.py --phone +573125835649 --yes
+   python3.11 scripts/wipe_conversation.py --phone +57312XXXXXX649 --yes
 
 2. WhatsApp al bot:
    "Hola, 1 sérum vit C 30ml, pago online, Bogota, Servientrega"
@@ -131,7 +131,7 @@ psql ... -c "SELECT email FROM contacts WHERE phone='+573125835649';"
 
 ```
 1. Reset (mantén contacto):
-   python3.11 scripts/wipe_conversation.py --phone +573125835649 --yes
+   python3.11 scripts/wipe_conversation.py --phone +57312XXXXXX649 --yes
 
 2. WhatsApp al bot:
    "Hola, 1 jabón coco 100g, pago online, Bogota, Servientrega"

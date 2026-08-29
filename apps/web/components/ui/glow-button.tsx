@@ -20,7 +20,11 @@ export function GlowButton({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof motion.button>) {
+}: Omit<React.ComponentProps<typeof motion.button>, 'children'> & {
+  // children se tipa ReactNode plano: el union MotionValue de motion.button no es
+  // renderizable por el <span> interno (TS2322 con React 19 + framer-motion 12).
+  children?: React.ReactNode
+}) {
   const reduce = useReducedMotionDS()
   const [magnetic, setMagnetic] = React.useState(false)
   React.useEffect(() => {

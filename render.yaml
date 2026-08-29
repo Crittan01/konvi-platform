@@ -99,7 +99,9 @@ services:
     region: oregon
     plan: starter
     rootDir: services/connector-whatsapp
-    buildCommand: pip install -r requirements.txt
+    # YELLOW-10 (OWASP 2026-08-23): requirements.lock (pip-compile --generate-hashes)
+    # con --require-hashes — supply-chain: build reproduible + integridad verificada.
+    buildCommand: pip install --require-hashes -r requirements.lock
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
@@ -137,7 +139,9 @@ services:
     rootDir: services/api
     # Track 5 M2.0: instala primero el paquete de dominio compartido (pip resuelve
     # la ruta -e relativa al CWD=rootDir, NO al requirements.txt — verificado).
-    buildCommand: pip install -e ../../packages/shared-py && pip install -r requirements.txt
+    # YELLOW-10 (OWASP 2026-08-23): el resto va por requirements.lock con hashes
+    # (el -e local no puede hashearse — pip --require-hashes lo rechazaría).
+    buildCommand: pip install -e ../../packages/shared-py && pip install --require-hashes -r requirements.lock
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
@@ -282,7 +286,8 @@ services:
     rootDir: services/ai-orchestrator
     # Track 5 M2.0: instala primero el paquete de dominio compartido (misma razón
     # que en konvi-api: pip resuelve la ruta -e relativa al CWD=rootDir).
-    buildCommand: pip install -e ../../packages/shared-py && pip install -r requirements.txt
+    # YELLOW-10 (OWASP 2026-08-23): el resto va por requirements.lock con hashes.
+    buildCommand: pip install -e ../../packages/shared-py && pip install --require-hashes -r requirements.lock
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL

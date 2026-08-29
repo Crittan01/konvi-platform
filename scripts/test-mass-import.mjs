@@ -353,7 +353,7 @@ async function main() {
   if (!skipOk) allPassed = false
 
   // ── PASO 7: (Opcional) La generación del .xlsx se hace desde el navegador
-  console.log('\n→ [EXCEL] Generación de plantilla: verificada en navegador (browser-only via xlsx-js-style)')
+  console.log('\n→ [EXCEL] Generación de plantilla: verificada en navegador (browser-only via xlsx CE 0.20.3)')
 
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n══════════════════════════════════════════════════════')

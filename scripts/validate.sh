@@ -258,6 +258,32 @@ else
   _warn "Migration SECDEF lint script ausente (scripts/check_secdef_grants.py)"
 fi
 
+# ─── 4.8 Anti-secretos: hex-32 (formato Meta App Secret) fuera de allowlist ───
+# RED-2 (auditoría 2026-08-23): dos Meta App Secrets REALES vivían en claro en
+# tests/test_meta_hmac_model_b.py marcados "# mock value". Un App Secret Meta es
+# exactamente 32 hex minúscula — mismo formato que un MD5. Este gate impide que
+# vuelva a entrar uno. Universo: archivos TRACKEADOS (git ls-files) — excluye
+# node_modules/.next/scratch por construcción. El boundary [^0-9a-f] evita
+# matchear substrings de SHA-1 de 40 chars (GitHub Actions pineadas, commit SHAs).
+# Allowlist por VALOR, no por path (un path allowlisteado habría escondido RED-2).
+_hdr "Anti-secretos: sin hex-32 tipo App Secret fuera de allowlist"
+_HEX32_ALLOWLIST=(
+  "00000000000000000000000000000000"  # sintético tests/test_meta_hmac_model_b.py (fix RED-2)
+  "11111111111111111111111111111111"  # sintético tests/test_meta_hmac_model_b.py (fix RED-2)
+  "0123456789abcdef0123456789abcdef"  # fixture apps/web/lib/mfa-recovery-cookie.test.ts (patrón teclado)
+  "31b40037201a9b0918cc5645c9c00e6d"  # MD5 integridad del monolito (docs/_archive/refactor/0001)
+)
+_hex32_hits=$(git ls-files -z -- '*.py' '*.md' '*.ts' '*.tsx' '*.sql' '*.toml' '*.sh' '*.yml' '*.yaml' '*.json' \
+  | xargs -0 -r grep -En '(^|[^0-9a-f])[0-9a-f]{32}([^0-9a-f]|$)' 2>/dev/null \
+  | grep -Evf <(printf '%s\n' "${_HEX32_ALLOWLIST[@]}") || true)
+if [ -n "$_hex32_hits" ]; then
+  _err "Posible secreto 32-hex (formato Meta App Secret) fuera de allowlist:"
+  echo "$_hex32_hits" | head -10
+  echo "  Si es un MD5/fixture legítimo, añadilo a _HEX32_ALLOWLIST (scripts/validate.sh) con justificación."
+else
+  _ok "Sin hex-32 sospechosos en archivos trackeados (allowlist: ${#_HEX32_ALLOWLIST[@]} valores justificados)"
+fi
+
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 
@@ -375,13 +401,16 @@ if $FULL; then
   # Ola 0 (auditoría 2026-07-13): el gate viejo usaba `--format=text` (INVÁLIDO →
   # pip-audit erroraba, `|| true` lo tragaba, el grep de "vulnerability" no matcheaba
   # → FALSE-GREEN en TODO el CI). Ahora: --format=columns + veredicto por EXIT CODE.
-  # Allowlist de starlette (transitivo de FastAPI==0.128.8; no pinneable sin bump
-  # coordinado de FastAPI, starlette 1.x rompe el FastAPI actual) → seguimiento W3
-  # supply-chain. Si aparece una vuln NUEVA en cualquier paquete, el gate falla.
+  # Allowlist de starlette (transitivo de FastAPI==0.139.0 → starlette 0.49.x; las 5
+  # PYSEC se fijan solo en starlette 1.x — verificado contra OSV 2026-08-29 — y
+  # starlette 1.x rompe el FastAPI actual) → seguimiento W3 supply-chain.
+  # YELLOW-10 (OWASP 2026-08-23): audita requirements.lock (el artefacto que Render
+  # instala, con hashes) cuando existe; cae a requirements.txt si no.
   _PA_IGNORE="--ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-2281 --ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-249"
   if command -v pip-audit &>/dev/null; then
     for dir in services/api services/ai-orchestrator services/connector-whatsapp; do
-      req="$dir/requirements.txt"
+      req="$dir/requirements.lock"
+      [ -f "$req" ] || req="$dir/requirements.txt"
       if [ -f "$req" ]; then
         out=$(pip-audit -r "$req" --format=columns $_PA_IGNORE 2>&1); pa_rc=$?
         if [ $pa_rc -ne 0 ]; then

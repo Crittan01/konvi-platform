@@ -21,25 +21,20 @@ const remotePatterns = [
     protocol: 'https',
     hostname: 'mlstatic.com',
   },
-  // Rev. 107 fix runtime KAIU 2026-05-24: 16 productos KAIU poblados con
-  // cover_image_url apuntando a placeholders HTTPS por defecto cuando
-  // tenant no sube imágenes reales.
-  //
-  // placehold.co retorna SVG sin XML prolog → Next.js detectContentType()
-  // no lo reconoce (espera bytes mágicos `<?xml`) → rechaza con "isn't a
-  // valid image" aunque dangerouslyAllowSVG=true (bug detección Next.js).
-  //
-  // dummyimage.com retorna PNG real → pasa por el optimizer sin problema.
-  // Mantenemos placehold.co como host whitelisted para compat retro.
-  {
-    protocol: 'https',
-    hostname: 'placehold.co',
-  },
-  {
-    protocol: 'https',
-    hostname: 'dummyimage.com',
-  },
+  // GREEN-27 (auditoría OWASP 2026-08-23): placehold.co / dummyimage.com
+  // RETIRADOS de remotePatterns — grep repo-wide (apps/web, services,
+  // supabase/migrations; 2026-08-28) sin ningún uso en código, seeds ni
+  // migraciones. Hosts de terceros en remotePatterns amplían la superficie
+  // del optimizer de imágenes sin necesidad. (Histórico: Rev. 107 los añadió
+  // por 16 productos KAIU con cover_image_url placeholder en datos live.)
 ]
+
+// GREEN-27: orígenes dev permitidos SOLO en development y configurables por
+// env (NEXT_ALLOWED_DEV_ORIGINS, CSV). Antes la IP de la VM estaba
+// hardcodeada y se emitía en cualquier entorno. Fallback: la IP histórica.
+const allowedDevOrigins = process.env.NODE_ENV === 'development'
+  ? (process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean) ?? ['192.168.20.5'])
+  : null
 if (supabaseStorageHost) {
   remotePatterns.unshift({
     protocol: 'https',
@@ -106,7 +101,9 @@ const nextConfig = {
   // anti-DNS-rebinding: el HMR ws moría con ERR_INVALID_HTTP_RESPONSE y la
   // página servida por LAN nunca hidrataba (formularios nativos sin React).
   // Solo aplica a `next dev`; producción (Render) no usa dev origins.
-  allowedDevOrigins: ['192.168.20.5'],
+  // GREEN-27: la key solo se emite en development (ver `allowedDevOrigins`
+  // computado arriba — env NEXT_ALLOWED_DEV_ORIGINS con fallback histórico).
+  ...(allowedDevOrigins ? { allowedDevOrigins } : {}),
 
   // Sem 5 perf (rev. 105 2026-05-07): activa gzip en respuestas Next.
   // Reduce 3-4x el tamaño de bundles JS (.js dev son 6.5MB sin
@@ -118,12 +115,10 @@ const nextConfig = {
 
   images: {
     remotePatterns,
-    // Rev. 107 fix runtime KAIU 2026-05-24 web.log:
-    // placehold.co retorna content-type=image/svg+xml (legítimo, su API
-    // genera SVG dinámico). Next.js Image bloquea SVG por defecto (riesgo
-    // XSS si fuente no confiable). placehold.co está en remotePatterns
-    // (whitelisted hostname) → safe para nuestro caso. CSP estricta
-    // adicional para defensa en profundidad.
+    // Next.js Image bloquea SVG por defecto (riesgo XSS si la fuente no es
+    // confiable). Se habilita para assets propios (logos/imágenes de catálogo
+    // en el bucket de Storage) con el remotePatterns acotado de arriba y la
+    // CSP estricta de abajo como defensa en profundidad.
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },

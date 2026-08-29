@@ -15,6 +15,15 @@ async function getToken(): Promise<string> {
 
 const REVALIDATE = '/dashboard/categories'
 
+// GREEN-18 (auditoría OWASP 2026-08-23): el cuerpo crudo del API (JSON de
+// FastAPI, HTML de un 502 del proxy) NO se devuelve al cliente — el detalle
+// queda en logs server-side y el operador recibe copy genérico es-CO (mismo
+// criterio que apiError de purchases/actions.ts y readApiError de claims).
+async function logApiError(scope: string, res: Response): Promise<void> {
+  const raw = await res.text().catch(() => '')
+  console.error(`[categories] ${scope} → API ${res.status} ${res.statusText}: ${raw.slice(0, 500)}`)
+}
+
 export async function createCategory(data: {
   name: string
   display_label: string
@@ -35,8 +44,8 @@ export async function createCategory(data: {
       }),
     })
     if (!res.ok) {
-      const detail = await res.text()
-      return { error: detail || res.statusText }
+      await logApiError('createCategory', res)
+      return { error: 'No se pudo crear la categoría. Intenta de nuevo.' }
     }
     revalidatePath(REVALIDATE)
     return { success: true }
@@ -66,8 +75,8 @@ export async function updateCategory(id: string, data: {
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const detail = await res.text()
-      return { error: detail || res.statusText }
+      await logApiError('updateCategory', res)
+      return { error: 'No se pudo actualizar la categoría. Intenta de nuevo.' }
     }
     revalidatePath(REVALIDATE)
     return { success: true }
@@ -85,8 +94,8 @@ export async function deleteCategory(id: string) {
       headers: { 'Authorization': `Bearer ${token}` },
     })
     if (!res.ok) {
-      const detail = await res.text()
-      return { error: detail || res.statusText }
+      await logApiError('deleteCategory', res)
+      return { error: 'No se pudo eliminar la categoría. Intenta de nuevo.' }
     }
     revalidatePath(REVALIDATE)
     return { success: true }
@@ -127,7 +136,10 @@ export async function createAttributeDef(data: AttributeDefInput) {
         sort_order: data.sort_order ?? 0,
       }),
     })
-    if (!res.ok) return { error: (await res.text()) || res.statusText }
+    if (!res.ok) {
+      await logApiError('createAttributeDef', res)
+      return { error: 'No se pudo crear el atributo. Intenta de nuevo.' }
+    }
     revalidatePath(REVALIDATE)
     return { success: true }
   } catch (error: unknown) {
@@ -151,7 +163,10 @@ export async function updateAttributeDef(id: string, data: Partial<Omit<Attribut
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify(body),
     })
-    if (!res.ok) return { error: (await res.text()) || res.statusText }
+    if (!res.ok) {
+      await logApiError('updateAttributeDef', res)
+      return { error: 'No se pudo actualizar el atributo. Intenta de nuevo.' }
+    }
     revalidatePath(REVALIDATE)
     return { success: true }
   } catch (error: unknown) {
@@ -167,7 +182,10 @@ export async function deleteAttributeDef(id: string) {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` },
     })
-    if (!res.ok) return { error: (await res.text()) || res.statusText }
+    if (!res.ok) {
+      await logApiError('deleteAttributeDef', res)
+      return { error: 'No se pudo eliminar el atributo. Intenta de nuevo.' }
+    }
     revalidatePath(REVALIDATE)
     return { success: true }
   } catch (error: unknown) {

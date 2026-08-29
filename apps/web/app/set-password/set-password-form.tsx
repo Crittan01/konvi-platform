@@ -9,9 +9,14 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react'
 interface Props {
   action: (formData: FormData) => Promise<void>
   submitLabel?: string
+  /** YELLOW-8 (auditoría OWASP 2026-08-23): pide la contraseña ACTUAL
+   *  (re-autenticación). Solo para cambio de contraseña con sesión activa
+   *  (settings/seguridad); en el alta/reset no aplica (aún no hay clave). */
+  requireCurrentPassword?: boolean
 }
 
-export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta y entrar' }: Props) {
+export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta y entrar', requireCurrentPassword = false }: Props) {
+  const [showCurrent,  setShowCurrent]    = useState(false)
   const [showPassword, setShowPassword]   = useState(false)
   const [showConfirm,  setShowConfirm]    = useState(false)
   const [error,        setError]          = useState<string | null>(null)
@@ -43,6 +48,33 @@ export default function SetPasswordForm({ action, submitLabel = 'Activar cuenta 
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
         <p className="text-sm text-destructive text-center" role="alert" aria-live="assertive">{error}</p>
+      )}
+
+      {/* Contraseña actual — re-auth (YELLOW-8), solo en cambio con sesión activa */}
+      {requireCurrentPassword && (
+        <div className="space-y-1.5">
+          <Label htmlFor="current_password">Contraseña actual</Label>
+          <div className="relative">
+            <Input
+              id="current_password"
+              name="current_password"
+              type={showCurrent ? 'text' : 'password'}
+              placeholder="Tu contraseña actual"
+              required
+              autoComplete="current-password"
+              className="h-10 pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowCurrent(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label={showCurrent ? 'Ocultar contraseña actual' : 'Mostrar contraseña actual'}
+              aria-pressed={showCurrent}
+            >
+              {showCurrent ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Contraseña */}

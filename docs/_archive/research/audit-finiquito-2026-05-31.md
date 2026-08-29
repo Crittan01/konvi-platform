@@ -2244,7 +2244,7 @@ Durante la ejecución de H2.2 (transferencia App Kaiu BP → Konvi BP) surgieron
 
 **Camino correcto Mode B confirmado**:
 1. App `819229210624423` (Konvi App) ya está en Konvi BP ✅ (post-H2.2)
-2. `.env META_APP_SECRET` = secret de Konvi App ✅ (revertido a valor original `41eb550c0dad8118ba389fb6822ab2f6`)
+2. `.env META_APP_SECRET` = secret de Konvi App ✅ (revertido a valor original `<redactado-2026-08-28>`)
 3. Pursue **H3 Business Verification** Konvi BP (1-3 sem Meta)
 4. Post-BV: **H4 App Review** Konvi App con Advanced Access `whatsapp_business_messaging` + `whatsapp_business_management` (1-2 sem Meta)
 5. Post-App Review: **Tech Provider Program enrollment** (1-3 sem Meta)
@@ -2344,7 +2344,7 @@ Esto es **consistente con cómo Konvi ya maneja Wompi/Aveonline/Telegram**: cada
 - phone_number_id: `990364080831295`
 - waba_id: `2159052118202272`
 - app_id: `2024793711712790` (KAIU Chat App)
-- app_secret: `1895ac2113e77866574486dbb438e3dd` (KAIU Chat secret, en Vault)
+- app_secret: `<redactado-2026-08-28>` (KAIU Chat secret, en Vault)
 - access_token: regenerar de commerce-ops System User → KAIU Chat App
 - verify_token: ej. `konvi-kaiu-direct-2026`
 - status: connected

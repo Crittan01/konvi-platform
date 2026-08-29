@@ -1227,11 +1227,12 @@ async def aveonline_webhook_delete(
             "tenant_id", tenant_id,
         ).eq("integration", "aveonline").execute()
     except Exception as exc:
+        # GREEN-18 (OWASP 2026-08-23): no devolver str(exc) crudo al cliente.
         logger.warning(
             "[AVEONLINE_WH_DEL] DB delete err tenant=%s: %s",
             tenant_id, exc,
         )
-        raise HTTPException(500, f"Error eliminando secret local: {exc}")
+        raise HTTPException(500, "Error eliminando secret local")
 
     logger.info(
         "[AVEONLINE_WH_DEL] tenant=%s deleted url=%s", tenant_id, url,
@@ -1380,9 +1381,11 @@ async def seed_aveonline_carriers(
     try:
         result = await client.list_carriers()
     except Exception as exc:
+        # GREEN-18 (OWASP 2026-08-23): no devolver str(exc) crudo al cliente.
+        logger.warning("[AVEONLINE_CARRIERS] list err tenant=%s: %s", tenant_id, exc)
         raise HTTPException(
             status_code=502,
-            detail=f"No se pudo consultar carriers Aveonline: {exc}",
+            detail="No se pudo consultar carriers Aveonline",
         )
 
     if not result.get("ok"):

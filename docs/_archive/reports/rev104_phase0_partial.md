@@ -69,7 +69,7 @@ Antes: el cart preservaba la ciudad vieja con `requires_requote=False` → resum
 - [`tests/test_phone_helpers_pact.py`](../../tests/test_phone_helpers_pact.py) (7 tests)
 
 **API pública:**
-- `to_canonical(raw)` — normaliza a digits-only con prefix CO inferido (`'+57 312 583 5649'` → `'573125835649'`).
+- `to_canonical(raw)` — normaliza a digits-only con prefix CO inferido (`'+57 312 XXX X649'` → `'57312XXXXXX649'`).
 - `to_e164(canonical)` — adds `+` prefix.
 - `hash_phone(canonical)` — SHA256 invariante a formato.
 - `is_valid_co(canonical)` — valida 12 dígitos + prefix `57`.

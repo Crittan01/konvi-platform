@@ -4,47 +4,31 @@
 #
 # Las FIJABLES las propone dependabot (.github/dependabot.yml) como PRs individuales
 # testeables → al mergear cada bump se ELIMINA su entrada de aquí (ratchet decreciente).
-# Las SIN FIX upstream (xlsx) se conservan hasta el follow-up de código.
 
-# ── xlsx 0.18.5 — SIN FIX upstream (paquete fork abandonado) ──────────────────
-# Follow-up W5/T7-02 (decisión founder: split read-path): quitar `xlsx`, migrar la
-# LECTURA de archivos subidos a un parser parcheado, dejar xlsx-js-style solo para
-# ESCRITURA de plantillas (sin input no confiable). Hasta entonces, ignorado con nota.
+# ── xlsx — OSV marca TODA la línea npm sin versión fixed ─────────────────────
+# YELLOW-4 RESUELTO en código (2026-08-29): `xlsx` ya no es el 0.18.5 vulnerable sino
+# SheetJS CE 0.20.3 (tarball oficial cdn.sheetjs.com — los fixes NO se publican en npm)
+# y `xlsx-js-style` (fork abandonado sobre la misma línea vulnerable) se ELIMINÓ del árbol.
+# PERO: GitHub/OSV registran ambos advisories para el paquete npm `xlsx` SIN fixed version
+# (el fix solo existe en el CDN), así que el scanner flaggea CUALQUIER versión — incluida
+# la 0.20.3 ya parcheada que corremos. Las entradas se conservan para no romper el gate;
+# el código vulnerable ya no está instalado. Re-auditar si OSV corrige los rangos.
 [[IgnoredVulns]]
 id = "GHSA-4r6h-8v6p-xvw6"
-reason = "xlsx 0.18.5 prototype pollution — sin fix upstream. Follow-up T7-02 split read-path."
+reason = "xlsx prototype pollution: FIXED en 0.20.3 (tarball CDN oficial; npm nunca recibió el fix → OSV sin fixed version, flaggea toda la línea npm). Código vulnerable ya no instalado."
 [[IgnoredVulns]]
 id = "GHSA-5pgg-2g8v-p4x9"
-reason = "xlsx 0.18.5 ReDoS — sin fix upstream. Follow-up T7-02 split read-path."
+reason = "xlsx ReDoS: FIXED en 0.20.3 (tarball CDN oficial; npm nunca recibió el fix → OSV sin fixed version, flaggea toda la línea npm). Código vulnerable ya no instalado."
 
-# ── brace-expansion ReDoS — SIN versión fixed+compatible ──────────────────────
-# GHSA-mh99 afecta TODAS las versiones < 5.0.8. La única fixed (5.0.8) cambió el
-# export CJS (ESM-first: `{default: expand}`) y rompe minimatch@3.1.5 con
-# `TypeError: expand is not a function` (minimatch es transitivo de glob/eslint y
-# hace `require('brace-expansion')()` directo). Todas las versiones CALLABLE (1.x/2.x)
-# están afectadas. Build-time only: minimatch matchea paths/globs CONFIABLES, no input
-# de atacante en runtime → sin superficie explotable. Los consumidores 5.x-native SÍ
-# van a la 5.0.8 fixed (override @5). Re-evaluar si minimatch upstream adopta el nuevo export.
-[[IgnoredVulns]]
-id = "GHSA-mh99-v99m-4gvg"
-reason = "brace-expansion ReDoS: única fixed (5.0.8) rompe minimatch@3.1.5 (export CJS cambiado); todas las callable (1.x/2.x) afectadas. Build-time only (glob/eslint sobre paths confiables). 5.x-native ya en 5.0.8."
+# ── Follow-up NO bloqueante (YELLOW-4, UX) ────────────────────────────────────
+# SheetJS CE no escribe estilos de celda (font/fill/border) ni `!freeze` — la plantilla
+# del mass-importer perdió formato visual al migrar (contenido, anchos y alturas intactos).
+# Si UX lo requiere: evaluar exceljs SOLO para generar la plantilla (nunca para parsear
+# input de usuario sin revisar su superficie). NO reinstalar xlsx-js-style.
 
-# ── FIJABLES — rastreadas por dependabot (se quitan al mergear el bump) ────────
-[[IgnoredVulns]]
-id = "GHSA-mw96-cpmx-2vgc"
-reason = "rollup 3.29.5→3.30.0 (transitivo, build). dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-w5hq-g745-h8pq"
-reason = "uuid 9.0.1→11.1.1 (major — validar breaking). dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-96hv-2xvq-fx4p"
-reason = "ws 8.20.0→8.21.0. dependabot-tracked."
-[[IgnoredVulns]]
-id = "GHSA-58qx-3vcg-4xpx"
-reason = "ws 8.20.0→8.20.1. dependabot-tracked."
-# (postcss / js-yaml / brace-expansion: entradas RETIRADAS 2026-07-21 — sus bumps
-# ya están forzados vía pnpm.overrides en package.json, así que estos advisories
-# quedaron resueltos y sus ignores eran ruido — el gate ya no los ve.)
-[[IgnoredVulns]]
-id = "GHSA-8988-4f7v-96qf"
-reason = "@opentelemetry/core 1.30.1→2.8.0 (major). dependabot-tracked."
+# ── Entradas históricas RETIRADAS 2026-08-29 ──────────────────────────────────
+# brace-expansion (GHSA-mh99), rollup (GHSA-mw96), uuid (GHSA-w5hq), ws (GHSA-96hv /
+# GHSA-58qx), @opentelemetry/core (GHSA-8988): el scanner las reportaba UNUSED ignores —
+# sus bumps ya están forzados vía pnpm.overrides en package.json o mergeados por
+# dependabot (verificado: scan sin config = 0 hallazgos fuera de xlsx). Un ignore stale
+# es riesgo: un downgrade que reintrodujera la vuln quedaría silenciado.

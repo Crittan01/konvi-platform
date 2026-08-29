@@ -11,6 +11,23 @@ de hoy. **No duplicar aquí ítems que ya están en PLAN.md.**
 
 ---
 
+## Cierre auditoría seguridad OWASP 2026-08-23 (2026-08-29)
+
+Los 30 hallazgos fueron validados y procesados — detalle completo y verificación en
+**[`docs/auditoria_seguridad_cierre_2026-08-29.md`](../docs/auditoria_seguridad_cierre_2026-08-29.md)**.
+Lo que queda fuera del repo (checklist §3 del cierre, founder/externo):
+
+1. **Rotar HOY Meta App Secrets ×2 (Konvi Platform App + KAIU Chat) + verify token** — el commit huérfano `be739a4` con `.env` real SIGUE público (HTTP 200 verificado 2026-08-28); es la única ventana de riesgo activa.
+2. ~~Purge del commit huérfano vía GitHub Support + confirmar rotación del lote~~ **OMITIDO por decisión founder (2026-08-29)**: el lote `.env` está 100% rotado/validado (sonda activa — §3-1/§3-2 del cierre); el huérfano solo expone valores muertos. Cierre definitivo = **eliminar y recrear el repo de GitHub al final** (checklist de integraciones a recablear en §3-3 del cierre: 4 secrets nightly, Render auto-deploy, branch protection, Dependabot). Opción intermedia de 1-clic: repo → privado.
+3. Supabase Dashboard: leaked password protection ON + min length 12; decisión MFA obligatorio owner/manager.
+4. Infra: bloquear tráfico directo al origen Render (Cloudflare) + canario T4-01.
+5. ~~Deploy a PRD de la migración `20260828120000_owasp_20260823_db_fixes.sql`~~ **✅ APLICADA A PRD 2026-08-29** (protocolo smoke→apply→repair + verificación post completa + health ×5 200; ledger 270=270 — detalle §3-7 del cierre). Follow-up manual: re-correr advisors en el dashboard.
+6. `KONVI_PROD_REF` en `.env.prd-backup` (sin él los scripts cloud abortan fail-closed).
+7. Follow-ups con código: tenant-media→privado tras signed URLs · starlette 1.x (elimina 5 ignores pip-audit) · plantilla xlsx con estilos vía `exceljs` si UX lo pide.
+8. **Nuevo hallazgo del cierre (decisión founder)**: más PII real en repo público — CCs/dirección/email en docs `_archive` + logs UAT con conversaciones reales + el teléfono real del founder como fixture en ~40 archivos de código/tests (requiere refactor con pact de hash parity). Ver §4 del cierre.
+
+---
+
 ## Verificado-resuelto 2026-08-02 (antes listado aquí como pendiente)
 
 | Ítem | Evidencia |

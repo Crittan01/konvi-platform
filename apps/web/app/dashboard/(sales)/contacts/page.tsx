@@ -330,7 +330,7 @@ export default async function ContactsPage(
     // el módulo" en Next y oculta el problema real.
     const newId = (inserted as { id?: string } | null)?.id
     if (newId && consentGiven && consentSource === 'in_person') {
-      const result = await uploadConsentEvidence(formData, newId, m.tenant_id)
+      const result = await uploadConsentEvidence(formData, newId)
       // Decisión F2 — el 2º write de evidencia (metadata del adjunto) pasa AHORA
       // por PATCH /api/v1/contacts/{id} (RL + idempotency + audit + pii_access_log)
       // en vez de un update DIRECTO a Supabase. El API mergea `consent_attachment`
@@ -464,7 +464,7 @@ export default async function ContactsPage(
     // El API la mergea en consent_evidence (limpia attachment_url legacy).
     let consentAttachment: Record<string, unknown> | undefined
     if (consentSource === 'in_person') {
-      const upload = await uploadConsentEvidence(formData, editContactId, m.tenant_id)
+      const upload = await uploadConsentEvidence(formData, editContactId)
       const nowIso = new Date().toISOString()
       if (upload.status === 'uploaded') {
         consentAttachment = {

@@ -33,6 +33,7 @@ phone_hash inmutable para trazabilidad ante SIC (Habeas Data Ley 1581).
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -107,7 +108,12 @@ def _phone_variants(raw: str) -> list[str]:
         return []
     raw = raw.strip()
     digits = "".join(ch for ch in raw if ch.isdigit())
-    out = {raw, digits}
+    # GREEN-15 (OWASP 2026-08-23): `raw` viaja literal al .or_() de PostgREST —
+    # solo se incluye si no trae chars de gramática del filtro (`, ( ) * .`).
+    out = set()
+    if re.fullmatch(r"[0-9+ ]+", raw):
+        out.add(raw)
+    out.add(digits)
     if digits and not digits.startswith("57") and len(digits) == 10:
         out.add(f"57{digits}")
     if digits.startswith("57") and len(digits) == 12:

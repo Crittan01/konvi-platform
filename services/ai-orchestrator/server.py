@@ -65,10 +65,16 @@ async def lifespan(app: FastAPI):
 
 
 # ─── FastAPI — solo para satisfacer el requisito de puerto de Render ───────────
+# GREEN-16 (OWASP 2026-08-23): /docs, /redoc y /openapi.json off en producción.
+_orch_is_prod = os.getenv("APP_ENV", "").strip().lower() in ("production", "prod")
+
 app = FastAPI(
     title="AI Orchestrator",
     description="Worker de polling de Supabase → Gemini → WhatsApp. El endpoint /health es solo para que Render detecte el servicio activo.",
     lifespan=lifespan,
+    docs_url=None if _orch_is_prod else "/docs",
+    redoc_url=None if _orch_is_prod else "/redoc",
+    openapi_url=None if _orch_is_prod else "/openapi.json",
 )
 
 # Estado global del worker (para /status)
@@ -140,8 +146,15 @@ def health():
 
 
 @app.get("/status")
-def status():
-    """Estado detallado del worker de IA."""
+def status(request: Request):
+    """Estado detallado del worker de IA.
+
+    GREEN-17 (OWASP 2026-08-23): exige X-Internal-Service-Secret — antes era
+    público (Render expone el servicio) y filtraba estado operativo interno
+    (running, started_at, error con str(exc), métricas). El health check de
+    Render es /health (render.yaml healthCheckPath), que sigue público.
+    """
+    _require_internal_secret(request)
     payload = dict(_worker_status)
     instance = _worker_ref.get("instance")
     if instance is not None and hasattr(instance, "metrics_snapshot"):
@@ -212,10 +225,11 @@ def agentic_metrics(request: Request, tenant_id: str | None = None, since_hours:
         )
         return JSONResponse(content=data)
     except Exception as exc:
+        # GREEN-18 (OWASP 2026-08-23): no devolver str(exc) crudo al cliente.
         logger.warning("[AGENTIC_METRICS] err: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"error": str(exc)},
+            content={"error": "Error interno consultando métricas"},
         )
 
 

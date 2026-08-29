@@ -446,8 +446,8 @@ async def _emit_degraded_response_and_escalate(
             supabase, tenant_id, message_id,
             processing_status=PROCESSING_STATUS_FAILED,
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("dispatcher.mark_failed_pre_count swallow: %s", type(_exc).__name__)
 
     # Contar failed previos del cliente en ventana 10 min (excluyendo el actual).
     from datetime import datetime, timedelta, timezone
@@ -465,8 +465,8 @@ async def _emit_degraded_response_and_escalate(
             .execute()
         )
         failed_recent = int(getattr(rows, "count", None) or len(rows.data or []))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("dispatcher.count_recent_failed swallow: %s", type(_exc).__name__)
 
     is_repeat_failure = failed_recent >= 2
 
@@ -1141,8 +1141,8 @@ async def _run_agentic_full(
                         ctx.update_cart_fields(
                             _avail_cart["id"], {"payment_method": forced_method},
                         )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("dispatcher.avail_cart_forced_method swallow: %s", type(_exc).__name__)
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] payment_method_availability crashed: %s — skip",
@@ -1210,8 +1210,8 @@ async def _run_agentic_full(
             # vean el mundo real, como con el read-fresco de hoy.
             try:
                 ctx.refresh_cart()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("dispatcher.refresh_cart_snapshot swallow: %s", type(_exc).__name__)
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] recipient_intent_resolver crashed: %s — skip",
@@ -1248,8 +1248,8 @@ async def _run_agentic_full(
                         "payment_method_availability ya forzó credit)"
                     )
                     cod_match = None  # disable downstream marking
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("dispatcher.cod_tenant_check swallow: %s", type(_exc).__name__)
 
         if cod_match:
             try:
@@ -1424,8 +1424,8 @@ async def _run_agentic_full(
                             "triggered_by": "bot",
                             "correlation_id": message_id,
                         }).execute()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("dispatcher.coupon_event_insert swallow: %s", type(_exc).__name__)
                 logger.info(
                     "[AGENTIC_PRE_LLM] coupon_intent conv=%s intent=%s code=%s",
                     conversation_id[:8], _coupon_intent.intent,
@@ -1779,8 +1779,8 @@ async def _run_agentic_full(
                             }).eq("id", conversation_id).eq(
                                 "tenant_id", tenant_id,
                             ).execute()
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug("dispatcher.human_takeover_update swallow: %s", type(_exc).__name__)
 
                     # Notif Telegram operador si requiere acción
                     if _cancel_result.operator_notification:
@@ -1915,8 +1915,8 @@ async def _run_agentic_full(
                         }).eq("id", conversation_id).eq(
                             "tenant_id", tenant_id,
                         ).execute()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("dispatcher.human_takeover_update swallow: %s", type(_exc).__name__)
                     try:
                         from telegram_notifications import (
                             notify_escalation_async,
@@ -1933,8 +1933,8 @@ async def _run_agentic_full(
                                 f"Ley 1480 art. 47)."
                             ),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("dispatcher.claim_escalation_persist swallow: %s", type(_exc).__name__)
                     _mark_message_processing(
                         supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
@@ -2244,8 +2244,8 @@ async def _run_agentic_full(
                     _cmix = _gcwi(supabase, conversation_id=conversation_id, tenant_id=tenant_id)
                     if _cmix:
                         _cart_sub = int(_cmix.get("subtotal_cents") or 0) // 100
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("dispatcher.cart_subtotal_mix swallow: %s", type(_exc).__name__)
                 outbound = compose_outbound_from_resolution(
                     intent_resolution, customer_name=customer_name, cart_subtotal_cop=_cart_sub,
                 )
@@ -2902,8 +2902,8 @@ async def _run_agentic_full(
                             "post-LLM (intent detected pre, cart created during)",
                             conversation_id[:8], _cart_post["id"][:8],
                         )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("dispatcher.cod_mark_post_llm swallow: %s", type(_exc).__name__)
     except Exception as _cod_exc:
         logger.warning(
             "[AGENTIC_POST_LLM] cod re-mark falló conv=%s: %s",

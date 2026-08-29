@@ -24,7 +24,7 @@ describe('resolveSupabaseUrl', () => {
   })
 
   it('URL pública de PRD nunca se altera aunque el host difiera', () => {
-    const prd = 'https://xmelwnhhphksbpdjmbbp.supabase.co'
+    const prd = 'https://fakeprojectref123.supabase.co' // ref sintético — NUNCA el ref real de prod
     expect(resolveSupabaseUrl(prd, 'app.konvi.co')).toBe(prd)
   })
 })

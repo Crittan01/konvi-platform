@@ -177,6 +177,21 @@ export function IntegrationsManager(props: Props) {
         return
       }
 
+      // GREEN-26 (auditoría OWASP 2026-08-23): validar el destino ANTES de
+      // redirigir — auth_url viene del API; si el backend se comprometiera, un
+      // redirect abierto aquí sería un vector de phishing de credenciales MeLi.
+      try {
+        const u = new URL(body.auth_url)
+        if (u.protocol !== 'https:' ||
+            !['auth.mercadolibre.com.co', 'auth.mercadolibre.com'].includes(u.host)) {
+          setMeliStartError('URL de autorización inesperada.')
+          return
+        }
+      } catch {
+        setMeliStartError('URL de autorización inesperada.')
+        return
+      }
+
       window.location.href = body.auth_url
     } catch {
       setMeliStartError('No se pudo contactar el API para iniciar OAuth de Mercado Libre.')

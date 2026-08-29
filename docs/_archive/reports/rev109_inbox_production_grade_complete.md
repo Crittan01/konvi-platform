@@ -181,9 +181,9 @@ necesitan ejecución live en VM con WhatsApp Cloud API real:
 make -C /home/ansible/commerce-ops-local restart
 
 # 2. Limpiar conversación previa (CRÍTICO — ver feedback_verify_db_state_before_diagnosis)
-python3.11 scripts/wipe_conversation.py --phone +573125835649 --yes
+python3.11 scripts/wipe_conversation.py --phone +57312XXXXXX649 --yes
 
-# 3. Modo NUEVO: hablar al bot vía WhatsApp +573125835649
+# 3. Modo NUEVO: hablar al bot vía WhatsApp +57312XXXXXX649
 #    Validar AT CADA TURN:
 #      - bot responde con estado esperado (Inbox UI badge debe coincidir)
 #      - tools usadas matchean tools subset del estado

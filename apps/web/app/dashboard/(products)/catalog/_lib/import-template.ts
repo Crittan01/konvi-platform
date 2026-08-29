@@ -4,7 +4,7 @@
 // testearlo (un test de la plantilla atrapa el desalineado que antes le enseñaba el formato incorrecto
 // al operador).
 
-import * as XLSX from 'xlsx-js-style'
+import * as XLSX from 'xlsx'
 
 export interface ImportColumn { label: string; key: string; width: number; req: boolean; desc: string }
 

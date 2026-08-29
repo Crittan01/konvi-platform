@@ -405,8 +405,10 @@ def get_conversation_context(
         contact = None
         contact_id: Optional[str] = None
         if customer_phone:
-            # Normalizar: eliminar '+' y espacios para cubrir '+57 3125835649', '573125835649', '+573125835649'
-            phone_norm = re.sub(r"[\s+]", "", customer_phone)        # sin + ni espacios: '573125835649'
+            # Normalizar: whitelist estricta de dígitos (GREEN-15, OWASP 2026-08-23) —
+            # antes [\s+]: `, ( ) *` sobrevivían y rompían la gramática del .or_().
+            # Cubre '+57 3125835649', '573125835649', '+573125835649'.
+            phone_norm = re.sub(r"\D", "", customer_phone)             # digits-only: '573125835649'
             phone_plus = f"+{phone_norm}"                             # con +: '+573125835649'
             phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
             contact_res = (

@@ -11,7 +11,7 @@ sección 7.
 ### Hechos detonantes
 
 Auditoría de la conversación productiva del 2026-04-30 14:48 (log
-`scripts/uat/logs/conversation_573125835649_20260430-150617.log`)
+`scripts/uat/logs/conversation_57312XXXXXX649_20260430-150617.log`)
 expuso 4 problemas operativos:
 
 1. Cliente confirmó pedido y bot prometió enviar link de pago, pero
@@ -157,7 +157,7 @@ Ordenado por ROI:
 
 ### Log fuente
 
-`scripts/uat/logs/conversation_573125835649_20260430-150617.log`
+`scripts/uat/logs/conversation_57312XXXXXX649_20260430-150617.log`
 
 ### Documentación oficial Google
 

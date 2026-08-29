@@ -2,7 +2,7 @@
 
 **Estado:** PARCIALMENTE IMPLEMENTADO (Piezas 1·2·3·4·6) · **REVISADO 2026-06-27** · **IMPLEMENTADO 2026-06-29**
 **Fecha:** 2026-06-27
-**Disparador:** founder sobre conversación KAIU +573125835649 — pidió "¿qué productos tienen?" y el
+**Disparador:** founder sobre conversación KAIU +57312XXXXXX649 — pidió "¿qué productos tienen?" y el
 bot volcó los 16 productos (1.092 chars, 4 categorías, todas las variantes). Pregunta: "¿qué pasa
 con 500 productos?". Premisa explícita del founder: **calidad primero, sin parches, tiempo no importa.**
 

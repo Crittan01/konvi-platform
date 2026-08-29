@@ -590,7 +590,9 @@ def _fetch_contact_for_phone(
     if not customer_phone_raw:
         return None, {}
 
-    phone_norm = re.sub(r"[\s+]", "", customer_phone_raw)
+    # GREEN-15 (OWASP 2026-08-23): whitelist estricta de dígitos — [\s+] dejaba
+    # `, ( ) *` que rompen la gramática del .or_() de PostgREST.
+    phone_norm = re.sub(r"\D", "", customer_phone_raw)
     if not phone_norm:
         return None, {}
 
@@ -853,8 +855,10 @@ async def _send_outbound_text(
         )
         _consent_given = False
         _customer_name: Optional[str] = None
-        if _customer_phone:
-            _phone_digits = _customer_phone.lstrip("+")
+        # GREEN-15 (OWASP 2026-08-23): whitelist estricta de dígitos — lstrip("+")
+        # dejaba `, ( ) *` que rompen la gramática del .or_() de PostgREST.
+        _phone_digits = re.sub(r"\D", "", _customer_phone) if _customer_phone else ""
+        if _phone_digits:
             _ctc = (
                 supabase.table("contacts")
                 .select("consent_given, name")
@@ -943,8 +947,9 @@ async def _send_outbound_text(
 
                     # Cargar contact completo (no solo phone).
                     _contact_record = {"phone": _customer_phone}
-                    if _customer_phone:
-                        _phone_digits = _customer_phone.lstrip("+")
+                    # GREEN-15: whitelist estricta de dígitos (ver arriba).
+                    _phone_digits = re.sub(r"\D", "", _customer_phone or "")
+                    if _phone_digits:
                         _full_contact = (
                             supabase.table("contacts")
                             .select(

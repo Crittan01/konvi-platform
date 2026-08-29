@@ -116,6 +116,15 @@ _XFF_HOPS_FROM_RIGHT = int(os.getenv("XFF_TRUSTED_HOPS_FROM_RIGHT", "0"))
 _XFF_CANARY = os.getenv("XFF_CANARY", "") == "1"
 
 
+def client_ip_trust_configured() -> bool:
+    """True si hay un ancla de IP confiable configurada: TRUSTED_CLIENT_IP_HEADER
+    (header inyectado por el edge, inmune al hop-count) o XFF_TRUSTED_HOPS_FROM_RIGHT>0
+    (requiere N verificado empíricamente). False → la resolución cae al XFF leftmost,
+    SPOOFEABLE por el cliente: cualquier control basado en IP (allowlist MeLi,
+    rate-limit) sería evasión trivial. Ref audit OWASP 2026-08-23 (YELLOW-3)."""
+    return bool(_TRUSTED_CLIENT_IP_HEADER) or _XFF_HOPS_FROM_RIGHT > 0
+
+
 def resolve_client_ip(request: Request) -> str:
     """IP del cliente detrás del proxy (W1/W5). Orden: (1) TRUSTED_CLIENT_IP_HEADER si
     presente (inmune al hop-count); (2) XFF_TRUSTED_HOPS_FROM_RIGHT>0 → xff[-N], default 0

@@ -284,11 +284,17 @@ def test_authenticated_no_inserta_security_events(ctx):
 
 def test_authenticated_no_edita_security_events(ctx):
     with as_user(OWNER_A, ctx["tenant_a"], "owner") as cur:
-        cur.execute(
-            "UPDATE public.api_security_events SET event_type = event_type WHERE id = %s",
-            (ctx["asec_a"],),
-        )
-        assert cur.rowcount == 0, "el log de seguridad NO debe ser editable"
+        try:
+            cur.execute(
+                "UPDATE public.api_security_events SET event_type = event_type WHERE id = %s",
+                (ctx["asec_a"],),
+            )
+            # Deny por RLS (policy RESTRICTIVE): la sentencia corre y no toca filas.
+            assert cur.rowcount == 0, "el log de seguridad NO debe ser editable"
+        except Exception as e:
+            # Deny por grant (OWASP YELLOW-14, 20260828120000): el REVOKE de DML en
+            # tablas service-only rechaza el UPDATE antes de evaluar RLS.
+            assert _denied(e), "el log de seguridad NO debe ser editable"
 
 
 def test_member_sigue_leyendo_security_events(ctx):

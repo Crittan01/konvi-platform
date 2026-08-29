@@ -235,6 +235,68 @@ class MeliAllowlistTrustedHeaderTests(unittest.TestCase):
             self.assertEqual(ctx.exception.status_code, 403)
 
 
+class MeliFailClosedProductionTests(unittest.TestCase):
+    """OWASP 2026-08-23 (YELLOW-3) — en producción SIN ancla de IP confiable
+    (TRUSTED_CLIENT_IP_HEADER / XFF_TRUSTED_HOPS_FROM_RIGHT), el allowlist MeLi
+    sería spoofeable vía XFF leftmost → fail-closed 503. Fuera de producción el
+    comportamiento histórico no cambia (a lo sumo warning)."""
+
+    def setUp(self):
+        self.mw = _reload_module({"MELI_WEBHOOK_ALLOWED_IPS": ""})
+        import dependencies.security as sec
+        self.sec = sec
+
+    def _no_trust_config(self):
+        p1 = patch.object(self.sec, "_TRUSTED_CLIENT_IP_HEADER", "")
+        p2 = patch.object(self.sec, "_XFF_HOPS_FROM_RIGHT", 0)
+        p1.start(); p2.start()
+        self.addCleanup(p1.stop); self.addCleanup(p2.stop)
+
+    def test_production_sin_trust_config_503(self):
+        self._no_trust_config()
+        with patch.dict(os.environ, {"APP_ENV": "production"}):
+            req = _make_request(client_host="54.88.218.97")
+            with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+                with self.assertRaises(self.mw.HTTPException) as ctx:
+                    self.mw._verify_meli_origin(req, supabase=MagicMock())
+            self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_production_con_trusted_header_no_503(self):
+        self._no_trust_config()
+        with patch.object(self.sec, "_TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip"):
+            with patch.dict(os.environ, {"APP_ENV": "production"}):
+                req = MagicMock()
+                req.headers = {"cf-connecting-ip": "54.88.218.97"}
+                req.client = MagicMock(host="10.0.0.1")
+                with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+                    self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+    def test_production_con_xff_hops_no_503(self):
+        self._no_trust_config()
+        with patch.object(self.sec, "_XFF_HOPS_FROM_RIGHT", 1):
+            with patch.dict(os.environ, {"APP_ENV": "production"}):
+                req = _make_request(client_host="10.0.0.5", xff="9.9.9.9, 54.88.218.97")
+                with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+                    self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+    def test_dev_sin_trust_config_comportamiento_historico(self):
+        self._no_trust_config()
+        with patch.dict(os.environ, {"APP_ENV": "development"}):
+            req = _make_request(client_host="54.88.218.97")
+            with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+                self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+    def test_sin_app_env_no_fail_closed(self):
+        # APP_ENV ausente (tests/locales históricos) → NO fail-closed.
+        self._no_trust_config()
+        env = dict(os.environ)
+        env.pop("APP_ENV", None)
+        with patch.dict(os.environ, env, clear=True):
+            req = _make_request(client_host="54.88.218.97")
+            with patch.object(self.mw, "webhook_rate_limit_check", return_value=(True, 0)):
+                self.assertIsNone(self.mw._verify_meli_origin(req, supabase=MagicMock()))
+
+
 class WebhookPublicoSinJWTTests(unittest.TestCase):
     """Regresión bug T4-01 (2026-08-07): el webhook de MeLi respondía 401 a
     llamadas sin JWT porque usaba Depends(get_service_client) (que exige

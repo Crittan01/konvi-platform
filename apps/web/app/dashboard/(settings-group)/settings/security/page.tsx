@@ -109,6 +109,9 @@ export default async function SecurityPage(
 
   // Server action: cambiar contraseña.
   // - Si AAL2 (sesión normal): usa supabase.auth.updateUser directo.
+  // - YELLOW-8 (auditoría OWASP 2026-08-23): exige la contraseña ACTUAL
+  //   (re-autenticación vía signInWithPassword) — una sesión robada no debe
+  //   bastar para cambiar la contraseña.
   // - Si AAL1 + recovery: NO disponible aquí — UI cliente lo maneja con
   //   dialog que pide recovery code y llama al endpoint backend.
   async function changePassword(formData: FormData) {
@@ -120,6 +123,23 @@ export default async function SecurityPage(
     const password = (formData.get('password') as string)?.trim()
     if (!password || password.length < 8) {
       redirect('/dashboard/settings/security?pwd_error=' + encodeURIComponent('La contraseña debe tener al menos 8 caracteres.'))
+    }
+
+    // YELLOW-8: re-auth — verifica la contraseña actual antes de updateUser.
+    // signInWithPassword reemplaza la sesión por una fresca si las credenciales
+    // son válidas; si el user tiene MFA, la nueva sesión nace AAL1 y el proxy
+    // lo llevará al challenge TOTP en el siguiente request (comportamiento
+    // correcto tras una re-autenticación).
+    const current = (formData.get('current_password') as string)?.trim()
+    if (!current || !u.email) {
+      redirect('/dashboard/settings/security?pwd_error=' + encodeURIComponent('Ingresa tu contraseña actual para confirmar el cambio.'))
+    }
+    const { error: reauthErr } = await sb.auth.signInWithPassword({
+      email: u.email,
+      password: current,
+    })
+    if (reauthErr) {
+      redirect('/dashboard/settings/security?pwd_error=' + encodeURIComponent('La contraseña actual no es correcta.'))
     }
 
     const { error } = await sb.auth.updateUser({ password })
@@ -159,7 +179,8 @@ export default async function SecurityPage(
             <KeyRound className="h-4 w-4 text-primary" /> Contraseña
           </CardTitle>
           <CardDescription>
-            Actualiza tu contraseña de acceso. Requerido: mínimo 8 caracteres.
+            Actualiza tu contraseña de acceso. Requerido: tu contraseña actual y
+            mínimo 8 caracteres para la nueva.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -182,7 +203,7 @@ export default async function SecurityPage(
             </Alert>
           )}
           {!isRecoverySession ? (
-            <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" />
+            <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" requireCurrentPassword />
           ) : (
             <RecoveryChangePassword />
           )}

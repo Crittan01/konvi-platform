@@ -65,6 +65,12 @@ class NormalizePhoneTests(unittest.TestCase):
     def test_handles_only_spaces(self):
         self.assertEqual(normalize_phone("  "), "")
 
+    def test_strips_postgrest_grammar_chars(self):
+        # GREEN-15 (OWASP 2026-08-23): `, ( ) *` rompen la gramática del
+        # filtro `.or_(f"phone.eq.{p},...")` — la whitelist es dígitos-only.
+        self.assertEqual(normalize_phone("573125835649,phone.eq.*"), "573125835649")
+        self.assertEqual(normalize_phone("(573) 125-8364"), "5731258364")
+
 
 class SafeFloatTests(unittest.TestCase):
     def test_parses_int(self):

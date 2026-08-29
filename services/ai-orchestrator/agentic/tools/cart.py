@@ -13,6 +13,7 @@ Diseño:
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -20,6 +21,8 @@ from pydantic import BaseModel, Field
 
 from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+
+logger = logging.getLogger(__name__)
 
 
 # Rev. 108 fix arquitectónico — el variant label en DB es "60g" pero el
@@ -281,8 +284,8 @@ class AddToCartTool:
                             # (la diferencia es real), permitir sumar.
                             bypass_guard = True
                             break
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("cart.variant_guard_check swallow: %s", type(_exc).__name__)
 
         if len(variants) > 1 and not bypass_guard:
             recent_inbounds = (ctx.extras or {}).get(
@@ -557,8 +560,8 @@ class UpdateCartItemQtyTool:
                         conversation_id=ctx.conversation_id,
                         ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("cart.restore_reservation_best_effort swallow: %s", type(_exc).__name__)
                 return tool_failure(
                     f"No hay stock suficiente para subir a {args.new_quantity} "
                     f"unidades. Disponibles: {exc.available}. "
@@ -586,8 +589,8 @@ class UpdateCartItemQtyTool:
                         conversation_id=ctx.conversation_id,
                         ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("cart.restore_reservation_best_effort swallow: %s", type(_exc).__name__)
                 return tool_failure(
                     f"No pude reservar el stock para actualizar la cantidad en este "
                     f"momento. ¿Lo intentamos de nuevo? (se mantiene en {previous_qty})",
@@ -695,8 +698,8 @@ class RemoveCartItemTool:
                 )
                 if released:
                     pass  # log already done in lib
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("cart.release_reservation swallow: %s", type(_exc).__name__)
 
         return tool_success({
             "removed": {

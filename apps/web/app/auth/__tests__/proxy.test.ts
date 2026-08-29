@@ -34,8 +34,8 @@ vi.mock('@/lib/mfa-recovery-cookie', () => ({
 // Import DESPUÉS de declarar los mocks.
 import { proxy } from '../../../proxy'
 
-function reqFor(path: string, opts: { recoveryCookie?: string } = {}) {
-  const r = new NextRequest(`http://localhost:3000${path}`)
+function reqFor(path: string, opts: { recoveryCookie?: string; method?: string } = {}) {
+  const r = new NextRequest(`http://localhost:3000${path}`, { method: opts.method ?? 'GET' })
   if (opts.recoveryCookie) r.cookies.set('mfa_recovery_session', opts.recoveryCookie)
   return r
 }
@@ -129,6 +129,30 @@ describe('proxy — fail-open observable ante outage de Supabase Auth', () => {
     expect(isPassThrough(res)).toBe(true)
     expect(spy).toHaveBeenCalledOnce()
     expect(String(spy.mock.calls[0][0])).toContain('fail-open')
+    spy.mockRestore()
+  })
+})
+
+// YELLOW-7 (auditoría OWASP 2026-08-23): el fail-open queda acotado a lecturas.
+describe('proxy — fail-closed en mutaciones ante outage de Supabase Auth', () => {
+  it('POST /dashboard/* recibe 503 JSON si el check de AAL lanza', async () => {
+    state.user = { id: 'u1' }
+    state.aalThrows = true
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await proxy(reqFor('/dashboard/orders', { method: 'POST' }))
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.detail).toBe('Verificación MFA temporalmente no disponible. Reintenta.')
+    expect(spy).toHaveBeenCalledOnce()
+    spy.mockRestore()
+  })
+
+  it('POST /api/* también recibe 503 (no 401) si el check de AAL lanza', async () => {
+    state.user = { id: 'u1' }
+    state.aalThrows = true
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await proxy(reqFor('/api/conversations/c1/send', { method: 'POST' }))
+    expect(res.status).toBe(503)
     spy.mockRestore()
   })
 })

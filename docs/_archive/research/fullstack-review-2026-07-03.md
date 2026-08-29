@@ -1487,7 +1487,7 @@ Núcleo confirmado, pero el hallazgo sobre-declara. CONFIRMADO: get_tenant_catal
 
 **Ubicación**: `services/ai-orchestrator/agentic/invariants/summary_coherence.py:287` · **Detectado por**: orchestrator-deadcode · 🆕 nuevo
 
-**Causa**: Coexisten: lib/phone_format.py `format_phone_co` (docstring 'Fuente única de formateo'), lib/phone.py:133 `to_display_format` (segunda 'fuente única' con la misma responsabilidad), orchestrator.py:4507 `_format_phone_for_summary`, summary_coherence.py:287 `_format_phone` y un quinto inline en agentic/tools/contact.py:~196. Divergencia concreta: con un phone local de 10 dígitos ('3125835649'), `format_phone_co` y `_format_phone_for_summary` devuelven '+57 312 583 5649' pero el `_format_phone` del invariant devuelve el raw sin prefijo — el resumen reescrito por summary_coherence muestra el celular en formato distinto al que emitió el prompt (format_phone_co en system_prompt.py:688).
+**Causa**: Coexisten: lib/phone_format.py `format_phone_co` (docstring 'Fuente única de formateo'), lib/phone.py:133 `to_display_format` (segunda 'fuente única' con la misma responsabilidad), orchestrator.py:4507 `_format_phone_for_summary`, summary_coherence.py:287 `_format_phone` y un quinto inline en agentic/tools/contact.py:~196. Divergencia concreta: con un phone local de 10 dígitos ('312XXXXXX649'), `format_phone_co` y `_format_phone_for_summary` devuelven '+57 312 XXX X649' pero el `_format_phone` del invariant devuelve el raw sin prefijo — el resumen reescrito por summary_coherence muestra el celular en formato distinto al que emitió el prompt (format_phone_co en system_prompt.py:688).
 
 **Evidencia (código real)**:
 ```
@@ -1503,7 +1503,7 @@ Consolidar en `lib/phone_format.format_phone_co` (la que ya se declara canónica
 
 <details><summary>Verificación adversarial</summary>
 
-CONFIRMADO. Las 5 copias existen: lib/phone_format.format_phone_co (docstring 'Fuente única de formateo', maneja 57+12 y 10 dígitos), lib/phone.to_display_format:133-145 (segunda 'fuente única' cross-service con pact), orchestrator._format_phone_for_summary:4507-4528 (maneja ambos + guards null), summary_coherence._format_phone:287-293 (SOLO 57+12; 10 dígitos → raw sin prefijo) y el inline de agentic/tools/contact.py:199-204 (SOLO 57+12). La divergencia ES alcanzable: services/api/routers/contacts.py:76-77 y 116-118 aceptan shipping_phone con pattern ^\+?[1-9]\d{7,19}$ SIN normalizar a +57 — un operador del Tenant Console puede guardar '3125835649' (10 dígitos) y entonces el resumen reescrit […]
+CONFIRMADO. Las 5 copias existen: lib/phone_format.format_phone_co (docstring 'Fuente única de formateo', maneja 57+12 y 10 dígitos), lib/phone.to_display_format:133-145 (segunda 'fuente única' cross-service con pact), orchestrator._format_phone_for_summary:4507-4528 (maneja ambos + guards null), summary_coherence._format_phone:287-293 (SOLO 57+12; 10 dígitos → raw sin prefijo) y el inline de agentic/tools/contact.py:199-204 (SOLO 57+12). La divergencia ES alcanzable: services/api/routers/contacts.py:76-77 y 116-118 aceptan shipping_phone con pattern ^\+?[1-9]\d{7,19}$ SIN normalizar a +57 — un operador del Tenant Console puede guardar '312XXXXXX649' (10 dígitos) y entonces el resumen reescrit […]
 
 </details>
 

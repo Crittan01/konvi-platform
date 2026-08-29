@@ -9,6 +9,7 @@ Extraído verbatim 2026-08-13 — comportamiento idéntico. Los lazy imports
 dispatcher.py los re-importa a su namespace (callers/tests intactos).
 """
 import logging
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,9 @@ def _resolve_contact_id(supabase: Any, tenant_id: str, conversation_id: str):
             .eq("id", conversation_id).eq("tenant_id", tenant_id)
             .limit(1).execute()
         )
-        phone = ((conv.data or [{}])[0].get("customer_phone") or "").lstrip("+")
+        # GREEN-15 (OWASP 2026-08-23): whitelist estricta de dígitos — lstrip("+")
+        # dejaba `, ( ) *` que rompen la gramática del .or_() de PostgREST.
+        phone = re.sub(r"\D", "", str((conv.data or [{}])[0].get("customer_phone") or ""))
         if not phone:
             return None
         ctc = (

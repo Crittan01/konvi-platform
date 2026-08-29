@@ -42,7 +42,7 @@ Aplicar también para "jabón de avena", "sérum de vitamina C", etc.
 
 ### Traza DB capturada
 
-Conversación cliente +573125835649, tenant test, 2026-05-06 ~09:21:00 GMT-5.
+Conversación cliente +57312XXXXXX649, tenant test, 2026-05-06 ~09:21:00 GMT-5.
 
 ```
 09:21:51 IN:  "Quiero Agregar un Aceite de Coco de 100ml"

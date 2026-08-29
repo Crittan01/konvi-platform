@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import * as XLSX from 'xlsx-js-style'
+import * as XLSX from 'xlsx'
 import { Download, Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,38 +31,14 @@ export default function MassImporter({ productCategories, onImported = () => {},
     setSuccess(null)
     const catName = productCategories.find(c => c.id === selectedOpCat)?.display_label || 'General'
 
-    // --- Construir celdas manualmente para poder aplicar estilos ---
+    // --- Construir celdas manualmente (cabeceras + fila de ejemplo alineada) ---
+    // YELLOW-4: desde la migración a SheetJS CE 0.20.3 (xlsx-js-style era un fork abandonado
+    // de xlsx 0.18.5 con CVE-2023-30533 y CVE-2024-22363 HIGH) la CE NO escribe estilos de
+    // celda (font/fill/border) ni paneles congelados (`!freeze`) — se eliminaron. La plantilla
+    // conserva contenido, anchos de columna y alturas de fila. Si se requieren estilos otra
+    // vez, NO reinstalar xlsx-js-style: evaluar exceljs (ver follow-up en osv-scanner.toml).
     const wb = XLSX.utils.book_new()
     const ws: XLSX.WorkSheet = {}
-
-    // Estilo de cabecera obligatoria (Rojo)
-    const reqHeaderStyle = {
-      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 12, name: 'Arial' },
-      fill: { fgColor: { rgb: 'B91C1C' }, patternType: 'solid' as const }, 
-      alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
-      border: {
-        bottom: { style: 'medium', color: { rgb: '7F1D1D' } },
-        right:  { style: 'thin',   color: { rgb: '7F1D1D' } },
-      }
-    }
-
-    // Estilo de cabecera opcional (Indigo)
-    const optHeaderStyle = {
-      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Arial' },
-      fill: { fgColor: { rgb: '4338CA' }, patternType: 'solid' as const },
-      alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
-      border: {
-        bottom: { style: 'medium', color: { rgb: '312E81' } },
-        right:  { style: 'thin',   color: { rgb: '312E81' } },
-      }
-    }
-
-    // Estilo de fila de ejemplo
-    const exampleStyle = {
-      font: { color: { rgb: '6B7280' }, sz: 10, italic: true },
-      fill: { fgColor: { rgb: 'F3F4F6' }, patternType: 'solid' as const },
-      alignment: { horizontal: 'left' as const }
-    }
 
     // Fila de ejemplo ALINEADA 1:1 con COLUMNS (16 celdas) — fuente única en _lib/import-template.
     const exampleRow = buildExampleRow()
@@ -70,8 +46,8 @@ export default function MassImporter({ productCategories, onImported = () => {},
     COLUMNS.forEach((col, i) => {
       const cellRef  = XLSX.utils.encode_cell({ r: 0, c: i })
       const exRef    = XLSX.utils.encode_cell({ r: 1, c: i })
-      ws[cellRef] = { v: col.label, t: 's', s: col.req ? reqHeaderStyle : optHeaderStyle }
-      ws[exRef]   = { v: exampleRow[i], t: typeof exampleRow[i] === 'number' ? 'n' : 's', s: exampleStyle }
+      ws[cellRef] = { v: col.label, t: 's' }
+      ws[exRef]   = { v: exampleRow[i], t: typeof exampleRow[i] === 'number' ? 'n' : 's' }
     })
 
     // Rango de la hoja
@@ -83,36 +59,25 @@ export default function MassImporter({ productCategories, onImported = () => {},
     // Altura de la fila de encabezado
     ws['!rows'] = [{ hpt: 36 }, { hpt: 20 }]
 
-    // Congelar primera fila principal
-    ws['!freeze'] = { xSplit: 0, ySplit: 1 }
-
     // --- Segunda Hoja: Instrucciones ---
     const wsInstruct: XLSX.WorkSheet = {}
     const instHeaders = ['Columna', '¿Obligatorio?', 'Descripción de lo que debes llenar', 'Ejemplo']
-    
+
     instHeaders.forEach((h, i) => {
-      wsInstruct[XLSX.utils.encode_cell({ r: 0, c: i })] = { v: h, t: 's', s: optHeaderStyle }
+      wsInstruct[XLSX.utils.encode_cell({ r: 0, c: i })] = { v: h, t: 's' }
     })
 
     COLUMNS.forEach((col, idx) => {
       const r = idx + 1;
-      const baseFont = { font: { name: 'Arial', sz: 10 } }
-      wsInstruct[XLSX.utils.encode_cell({ r, c: 0 })] = { v: col.label, t: 's', s: { font: { bold: true, name: 'Arial', sz: 10 } } }
-      
-      wsInstruct[XLSX.utils.encode_cell({ r, c: 1 })] = { 
-        v: col.req ? '⚠️ SÍ, OBLIGATORIO' : 'Opcional', 
-        t: 's', 
-        s: { font: { color: { rgb: col.req ? 'B91C1C' : '6B7280' }, bold: col.req, name: 'Arial', sz: 10 }, alignment: { horizontal: 'center' } } 
-      }
-      
-      wsInstruct[XLSX.utils.encode_cell({ r, c: 2 })] = { v: col.desc, t: 's', s: { ...baseFont, alignment: { wrapText: true, vertical: 'center' } } }
-      wsInstruct[XLSX.utils.encode_cell({ r, c: 3 })] = { v: exampleRow[idx], t: typeof exampleRow[idx] === 'number' ? 'n' : 's', s: { font: { italic: true, color: { rgb: '4B5563' }, name: 'Arial' } } }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 0 })] = { v: col.label, t: 's' }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 1 })] = { v: col.req ? '⚠️ SÍ, OBLIGATORIO' : 'Opcional', t: 's' }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 2 })] = { v: col.desc, t: 's' }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 3 })] = { v: exampleRow[idx], t: typeof exampleRow[idx] === 'number' ? 'n' : 's' }
     })
 
     wsInstruct['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: COLUMNS.length, c: 3 } })
     wsInstruct['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 75 }, { wch: 30 }]
     wsInstruct['!rows'] = [{ hpt: 30 }, ...COLUMNS.map(() => ({ hpt: 45 }))]
-    wsInstruct['!freeze'] = { xSplit: 0, ySplit: 1 }
 
     XLSX.utils.book_append_sheet(wb, wsInstruct, 'Instrucciones')
     XLSX.utils.book_append_sheet(wb, ws, catName.substring(0, 31))

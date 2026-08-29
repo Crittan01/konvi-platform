@@ -47,8 +47,8 @@ _meta = _load_module("dependencies/meta.py", "_test_model_b_meta")
 
 KONVI_DEV_TID = "6115474f-7046-44a8-88ad-182dbf7626a6"
 KAIU_TID = "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9"
-KONVI_DEV_SECRET = "41eb550c0dad8118ba389fb6822ab2f6"  # mock value
-KAIU_SECRET = "1895ac2113e77866574486dbb438e3dd"  # mock value
+KONVI_DEV_SECRET = "0" * 32  # sintético — NUNCA un secret real (redactado 2026-08-28)
+KAIU_SECRET = "1" * 32       # sintético — NUNCA un secret real (redactado 2026-08-28)
 KONVI_DEV_PHONE_ID = "1124135250785919"
 KAIU_PHONE_ID = "990364080831295"
 
