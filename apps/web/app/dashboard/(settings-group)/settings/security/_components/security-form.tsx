@@ -360,36 +360,43 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
 
       {/* Recovery codes — display ONCE (post-enrollment o post-regenerate) */}
       {recoveryCodes && (
-        <section className="rounded-lg border border-amber-700 bg-amber-50 p-4 space-y-3">
+        <section className="rounded-lg border border-amber-700 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 p-4 space-y-3">
           <div className="flex items-start gap-2">
-            <KeyRound className="h-5 w-5 text-amber-700 mt-0.5 shrink-0" />
+            <KeyRound className="h-5 w-5 text-amber-700 dark:text-amber-400 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <h2 className="text-base font-semibold text-amber-900">
+              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">
                 Guarda estos códigos AHORA
               </h2>
-              <p className="text-sm text-amber-800 mt-1">
+              <p className="text-sm text-amber-800 dark:text-amber-300/90 mt-1">
                 Solo se muestran UNA VEZ. Si pierdes tu authenticator, los
                 necesitarás para iniciar sesión.
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 bg-white border border-amber-700 rounded p-3 font-mono text-sm">
+          {/* Tiles: par texto/fondo explícito en AMBOS temas — sin esto, en dark
+              el texto heredado (claro) quedaba invisible sobre el tile claro. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded border border-amber-700/40 bg-white dark:bg-transparent p-3 font-mono text-sm">
             {recoveryCodes.map(c => (
-              <code key={c} className="px-2 py-1 rounded bg-amber-50">{c}</code>
+              <code
+                key={c}
+                className="rounded px-2 py-1 text-center tracking-wider select-all bg-amber-100 text-amber-950 dark:bg-amber-400/15 dark:text-amber-100"
+              >
+                {c}
+              </code>
             ))}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={downloadCodes}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-700 text-white hover:bg-amber-800 text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-700 text-white hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 text-sm"
             >
               <Download className="h-4 w-4" /> Descargar .txt
             </button>
             <button
               type="button"
               onClick={copyCodes}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-700 hover:bg-amber-100 text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-700 text-amber-900 hover:bg-amber-100 dark:border-amber-500/50 dark:text-amber-200 dark:hover:bg-amber-500/10 text-sm"
             >
               <Copy className="h-4 w-4" /> Copiar
             </button>

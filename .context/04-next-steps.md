@@ -28,6 +28,29 @@ Lo que queda fuera del repo (checklist §3 del cierre, founder/externo):
 
 ---
 
+## Directiva UX founder (2026-08-29): pase de plataforma web/tablet/móvil
+
+Feedback founder (activando MFA): *"la interfaz — web, tablet, móvil — debe estar mejorada:
+distribución, colores; el panel de recovery codes es un ejemplo de toda la plataforma"*.
+Ejemplo concreto YA corregido (2026-08-29): panel de recovery codes de `security-form.tsx` —
+en dark mode los códigos eran invisibles (texto claro heredado sobre tile claro; cadena
+`bg-white` sin override + override interino de `globals.css` solo para fondos).
+
+**Medición del problema real**: **73 archivos** en `apps/web` usan colores de paleta
+hardcodeados de modo claro (`bg-amber-50/100`, `text-amber-800/900`, idem red/green/blue).
+El override interino de `globals.css` (`:361-363`) cubre SOLO fondos de 3 familias — ningún
+`text-*`, así que banners/cards en dark mode tienen contraste roto de forma sistémica.
+El propio `globals.css` lo marca: *"Interino; el fin de juego son tokens danger/warning/success/info"*.
+
+**Pase propuesto (fase nueva, requiere priorización founder vs B-2 Fase 2):**
+1. Auditoría visual de las 73 superficies en dark mode (screenshot sweep web/tablet/móvil —
+   hay infra Playwright en `scratch/`).
+2. Migración a tokens semánticos `warning/danger/success/info` (fin del override interino).
+3. Revisión responsive (distribución/breakpoints) de las mismas superficies.
+4. Gate: añadir a CI un lint anti hardcoded-palette en `apps/web/app` (ratchet, como el de tenant-filter).
+
+---
+
 ## Verificado-resuelto 2026-08-02 (antes listado aquí como pendiente)
 
 | Ítem | Evidencia |
