@@ -451,7 +451,7 @@ export default async function WhatsAppIntegrationPage(
           connected ? (
             <>
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-700 inline-block" />
+                <span className="h-2 w-2 rounded-full bg-success-fg inline-block" />
                 Conectado
               </span>
               {wabaId && <> · WABA {wabaId}</>}
@@ -461,7 +461,7 @@ export default async function WhatsAppIntegrationPage(
           ) : (
             <>
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-slate-700 inline-block" />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground inline-block" />
                 Desconectado
               </span>
               {' · Configura WhatsApp en la pestaña Setup para empezar.'}
@@ -472,7 +472,7 @@ export default async function WhatsAppIntegrationPage(
 
       {/* Banner sin WABA configurado */}
       {!wabaConfigured && tab === 'plantillas' && (
-        <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-3 text-sm text-amber-900">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-sm text-warning-fg">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           {!connected
             ? 'WhatsApp aún no está conectado. Ve a la pestaña Setup para conectar.'

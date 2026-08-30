@@ -329,7 +329,7 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
             : 'Guardar presencia'}
         </Button>
         {saved && (
-          <span className="flex items-center gap-1 text-xs text-emerald-700">
+          <span className="flex items-center gap-1 text-xs text-success-fg">
             <Check className="h-3.5 w-3.5" /> Información guardada
           </span>
         )}

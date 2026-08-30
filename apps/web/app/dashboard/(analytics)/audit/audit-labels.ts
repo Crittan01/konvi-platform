@@ -84,11 +84,11 @@ export const ACTION_LABELS: Record<string, string> = {
  * paleta founder: nunca 300-500). Cobertura completa de las 15 acciones reales;
  * el fallback gris solo aplica a acciones futuras aún no mapeadas.
  */
-const GREEN  = 'bg-emerald-500/10 text-emerald-800 border border-emerald-700/25'
-const BLUE   = 'bg-blue-500/10 text-blue-800 border border-blue-700/25'
-const RED     = 'bg-red-500/10 text-red-800 border border-red-700/25'
-const PURPLE = 'bg-purple-500/10 text-purple-800 border border-purple-700/25'
-const AMBER  = 'bg-amber-500/10 text-amber-800 border border-amber-700/25'
+const GREEN  = 'bg-success-bg text-success-fg border border-success-border'
+const BLUE   = 'bg-info-bg text-info-fg border border-info-border'
+const RED     = 'bg-danger-bg text-danger-fg border border-danger-border'
+const PURPLE = 'bg-ai-bg text-ai-fg border border-ai-border'
+const AMBER  = 'bg-warning-bg text-warning-fg border border-warning-border'
 const NEUTRAL = 'bg-muted text-muted-foreground border border-border'
 
 export const ACTION_COLORS: Record<string, string> = {

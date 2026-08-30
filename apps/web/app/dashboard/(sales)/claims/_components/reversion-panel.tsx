@@ -150,11 +150,11 @@ export default function ReversionPanel({ claimId, formaPago, totalPedido, canWri
           )}
         </dl>
 
-        <p className={`mt-2 text-xs ${constancia.alerta ? 'text-amber-800' : 'text-muted-foreground'}`}>
+        <p className={`mt-2 text-xs ${constancia.alerta ? 'text-warning-fg' : 'text-muted-foreground'}`}>
           {constancia.alerta && <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />}
           Constancia: {constancia.texto}
         </p>
-        <p className={`mt-1 text-xs ${dinero.alerta ? 'text-red-700 font-medium' : 'text-muted-foreground'}`}>
+        <p className={`mt-1 text-xs ${dinero.alerta ? 'text-danger-fg font-medium' : 'text-muted-foreground'}`}>
           {dinero.alerta && <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />}
           {dinero.texto}
         </p>
@@ -276,7 +276,7 @@ export default function ReversionPanel({ claimId, formaPago, totalPedido, canWri
               </span>
             </label>
 
-            {error && <p className="text-sm text-red-700">{error}</p>}
+            {error && <p className="text-sm text-danger-fg">{error}</p>}
           </div>
 
           <DialogFooter>

@@ -167,7 +167,7 @@ export function BotPreview({ agents = [] }: Props) {
         <div
           role="alert"
           aria-live="assertive"
-          className="rounded-lg border border-red-700/30 bg-red-500/8 px-3 py-2 text-xs text-red-700"
+          className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger-fg"
         >
           {error}
         </div>
@@ -182,7 +182,7 @@ export function BotPreview({ agents = [] }: Props) {
               <span className="text-xs font-medium text-muted-foreground">{result.agent_name}:</span>
             </div>
             {result.kb_used && (
-              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-700/20">
+              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-success-bg text-success-fg border border-success-border">
                 <Zap className="h-2.5 w-2.5" />
                 RAG activo · {result.kb_count} doc{result.kb_count !== 1 ? 's' : ''} usados
               </span>

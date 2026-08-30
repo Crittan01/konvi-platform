@@ -114,7 +114,7 @@ function VariantEditRow({ v, productId, threshold, tenantId, variantCount, editV
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs font-semibold tabular-nums">{fmtPrice(v)}</p>
-          <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
+          <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-warning-fg' : 'text-muted-foreground'}`}>
             {v.stock_quantity} u.
           </p>
         </div>
@@ -146,8 +146,8 @@ function VariantEditRow({ v, productId, threshold, tenantId, variantCount, editV
           <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="50" className="h-7 text-xs font-mono mt-1" placeholder="Opcional" />
         </div>
         <div>
-          <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
-          <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-7 text-xs font-mono mt-1 border-amber-700/30" placeholder="0" />
+          <label className="text-[10px] text-warning-fg/90 uppercase font-semibold">Costo ($)</label>
+          <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-7 text-xs font-mono mt-1 border-warning-border" placeholder="0" />
         </div>
         <div>
           <label className="text-[10px] text-muted-foreground uppercase font-semibold">SKU</label>
@@ -254,7 +254,7 @@ function StockMovementHistory({ product, tenantId }: { product: Product; tenantI
             </div>
           )}
           {error && (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-red-700/30 bg-red-500/5 px-3 py-2 text-xs text-red-700">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger-fg">
               <span>{error}</span>
               <button type="button" onClick={load} className="underline underline-offset-2 hover:no-underline">Reintentar</button>
             </div>
@@ -280,7 +280,7 @@ function StockMovementHistory({ product, tenantId }: { product: Product; tenantI
                       <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(mv.created_at)}</td>
                       <td className="px-2.5 py-1.5 truncate max-w-[120px]" title={varLabel(mv.variation_id)}>{varLabel(mv.variation_id)}</td>
                       <td className="px-2.5 py-1.5 text-muted-foreground truncate max-w-[140px]" title={mv.reason ?? ''}>{mv.reason || '—'}</td>
-                      <td className={`px-2.5 py-1.5 text-right font-mono tabular-nums font-semibold ${mv.delta > 0 ? 'text-emerald-700' : mv.delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                      <td className={`px-2.5 py-1.5 text-right font-mono tabular-nums font-semibold ${mv.delta > 0 ? 'text-success-fg' : mv.delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
                         {mv.delta > 0 ? '+' : ''}{mv.delta}
                       </td>
                       <td className="px-2.5 py-1.5 text-right font-mono tabular-nums">{mv.new_stock}</td>
@@ -452,7 +452,7 @@ export function ProductEditDrawer({
                 </Button>
               </div>
               {aiNotice && (
-                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-700/30 rounded px-2 py-1">{aiNotice}</p>
+                <p className="text-[11px] text-warning-fg bg-warning-bg border border-warning-border rounded px-2 py-1">{aiNotice}</p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -617,7 +617,7 @@ export function ProductEditDrawer({
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">SKU</label><Input name="sku" placeholder="PROD-001" className="h-7 text-xs font-mono mt-1" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio *</label><Input name="price" type="number" min="50" step="50" placeholder="0" required className="h-7 text-xs font-mono mt-1" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio anterior</label><Input name="compare_at_price" type="number" step="50" placeholder="Opcional" className="h-7 text-xs font-mono mt-1 border-dashed" /></div>
-                  <div><label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label><Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-7 text-xs font-mono mt-1 border-amber-700/30" /></div>
+                  <div><label className="text-[10px] text-warning-fg/90 uppercase font-semibold">Costo ($)</label><Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-7 text-xs font-mono mt-1 border-warning-border" /></div>
                   <div><label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock *</label><Input name="stock" type="number" min="0" defaultValue={0} required className="h-7 text-xs font-mono mt-1" /></div>
                 </div>
                 <div className="flex gap-2 justify-end">
@@ -647,9 +647,9 @@ export function ProductEditDrawer({
                   <input type="hidden" name="product_id" value={product.id} />
                   <span className="text-xs font-medium truncate">{fmtAttrs(v.attributes)}</span>
                   <span className="text-right leading-tight">
-                    <span className={`block text-xs font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-700' : 'text-foreground'}`}>{v.stock_quantity} u.</span>
+                    <span className={`block text-xs font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-warning-fg' : 'text-foreground'}`}>{v.stock_quantity} u.</span>
                     {reserved > 0 && (
-                      <span className="block text-[10px] font-mono tabular-nums text-amber-700" title={`${reserved} u. reservadas en carritos activos`}>
+                      <span className="block text-[10px] font-mono tabular-nums text-warning-fg" title={`${reserved} u. reservadas en carritos activos`}>
                         −{reserved} · {available} disp
                       </span>
                     )}

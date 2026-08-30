@@ -314,7 +314,7 @@ export default function AveonlineCarriersSection() {
 
         {/* Default-open banner */}
         {!loading && prefs.length === 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-700 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
             <Info className="h-4 w-4 mt-0.5 shrink-0" />
             <span>
               Aún no has configurado preferencias. Por defecto se ofrecen
@@ -331,7 +331,7 @@ export default function AveonlineCarriersSection() {
           </div>
         )}
         {success && (
-          <div className="flex items-start gap-2 rounded-md border border-green-700/50 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <div className="flex items-start gap-2 rounded-md border border-success-border bg-success-bg px-3 py-2 text-sm text-success-fg">
             <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{success}</span>
           </div>
@@ -412,7 +412,7 @@ export default function AveonlineCarriersSection() {
                         </div>
                       )}
                       {facts.cod === 'unknown' && (
-                        <div className="text-amber-700 italic">
+                        <div className="text-warning-fg italic">
                           <AlertCircle className="inline h-3 w-3 mr-0.5" />
                           COD: <strong>no documentado oficialmente</strong> — verificar con asesor logístico
                         </div>

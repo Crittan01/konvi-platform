@@ -153,9 +153,9 @@ export function ReadinessCard({
   return (
     <div className={`rounded-xl border p-5 space-y-3 ${
       allOk
-        ? 'border-emerald-700/25 bg-emerald-500/5'
+        ? 'border-success-border bg-success-bg'
         : score >= 2
-          ? 'border-amber-700/25 bg-amber-500/5'
+          ? 'border-warning-border bg-warning-bg'
           : 'border-border bg-muted/20'
     }`}>
       <div className="flex items-center justify-between gap-3">
@@ -168,7 +168,7 @@ export function ReadinessCard({
           </p>
         </div>
         <div className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-          allOk ? 'bg-emerald-500/15 text-emerald-700' : score >= 2 ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'
+          allOk ? 'bg-success-bg text-success-fg' : score >= 2 ? 'bg-warning-bg text-warning-fg' : 'bg-muted text-muted-foreground'
         }`}>
           {score}/{total}
         </div>
@@ -182,10 +182,10 @@ export function ReadinessCard({
           {items.map(item => (
             <div key={item.label} className="flex items-center gap-2.5">
               {item.ok
-                ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+                ? <CheckCircle2 className="h-3.5 w-3.5 text-success-fg shrink-0" />
                 : score === 0 || !item.detail
                   ? <XCircle className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-                  : <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                  : <AlertCircle className="h-3.5 w-3.5 text-warning-fg shrink-0" />
               }
               <div className="flex-1 min-w-0 flex items-center gap-1">
                 <span className="text-xs font-medium">{item.label}</span>

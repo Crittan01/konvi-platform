@@ -33,7 +33,7 @@ const SECTIONS: Section[] = [
     id: 'credito',
     title: '1. Pago anticipado (crédito) — vía Wompi',
     Icon: CreditCard,
-    color: 'text-blue-700 bg-blue-50 border-blue-200',
+    color: 'text-info-fg bg-info-bg border-info-border',
     content: (
       <div className="space-y-3 text-sm text-foreground">
         <p>
@@ -71,7 +71,7 @@ const SECTIONS: Section[] = [
     id: 'cod',
     title: '2. Pago contraentrega (COD) — recauda el courier',
     Icon: Coins,
-    color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+    color: 'text-success-fg bg-success-bg border-success-border',
     content: (
       <div className="space-y-3 text-sm text-foreground">
         <p>
@@ -79,9 +79,9 @@ const SECTIONS: Section[] = [
           en el momento de la entrega. Aveonline te liquida después según el carrier.
         </p>
 
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs space-y-1.5">
-          <div className="font-medium text-amber-900">⚠️ Requiere activación per-carrier</div>
-          <div className="text-amber-800">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-xs space-y-1.5">
+          <div className="font-medium text-warning-fg">⚠️ Requiere activación per-carrier</div>
+          <div className="text-warning-fg">
             En la pestaña <strong>Carriers</strong> activa el toggle "Pago
             contraentrega" para cada transportadora que aceptes COD. La decisión
             comercial depende de tu contrato Aveonline.
@@ -182,9 +182,9 @@ const SECTIONS: Section[] = [
           </div>
         </div>
 
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
-          <div className="font-medium text-amber-900 mb-1">⚠️ Reconciliación manual</div>
-          <div className="text-amber-800">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-xs">
+          <div className="font-medium text-warning-fg mb-1">⚠️ Reconciliación manual</div>
+          <div className="text-warning-fg">
             La API de Aveonline <strong>NO expone</strong> endpoints para consultar
             liquidaciones COD (validado web fetch directo a docs `listarEnvios`:
             campos retornados solo incluyen tracking, sin valorRecaudo/fechaPago).
@@ -223,7 +223,7 @@ const SECTIONS: Section[] = [
     id: 'novedades',
     title: '3. Novedades en la entrega',
     Icon: AlertTriangle,
-    color: 'text-amber-700 bg-amber-50 border-amber-200',
+    color: 'text-warning-fg bg-warning-bg border-warning-border',
     content: (
       <div className="space-y-3 text-sm text-foreground">
         <p>
@@ -271,7 +271,7 @@ const SECTIONS: Section[] = [
     id: 'devoluciones',
     title: '4. Devoluciones (RMA)',
     Icon: RefreshCcw,
-    color: 'text-purple-700 bg-purple-50 border-purple-200',
+    color: 'text-ai-fg bg-ai-bg border-ai-border',
     content: (
       <div className="space-y-3 text-sm text-foreground">
         <p>
@@ -308,9 +308,9 @@ const SECTIONS: Section[] = [
             (a) y (b) no aplican.
           </div>
         </div>
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
-          <div className="font-medium text-amber-900 mb-0.5">⚠️ Pendiente en Konvi</div>
-          <div className="text-amber-800">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-xs">
+          <div className="font-medium text-warning-fg mb-0.5">⚠️ Pendiente en Konvi</div>
+          <div className="text-warning-fg">
             El tool de devoluciones 1-click aún no está implementado. Hoy
             tu operador debe usar caminos (b) o (c) manualmente desde el Inbox.
           </div>
@@ -322,7 +322,7 @@ const SECTIONS: Section[] = [
     id: 'cancelacion',
     title: '5. Cancelación de guías',
     Icon: Package,
-    color: 'text-red-700 bg-red-50 border-red-200',
+    color: 'text-danger-fg bg-danger-bg border-danger-border',
     content: (
       <div className="space-y-3 text-sm text-foreground">
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1.5">

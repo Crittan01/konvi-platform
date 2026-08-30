@@ -50,10 +50,10 @@ type RecentOrder = {
 // ─── Maps ─────────────────────────────────────────────────────────────────────
 
 const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> = {
-  open:          { label: 'Abierto',      color: 'bg-red-500/15 text-red-700 border-red-700/30',        dot: 'bg-red-600' },
-  investigating: { label: 'Investigando', color: 'bg-amber-500/15 text-amber-700 border-amber-700/30',  dot: 'bg-amber-600' },
-  resolved:      { label: 'Resuelto',     color: 'bg-green-500/15 text-green-700 border-green-700/30',   dot: 'bg-green-600' },
-  refunded:      { label: 'Reembolsado',  color: 'bg-emerald-500/15 text-emerald-700 border-emerald-700/30', dot: 'bg-emerald-600' },
+  open:          { label: 'Abierto',      color: 'bg-danger-bg text-danger-fg border-danger-border',        dot: 'bg-danger-fg' },
+  investigating: { label: 'Investigando', color: 'bg-warning-bg text-warning-fg border-warning-border',  dot: 'bg-warning-fg' },
+  resolved:      { label: 'Resuelto',     color: 'bg-success-bg text-success-fg border-success-border',   dot: 'bg-success-fg' },
+  refunded:      { label: 'Reembolsado',  color: 'bg-success-bg text-success-fg border-success-border', dot: 'bg-success-fg' },
   rejected:      { label: 'Rechazado',    color: 'bg-muted text-muted-foreground border-border',         dot: 'bg-muted-foreground' },
   cancelled:     { label: 'Cancelado',    color: 'bg-muted text-muted-foreground border-border',         dot: 'bg-muted-foreground' },
 }
@@ -381,7 +381,7 @@ export default function ClaimsManager({
 
         {/* Aviso: el reembolso no mueve dinero */}
         {selectedClaim.status === 'refunded' && (
-          <div className="mx-4 sm:mx-6 mt-4 flex items-start gap-2 text-xs text-amber-700 bg-amber-500/10 border border-amber-700/20 rounded-lg px-3 py-2">
+          <div className="mx-4 sm:mx-6 mt-4 flex items-start gap-2 text-xs text-warning-fg bg-warning-bg border border-warning-border rounded-lg px-3 py-2">
             <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>Este estado solo registra el reclamo. El dinero se devuelve manualmente desde Wompi; verifica que el reembolso se haya emitido.</span>
           </div>
@@ -389,7 +389,7 @@ export default function ClaimsManager({
 
         {/* Error acción */}
         {actionError && (
-          <div className="mx-4 sm:mx-6 mt-4 flex items-center gap-2 text-xs text-red-700 bg-red-500/10 border border-red-700/20 rounded-lg px-3 py-2">
+          <div className="mx-4 sm:mx-6 mt-4 flex items-center gap-2 text-xs text-danger-fg bg-danger-bg border border-danger-border rounded-lg px-3 py-2">
             <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {actionError}
           </div>
         )}
@@ -406,7 +406,7 @@ export default function ClaimsManager({
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Monto solicitado</p>
-              <p className="font-medium text-sm font-mono text-red-700">
+              <p className="font-medium text-sm font-mono text-danger-fg">
                 {selectedClaim.requested_amount != null
                   ? `$${selectedClaim.requested_amount.toLocaleString('es-CO')}`
                   : 'No definido'}
@@ -426,10 +426,10 @@ export default function ClaimsManager({
 
           {/* BLOQUE G-2: monto REAL reembolsado (lo que resta el KPI net-revenue). */}
           {selectedClaim.status === 'refunded' && (
-            <div className="space-y-1 rounded-lg border border-emerald-700/25 bg-emerald-500/5 p-3">
+            <div className="space-y-1 rounded-lg border border-success-border bg-success-bg p-3">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Reembolsado (real)</p>
               {selectedClaim.refunded_amount != null ? (
-                <p className="font-medium text-sm font-mono text-emerald-700">
+                <p className="font-medium text-sm font-mono text-success-fg">
                   ${selectedClaim.refunded_amount.toLocaleString('es-CO')}
                   {selectedClaim.refunded_at && (
                     <span className="ml-2 text-[11px] text-muted-foreground">
@@ -439,7 +439,7 @@ export default function ClaimsManager({
                 </p>
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm text-amber-700">Monto no registrado</p>
+                  <p className="text-sm text-warning-fg">Monto no registrado</p>
                   {canResolve && (
                     <button
                       onClick={() => { setRefundAmount(''); setActionError(null); setRefundOpen(true) }}
@@ -470,7 +470,7 @@ export default function ClaimsManager({
             {canResolve && (
               <div className="flex items-center justify-end gap-2">
                 {notesDraft !== (selectedClaim.resolution_notes ?? '') && (
-                  <span className="text-[11px] text-amber-700">Cambios sin guardar</span>
+                  <span className="text-[11px] text-warning-fg">Cambios sin guardar</span>
                 )}
                 <Button
                   size="sm" variant="outline"
@@ -651,7 +651,7 @@ export default function ClaimsManager({
                 placeholder="0" autoFocus
               />
             </div>
-            {actionError && <p className="text-sm text-red-700">{actionError}</p>}
+            {actionError && <p className="text-sm text-danger-fg">{actionError}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRefundOpen(false)} disabled={refundSubmitting}>
@@ -728,7 +728,7 @@ export default function ClaimsManager({
             </div>
 
             {createError && (
-              <p className="text-xs text-red-700 flex items-center gap-1">
+              <p className="text-xs text-danger-fg flex items-center gap-1">
                 <AlertCircle className="h-3.5 w-3.5" /> {createError}
               </p>
             )}

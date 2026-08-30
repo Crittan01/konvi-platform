@@ -141,7 +141,7 @@ export function AttributeContractEditor({
                 <Pencil className="h-3.5 w-3.5" />
               </button>
               <button onClick={() => handleDelete(d.id)} disabled={pending}
-                className="h-7 w-7 inline-flex items-center justify-center rounded-md text-red-700 hover:bg-red-700/10" aria-label="Eliminar">
+                className="h-7 w-7 inline-flex items-center justify-center rounded-md text-danger-fg hover:bg-danger-bg" aria-label="Eliminar">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -149,7 +149,7 @@ export function AttributeContractEditor({
         </div>
 
         {error && (
-          <div className="rounded-lg border border-red-700/40 bg-red-700/10 px-3 py-2 text-sm text-red-700">{error}</div>
+          <div className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-sm text-danger-fg">{error}</div>
         )}
 
         {/* Formulario alta/edición */}

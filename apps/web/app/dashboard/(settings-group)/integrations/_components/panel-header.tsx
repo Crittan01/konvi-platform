@@ -40,7 +40,7 @@ export default function PanelHeader({ Icon, title, connected, metaLine }: Props)
           connected ? (
             <>
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-700 inline-block" />
+                <span className="h-2 w-2 rounded-full bg-success-fg inline-block" />
                 Conectado
               </span>
               {metaLine && <> · {metaLine}</>}
@@ -48,7 +48,7 @@ export default function PanelHeader({ Icon, title, connected, metaLine }: Props)
           ) : (
             <>
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-slate-700 inline-block" />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground inline-block" />
                 Desconectado
               </span>
               {' · Configura esta integración desde el panel de Integraciones.'}

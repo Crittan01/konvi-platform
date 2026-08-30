@@ -115,9 +115,9 @@ export default async function LoginPage(
       <AuthBrand subtitle="Consola de administración de tu negocio" />
 
       {forceLogin && data?.user && (
-        <div className="mb-4 rounded-lg border border-amber-700/40 bg-amber-50/95 p-3 text-sm text-amber-900">
+        <div className="mb-4 rounded-lg border border-warning-border bg-warning-bg/95 p-3 text-sm text-warning-fg">
           <p className="font-medium">Sesión activa de otro usuario</p>
-          <p className="text-xs mt-1 text-amber-800">
+          <p className="text-xs mt-1 text-warning-fg">
             Actualmente: <code className="font-mono">{data.user.email}</code>.
             Si te logueas ahora, esa sesión se cerrará automáticamente.
           </p>

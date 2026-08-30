@@ -24,26 +24,26 @@ export const agenticStateLabel = (s: AgenticState): string =>
   AGENTIC_STATE_LABELS[s] ?? s
 
 export const getAgenticStateBadgeColor = (s: AgenticState): string => {
-  // Paleta neutra (no shades 300-500 fluorescentes per feedback_ui_colors).
+  // Tokens semánticos de status por estado del FSM (FASE 2 — antes paleta light-only).
   switch (s) {
     case 'GREETING':
     case 'EXPLORING':
-      return 'bg-slate-100 text-slate-700 border-slate-200'
+      return 'bg-muted text-muted-foreground border-border'
     case 'CART_BUILDING':
-      return 'bg-blue-50 text-blue-700 border-blue-200'
+      return 'bg-info-bg text-info-fg border-info-border'
     case 'PII_COLLECTION':
-      return 'bg-amber-50 text-amber-700 border-amber-200'
+      return 'bg-warning-bg text-warning-fg border-warning-border'
     case 'SHIPPING_QUOTE':
     case 'CARRIER_SELECTION':
-      return 'bg-violet-50 text-violet-700 border-violet-200'
+      return 'bg-ai-bg text-ai-fg border-ai-border'
     case 'PAYMENT':
-      return 'bg-orange-50 text-orange-700 border-orange-200'
+      return 'bg-warning-bg text-warning-fg border-warning-border'
     case 'POST_PAYMENT':
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      return 'bg-success-bg text-success-fg border-success-border'
     case 'HUMAN_HANDOFF':
-      return 'bg-rose-50 text-rose-700 border-rose-200'
+      return 'bg-danger-bg text-danger-fg border-danger-border'
     default:
-      return 'bg-slate-100 text-slate-700 border-slate-200'
+      return 'bg-muted text-muted-foreground border-border'
   }
 }
 

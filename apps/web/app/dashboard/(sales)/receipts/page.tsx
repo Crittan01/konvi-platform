@@ -107,7 +107,7 @@ export default async function ReceiptsPage(props: {
                     </td>
                     <td
                       className={`px-3 py-2 ${
-                        entrega.alerta ? 'text-amber-700' : 'text-muted-foreground'
+                        entrega.alerta ? 'text-warning-fg' : 'text-muted-foreground'
                       }`}
                     >
                       {entrega.texto}

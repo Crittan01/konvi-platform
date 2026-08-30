@@ -104,8 +104,8 @@ export function WhatsAppCredentialsForm({
           </div>
         ))}
       </div>
-      {error && <p className="text-xs text-red-700 bg-red-700/10 border border-red-700/30 rounded px-2 py-1">{error}</p>}
-      {saved && <p className="text-xs text-green-700 inline-flex items-center gap-1"><Check className="h-3 w-3" /> Guardado. El bot ya usa estas credenciales.</p>}
+      {error && <p className="text-xs text-danger-fg bg-danger-bg border border-danger-border rounded px-2 py-1">{error}</p>}
+      {saved && <p className="text-xs text-success-fg inline-flex items-center gap-1"><Check className="h-3 w-3" /> Guardado. El bot ya usa estas credenciales.</p>}
       <div className="flex items-center gap-2 justify-end">
         {connected && (
           <button onClick={() => setOpen(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">Cancelar</button>

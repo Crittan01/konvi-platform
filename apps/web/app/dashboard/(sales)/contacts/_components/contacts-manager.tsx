@@ -128,11 +128,11 @@ function ExistingAttachmentCard({
   const sizeKb = size != null ? Math.max(1, Math.round(size / 1024)) : null
   const mimeShort = mime?.replace('application/', '').replace('image/', '').toUpperCase() ?? '—'
   return (
-    <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-2.5 space-y-1.5">
+    <div className="rounded-md border border-success-border bg-success-bg p-2.5 space-y-1.5">
       <div className="flex items-center gap-2">
-        <Paperclip className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+        <Paperclip className="h-3.5 w-3.5 text-success-fg shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-emerald-700">Evidencia física adjunta</p>
+          <p className="text-xs font-medium text-success-fg">Evidencia física adjunta</p>
           <p className="text-[10px] text-muted-foreground">
             {mimeShort}{sizeKb != null && ` · ${sizeKb} KB`}
             {uploadedAt && ` · subida ${new Date(uploadedAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}`}
@@ -485,17 +485,17 @@ export default function ContactsManager({ initialContacts, loadError, capReached
       {loadError && (
         <div
           role="alert"
-          className="rounded-xl border border-red-700/40 bg-red-700/5 px-4 py-3 text-sm text-red-700 flex items-start gap-2"
+          className="rounded-xl border border-danger-border bg-danger-bg px-4 py-3 text-sm text-danger-fg flex items-start gap-2"
         >
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-semibold">No se pudieron cargar los contactos.</p>
-            <p className="text-xs text-red-700/90 mt-0.5">{loadError}</p>
+            <p className="text-xs text-danger-fg/90 mt-0.5">{loadError}</p>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="mt-2 h-7 text-xs gap-1.5 border-red-700/50 text-red-700 hover:bg-red-700/10"
+              className="mt-2 h-7 text-xs gap-1.5 border-danger-border text-danger-fg hover:bg-danger-bg"
               onClick={handleRefresh}
             >
               <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} /> Reintentar
@@ -508,7 +508,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
       {capReached && !loadError && (
         <div
           role="status"
-          className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-2.5 text-xs text-amber-700 flex items-start gap-2"
+          className="rounded-xl border border-warning-border bg-warning-bg px-4 py-2.5 text-xs text-warning-fg flex items-start gap-2"
         >
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
@@ -525,7 +525,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-700">
+            <DialogTitle className="flex items-center gap-2 text-danger-fg">
               <AlertTriangle className="h-5 w-5" />
               Eliminar contacto
             </DialogTitle>
@@ -539,7 +539,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                 ({pendingDeleteContact ? formatPhone(pendingDeleteContact.phone) : ''})
               </strong>.
             </p>
-            <div className="rounded-md border border-red-700/40 bg-red-700/5 p-2.5 text-xs text-red-700">
+            <div className="rounded-md border border-danger-border bg-danger-bg p-2.5 text-xs text-danger-fg">
               <p className="font-semibold mb-1">Diferencia con &quot;Anonimizar&quot;:</p>
               <ul className="list-disc list-inside space-y-0.5">
                 <li><strong>Eliminar</strong>: borra el contacto completo de la base. Queda audit log inmutable (event=&quot;deleted&quot;) con phone hasheado para trazabilidad ante SIC.</li>
@@ -591,7 +591,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-700">
+            <DialogTitle className="flex items-center gap-2 text-success-fg">
               <ShieldCheck className="h-5 w-5" />
               Reactivar consent marketing
             </DialogTitle>
@@ -607,7 +607,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                 ({pendingReactivateContact ? formatPhone(pendingReactivateContact.phone) : ''})
               </strong>.
             </p>
-            <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2.5 text-xs text-amber-700">
+            <div className="rounded-md border border-warning-border bg-warning-bg p-2.5 text-xs text-warning-fg">
               <p className="font-semibold mb-1">Habeas Data Ley 1581 ART. 9:</p>
               <ul className="list-disc list-inside space-y-0.5">
                 <li>El cliente debió haber dado consent renovado <strong>explícito</strong> (idealmente vía WhatsApp con confirmación).</li>
@@ -990,18 +990,18 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                             // PII intacta + consent_given=true + revoked_at populated.
                             // Marketing bloqueado pero chat activo (Q3 + Op-A.2).
                             <span
-                              className="flex items-center gap-1 text-[11px] text-rose-700"
+                              className="flex items-center gap-1 text-[11px] text-danger-fg"
                               title="Cliente envió STOP/BAJA por WhatsApp. Mensajes de marketing por WhatsApp bloqueados. La conversación puede continuar normalmente — el bot responde a los mensajes que el cliente envíe. Para reactivar el marketing, usa 'Reactivar consent' (requiere que el cliente lo pida explícitamente)."
                             >
                               <ShieldOff className="h-3 w-3" /> Marketing bloqueado · Chat activo
                             </span>
                           ) : c.consent_given ? (
-                            <span className="flex items-center gap-1 text-[11px] text-emerald-700">
+                            <span className="flex items-center gap-1 text-[11px] text-success-fg">
                               <ShieldCheck className="h-3 w-3" /> Consent.{' '}
                               {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</span>}
                             </span>
                           ) : c.consent_revoked_at ? (
-                            <span className="flex items-center gap-1 text-[11px] text-amber-700">
+                            <span className="flex items-center gap-1 text-[11px] text-warning-fg">
                               <ShieldOff className="h-3 w-3" /> Revocado
                             </span>
                           ) : (
@@ -1014,7 +1014,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                           {formatPhone(c.phone)}
                         </p>
                         {c.shipping_phone && c.shipping_phone !== c.phone && (
-                          <p className="text-xs font-mono text-amber-700 mt-0.5 flex items-center gap-1" title="Phone alternativo para envío (transportadora contacta a este número)">
+                          <p className="text-xs font-mono text-warning-fg mt-0.5 flex items-center gap-1" title="Phone alternativo para envío (transportadora contacta a este número)">
                             <Phone className="h-3 w-3 shrink-0" />
                             Envío: {formatPhone(c.shipping_phone)}
                           </p>
@@ -1035,7 +1035,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                         )}
                         {c.consent_revoked_at && (
                           <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                            <p className="text-xs text-amber-700">
+                            <p className="text-xs text-warning-fg">
                               Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                               {c.consent_revoked_reason ? ` · ${c.consent_revoked_reason}` : ''}
                             </p>
@@ -1054,7 +1054,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                 variant="outline"
                                 className={
                                   isOwner
-                                    ? 'h-6 text-[11px] px-2 gap-1 border-emerald-700/40 text-emerald-700 hover:bg-emerald-700/10'
+                                    ? 'h-6 text-[11px] px-2 gap-1 border-success-border text-success-fg hover:bg-success-bg'
                                     : 'h-6 text-[11px] px-2 gap-1 border-muted-foreground/30 text-muted-foreground cursor-not-allowed opacity-60'
                                 }
                                 onClick={isOwner ? () => handleReactivateById(c.id) : undefined}
@@ -1085,7 +1085,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                             (c.consent_evidence as Record<string, unknown> | null)?.attachment_skip_reason as string | undefined,
                           )
                           return skipMsg ? (
-                            <p className="text-xs text-amber-700 mt-0.5 flex items-start gap-1" title="Reintenta la subida desde Editar → Adjuntar evidencia física.">
+                            <p className="text-xs text-warning-fg mt-0.5 flex items-start gap-1" title="Reintenta la subida desde Editar → Adjuntar evidencia física.">
                               <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
                               <span>Adjunto de evidencia NO guardado: {skipMsg} Reintenta desde Editar.</span>
                             </p>
@@ -1139,8 +1139,8 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                             Cuando este flow está activo, el bloque consent normal de
                             abajo NO se renderiza (era redundancia). */}
                         {awaitingRenewal && (
-                          <div className="rounded-lg border border-amber-700/40 bg-amber-700/5 p-3 space-y-2">
-                            <div className="flex items-start gap-2 text-xs text-amber-700">
+                          <div className="rounded-lg border border-warning-border bg-warning-bg p-3 space-y-2">
+                            <div className="flex items-start gap-2 text-xs text-warning-fg">
                               <ShieldOff className="h-4 w-4 shrink-0 mt-0.5" />
                               <div className="flex-1">
                                 <p className="font-semibold">Contacto anonimizado el {c.consent_revoked_at && new Date(c.consent_revoked_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}.</p>
@@ -1172,7 +1172,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                 <input type="hidden" name="consent_given" value="on" />
 
                                 <div className="space-y-1">
-                                  <Label className="text-xs text-amber-700">
+                                  <Label className="text-xs text-warning-fg">
                                     Canal del consentimiento renovado <span className="text-destructive">*</span>
                                   </Label>
                                   <select
@@ -1199,7 +1199,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                 </div>
 
                                 <div className="space-y-1">
-                                  <Label className="text-xs text-amber-700">
+                                  <Label className="text-xs text-warning-fg">
                                     Evidencia del consentimiento renovado <span className="text-destructive">*</span>
                                   </Label>
                                   <Input
@@ -1338,7 +1338,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                 <>
                                   <input type="hidden" name="consent_given" value="on" />
                                   <div className="flex items-start gap-2">
-                                    <ShieldCheck className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
+                                    <ShieldCheck className="h-4 w-4 text-success-fg shrink-0 mt-0.5" />
                                     <div className="text-xs text-foreground leading-snug">
                                       <strong>Consentimiento activo</strong> (Ley 1581/2012)
                                       {c.consent_date && (
@@ -1348,7 +1348,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                       )}.
                                       <p className="text-[11px] text-muted-foreground mt-0.5">
                                         Para revocar el consentimiento usa el botón
-                                        <strong className="text-amber-700"> Anonimizar </strong>
+                                        <strong className="text-warning-fg"> Anonimizar </strong>
                                         en la sección Habeas Data abajo. Esa acción borra la PII
                                         + deja audit inmutable + notifica al tenant. Desmarcar
                                         este check NO es la vía correcta de revocación legal.
@@ -1463,7 +1463,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                                 {(() => {
                                   const skipMsg = attachmentSkipMessage(evidenceObj.attachment_skip_reason as string | undefined)
                                   return skipMsg && !hasAttachment ? (
-                                    <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2 text-[11px] text-amber-700 flex items-start gap-1.5">
+                                    <div className="rounded-md border border-warning-border bg-warning-bg p-2 text-[11px] text-warning-fg flex items-start gap-1.5">
                                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                                       <span>El último intento de adjuntar evidencia falló: {skipMsg} Vuelve a subir el archivo abajo.</span>
                                     </div>
@@ -1520,7 +1520,7 @@ export default function ContactsManager({ initialContacts, loadError, capReached
                             disabled={isPending}
                             size="sm"
                             variant="outline"
-                            className="h-8 text-xs gap-1.5 px-3 border-red-700/50 text-red-700 hover:bg-red-700/10 hover:text-red-800 hover:border-red-700"
+                            className="h-8 text-xs gap-1.5 px-3 border-danger-border text-danger-fg hover:bg-danger-bg hover:text-danger-fg hover:border-danger-fg"
                             onClick={() => handleDeleteById(c.id)}
                           >
                             <Trash2 className="h-3 w-3" /> Eliminar

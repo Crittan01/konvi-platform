@@ -96,15 +96,15 @@ export function ComplianceSection({
   return (
     <section className="rounded-xl border border-border bg-card p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-emerald-700" />
+        <ShieldCheck className="h-4 w-4 text-success-fg" />
         <h3 className="font-semibold text-foreground">{title}</h3>
       </div>
       <div className="space-y-2 text-sm">
         {gates.map((g, i) => {
           const okClass =
             g.ok === false
-              ? 'bg-amber-700/10 border border-amber-700/40 text-amber-900'
-              : 'bg-emerald-700/10 border border-emerald-700/40 text-emerald-900'
+              ? 'bg-warning-bg border border-warning-border text-warning-fg'
+              : 'bg-success-bg border border-success-border text-success-fg'
           return (
             <div key={i} className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">{g.label}</span>
@@ -143,18 +143,18 @@ export function DangerZoneSection({
   onAction?: () => void
 }) {
   return (
-    <section className="rounded-xl border border-rose-700/30 bg-rose-700/5 p-4 space-y-3">
+    <section className="rounded-xl border border-danger-border bg-danger-bg p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <ShieldOff className="h-4 w-4 text-rose-800" />
-        <h3 className="font-semibold text-rose-900">{title}</h3>
+        <ShieldOff className="h-4 w-4 text-danger-fg" />
+        <h3 className="font-semibold text-danger-fg">{title}</h3>
       </div>
-      <div className="text-sm text-rose-900/80">{description}</div>
+      <div className="text-sm text-danger-fg/80">{description}</div>
       <button
         type="button"
         onClick={onAction}
         disabled={actionDisabled}
         title={actionDisabled ? 'Disponible próximamente' : undefined}
-        className="text-sm font-medium text-rose-800 hover:text-rose-900 underline disabled:opacity-60 disabled:cursor-not-allowed disabled:no-underline"
+        className="text-sm font-medium text-danger-fg hover:text-danger-fg underline disabled:opacity-60 disabled:cursor-not-allowed disabled:no-underline"
       >
         {actionLabel}
         {actionDisabled && ' (próximamente)'}
@@ -167,9 +167,9 @@ export function DangerZoneSection({
 
 export function MigrationBanner({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-amber-700/30 bg-amber-700/5 p-4 flex items-start gap-3">
-      <AlertCircle className="h-4 w-4 text-amber-800 mt-0.5 shrink-0" />
-      <p className="text-sm text-amber-900">{children}</p>
+    <section className="rounded-xl border border-warning-border bg-warning-bg p-4 flex items-start gap-3">
+      <AlertCircle className="h-4 w-4 text-warning-fg mt-0.5 shrink-0" />
+      <p className="text-sm text-warning-fg">{children}</p>
     </section>
   )
 }

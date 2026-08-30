@@ -139,7 +139,7 @@ export function OrderMiniForm({
     <>
       {/* Banner success cuando el form se cierra tras crear pedido */}
       {success && (
-        <p className="text-[11px] text-emerald-600 mx-4 mb-2 flex items-center gap-1">
+        <p className="text-[11px] text-success-fg mx-4 mb-2 flex items-center gap-1">
           <BadgeCheck className="h-3.5 w-3.5" /> {success}
         </p>
       )}
@@ -208,7 +208,7 @@ export function OrderMiniForm({
                       {label !== 'Estándar' && <span className="text-muted-foreground"> — {label}</span>}
                       <span className="float-right font-semibold">{formatMoney(v.price)}</span>
                       <br />
-                      <span className={`text-[10px] ${v.stock_quantity <= 0 ? 'text-red-700' : 'text-muted-foreground'}`}>
+                      <span className={`text-[10px] ${v.stock_quantity <= 0 ? 'text-danger-fg' : 'text-muted-foreground'}`}>
                         Stock: {v.stock_quantity}
                       </span>
                     </button>
@@ -236,7 +236,7 @@ export function OrderMiniForm({
                     }))}
                     className="w-14 px-1 py-0.5 text-xs rounded border border-border bg-background text-center focus:outline-hidden focus:ring-1 focus:ring-primary"
                   />
-                  <button onClick={() => handleToggleVariation(v)} className="text-muted-foreground hover:text-red-700">
+                  <button onClick={() => handleToggleVariation(v)} className="text-muted-foreground hover:text-danger-fg">
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -275,7 +275,7 @@ export function OrderMiniForm({
           </div>
 
           {error && (
-            <p className="text-[11px] text-red-700 mb-2 flex items-center gap-1">
+            <p className="text-[11px] text-danger-fg mb-2 flex items-center gap-1">
               <AlertCircle className="h-3.5 w-3.5" /> {error}
             </p>
           )}

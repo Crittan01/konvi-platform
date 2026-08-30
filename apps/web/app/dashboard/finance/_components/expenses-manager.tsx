@@ -79,7 +79,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
       </div>
 
       {showAdd && (
-        <Card className="border-red-700/30">
+        <Card className="border-danger-border">
           <CardContent className="pt-6">
             <ActionResultForm
               action={async (fd) => {
@@ -102,7 +102,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                 </div>
                 <div className="space-y-1">
                   <label htmlFor="exp-amount" className="text-[10px] font-semibold text-muted-foreground uppercase">Monto ($) *</label>
-                  <Input id="exp-amount" name="amount" type="number" min="1" step="1" placeholder="0" required className="h-8 text-xs font-mono border-red-700/30 text-red-700" />
+                  <Input id="exp-amount" name="amount" type="number" min="1" step="1" placeholder="0" required className="h-8 text-xs font-mono border-danger-border text-danger-fg" />
                 </div>
                 <div className="space-y-1 lg:col-span-2">
                   <label htmlFor="exp-date" className="text-[10px] font-semibold text-muted-foreground uppercase">Fecha del Gasto</label>
@@ -175,7 +175,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                         {formatBogotaDate(e.expense_date)}
                       </span>
                     </TableCell>
-                    <TableCell className={`text-right font-mono text-red-700 font-medium whitespace-nowrap ${reversed ? 'line-through' : ''}`}>
+                    <TableCell className={`text-right font-mono text-danger-fg font-medium whitespace-nowrap ${reversed ? 'line-through' : ''}`}>
                       {formatCOPNegative(e.amount)}
                     </TableCell>
                     {canWrite && (
@@ -184,7 +184,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-500/10 gap-1"
+                            className="h-7 px-2 text-xs text-danger-fg hover:text-danger-fg hover:bg-danger-bg gap-1"
                             onClick={() => { setTarget(e); setReason('') }}
                             title="Anular este gasto (no se borra: queda registrado como anulado)"
                           >
@@ -214,7 +214,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
           {target && (
             <div className="rounded-md border border-border/50 bg-muted/30 p-3 text-sm space-y-1">
               <p className="font-medium">{target.description}</p>
-              <p className="font-mono text-red-700">{formatCOPNegative(target.amount)}</p>
+              <p className="font-mono text-danger-fg">{formatCOPNegative(target.amount)}</p>
             </div>
           )}
 

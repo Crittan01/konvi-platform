@@ -47,7 +47,7 @@ function MoneyEventToastBody({ status, totalAmount }: { status: string; totalAmo
   const Icon = ICONS[status] ?? CheckCircle2
   return (
     <span className="flex items-center gap-2.5">
-      <CelebrationCheck className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-600/25 shrink-0">
+      <CelebrationCheck className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-success-bg text-success-fg ring-1 ring-emerald-600/25 shrink-0">
         <Icon className="h-4 w-4" aria-hidden />
       </CelebrationCheck>
       <span className="min-w-0">

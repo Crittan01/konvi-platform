@@ -151,10 +151,10 @@ function ClaimsError({ message }: { message: string }) {
       <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
         <AlertCircle className="h-5 w-5 text-primary" /> Centro de Reclamos
       </h1>
-      <div className="rounded-xl border border-red-700/30 bg-red-500/10 p-6 flex items-start gap-3">
-        <AlertCircle className="h-5 w-5 text-red-700 shrink-0 mt-0.5" />
+      <div className="rounded-xl border border-danger-border bg-danger-bg p-6 flex items-start gap-3">
+        <AlertCircle className="h-5 w-5 text-danger-fg shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <p className="font-medium text-red-700">No se pudieron cargar los reclamos</p>
+          <p className="font-medium text-danger-fg">No se pudieron cargar los reclamos</p>
           <p className="text-sm text-muted-foreground">{message}</p>
         </div>
       </div>

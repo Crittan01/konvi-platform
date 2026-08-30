@@ -64,23 +64,23 @@ const STATUS_ICON: Record<TemplateStatus, React.ElementType> = {
   LIMIT_EXCEEDED: Gauge,
 }
 
-// Tailwind shades 700+ por feedback_ui_colors (NO 300-500).
+// Neutros usan tokens muted (FASE 2); status usan tokens semánticos del DS.
 const STATUS_CHIP: Record<TemplateStatus, string> = {
-  LOCAL_DRAFT: 'bg-slate-700/10 text-slate-800 border-slate-700/30',
-  PENDING:     'bg-amber-700/10 text-amber-900 border-amber-700/40',
-  APPROVED:    'bg-emerald-700/10 text-emerald-900 border-emerald-700/40',
-  REJECTED:    'bg-rose-700/10 text-rose-900 border-rose-700/40',
-  DISABLED:    'bg-slate-700/10 text-slate-800 border-slate-700/30',
-  PAUSED:      'bg-amber-700/10 text-amber-900 border-amber-700/40',
-  FLAGGED:     'bg-rose-700/10 text-rose-900 border-rose-700/40',
-  LIMIT_EXCEEDED: 'bg-amber-700/10 text-amber-900 border-amber-700/40',
+  LOCAL_DRAFT: 'bg-muted text-muted-foreground border-border',
+  PENDING:     'bg-warning-bg text-warning-fg border-warning-border',
+  APPROVED:    'bg-success-bg text-success-fg border-success-border',
+  REJECTED:    'bg-danger-bg text-danger-fg border-danger-border',
+  DISABLED:    'bg-muted text-muted-foreground border-border',
+  PAUSED:      'bg-warning-bg text-warning-fg border-warning-border',
+  FLAGGED:     'bg-danger-bg text-danger-fg border-danger-border',
+  LIMIT_EXCEEDED: 'bg-warning-bg text-warning-fg border-warning-border',
 }
 
 const QUALITY_CHIP: Record<string, string> = {
-  GREEN: 'bg-emerald-700/10 text-emerald-900 border-emerald-700/40',
-  YELLOW: 'bg-amber-700/10 text-amber-900 border-amber-700/40',
-  RED: 'bg-rose-700/10 text-rose-900 border-rose-700/40',
-  UNKNOWN: 'bg-slate-700/10 text-slate-700 border-slate-700/30',
+  GREEN: 'bg-success-bg text-success-fg border-success-border',
+  YELLOW: 'bg-warning-bg text-warning-fg border-warning-border',
+  RED: 'bg-danger-bg text-danger-fg border-danger-border',
+  UNKNOWN: 'bg-muted text-muted-foreground border-border',
 }
 
 const QUALITY_LABEL: Record<string, string> = {
@@ -152,9 +152,9 @@ function MessagePreview({ componentsText }: { componentsText: string }) {
           El preview aparece cuando el JSON es válido y tiene un BODY con texto.
         </div>
       ) : (
-        <div className="rounded-lg border border-emerald-700/30 bg-emerald-700/5 p-3 space-y-1.5">
+        <div className="rounded-lg border border-success-border bg-success-bg p-3 space-y-1.5">
           {preview.headerFormat && preview.headerFormat !== 'TEXT' && (
-            <div className="text-[11px] uppercase tracking-wide text-emerald-900/70">
+            <div className="text-[11px] uppercase tracking-wide text-success-fg/70">
               [{preview.headerFormat}]
             </div>
           )}
@@ -172,7 +172,7 @@ function MessagePreview({ componentsText }: { componentsText: string }) {
               {preview.buttonLabels.map((b, i) => (
                 <span
                   key={i}
-                  className="text-xs text-emerald-900 border border-emerald-700/40 rounded-full px-2 py-0.5"
+                  className="text-xs text-success-fg border border-success-border rounded-full px-2 py-0.5"
                 >
                   {b}
                 </span>
@@ -292,7 +292,7 @@ export default function WhatsAppTemplates({
         <div
           role="status"
           aria-live="polite"
-          className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900 flex items-start gap-2"
+          className="rounded-md border border-success-border bg-success-bg p-3 text-sm text-success-fg flex items-start gap-2"
         >
           <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
           <span>{successMsg}</span>
@@ -392,7 +392,7 @@ export default function WhatsAppTemplates({
                       {extractBodyPreview(t.components)}
                     </p>
                     {t.status_reason && (
-                      <p className="text-xs text-rose-900 border-l-2 border-rose-700/40 pl-2">
+                      <p className="text-xs text-danger-fg border-l-2 border-danger-border pl-2">
                         Meta indicó: {t.status_reason}
                       </p>
                     )}
@@ -436,7 +436,7 @@ export default function WhatsAppTemplates({
                         variant="ghost"
                         size="sm"
                         onClick={() => { setDeleting(t); setFormError(null) }}
-                        className="gap-1 text-rose-800 hover:text-rose-900"
+                        className="gap-1 text-danger-fg hover:text-danger-fg"
                       >
                         <Trash2 className="h-3.5 w-3.5" /> Eliminar
                       </Button>
@@ -527,7 +527,7 @@ export default function WhatsAppTemplates({
               <div
                 role="alert"
                 aria-live="assertive"
-                className="rounded-md border border-rose-700/40 bg-rose-700/5 p-2 text-sm text-rose-900 flex items-start gap-2"
+                className="rounded-md border border-danger-border bg-danger-bg p-2 text-sm text-danger-fg flex items-start gap-2"
               >
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>{formError}</span>
@@ -612,12 +612,12 @@ export default function WhatsAppTemplates({
                 />
               </div>
               <MessagePreview componentsText={componentsText} />
-              <div className="rounded-md border border-amber-700/30 bg-amber-700/5 p-2 text-xs text-amber-900">
+              <div className="rounded-md border border-warning-border bg-warning-bg p-2 text-xs text-warning-fg">
                 Al guardar, la plantilla vuelve a <strong>borrador local</strong> y se desliga
                 de cualquier envío anterior a Meta. Deberás enviarla a revisión de nuevo.
               </div>
               {editing.status_reason && (
-                <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-2 text-xs text-rose-900">
+                <div className="rounded-md border border-danger-border bg-danger-bg p-2 text-xs text-danger-fg">
                   <strong>Razón del rechazo de Meta:</strong> {editing.status_reason}
                 </div>
               )}
@@ -625,7 +625,7 @@ export default function WhatsAppTemplates({
                 <div
                   role="alert"
                   aria-live="assertive"
-                  className="rounded-md border border-rose-700/40 bg-rose-700/5 p-2 text-sm text-rose-900 flex items-start gap-2"
+                  className="rounded-md border border-danger-border bg-danger-bg p-2 text-sm text-danger-fg flex items-start gap-2"
                 >
                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>{formError}</span>
@@ -663,7 +663,7 @@ export default function WhatsAppTemplates({
                 <div
                   role="alert"
                   aria-live="assertive"
-                  className="rounded-md border border-rose-700/40 bg-rose-700/5 p-2 text-sm text-rose-900"
+                  className="rounded-md border border-danger-border bg-danger-bg p-2 text-sm text-danger-fg"
                 >
                   {formError}
                 </div>
@@ -729,7 +729,7 @@ export default function WhatsAppTemplates({
                 </div>
               </div>
               {viewing.status_reason && (
-                <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-2 text-xs text-rose-900">
+                <div className="rounded-md border border-danger-border bg-danger-bg p-2 text-xs text-danger-fg">
                   <strong>Razón de Meta:</strong> {viewing.status_reason}
                 </div>
               )}

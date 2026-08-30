@@ -22,13 +22,13 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
-  pending_payment: 'bg-amber-500/15 text-amber-700 border-amber-700/30',
-  confirmed: 'bg-blue-500/15 text-blue-700 border-blue-700/30',
-  processing: 'bg-purple-500/15 text-purple-700 border-purple-700/30',
-  shipped: 'bg-indigo-500/15 text-indigo-700 border-indigo-700/30',
-  delivered: 'bg-green-500/15 text-green-700 border-green-700/30',
-  cancelled: 'bg-red-500/15 text-red-700 border-red-700/30',
+  pending: 'bg-warning-bg text-warning-fg border-warning-border',
+  pending_payment: 'bg-warning-bg text-warning-fg border-warning-border',
+  confirmed: 'bg-info-bg text-info-fg border-info-border',
+  processing: 'bg-ai-bg text-ai-fg border-ai-border',
+  shipped: 'bg-ai-bg text-ai-fg border-ai-border',
+  delivered: 'bg-success-bg text-success-fg border-success-border',
+  cancelled: 'bg-danger-bg text-danger-fg border-danger-border',
 }
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   pending: 'Pendiente', approved: 'Aprobado', declined: 'Rechazado',
@@ -137,7 +137,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
               {STATUS_LABELS[order.status] ?? order.status}
             </span>
             {order.payment_method === 'cod' && (
-              <Badge variant="outline" className="text-[11px] text-emerald-700 border-emerald-700/30">💵 Contraentrega</Badge>
+              <Badge variant="outline" className="text-[11px] text-success-fg border-success-border">💵 Contraentrega</Badge>
             )}
             <p className="text-2xl font-bold text-primary tabular-nums">{cop(total)}</p>
           </div>
@@ -177,7 +177,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
             </div>
           )}
           {discount > 0 && (
-            <div className="flex justify-between gap-2 text-emerald-700">
+            <div className="flex justify-between gap-2 text-success-fg">
               <span>Descuento</span><span className="font-mono tabular-nums">−{cop(discount)}</span>
             </div>
           )}
@@ -241,8 +241,8 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
 
       {/* Auditoría de cancelación */}
       {cancel && (
-        <section className="rounded-xl border border-red-700/30 bg-red-500/5 p-4">
-          <h2 className="text-sm font-semibold flex items-center gap-2 mb-3 text-red-700"><XCircle className="h-4 w-4" /> Cancelación</h2>
+        <section className="rounded-xl border border-danger-border bg-danger-bg p-4">
+          <h2 className="text-sm font-semibold flex items-center gap-2 mb-3 text-danger-fg"><XCircle className="h-4 w-4" /> Cancelación</h2>
           <div className="text-sm space-y-1">
             <div className="flex justify-between gap-2"><span className="text-muted-foreground">Motivo</span><span>{cancel.reason_text || cancel.reason_code}</span></div>
             <div className="flex justify-between gap-2"><span className="text-muted-foreground">Reembolso</span><span>{cancel.refund_method ? `${cancel.refund_method} · ${cancel.refund_status}` : 'No aplica'}</span></div>

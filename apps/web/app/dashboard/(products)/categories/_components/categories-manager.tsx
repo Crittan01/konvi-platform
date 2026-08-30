@@ -151,7 +151,7 @@ export default function CategoriesManager({
             <button
               onClick={() => handleSaveEdit(c.id)}
               disabled={pending}
-              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-green-700 hover:bg-green-700/10"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-success-fg hover:bg-success-bg"
               aria-label="Guardar"
             >
               <Check className="h-4 w-4" />
@@ -183,7 +183,7 @@ export default function CategoriesManager({
               ) : (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="text-xs text-amber-800 tabular-nums shrink-0 cursor-help underline decoration-dotted underline-offset-2">
+                    <span className="text-xs text-warning-fg tabular-nums shrink-0 cursor-help underline decoration-dotted underline-offset-2">
                       ≥ {c.product_count} producto{c.product_count === 1 ? '' : 's'}
                     </span>
                   </TooltipTrigger>
@@ -218,7 +218,7 @@ export default function CategoriesManager({
                 <button
                   onClick={() => handleDelete(c.id, c.product_count)}
                   disabled={pending}
-                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-red-700 hover:bg-red-700/10"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-danger-fg hover:bg-danger-bg"
                   aria-label="Eliminar"
                 >
                   <Trash2 className="h-3.5 w-3.5" />

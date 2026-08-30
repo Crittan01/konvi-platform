@@ -268,8 +268,8 @@ export default function SuppliersManager({ suppliers, canWrite }: Props) {
                         onClick={() => handleToggleActive(s)}
                         className={`h-8 text-xs gap-1.5 ${
                           isActive(s)
-                            ? 'text-red-700 hover:text-red-800 hover:bg-red-500/10 border-red-700/25'
-                            : 'text-emerald-700 hover:text-emerald-800 hover:bg-emerald-500/10 border-emerald-700/25'
+                            ? 'text-danger-fg hover:text-danger-fg hover:bg-danger-bg border-danger-border'
+                            : 'text-success-fg hover:text-success-fg hover:bg-success-bg border-success-border'
                         }`}
                       >
                         {isPending ? (

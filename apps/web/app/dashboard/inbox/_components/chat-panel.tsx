@@ -249,8 +249,8 @@ export function ChatPanel({
                       const ageMs = Date.now() - new Date(lastInbound.created_at).getTime()
                       const ageMin = Math.floor(ageMs / 60000)
                       let cls = 'text-muted-foreground'
-                      if (ageMin >= 15) cls = 'text-red-600 font-medium'
-                      else if (ageMin >= 5) cls = 'text-amber-600 font-medium'
+                      if (ageMin >= 15) cls = 'text-danger-fg font-medium'
+                      else if (ageMin >= 5) cls = 'text-warning-fg font-medium'
                       return (
                         <span className={`inline-flex items-center gap-0.5 text-[10px] ${cls}`} title={`Último mensaje del cliente: ${formatDateTime(lastInbound.created_at)}`}>
                           <Clock className="h-2.5 w-2.5" />
@@ -273,17 +273,17 @@ export function ChatPanel({
                     title={rerunCooldown
                       ? 'Espera unos segundos antes de re-ejecutar de nuevo'
                       : 'Re-procesar último mensaje del cliente — útil si el bot dio respuesta mala o si actualizaste catálogo/cupones'}
-                    className="text-violet-600 border-violet-700/30 hover:bg-violet-500/10 text-xs h-8"
+                    className="text-ai-fg border-ai-border hover:bg-ai-bg text-xs h-8"
                   >
                     <RotateCw className={`h-3.5 w-3.5 mr-1 ${rerunning ? 'animate-spin' : ''}`} /> Rerun IA
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onUpdateStatus('human_takeover')} disabled={takingOver}
-                    className="text-amber-600 border-amber-700/30 hover:bg-amber-500/10 text-xs h-8">
+                    className="text-warning-fg border-warning-border hover:bg-warning-bg text-xs h-8">
                     <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
                   </Button>
                   <Button size="sm" variant="outline" onClick={handleClose} disabled={takingOver}
                     title="Marcar la conversación como resuelta y cerrarla. Se reabre si el cliente vuelve a escribir."
-                    className="text-slate-700 border-slate-700/30 hover:bg-slate-500/10 text-xs h-8">
+                    className="text-muted-foreground border-border hover:bg-muted text-xs h-8">
                     <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Cerrar
                   </Button>
                 </>
@@ -291,12 +291,12 @@ export function ChatPanel({
               {selectedConv.status === 'human_takeover' && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
-                    className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8">
+                    className="text-success-fg border-success-border hover:bg-success-bg text-xs h-8">
                     <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
                   </Button>
                   <Button size="sm" variant="outline" onClick={handleClose} disabled={takingOver}
                     title="Marcar la conversación como resuelta y cerrarla. Se reabre si el cliente vuelve a escribir."
-                    className="text-slate-700 border-slate-700/30 hover:bg-slate-500/10 text-xs h-8">
+                    className="text-muted-foreground border-border hover:bg-muted text-xs h-8">
                     <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Cerrar
                   </Button>
                 </>
@@ -304,13 +304,13 @@ export function ChatPanel({
               {selectedConv.status === 'closed' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
                   title="Reabrir la conversación y reactivar el bot."
-                  className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8">
+                  className="text-success-fg border-success-border hover:bg-success-bg text-xs h-8">
                   <Bot className="h-3.5 w-3.5 mr-1" /> Reabrir
                 </Button>
               )}
               {selectedConv.status === 'opted_out' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
-                  className="text-emerald-600 border-emerald-700/30 hover:bg-emerald-500/10 text-xs h-8"
+                  className="text-success-fg border-success-border hover:bg-success-bg text-xs h-8"
                   title="Reactivar bot. consent_revoked_at sigue marcado — para reactivar marketing proactivo, el cliente debe re-otorgar consent explícitamente.">
                   <Bot className="h-3.5 w-3.5 mr-1" /> Reactivar bot
                 </Button>
@@ -337,12 +337,12 @@ export function ChatPanel({
             </div>
           </div>
           {statusError && (
-            <div className="px-4 py-2 text-[11px] text-red-700 bg-red-500/5 border-b border-red-700/20">
+            <div className="px-4 py-2 text-[11px] text-danger-fg bg-danger-bg border-b border-danger-border">
               {statusError}
             </div>
           )}
           {rerunNotice && (
-            <div className="px-4 py-2 text-[11px] text-violet-700 bg-violet-500/10 border-b border-violet-700/30 flex items-center gap-1">
+            <div className="px-4 py-2 text-[11px] text-ai-fg bg-ai-bg border-b border-ai-border flex items-center gap-1">
               <RotateCw className="h-3 w-3" /> {rerunNotice}
             </div>
           )}
@@ -351,7 +351,7 @@ export function ChatPanel({
             const lastInbound = [...messages].reverse().find(m => m.direction === 'inbound')
             if (!lastInbound) {
               return (
-                <div className="px-4 py-2 text-[12px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                <div className="px-4 py-2 text-[12px] text-danger-fg bg-danger-bg border-b border-danger-border flex items-center gap-2">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     Aún no hay mensaje del cliente. Meta solo permite responder libre cuando el cliente abrió la conversación —
@@ -365,7 +365,7 @@ export function ChatPanel({
             const hoursRemaining = 24 - hoursSince
             if (hoursRemaining <= 0) {
               return (
-                <div className="px-4 py-2 text-[12px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                <div className="px-4 py-2 text-[12px] text-danger-fg bg-danger-bg border-b border-danger-border flex items-center gap-2">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     <strong>Ventana 24h expirada</strong> (último mensaje del cliente hace {hoursSince.toFixed(1)}h).
@@ -376,7 +376,7 @@ export function ChatPanel({
             }
             if (hoursRemaining < 4) {
               return (
-                <div className="px-4 py-2 text-[12px] text-amber-700 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+                <div className="px-4 py-2 text-[12px] text-warning-fg bg-warning-bg border-b border-warning-border flex items-center gap-2">
                   <Clock className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     Ventana 24h: quedan <strong>{hoursRemaining.toFixed(1)}h</strong> para responder libremente.
@@ -410,7 +410,7 @@ export function ChatPanel({
               </div>
             )}
             {error ? (
-              <div className="text-center text-red-700 text-sm pt-12">
+              <div className="text-center text-danger-fg text-sm pt-12">
                 <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-70" />
                 {error}
               </div>
@@ -557,7 +557,7 @@ export function ChatPanel({
                           const detail = [err?.title, err?.message].filter(Boolean).join(' — ')
                           return (
                             <span
-                              className="text-[10px] bg-red-500/20 text-red-700 px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                              className="text-[10px] bg-danger-bg text-danger-fg px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
                               title={detail || 'Meta no pudo entregar este mensaje'}
                             >
                               <AlertCircle className="h-3 w-3" /> No entregado
@@ -594,7 +594,7 @@ export function ChatPanel({
                           : <Check className="h-3 w-3 opacity-50" aria-label="Pendiente" />
                       })()}
                       {!isInbound && msg.processing_status === 'failed' && (
-                        <span className="text-[10px] bg-red-500/20 text-red-700 px-1.5 py-0.5 rounded-full"
+                        <span className="text-[10px] bg-danger-bg text-danger-fg px-1.5 py-0.5 rounded-full"
                           title={msg.skip_reason ?? 'Error al procesar'}>
                           ✕ Error
                         </span>
@@ -623,7 +623,7 @@ export function ChatPanel({
           {/* Footer */}
           {selectedConv.status === 'human_takeover' ? (
             <div className="p-3 border-t border-border bg-card space-y-2">
-              {sendError && <p className="text-xs text-red-700 text-center">{sendError}</p>}
+              {sendError && <p className="text-xs text-danger-fg text-center">{sendError}</p>}
               <ChatEditorToolbar
                 textareaRef={replyInputRef}
                 setReplyText={setReplyText}
@@ -669,7 +669,7 @@ export function ChatPanel({
                   </div>
                 </div>
               )}
-              <p className="text-[11px] text-amber-600 font-medium text-center flex items-center justify-center gap-1">
+              <p className="text-[11px] text-warning-fg font-medium text-center flex items-center justify-center gap-1">
                 <User className="h-3 w-3" /> Modo agente humano (bot silenciado)
               </p>
             </div>

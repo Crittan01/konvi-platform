@@ -41,6 +41,32 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
+  /* ── Tokens semánticos de status (FASE 2, 2026-08-30) ───────────────────
+     Fin de juego del remap dark interino (bloque `.dark .bg-{color}-50…`
+     eliminado más abajo en este mismo pase): las familias de paleta
+     light-only (amber/red/emerald/blue/violet/slate…) se reemplazan por
+     tokens con valor por tema. Los valores son full-color (hex/rgb con
+     alpha), NO canales hsl como el resto del DS — el alpha de bg/border en
+     dark es deliberado (tinte translúcido sobre el canvas, mismo efecto
+     que el remap que reemplazan). `inline` igual de obligatorio aquí.
+     Neutrales (slate/gray/zinc) NO tienen familia nueva: mapean a los
+     tokens `muted`/`border` ya existentes. */
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-border: var(--warning-border);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-border: var(--danger-border);
+  --color-success-bg: var(--success-bg);
+  --color-success-fg: var(--success-fg);
+  --color-success-border: var(--success-border);
+  --color-info-bg: var(--info-bg);
+  --color-info-fg: var(--info-fg);
+  --color-info-border: var(--info-border);
+  --color-ai-bg: var(--ai-bg);
+  --color-ai-fg: var(--ai-fg);
+  --color-ai-border: var(--ai-border);
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -220,7 +246,7 @@
     /* Charts del home (recharts) — Spec WOW: antes hex hardcodeados en
        dashboard-client.tsx (no adaptaban a dark). Light = los hex originales
        exactos (cero regresión visual); dark = valores brillantes coherentes
-       con el remap dark de badges (§1.10). */
+       con los tokens semánticos de status (FASE 2). */
     --chart-messages:        153 50% 44%;   /* #38A875 verde actividad */
     --chart-neutral:         171 11% 53%;   /* #7A9490 ticks/leyendas */
     --chart-pending:          42 63% 55%;   /* #D4A843 */
@@ -235,6 +261,26 @@
     --sidebar-bg:     168 14%  8%;   /* Sidebar estructurado oscuro */
     --sidebar-bg-end: 168 15%  6%;   /* Extremo inferior del gradiente */
     --topbar-bg:      168 13% 15%;   /* #212B2A — entre sidebar y canvas */
+
+    /* ── Status tokens (light = réplica de la paleta histórica: amber-50/800,
+       red-50/800, emerald-50/800, blue-50/700, violet-50/800 — la migración
+       desde las clases de paleta es visualmente idéntica en light).
+       fg verificado ≥4.5:1 AA sobre su bg (ver reporte FASE 2). */
+    --warning-bg:      #FFFBEB;              /* amber-50 */
+    --warning-fg:      #92400E;              /* amber-800 */
+    --warning-border:  rgb(180 83 9 / 0.30); /* amber-700/30 */
+    --danger-bg:       #FEF2F2;              /* red-50 */
+    --danger-fg:       #991B1B;              /* red-800 */
+    --danger-border:   rgb(185 28 28 / 0.30);/* red-700/30 */
+    --success-bg:      #ECFDF5;              /* emerald-50 */
+    --success-fg:      #065F46;              /* emerald-800 */
+    --success-border:  rgb(4 120 87 / 0.30); /* emerald-700/30 */
+    --info-bg:         #EFF6FF;              /* blue-50 */
+    --info-fg:         #1D4ED8;              /* blue-700 */
+    --info-border:     rgb(29 78 216 / 0.30);/* blue-700/30 */
+    --ai-bg:           #F5F3FF;              /* violet-50 */
+    --ai-fg:           #5B21B6;              /* violet-800 */
+    --ai-border:       rgb(109 40 217 / 0.30);/* violet-700/30 */
 
     color-scheme: light;
   }
@@ -275,7 +321,7 @@
     --amber:  43 70% 60%;
     --chart-opex:      0 72% 63%;    /* rojo más brillante en dark */
     --chart-beneficio: 152 48% 55%;  /* verde beneficio brillante en dark (paridad --primary) */
-    /* Charts del home en dark — brillantes, coherentes con el remap de badges. */
+    /* Charts del home en dark — brillantes, coherentes con los tokens de status. */
     --chart-messages:        158 64% 52%;   /* #34d399 */
     --chart-pending:          43 96% 56%;   /* #fbbf24 */
     --chart-pending-payment:  27 96% 61%;   /* #fb923c (naranja: espera de pago) */
@@ -284,6 +330,27 @@
     --chart-shipped:         270 95% 75%;   /* #c084fc */
     --chart-delivered:       142 69% 58%;   /* #4ade80 */
     --chart-cancelled:         0 91% 71%;   /* #f87171 */
+
+    /* ── Status tokens dark — bg translúcido 13% + fg brillante (misma tinta
+       que el remap interino que reemplazan: amber→#fbbf24, red→#f87171,
+       emerald→#34d399, blue→#60a5fa, violet→#a78bfa). Border 30% (el remap
+       usaba 26% — +4pp para paridad con el patrón DS alert.tsx /25-30).
+       fg ≥4.5:1 AA sobre bg compuesto con el canvas (reporte FASE 2). */
+    --warning-bg:      rgb(245 158 11 / 0.13);
+    --warning-fg:      #FBBF24;
+    --warning-border:  rgb(245 158 11 / 0.30);
+    --danger-bg:       rgb(239 68 68 / 0.13);
+    --danger-fg:       #F87171;
+    --danger-border:   rgb(239 68 68 / 0.30);
+    --success-bg:      rgb(16 185 129 / 0.13);
+    --success-fg:      #34D399;
+    --success-border:  rgb(16 185 129 / 0.30);
+    --info-bg:         rgb(59 130 246 / 0.13);
+    --info-fg:         #60A5FA;
+    --info-border:     rgb(59 130 246 / 0.30);
+    --ai-bg:           rgb(139 92 246 / 0.13);
+    --ai-fg:           #A78BFA;
+    --ai-border:       rgb(139 92 246 / 0.30);
 
     color-scheme: dark;
   }
@@ -349,65 +416,13 @@
   }
 }
 
-/* ── Dark mode — colores semánticos legibles (barrido visual 2026-07-19) ──────
-   Muchos badges/cajas usan `bg-{color}-50/100` + `text-{color}-700` (patrón claro).
-   En dark eso quedaba como caja CLARA sobre el canvas oscuro (legible pero inconsistente)
-   y el texto de color SUELTO sobre el canvas perdía brillo (concern founder rojo/azul).
-   Remapeo por PAREJA (fondo → tinte oscuro translúcido, texto → brillante, borde → sutil)
-   por familia → badges dark-consistentes + texto legible, en UN solo lugar (modular).
-   Interino; el fin de juego son tokens danger/warning/success/info. Sin @layer → ganan
-   sobre las utilidades de Tailwind por cascada de capas. NO toca las variantes /15 /20
-   (ya translúcidas → correctas en dark) ni las páginas de auth (forzadas .light). */
-.dark .bg-red-50, .dark .bg-red-100, .dark .bg-rose-50 { background-color: color-mix(in srgb, #ef4444 13%, transparent); }
-.dark .bg-amber-50, .dark .bg-amber-100, .dark .bg-yellow-50 { background-color: color-mix(in srgb, #f59e0b 13%, transparent); }
-.dark .bg-orange-50 { background-color: color-mix(in srgb, #f97316 13%, transparent); }
-.dark .bg-emerald-50, .dark .bg-emerald-100, .dark .bg-green-50 { background-color: color-mix(in srgb, #10b981 13%, transparent); }
-.dark .bg-blue-50, .dark .bg-sky-50 { background-color: color-mix(in srgb, #3b82f6 13%, transparent); }
-.dark .bg-indigo-50, .dark .bg-purple-50 { background-color: color-mix(in srgb, #6366f1 13%, transparent); }
-
-.dark .text-red-600, .dark .text-red-700, .dark .text-red-800, .dark .text-red-900 { color: #f87171; }
-.dark .text-rose-700, .dark .text-rose-800, .dark .text-rose-900 { color: #fb7185; }
-.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900 { color: #fbbf24; }
-.dark .text-yellow-600, .dark .text-yellow-700 { color: #facc15; }
-.dark .text-orange-700 { color: #fb923c; }
-.dark .text-emerald-600, .dark .text-emerald-700, .dark .text-emerald-800, .dark .text-emerald-900 { color: #34d399; }
-.dark .text-green-600, .dark .text-green-700, .dark .text-green-800 { color: #4ade80; }
-.dark .text-blue-700, .dark .text-blue-800 { color: #60a5fa; }
-.dark .text-sky-700 { color: #38bdf8; }
-.dark .text-indigo-700 { color: #818cf8; }
-.dark .text-purple-700 { color: #c084fc; }
-
-.dark .border-red-200, .dark .border-red-300 { border-color: color-mix(in srgb, #ef4444 26%, transparent); }
-.dark .border-amber-200, .dark .border-amber-300 { border-color: color-mix(in srgb, #f59e0b 26%, transparent); }
-.dark .border-emerald-200, .dark .border-emerald-300, .dark .border-green-200 { border-color: color-mix(in srgb, #10b981 26%, transparent); }
-.dark .border-blue-200, .dark .border-sky-200 { border-color: color-mix(in srgb, #3b82f6 26%, transparent); }
-
-/* ── OLA 0 barrido UX 2026-07-19 — familias faltantes del remap ───────────────
-   Cierra los gaps que los audits marcaron: neutrales (slate/gray/zinc: bg-slate-200
-   de inbox, StatusBadge/sub-nav de channels) + cyan/violet/teal. Mismo patrón por
-   pareja; scoped a .dark → light mode y páginas .light intactas. */
-.dark .bg-slate-50, .dark .bg-slate-100, .dark .bg-slate-200,
-.dark .bg-gray-50, .dark .bg-gray-100, .dark .bg-gray-200,
-.dark .bg-zinc-50, .dark .bg-zinc-100, .dark .bg-zinc-200 { background-color: color-mix(in srgb, #64748b 16%, transparent); }
-.dark .bg-cyan-50, .dark .bg-cyan-100 { background-color: color-mix(in srgb, #06b6d4 13%, transparent); }
-.dark .bg-violet-50, .dark .bg-violet-100 { background-color: color-mix(in srgb, #8b5cf6 13%, transparent); }
-.dark .bg-teal-50, .dark .bg-teal-100 { background-color: color-mix(in srgb, #14b8a6 13%, transparent); }
-
-.dark .text-slate-600, .dark .text-slate-700, .dark .text-slate-800,
-.dark .text-gray-600, .dark .text-gray-700, .dark .text-gray-800,
-.dark .text-zinc-600, .dark .text-zinc-700, .dark .text-zinc-800 { color: #cbd5e1; }
-.dark .text-slate-900, .dark .text-gray-900, .dark .text-zinc-900 { color: #e2e8f0; }
-.dark .text-cyan-600, .dark .text-cyan-700 { color: #22d3ee; }
-.dark .text-violet-600, .dark .text-violet-700 { color: #a78bfa; }
-.dark .text-teal-600, .dark .text-teal-700 { color: #2dd4be; }
-
-.dark .border-slate-200, .dark .border-slate-300,
-.dark .border-gray-200, .dark .border-gray-300,
-.dark .border-zinc-200, .dark .border-zinc-300 { border-color: color-mix(in srgb, #64748b 30%, transparent); }
-.dark .border-indigo-200, .dark .border-purple-200, .dark .border-violet-200 { border-color: color-mix(in srgb, #8b5cf6 26%, transparent); }
-.dark .border-orange-200, .dark .border-rose-200, .dark .border-yellow-200 { border-color: color-mix(in srgb, #f59e0b 26%, transparent); }
-.dark .border-cyan-200, .dark .border-cyan-300 { border-color: color-mix(in srgb, #06b6d4 26%, transparent); }
-.dark .border-teal-200, .dark .border-teal-300 { border-color: color-mix(in srgb, #14b8a6 26%, transparent); }
+/* ── FASE 2 (2026-08-30) — el remap dark interino murió: los tokens semánticos
+     de status (warning/danger/success/info/ai + muted para neutrales, ver
+     @theme inline arriba) lo reemplazan en TODA la app (codemod sobre
+     apps/web/{app,components} + casos manuales, security-form.tsx incluido —
+     grep: 0 clases light-only cubiertas por el viejo remap). Ratchet CI:
+     scripts/audit_ui_palette.py impide reintroducir clases de paleta
+     light-only fuera de allowlist. */
 
 /* Canvas del chat de Inbox — antes hex fijo bg-[#F3F6F4] (no adaptaba a dark → área de
    mensajes gris-blanco brillante). Theme-aware: claro original + superficie sutil en dark. */

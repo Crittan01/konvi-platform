@@ -218,9 +218,9 @@ export function ConversationNotes({ conversationId }: Props) {
   }
 
   return (
-    <section className="p-4 border-b border-border bg-amber-500/5">
+    <section className="p-4 border-b border-border bg-warning-bg">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+        <p className="text-xs font-semibold text-warning-fg uppercase tracking-wider flex items-center gap-1.5">
           <Pin className="h-3 w-3" /> Notas privadas del operador
         </p>
         {notes.length > 0 && (
@@ -266,7 +266,7 @@ export function ConversationNotes({ conversationId }: Props) {
       </div>
 
       {error && (
-        <p className="text-[11px] text-red-700 mb-2 flex items-center gap-1">
+        <p className="text-[11px] text-danger-fg mb-2 flex items-center gap-1">
           <AlertCircle className="h-3 w-3" /> {error}
         </p>
       )}
@@ -289,7 +289,7 @@ export function ConversationNotes({ conversationId }: Props) {
               key={note.id}
               className={`p-2 rounded-lg border text-xs ${
                 note.is_pinned
-                  ? 'bg-amber-100/40 border-amber-700/40'
+                  ? 'bg-warning-bg/40 border-warning-border'
                   : 'bg-background border-border'
               }`}
             >
@@ -301,7 +301,7 @@ export function ConversationNotes({ conversationId }: Props) {
                     rows={2}
                     maxLength={2000}
                     autoFocus
-                    className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-amber-700/40 bg-background focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                    className="w-full resize-none px-2 py-1.5 text-xs rounded-lg border border-warning-border bg-background focus:outline-hidden focus:ring-1 focus:ring-amber-500"
                   />
                   <div className="flex items-center justify-end gap-1">
                     <button
@@ -327,7 +327,7 @@ export function ConversationNotes({ conversationId }: Props) {
               )}
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1">
-                  {note.is_pinned && <BadgeCheck className="h-2.5 w-2.5 text-amber-700" />}
+                  {note.is_pinned && <BadgeCheck className="h-2.5 w-2.5 text-warning-fg" />}
                   {timeAgo(note.created_at)}
                   {note.updated_at !== note.created_at && (
                     <span className="italic">(editada)</span>
@@ -357,7 +357,7 @@ export function ConversationNotes({ conversationId }: Props) {
                       onClick={() => onDelete(note)}
                       title="Eliminar nota"
                       aria-label="Eliminar nota"
-                      className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-red-500/10 hover:text-red-700"
+                      className="h-5 w-5 inline-flex items-center justify-center rounded hover:bg-danger-bg hover:text-danger-fg"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>

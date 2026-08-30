@@ -446,9 +446,9 @@ export default async function SettingsPage() {
                 <ActionResultForm action={saveHorarioAsesor} successMessage="Horario guardado" className="space-y-4">
 
                   {/* Indicador: bot 24/7 */}
-                  <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-700/20 px-3 py-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-600 shrink-0" />
-                    <span className="text-xs text-emerald-700 font-medium">Bot de ventas: activo 24/7 (automático)</span>
+                  <div className="flex items-center gap-2 rounded-lg bg-success-bg border border-success-border px-3 py-2">
+                    <span className="h-2 w-2 rounded-full bg-success-fg shrink-0" />
+                    <span className="text-xs text-success-fg font-medium">Bot de ventas: activo 24/7 (automático)</span>
                   </div>
 
                   {/* Horario de asesor humano — client component para interactividad */}
@@ -605,7 +605,7 @@ export default async function SettingsPage() {
                       <>
                         <span className="text-xs text-muted-foreground shrink-0 group-hover:text-foreground/70 transition-colors">{label}</span>
                         <span className={`text-xs font-medium flex items-center gap-1 text-right ${
-                          ok === true ? 'text-emerald-700' : ok === false ? 'text-muted-foreground/60' : ''
+                          ok === true ? 'text-success-fg' : ok === false ? 'text-muted-foreground/60' : ''
                         }`}>
                           {ok === true && <CheckCircle2 className="h-3 w-3 shrink-0" />}
                           {ok === false && <XCircle className="h-3 w-3 shrink-0" />}
@@ -649,7 +649,7 @@ export default async function SettingsPage() {
                 href="/dashboard/settings/security"
                 className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
               >
-                <div className="h-9 w-9 rounded-md bg-emerald-50 text-emerald-700 inline-flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-md bg-success-bg text-success-fg inline-flex items-center justify-center shrink-0">
                   <Shield className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -666,7 +666,7 @@ export default async function SettingsPage() {
                 href="/dashboard/settings/health"
                 className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
               >
-                <div className="h-9 w-9 rounded-md bg-sky-50 text-sky-700 inline-flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-md bg-info-bg text-info-fg inline-flex items-center justify-center shrink-0">
                   <Activity className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -683,7 +683,7 @@ export default async function SettingsPage() {
                 href="/dashboard/settings/legal"
                 className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
               >
-                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-md bg-muted text-muted-foreground inline-flex items-center justify-center shrink-0">
                   <Scale className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -700,7 +700,7 @@ export default async function SettingsPage() {
                 href="/dashboard/settings/retention"
                 className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
               >
-                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-md bg-muted text-muted-foreground inline-flex items-center justify-center shrink-0">
                   <Archive className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -715,18 +715,18 @@ export default async function SettingsPage() {
               {/* Cerrar cuenta (destructive, owner only) */}
               <Link
                 href="/dashboard/settings/account-closure"
-                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-red-200 bg-red-50/30 hover:border-red-700 hover:bg-red-50 transition-colors"
+                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-danger-border bg-danger-bg/30 hover:border-danger-fg hover:bg-danger-bg transition-colors"
               >
-                <div className="h-9 w-9 rounded-md bg-red-100 text-red-700 inline-flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-md bg-danger-bg text-danger-fg inline-flex items-center justify-center shrink-0">
                   <Trash2 className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm text-red-900">Cerrar cuenta</p>
-                  <p className="text-xs text-red-700/80 mt-0.5">
+                  <p className="font-medium text-sm text-danger-fg">Cerrar cuenta</p>
+                  <p className="text-xs text-danger-fg/80 mt-0.5">
                     Exportar todos tus datos y solicitar eliminación permanente (30 días de gracia).
                   </p>
                 </div>
-                <ChevronRight className="h-4 w-4 text-red-700/80 group-hover:text-red-700 shrink-0 mt-2" />
+                <ChevronRight className="h-4 w-4 text-danger-fg/80 group-hover:text-danger-fg shrink-0 mt-2" />
               </Link>
             </div>
           </section>

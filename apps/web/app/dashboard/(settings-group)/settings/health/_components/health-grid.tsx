@@ -28,27 +28,27 @@ function isStale(iso: string, now: number): boolean {
 
 function StatusIcon({ status }: { status: HealthStatus | 'stale' }) {
   if (status === 'healthy') {
-    return <CheckCircle2 className="h-5 w-5 text-emerald-600" aria-hidden="true" />
+    return <CheckCircle2 className="h-5 w-5 text-success-fg" aria-hidden="true" />
   }
   if (status === 'warning') {
-    return <AlertTriangle className="h-5 w-5 text-amber-600" aria-hidden="true" />
+    return <AlertTriangle className="h-5 w-5 text-warning-fg" aria-hidden="true" />
   }
   if (status === 'critical') {
-    return <AlertCircle className="h-5 w-5 text-red-600" aria-hidden="true" />
+    return <AlertCircle className="h-5 w-5 text-danger-fg" aria-hidden="true" />
   }
   if (status === 'stale') {
-    return <Clock className="h-5 w-5 text-slate-700" aria-hidden="true" />
+    return <Clock className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
   }
-  return <Circle className="h-5 w-5 text-slate-700" aria-hidden="true" />
+  return <Circle className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
 }
 
 function StatusBadge({ status }: { status: HealthStatus | 'stale' }) {
   const classes: Record<string, string> = {
-    healthy: 'bg-emerald-50 text-emerald-700 border-emerald-700',
-    warning: 'bg-amber-50 text-amber-700 border-amber-700',
-    critical: 'bg-red-50 text-red-700 border-red-700',
-    unknown: 'bg-slate-50 text-slate-600 border-slate-700',
-    stale: 'bg-slate-50 text-slate-700 border-slate-700',
+    healthy: 'bg-success-bg text-success-fg border-success-border',
+    warning: 'bg-warning-bg text-warning-fg border-warning-border',
+    critical: 'bg-danger-bg text-danger-fg border-danger-border',
+    unknown: 'bg-muted text-muted-foreground border-border',
+    stale: 'bg-muted text-muted-foreground border-border',
   }
   const labels: Record<string, string> = {
     healthy: 'OK',

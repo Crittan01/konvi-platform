@@ -375,7 +375,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
               onClick={() => setPaymentMethod('cod')}
               className={`rounded-lg border px-3 py-2 text-xs text-left transition-colors ${
                 paymentMethod === 'cod'
-                  ? 'border-emerald-700/50 bg-emerald-500/10 text-foreground'
+                  ? 'border-success-border bg-success-bg text-foreground'
                   : 'border-border text-muted-foreground hover:bg-accent'
               }`}
             >
@@ -407,7 +407,7 @@ export default function OrdersNewForm({ products, contacts, onCreated = () => {}
           )}
         </div>
 
-        {error && <p className="text-xs text-red-700">{error}</p>}
+        {error && <p className="text-xs text-danger-fg">{error}</p>}
 
         <Button
           type="button"

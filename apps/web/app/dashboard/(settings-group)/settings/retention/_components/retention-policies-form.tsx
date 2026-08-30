@@ -112,7 +112,7 @@ export default function RetentionPoliciesForm({
           <div
             key={entity}
             className={`rounded-xl border px-4 py-3 ${
-              isOverridden ? 'border-blue-700/40 bg-blue-700/5' : 'border-border bg-card/30'
+              isOverridden ? 'border-info-border bg-info-bg' : 'border-border bg-card/30'
             }`}
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -120,7 +120,7 @@ export default function RetentionPoliciesForm({
                 <div className="font-semibold text-foreground flex items-center gap-2">
                   {labels.label}
                   {isOverridden && (
-                    <span className="text-xs font-normal text-blue-700 bg-blue-700/10 px-1.5 py-0.5 rounded">
+                    <span className="text-xs font-normal text-info-fg bg-info-bg px-1.5 py-0.5 rounded">
                       Plazo personalizado
                     </span>
                   )}
@@ -130,7 +130,7 @@ export default function RetentionPoliciesForm({
                   Al cumplirse el plazo: <strong>{ACTION_LABEL_ES[action]}</strong>
                   {' · '}Predeterminado global: <strong>{def?.ttl_days ?? '?'} días</strong>
                   {isOverridden && (
-                    <> → Tu cuenta: <strong className="text-blue-700">{effectiveTtl} días</strong></>
+                    <> → Tu cuenta: <strong className="text-info-fg">{effectiveTtl} días</strong></>
                   )}
                 </p>
               </div>
@@ -172,7 +172,7 @@ export default function RetentionPoliciesForm({
                     disabled={busy}
                     size="sm"
                     variant="ghost"
-                    className="h-8 text-xs text-amber-700 hover:bg-amber-700/10 gap-1.5"
+                    className="h-8 text-xs text-warning-fg hover:bg-warning-bg gap-1.5"
                   >
                     <Trash2 className="h-3 w-3" />
                     Volver al predeterminado

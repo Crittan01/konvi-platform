@@ -53,7 +53,7 @@ export default function TelegramSetup({ connected, config }: Props) {
                 ? `secret_${botTokenSecretId.slice(0, 8)}…`
                 : hasPlaintextToken
                   ? (
-                    <span className="text-amber-800 font-sans">
+                    <span className="text-warning-fg font-sans">
                       Legacy (texto plano) — migrar a Vault
                     </span>
                   )

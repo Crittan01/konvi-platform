@@ -25,9 +25,9 @@ type Props = {
 // ── Colores de prioridad ───────────────────────────────────────────────────────
 
 const PRIORITY_STYLES: Record<Prioridad, { dot: string; text: string; badge: string }> = {
-  alta:  { dot: 'bg-red-400',    text: 'text-red-700',    badge: 'bg-red-400/15 text-red-700 border border-red-700/30' },
-  media: { dot: 'bg-amber-400',  text: 'text-amber-700',  badge: 'bg-amber-400/15 text-amber-700 border border-amber-700/30' },
-  baja:  { dot: 'bg-green-400',  text: 'text-green-700',  badge: 'bg-green-400/15 text-green-700 border border-green-700/30' },
+  alta:  { dot: 'bg-danger-fg',  text: 'text-danger-fg',  badge: 'bg-danger-bg text-danger-fg border border-danger-border' },
+  media: { dot: 'bg-warning-fg', text: 'text-warning-fg', badge: 'bg-warning-bg text-warning-fg border border-warning-border' },
+  baja:  { dot: 'bg-success-fg', text: 'text-success-fg', badge: 'bg-success-bg text-success-fg border border-success-border' },
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -138,10 +138,10 @@ export default function AiInsightPanel({ module, label = module }: Props) {
   // ── Error ─────────────────────────────────────────────────────────────────
   if (state === 'error') {
     return (
-      <div className="rounded-xl border border-red-700/30 bg-red-500/5 px-4 py-3 flex items-start gap-3">
-        <AlertTriangle className="h-4 w-4 text-red-700 shrink-0 mt-0.5" />
+      <div className="rounded-xl border border-danger-border bg-danger-bg px-4 py-3 flex items-start gap-3">
+        <AlertTriangle className="h-4 w-4 text-danger-fg shrink-0 mt-0.5" />
         <div className="flex-1">
-          <p className="text-sm font-medium text-red-700">Error al generar análisis</p>
+          <p className="text-sm font-medium text-danger-fg">Error al generar análisis</p>
           <p className="text-xs text-muted-foreground mt-0.5">{errorMsg}</p>
         </div>
         <Button size="sm" variant="ghost" className="text-xs h-7 shrink-0" onClick={() => setState('idle')}>
@@ -190,9 +190,9 @@ export default function AiInsightPanel({ module, label = module }: Props) {
       <div className="p-4 space-y-4">
         {/* Alerta crítica */}
         {hasAlert && (
-          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-700/25">
-            <AlertTriangle className="h-3.5 w-3.5 text-red-700 shrink-0 mt-0.5" />
-            <p className="text-xs text-red-700 font-medium leading-relaxed">{insight.alerta}</p>
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-danger-bg border border-danger-border">
+            <AlertTriangle className="h-3.5 w-3.5 text-danger-fg shrink-0 mt-0.5" />
+            <p className="text-xs text-danger-fg font-medium leading-relaxed">{insight.alerta}</p>
           </div>
         )}
 

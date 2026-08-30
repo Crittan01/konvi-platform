@@ -455,7 +455,7 @@ export default async function PromotionsPage() {
       />
 
       {!canWrite && (
-        <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-3 text-sm text-amber-900">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-sm text-warning-fg">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           Solo el rol Administrador o Supervisor puede crear/editar cupones.
           Tú (operador) puedes ver el catálogo en modo lectura.

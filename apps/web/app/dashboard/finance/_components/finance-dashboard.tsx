@@ -66,29 +66,29 @@ export default function FinanceDashboard({
     />,
     <KpiCard
       key="cogs"
-      icon={<TrendingDown className="h-5 w-5 text-amber-700" />} iconBg="bg-amber-500/10"
-      label="Costo Mercancía (COGS)" value={formatCOPNegative(cogs)} valueClass="text-amber-700"
+      icon={<TrendingDown className="h-5 w-5 text-warning-fg" />} iconBg="bg-warning-bg"
+      label="Costo Mercancía (COGS)" value={formatCOPNegative(cogs)} valueClass="text-warning-fg"
       sub="Costo del inventario vendido"
       help="Cost of Goods Sold: lo que te costó comprar/producir lo que vendiste. Sale del costo unitario cargado en el Catálogo."
     />,
     <KpiCard
       key="opex"
-      icon={<Activity className="h-5 w-5 text-red-700" />} iconBg="bg-red-500/10"
-      label="Gastos (OPEX)" value={formatCOPNegative(opex)} valueClass="text-red-700"
+      icon={<Activity className="h-5 w-5 text-danger-fg" />} iconBg="bg-danger-bg"
+      label="Gastos (OPEX)" value={formatCOPNegative(opex)} valueClass="text-danger-fg"
       sub="Marketing, nómina, software…"
       help="Operating Expenses: gastos operativos no atados a un producto vendido (pauta, nómina, suscripciones, logística)."
     />,
     <Card key="neto" className={`h-full border-border/50 shadow-xs relative overflow-hidden border-b-4 ${netProfit >= 0 ? 'border-b-emerald-700' : 'border-b-red-700'}`}>
       <CardContent className="p-5 flex flex-col items-center justify-center text-center">
-        <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
-          <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} />
+        <div className={`h-10 w-10 rounded-full flex items-center justify-center mb-3 ${netProfit >= 0 ? 'bg-success-bg' : 'bg-danger-bg'}`}>
+          <TrendingUp className={`h-5 w-5 ${netProfit >= 0 ? 'text-success-fg' : 'text-danger-fg'}`} />
         </div>
         <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
           Beneficio Neto
           <JargonTip text="Ingresos − COGS − OPEX. Lo que realmente ganó (o perdió) el negocio en el período." />
         </p>
-        <h3 className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCOP(netProfit)}</h3>
-        <p className={`text-[11px] font-bold mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+        <h3 className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-success-fg' : 'text-danger-fg'}`}>{formatCOP(netProfit)}</h3>
+        <p className={`text-[11px] font-bold mt-1 ${netProfit >= 0 ? 'text-success-fg' : 'text-danger-fg'}`}>
           {netMargin.toFixed(1)}% Margen
         </p>
       </CardContent>
@@ -246,9 +246,9 @@ export default function FinanceDashboard({
                           <span className="text-muted-foreground">{c.label}</span>
                           <div className="flex items-center gap-2">
                             <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden hidden sm:block">
-                              <div className="h-full bg-red-700 rounded-full" style={{ width: `${opex > 0 ? Math.round((c.amount / opex) * 100) : 0}%` }} />
+                              <div className="h-full bg-danger-fg rounded-full" style={{ width: `${opex > 0 ? Math.round((c.amount / opex) * 100) : 0}%` }} />
                             </div>
-                            <span className="font-mono font-medium text-red-700 w-24 text-right">{formatCOPNegative(c.amount)}</span>
+                            <span className="font-mono font-medium text-danger-fg w-24 text-right">{formatCOPNegative(c.amount)}</span>
                           </div>
                         </div>
                       ))}

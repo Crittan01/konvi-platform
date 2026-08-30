@@ -18,8 +18,8 @@ export default function CuentaSuspendidaPage() {
         <Card className="dark border-white/10 bg-card/75 backdrop-blur-xl shadow-2xl">
           <CardContent className="pt-6 text-center space-y-5">
             <div className="flex justify-center">
-              <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-700/30 flex items-center justify-center">
-                <PauseCircle className="h-8 w-8 text-amber-700" aria-hidden="true" />
+              <div className="h-16 w-16 rounded-2xl bg-warning-bg border border-warning-border flex items-center justify-center">
+                <PauseCircle className="h-8 w-8 text-warning-fg" aria-hidden="true" />
               </div>
             </div>
             <div className="space-y-2">

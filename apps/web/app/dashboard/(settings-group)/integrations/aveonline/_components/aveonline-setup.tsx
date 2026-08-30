@@ -242,7 +242,7 @@ export default function AveonlineSetup({
             )}
 
             {success && (
-              <div className="flex items-start gap-2 rounded-md border border-green-700/50 bg-green-50 px-3 py-2 text-sm text-green-800">
+              <div className="flex items-start gap-2 rounded-md border border-success-border bg-success-bg px-3 py-2 text-sm text-success-fg">
                 <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>{success}</span>
               </div>
@@ -323,21 +323,21 @@ export default function AveonlineSetup({
 
       {/* ID Agente — REQUERIDO para generación de guías (§3.5 dossier) */}
       <div className={`rounded-lg border p-5 space-y-3 ${
-        idagente ? 'border-border bg-card' : 'border-amber-700/30 bg-amber-500/5'
+        idagente ? 'border-border bg-card' : 'border-warning-border bg-warning-bg'
       }`}>
         <div className="flex items-center gap-2 text-foreground">
           <Truck className="h-5 w-5 text-muted-foreground" />
           <h3 className="font-semibold">ID Agente — Punto de despacho</h3>
         </div>
         {!idagente && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-700/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+          <div className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <div className="space-y-0.5">
               <p className="font-medium">ID Agente NO configurado</p>
-              <p className="text-xs text-amber-200/80 leading-relaxed">
+              <p className="text-xs text-warning-fg/80 leading-relaxed">
                 Sin este ID, Aveonline rechazará la generación automática de guías
                 con error{' '}
-                <code className="font-mono text-[11px] bg-amber-500/10 px-1 rounded">999</code>{' '}
+                <code className="font-mono text-[11px] bg-warning-bg px-1 rounded">999</code>{' '}
                 tras el pago. Configúralo abajo para destrabar las guías post-pago.
               </p>
             </div>
@@ -374,7 +374,7 @@ export default function AveonlineSetup({
         )}
 
         {!agentsLoading && !agentsError && agents.length === 0 && (
-          <div className="rounded-md border border-amber-700/30 bg-amber-500/5 p-3 text-sm text-amber-700">
+          <div className="rounded-md border border-warning-border bg-warning-bg p-3 text-sm text-warning-fg">
             No hay agentes registrados en tu cuenta Aveonline. Pídele a tu
             asesor logístico que active al menos uno desde el panel
             Aveonline → Configuración → Agentes.
@@ -486,7 +486,7 @@ export default function AveonlineSetup({
           </div>
         )}
         {success && (
-          <div className="flex items-start gap-2 rounded-md border border-green-700/50 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <div className="flex items-start gap-2 rounded-md border border-success-border bg-success-bg px-3 py-2 text-sm text-success-fg">
             <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{success}</span>
           </div>
@@ -690,19 +690,19 @@ function AveonlineWebhookSection() {
               <div className="text-sm font-medium text-foreground flex items-center gap-2">
                 {status.configured ? (
                   <>
-                    <CheckCircle2 className="h-4 w-4 text-green-700" />
+                    <CheckCircle2 className="h-4 w-4 text-success-fg" />
                     Configurado
                   </>
                 ) : (
                   <>
-                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertCircle className="h-4 w-4 text-warning-fg" />
                     Sin configurar
                   </>
                 )}
               </div>
             </div>
             {status.configured && status.has_grace_period && (
-              <span className="text-xs px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-700">
+              <span className="text-xs px-2 py-1 rounded-md bg-warning-bg text-warning-fg border border-warning-border">
                 Rotación reciente — grace activo
               </span>
             )}
@@ -747,24 +747,24 @@ function AveonlineWebhookSection() {
       )}
 
       {secret && (
-        <div className="rounded-md border border-amber-700 bg-amber-50 p-4 space-y-2">
-          <div className="flex items-center gap-2 text-amber-900 font-medium text-sm">
+        <div className="rounded-md border border-warning-border bg-warning-bg p-4 space-y-2">
+          <div className="flex items-center gap-2 text-warning-fg font-medium text-sm">
             <KeyRound className="h-4 w-4" />
             Secret generado — guárdalo ahora
           </div>
-          <p className="text-xs text-amber-800">
+          <p className="text-xs text-warning-fg">
             Este secret se muestra una sola vez. Aveonline ya lo recibió y lo
             usará automáticamente al enviar webhooks. Solo lo necesitas si
             quieres reconfigurar manualmente en el panel Aveonline.
           </p>
           <div className="flex items-center gap-2">
-            <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-amber-700 flex-1 break-all">
+            <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-warning-border flex-1 break-all">
               {secret}
             </code>
             <button
               type="button"
               onClick={() => void copyToClipboard(secret)}
-              className="text-amber-900 hover:bg-amber-100 p-1.5 rounded-md"
+              className="text-warning-fg hover:bg-warning-bg p-1.5 rounded-md"
               title="Copiar secret"
             >
               <Copy className="h-4 w-4" />
@@ -780,7 +780,7 @@ function AveonlineWebhookSection() {
         </div>
       )}
       {success && !secret && (
-        <div className="flex items-start gap-2 rounded-md border border-green-700/50 bg-green-50 px-3 py-2 text-sm text-green-800">
+        <div className="flex items-start gap-2 rounded-md border border-success-border bg-success-bg px-3 py-2 text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
           <span>{success}</span>
         </div>

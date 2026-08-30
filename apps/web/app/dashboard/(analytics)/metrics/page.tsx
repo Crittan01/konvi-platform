@@ -38,7 +38,7 @@ function DeltaBadge({ delta }: { delta: number | null }) {
   const up = delta > 0
   const flat = delta === 0
   const Icon = flat ? Minus : up ? ArrowUp : ArrowDown
-  const color = flat ? 'text-muted-foreground' : up ? 'text-emerald-700' : 'text-red-700'
+  const color = flat ? 'text-muted-foreground' : up ? 'text-success-fg' : 'text-danger-fg'
   return (
     <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${color}`}
       title="Variación vs. el período inmediatamente anterior de igual duración">
@@ -261,20 +261,20 @@ export default async function MetricsPage(
             delta: err('messages') ? null : messagesDelta,
           },
           {
-            icon: Users, label: 'Conversaciones', color: 'text-blue-700',
+            icon: Users, label: 'Conversaciones', color: 'text-info-fg',
             value: err('conversations') ? DASH : conversationsTotal,
             sub: err('conversations') ? 'No disponible' : `${botCount} bot · ${humanCount} humano`,
             delta: err('conversations') ? null : convosDelta,
           },
           {
-            icon: ShoppingCart, label: 'Pedidos', color: 'text-emerald-700',
+            icon: ShoppingCart, label: 'Pedidos', color: 'text-success-fg',
             value: err('orders') ? DASH : ordersTotal,
             sub: err('orders') ? 'No disponible' : `${cop(grossSales)} en ventas brutas`,
             tip: 'Ventas brutas = suma de pedidos NO cancelados (incluye pendientes y en espera de pago). Es una métrica secundaria: NO es ingreso. El ingreso reconocido (pago confirmado en adelante) se muestra abajo.',
             delta: err('orders') ? null : ordersDelta,
           },
           {
-            icon: Users, label: 'Contactos', color: 'text-violet-700',
+            icon: Users, label: 'Contactos', color: 'text-ai-fg',
             value: err('contacts') ? DASH : contactsTotal,
             sub: 'Base total de clientes',
             tip: 'Total histórico de clientes registrados del tenant (no depende del período seleccionado).',
@@ -307,10 +307,10 @@ export default async function MetricsPage(
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
         {[
           { label: 'Tasa conversión', value: (err('orders') || err('conversations')) ? DASH : `${convRate}%`, note: 'Pedidos ÷ conversaciones', Icon: TrendingUp, color: 'text-primary', tip: 'Pedidos no cancelados dividido entre conversaciones, ambos dentro del período seleccionado.' },
-          { label: 'Ingreso reconocido', value: err('orders') ? DASH : cop(recognizedRevenue), note: 'Pago confirmado+', Icon: Coins, color: 'text-emerald-700', tip: 'Definición canónica de ingreso (compartida con Finanzas): pedidos con pago confirmado en adelante — confirmado, en proceso, enviado y entregado. Excluye pendientes, en espera de pago y cancelados. «Ya entregado» se detalla en el desglose de pedidos.', delta: err('orders') ? null : revenueDelta },
-          { label: '% Inbound', value: err('messages') ? DASH : (messagesTotal > 0 ? `${Math.round((inboundTotal / messagesTotal) * 100)}%` : '—'), note: 'de los mensajes', Icon: ArrowDownToLine, color: 'text-blue-700' },
-          { label: 'Pedidos cancelados', value: err('orders') ? DASH : cancelledCount.toString(), note: 'en el período', Icon: XCircle, color: 'text-red-700' },
-          { label: 'Productos activos', value: err('products') ? DASH : activeProducts.toString(), note: 'en catálogo', Icon: Package, color: 'text-violet-700' },
+          { label: 'Ingreso reconocido', value: err('orders') ? DASH : cop(recognizedRevenue), note: 'Pago confirmado+', Icon: Coins, color: 'text-success-fg', tip: 'Definición canónica de ingreso (compartida con Finanzas): pedidos con pago confirmado en adelante — confirmado, en proceso, enviado y entregado. Excluye pendientes, en espera de pago y cancelados. «Ya entregado» se detalla en el desglose de pedidos.', delta: err('orders') ? null : revenueDelta },
+          { label: '% Inbound', value: err('messages') ? DASH : (messagesTotal > 0 ? `${Math.round((inboundTotal / messagesTotal) * 100)}%` : '—'), note: 'de los mensajes', Icon: ArrowDownToLine, color: 'text-info-fg' },
+          { label: 'Pedidos cancelados', value: err('orders') ? DASH : cancelledCount.toString(), note: 'en el período', Icon: XCircle, color: 'text-danger-fg' },
+          { label: 'Productos activos', value: err('products') ? DASH : activeProducts.toString(), note: 'en catálogo', Icon: Package, color: 'text-ai-fg' },
         ].map(k => {
           const delta = (k as { delta?: number | null }).delta ?? null
           return (
@@ -403,7 +403,7 @@ export default async function MetricsPage(
               <div className="pt-2 border-t border-border space-y-1.5">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Ingreso reconocido <span className="text-muted-foreground/60">(pago confirmado+)</span></span>
-                  <span className="font-bold text-emerald-700 text-sm">{cop(recognizedRevenue)}</span>
+                  <span className="font-bold text-success-fg text-sm">{cop(recognizedRevenue)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Ya entregado</span>
@@ -434,9 +434,9 @@ export default async function MetricsPage(
                 <div key={p.title} className="flex justify-between items-start gap-3">
                   <div className="flex gap-2 items-center min-w-0">
                     <span className={`shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[11px] font-bold ${
-                      i === 0 ? 'bg-amber-500/20 text-amber-700' :
-                      i === 1 ? 'bg-slate-500/20 text-slate-700' :
-                      i === 2 ? 'bg-orange-500/20 text-orange-700' : 'bg-muted text-muted-foreground'
+                      i === 0 ? 'bg-warning-bg text-warning-fg' :
+                      i === 1 ? 'bg-muted text-muted-foreground' :
+                      i === 2 ? 'bg-warning-bg text-warning-fg' : 'bg-muted text-muted-foreground'
                     }`}>{i + 1}</span>
                     <p className="text-sm font-medium truncate">{p.title}</p>
                   </div>
@@ -454,7 +454,7 @@ export default async function MetricsPage(
       {/* ── Reclamos ── */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center gap-2 mb-4">
-          <AlertCircle className="h-4 w-4 text-red-700" />
+          <AlertCircle className="h-4 w-4 text-danger-fg" />
           <p className="text-sm font-medium">Reclamos</p>
           <span className="ml-auto text-xs text-muted-foreground">{err('claims') ? DASH : `${claimsAgg.total} en período`}</span>
         </div>
@@ -467,9 +467,9 @@ export default async function MetricsPage(
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
               {[
-                { label: 'Total reclamos',      value: claimsAgg.total,         color: 'text-red-700' },
-                { label: 'Abiertos',            value: claimsAgg.open,          color: 'text-amber-700' },
-                { label: 'Reembolsados',        value: claimsAgg.refundedCount, color: 'text-emerald-700' },
+                { label: 'Total reclamos',      value: claimsAgg.total,         color: 'text-danger-fg' },
+                { label: 'Abiertos',            value: claimsAgg.open,          color: 'text-warning-fg' },
+                { label: 'Reembolsados',        value: claimsAgg.refundedCount, color: 'text-success-fg' },
                 { label: 'Tasa reclamo/pedido', value: `${claimRate}%`,         color: 'text-primary' },
               ].map(k => (
                 <div key={k.label} className="rounded-lg border border-border p-3 text-center">
@@ -482,7 +482,7 @@ export default async function MetricsPage(
             {claimsAgg.totalRefunded > 0 && (
               <p className="text-xs text-muted-foreground mb-4">
                 Total reembolsado:{' '}
-                <span className="font-semibold text-emerald-700">{cop(claimsAgg.totalRefunded)}</span>
+                <span className="font-semibold text-success-fg">{cop(claimsAgg.totalRefunded)}</span>
               </p>
             )}
 
@@ -494,7 +494,7 @@ export default async function MetricsPage(
                     <span className="text-xs text-muted-foreground">{CLAIM_REASON_LABELS[reason] ?? reason}</span>
                     <div className="flex items-center gap-2">
                       <div className="w-20 h-1.5 rounded-full bg-border overflow-hidden hidden sm:block">
-                        <div className="h-full bg-red-700/50 rounded-full" style={{ width: `${Math.round((count / claimsAgg.total) * 100)}%` }} />
+                        <div className="h-full bg-danger-fg/60 rounded-full" style={{ width: `${Math.round((count / claimsAgg.total) * 100)}%` }} />
                       </div>
                       <span className="text-xs font-semibold w-4 text-right">{count}</span>
                     </div>

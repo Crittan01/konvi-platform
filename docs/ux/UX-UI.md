@@ -38,6 +38,18 @@ Tokens semánticos (`globals.css:17-46`):
 - Formularios: `--border`, `--input`, `--ring`
 - Radio: `--radius: 0.75rem` (+ derivados `--radius-lg/md/sm`, `globals.css:44-46`, 177)
 
+**Tokens semánticos de status** (FASE 2, 2026-08-30 — cierran la deuda §1.10.1): `--color-{warning|danger|success|info|ai}-{bg|fg|border}` en `@theme inline` mapeando `var(--{token})` a valores full-color por tema (hex sólido en light = réplica de la paleta histórica; tinte translúcido 13% + fg brillante en dark). fg verificado ≥4.5:1 AA sobre su bg en ambos temas (10/10, script de contraste en `scratch/fase2_contrast_check.py`). Neutrales (slate/gray/zinc) NO tienen familia nueva: mapean a `muted`/`muted-foreground`/`border`.
+
+| Token | Light | Dark | Uso |
+|---|---|---|---|
+| `warning-{bg,fg,border}` | `#FFFBEB` / `#92400E` / amber-700/30 | amber-500 13% / `#FBBF24` / amber-500 30% | pendiente, SLA, stock bajo, acciones con cuidado |
+| `danger-{bg,fg,border}` | `#FEF2F2` / `#991B1B` / red-700/30 | red-500 13% / `#F87171` / red-500 30% | errores, cancelado, destructivas, opt-out |
+| `success-{bg,fg,border}` | `#ECFDF5` / `#065F46` / emerald-700/30 | emerald-500 13% / `#34D399` / emerald-500 30% | pagado, entregado, conectado, confirmaciones |
+| `info-{bg,fg,border}` | `#EFF6FF` / `#1D4ED8` / blue-700/30 | blue-500 13% / `#60A5FA` / blue-500 30% | estados informativos (confirmado, enviado), ayuda |
+| `ai-{bg,fg,border}` | `#F5F3FF` / `#5B21B6` / violet-700/30 | violet-500 13% / `#A78BFA` / violet-500 30% | acento de IA/brand (agentes, tiles IA, procesamiento bot) |
+
+Regla de uso: NUNCA clases de paleta light-only (`bg-amber-50`, `text-red-700`…) en `apps/web/{app,components}` — el ratchet CI `scripts/audit_ui_palette.py` (sección 4.9 de `validate.sh`) falla el build. Excepciones solo vía allowlist justificada en el propio script (botones sólidos `text-white`, marcas de proveedor, dots multi-hue del timeline de envíos, security-form founder-paired).
+
 Compatibilidad v3→v4: capa base que fija `border-color` a `--color-gray-200` (`globals.css:77-85`) y regla global `* { @apply border-border }` (`globals.css:255-258`).
 
 ### 1.2 Tema claro — "Kaiu Organic"
@@ -130,7 +142,7 @@ Primitivos Radix instalados (`package.json`): accordion, checkbox, dialog, dropd
 
 ### 1.10 Deuda declarada del DS
 
-1. **Remap dark interino** (`globals.css:295-358`): barrido de pares `bg-{color}-50/100` + `text-{color}-700` → tintes oscuros translúcidos por familia (red/amber/orange/emerald/blue/indigo/slate/gray/zinc/cyan/violet/teal). El propio comentario (301-302) lo declara: *"Interino; el fin de juego son tokens danger/warning/success/info"*. Sin `@layer` → ganan por cascada. No toca variantes `/15` `/20` ni páginas `.light`.
+1. ~~**Remap dark interino**~~ — **CERRADA 2026-08-30 (FASE 2)**. El barrido de pares `bg-{color}-50/100` + `text-{color}-700` → tintes dark fue reemplazado por los tokens semánticos de status de §1.1 (`warning/danger/success/info/ai` + `muted` para neutrales) aplicados con codemod (1.265 reemplazos en 103 archivos) + casos manuales; el bloque remap de `globals.css` se eliminó. Solo queda un *remnant* de 5 reglas scoped a `security-form.tsx` (corregido a mano por founder — patrón de referencia, fuera del codemod; sus diálogos internos aún tienen 7 spots sin par `dark:`). Ratchet CI: `scripts/audit_ui_palette.py`. Migrar security-form a tokens elimina el remnant y la exención.
 2. **Primitivos faltantes** (ausentes del directorio, verificado §1.9): `popover` (el token existe pero no el componente), `command`, `avatar`, `progress`, `calendar`, `carousel`, `scroll-area`, `separator`. La Spec WOW (§4) introduce `command` (cmdk) y `carousel` (embla) — deben crearse como wrappers del DS, no como estilos sueltos.
 
 ---
@@ -232,7 +244,7 @@ sonner montado una vez en root (`app/layout.tsx:60`). **95 llamadas** `toast.suc
 ### 4.1 Reglas transversales de motion (obligatorias)
 
 1. **`prefers-reduced-motion` siempre**. Precedente ya en el DS: `card-hover` anula transición y transform bajo `prefers-reduced-motion: reduce` (`globals.css:124-129`). Todo motion nuevo (framer-motion, CSS) debe tener su variante reducida — para framer-motion usar `useReducedMotion()` y desactivar layout animations/gestos.
-2. **Solo tokens Kaiu** (`hsl(var(--token))` o utilities Tailwind semánticas). Prohibido introducir colores literales nuevos; el remap dark interino (§1.10) ya muestra el coste de los literales.
+2. **Solo tokens Kaiu** (`hsl(var(--token))` o utilities Tailwind semánticas). Prohibido introducir colores literales nuevos ni clases de paleta light-only (§1.1 tokens de status + ratchet `scripts/audit_ui_palette.py`; el remap dark interino —§1.10.1, cerrado en FASE 2— mostró el coste de los literales).
 3. **Nada que rompa dark mode**: cualquier superficie nueva (palette, sheet, carousel) usa `bg-card`/`bg-popover` + `border-border` + tokens de texto; se prueba en ambos temas. El anti-FOUC y `.light` forzado de auth no se tocan.
 4. **Motion con propósito operativo**: feedback, orientación espacial, celebración de hitos de dinero. Nada decorativo que retrase la tarea (operador en inbox mide segundos).
 5. Duraciones cortas: micro-interacción 150-300ms (coherente con `duration-300` del drawer y `0.2s` de los keyframes accordion, `globals.css:48-49`).

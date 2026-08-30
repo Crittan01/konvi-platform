@@ -304,7 +304,7 @@ export function SwipeActions({
       <motion.div
         aria-hidden
         style={{ opacity: rightOpacity }}
-        className="absolute inset-y-0 left-0 flex items-center pl-4 rounded-l-xl bg-emerald-500/10 text-emerald-700 text-xs font-medium"
+        className="absolute inset-y-0 left-0 flex items-center pl-4 rounded-l-xl bg-success-bg text-success-fg text-xs font-medium"
       >
         {rightHint}
       </motion.div>

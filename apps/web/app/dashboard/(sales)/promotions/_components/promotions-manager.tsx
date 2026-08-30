@@ -280,13 +280,13 @@ export default function PromotionsManager({
     <TooltipProvider delayDuration={200}>
     <div className="space-y-4">
       {successMsg && (
-        <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900">
+        <div className="rounded-md border border-success-border bg-success-bg p-3 text-sm text-success-fg">
           <CheckCircle2 className="inline h-4 w-4 mr-1" />
           {successMsg}
         </div>
       )}
       {formError && (
-        <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-3 text-sm text-rose-900">
+        <div className="rounded-md border border-danger-border bg-danger-bg p-3 text-sm text-danger-fg">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           {formError}
         </div>
@@ -302,13 +302,13 @@ export default function PromotionsManager({
       )}
 
       {loadError ? (
-        <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-6 text-center">
-          <AlertTriangle className="mx-auto h-8 w-8 text-rose-700 mb-2" />
-          <p className="text-sm text-rose-900">{loadError}</p>
+        <div className="rounded-md border border-danger-border bg-danger-bg p-6 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-danger-fg mb-2" />
+          <p className="text-sm text-danger-fg">{loadError}</p>
           <Button
             variant="outline"
             size="sm"
-            className="mt-3 border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+            className="mt-3 border-danger-border text-danger-fg hover:bg-danger-bg"
             onClick={() => router.refresh()}
           >
             <RefreshCw className="h-3.5 w-3.5 mr-1" />
@@ -459,8 +459,8 @@ export default function PromotionsManager({
                                 onClick={() => handleToggle(c)}
                                 aria-label={`${c.is_active ? 'Desactivar' : 'Activar'} cupón ${c.code}`}
                                 className={c.is_active
-                                  ? 'border-amber-700/40 text-amber-900 hover:bg-amber-700/5'
-                                  : 'border-emerald-700/40 text-emerald-900 hover:bg-emerald-700/5'}
+                                  ? 'border-warning-border text-warning-fg hover:bg-warning-bg'
+                                  : 'border-success-border text-success-fg hover:bg-success-bg'}
                               >
                                 <Power className="h-3.5 w-3.5" />
                               </Button>
@@ -499,7 +499,7 @@ export default function PromotionsManager({
                                   disabled={pending}
                                   onClick={() => { setFormError(null); setDeleting(c) }}
                                   aria-label={`Eliminar cupón ${c.code} permanentemente`}
-                                  className="border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+                                  className="border-danger-border text-danger-fg hover:bg-danger-bg"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
@@ -563,7 +563,7 @@ export default function PromotionsManager({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
-              <Trash2 className="h-5 w-5 text-rose-700" />
+              <Trash2 className="h-5 w-5 text-danger-fg" />
               Eliminar cupón {deleting?.code}
             </DialogTitle>
             <DialogDescription>
@@ -572,14 +572,14 @@ export default function PromotionsManager({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900">
+          <div className="rounded-md border border-success-border bg-success-bg p-3 text-sm text-success-fg">
             <ShieldCheck className="inline h-4 w-4 mr-1" />
             Este cupón <b>nunca tuvo redenciones</b>, así que es seguro
             eliminarlo sin afectar auditoría Habeas Data.
           </div>
 
           {formError && (
-            <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-3 text-sm text-rose-900">
+            <div className="rounded-md border border-danger-border bg-danger-bg p-3 text-sm text-danger-fg">
               <AlertTriangle className="inline h-4 w-4 mr-1" />
               {formError}
             </div>
@@ -640,14 +640,14 @@ export default function PromotionsManager({
                 ))}
               </div>
             ) : redemptionsError ? (
-              <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-6 text-center">
-                <AlertTriangle className="mx-auto mb-2 h-8 w-8 text-rose-700" />
-                <p className="text-sm text-rose-900">{redemptionsError}</p>
+              <div className="rounded-md border border-danger-border bg-danger-bg p-6 text-center">
+                <AlertTriangle className="mx-auto mb-2 h-8 w-8 text-danger-fg" />
+                <p className="text-sm text-danger-fg">{redemptionsError}</p>
                 {viewing && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="mt-3 border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+                    className="mt-3 border-danger-border text-danger-fg hover:bg-danger-bg"
                     onClick={() => loadRedemptions(viewing)}
                   >
                     <RefreshCw className="mr-1 h-3.5 w-3.5" />
@@ -884,7 +884,7 @@ function CouponForm({
             name="discount_type"
             value={discountType}
             onChange={(e) => setDiscountType(e.target.value as DiscountType)}
-            className="w-full rounded-md border border-slate-700 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border px-3 py-2 text-sm"
           >
             <option value="percent">Porcentaje (%)</option>
             <option value="fixed_amount">Monto fijo (COP)</option>

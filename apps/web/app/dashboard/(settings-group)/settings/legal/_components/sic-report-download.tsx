@@ -86,7 +86,7 @@ export function SicReportDownload({ apiUrl }: { apiUrl: string }) {
           JSON
         </button>
       </div>
-      {error && <p className="text-xs text-red-700 bg-red-700/10 border border-red-700/30 rounded px-2 py-1">{error}</p>}
+      {error && <p className="text-xs text-danger-fg bg-danger-bg border border-danger-border rounded px-2 py-1">{error}</p>}
     </div>
   )
 }

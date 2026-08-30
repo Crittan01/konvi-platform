@@ -21,14 +21,14 @@ export default async function DashboardPage() {
     console.error('[dashboard] usuario sin tenant_id — cuenta malformada', { userId: user.id })
     return (
       <div className="flex items-center justify-center p-12">
-        <div className="max-w-md w-full rounded-xl border border-amber-700/25 bg-amber-500/10 p-6 text-center space-y-3">
+        <div className="max-w-md w-full rounded-xl border border-warning-border bg-warning-bg p-6 text-center space-y-3">
           <div className="flex justify-center">
-            <div className="h-12 w-12 rounded-full bg-amber-500/15 flex items-center justify-center">
-              <AlertTriangle className="h-6 w-6 text-amber-700" />
+            <div className="h-12 w-12 rounded-full bg-warning-bg flex items-center justify-center">
+              <AlertTriangle className="h-6 w-6 text-warning-fg" />
             </div>
           </div>
           <h2 className="text-lg font-semibold text-foreground">Tu cuenta no tiene una tienda asignada</h2>
-          <p className="text-sm text-amber-800">
+          <p className="text-sm text-warning-fg">
             {user.email} está autenticado pero no está vinculado a ningún tenant.
             Contacta al administrador de la plataforma para completar la asignación.
           </p>

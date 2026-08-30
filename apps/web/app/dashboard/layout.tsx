@@ -161,11 +161,11 @@ export default async function DashboardLayout({
 
         {/* Rev. 109 J.2.4.3 — Banner urgente si sesión vía recovery code */}
         {usedRecoveryCode && (
-          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 rounded-lg border border-amber-700/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-3">
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 rounded-lg border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-fg flex items-start gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
             <div className="flex-1">
               <p className="font-medium">Sesión iniciada con código de respaldo</p>
-              <p className="text-xs mt-1 text-amber-800">
+              <p className="text-xs mt-1 text-warning-fg">
                 Esto significa que perdiste tu authenticator. Te recomendamos
                 regenerar tu MFA + nuevos códigos de respaldo en{' '}
                 <a href="/dashboard/settings/security" className="underline font-medium">Configuración → Seguridad</a>

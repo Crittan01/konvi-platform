@@ -420,11 +420,11 @@ export default async function AiAgentsPage() {
         description="Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp."
         actions={
           agent.strict_guardrails ? (
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-green-700/30 bg-green-500/10 text-green-700">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-success-border bg-success-bg text-success-fg">
               Zero-Hallucinations Activo
             </span>
           ) : (
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-500/10 text-amber-700">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-warning-border bg-warning-bg text-warning-fg">
               Guardrails relajados
             </span>
           )
@@ -449,8 +449,8 @@ export default async function AiAgentsPage() {
 
       <div className="rounded-xl border border-primary/20 bg-linear-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-purple-500/15 border border-purple-700/25 flex items-center justify-center shrink-0">
-            <Sparkles className="h-6 w-6 text-purple-700" />
+          <div className="h-12 w-12 rounded-xl bg-ai-bg border border-ai-border flex items-center justify-center shrink-0">
+            <Sparkles className="h-6 w-6 text-ai-fg" />
           </div>
           <div>
             <p className="font-semibold text-foreground">Anti-Spam & RAG en Tiempo Real</p>
@@ -463,9 +463,9 @@ export default async function AiAgentsPage() {
       </div>
 
       {/* Card: Filosofía del negocio — contexto inyectado automáticamente */}
-      <div className={`rounded-xl border p-5 space-y-3 ${hasFilosofia ? 'border-emerald-700/25 bg-emerald-500/5' : 'border-amber-700/25 bg-amber-500/5'}`}>
+      <div className={`rounded-xl border p-5 space-y-3 ${hasFilosofia ? 'border-success-border bg-success-bg' : 'border-warning-border bg-warning-bg'}`}>
         <div className="flex items-center gap-2">
-          <BookOpen className={`h-4 w-4 ${hasFilosofia ? 'text-emerald-700' : 'text-amber-700'}`} />
+          <BookOpen className={`h-4 w-4 ${hasFilosofia ? 'text-success-fg' : 'text-warning-fg'}`} />
           <p className="text-sm font-semibold">
             Filosofía del negocio — inyectada automáticamente al bot
           </p>
@@ -498,7 +498,7 @@ export default async function AiAgentsPage() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-amber-700">
+          <p className="text-sm text-warning-fg">
             No has configurado la Filosofía del negocio todavía.{' '}
             <a href="/dashboard/settings" className="underline hover:no-underline">
               Configúrala en Ajustes → General

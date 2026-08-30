@@ -122,7 +122,7 @@ export function VariantMatrixGenerator({ productId, addVariationAction, onDone }
   if (summary) {
     const clean = summary.skipped === 0 && summary.failed === 0
     return (
-      <div className={`p-4 rounded-xl border text-sm flex items-start gap-2 ${clean ? 'border-emerald-700/30 bg-emerald-500/5 text-emerald-700' : 'border-amber-700/30 bg-amber-500/5 text-amber-700'}`}>
+      <div className={`p-4 rounded-xl border text-sm flex items-start gap-2 ${clean ? 'border-success-border bg-success-bg text-success-fg' : 'border-warning-border bg-warning-bg text-warning-fg'}`}>
         {clean ? <Zap className="h-4 w-4 shrink-0 mt-0.5" /> : <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />}
         <div className="space-y-1">
           <p className="font-medium">

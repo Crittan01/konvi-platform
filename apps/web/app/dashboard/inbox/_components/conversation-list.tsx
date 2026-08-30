@@ -115,7 +115,7 @@ export function ConversationList({
             </span>
             {hasUnread && (
               <span
-                className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
+                className="h-2 w-2 rounded-full bg-success-fg shrink-0"
                 role="status"
                 aria-label="Mensaje sin leer"
                 title="Mensaje sin leer"
@@ -152,7 +152,7 @@ export function ConversationList({
           )}
           {isSlaBreach(conv) && (
             <span
-              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border border-red-700 bg-red-700/10 text-red-700 font-semibold"
+              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border border-danger-border bg-danger-bg text-danger-fg font-semibold"
               title={`Sin respuesta humana hace ≥${SLA_BREACH_HOURS}h — atender ya`}
             >
               ⏰ SLA
@@ -193,7 +193,7 @@ export function ConversationList({
             </span>
             Inbox AI
           </h1>
-          <div className="flex items-center gap-1 text-xs text-emerald-700">
+          <div className="flex items-center gap-1 text-xs text-success-fg">
             <Wifi className="h-3 w-3" />
             <span>Live</span>
           </div>
@@ -244,7 +244,7 @@ export function ConversationList({
             <button
               onClick={() => setFilterStatus('active')}
               title="Quitar filtro"
-              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-500/10 text-amber-700 font-medium hover:bg-amber-500/15 transition-colors"
+              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-warning-border bg-warning-bg text-warning-fg font-medium hover:bg-warning-bg transition-colors"
             >
               {STATUS_CONFIG[filterStatus as keyof typeof STATUS_CONFIG].label}
               <X className="h-2.5 w-2.5" />
@@ -254,7 +254,7 @@ export function ConversationList({
             onClick={() => setShowArchived(v => !v)}
             className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
               showArchived
-                ? 'bg-slate-200 text-slate-700 border-slate-700 font-medium'
+                ? 'bg-muted text-muted-foreground border-border font-medium'
                 : 'border-border text-muted-foreground hover:text-foreground'
             }`}
             title="Mostrar conversaciones archivadas (cerradas con >90 días sin actividad)"
@@ -279,7 +279,7 @@ export function ConversationList({
                 <button
                   type="button"
                   onClick={() => setFilterStatus('sla_breach')}
-                  className="ml-2 inline-flex items-center text-[10px] font-semibold text-red-700 hover:underline"
+                  className="ml-2 inline-flex items-center text-[10px] font-semibold text-danger-fg hover:underline"
                   title="Ver convs sin respuesta humana en SLA"
                 >
                   · ⏰ {breachCount} en SLA breach
@@ -299,7 +299,7 @@ export function ConversationList({
             ))}
           </div>
         ) : error ? (
-          <div className="p-8 text-center text-red-700 text-sm">
+          <div className="p-8 text-center text-danger-fg text-sm">
             <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-70" />
             <p>{error}</p>
           </div>

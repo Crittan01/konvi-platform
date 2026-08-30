@@ -42,12 +42,12 @@ export const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 
 // Paleta founder: texto/border en shade 700; el bg 500/xx es solo tinte de fondo.
 export const CATEGORY_COLORS: Record<string, string> = {
-  faq: 'bg-blue-500/15 text-blue-700 border border-blue-700/30',
-  negocio: 'bg-green-500/15 text-green-700 border border-green-700/30',
-  politicas: 'bg-purple-500/15 text-purple-700 border border-purple-700/30',
-  productos: 'bg-orange-500/15 text-orange-700 border border-orange-700/30',
-  envios: 'bg-teal-500/15 text-teal-700 border border-teal-700/30',
-  pagos: 'bg-amber-500/15 text-amber-700 border border-amber-700/30',
+  faq: 'bg-info-bg text-info-fg border border-info-border',
+  negocio: 'bg-success-bg text-success-fg border border-success-border',
+  politicas: 'bg-ai-bg text-ai-fg border border-ai-border',
+  productos: 'bg-warning-bg text-warning-fg border border-warning-border',
+  envios: 'bg-success-bg text-success-fg border border-success-border',
+  pagos: 'bg-warning-bg text-warning-fg border border-warning-border',
 }
 
 /** Clase de badge para una categoría; fallback neutro si llega un slug desconocido. */

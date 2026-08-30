@@ -225,7 +225,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
             </div>
           )}
           {!loading && !error && truncated && (
-            <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-700/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning-fg">
               <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>Mostrando las {GALLERY_LIMIT} imágenes más recientes. Si buscas una más antigua, súbela de nuevo desde el producto.</span>
             </div>
@@ -245,7 +245,7 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
                     key={f.name}
                     className={`group relative rounded-lg overflow-hidden border-2 transition-colors bg-card flex flex-col ${
                       f.usedByProduct
-                        ? 'border-emerald-700/40 hover:border-emerald-700/70'
+                        ? 'border-success-border hover:border-success-fg'
                         : 'border-border hover:border-primary'
                     }`}
                   >
@@ -325,8 +325,8 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
             <>
               <span>
                 <span className="font-medium text-foreground">{files.length}</span> imágenes ·
-                {' '}<span className="text-amber-600">{files.filter(f => !f.usedByProduct).length} sin asignar</span> ·
-                {' '}<span className="text-emerald-600">{files.filter(f => f.usedByProduct).length} en uso</span>
+                {' '}<span className="text-warning-fg">{files.filter(f => !f.usedByProduct).length} sin asignar</span> ·
+                {' '}<span className="text-success-fg">{files.filter(f => f.usedByProduct).length} en uso</span>
               </span>
               <span>Click para asignar · hover → 🗑 para borrar</span>
             </>

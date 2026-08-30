@@ -345,10 +345,10 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
               className="h-8 text-xs font-mono mt-1" placeholder="PROD-001" maxLength={50} />
           </div>
           <div>
-            <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
+            <label className="text-[10px] text-warning-fg/90 uppercase font-semibold">Costo ($)</label>
             <Input type="number" step="50" min="0" value={v.cost_price}
               onChange={e => onChange('cost_price', parseFloat(e.target.value) || '')}
-              className="h-8 text-xs font-mono mt-1 border-amber-700/30" placeholder="Para margen" />
+              className="h-8 text-xs font-mono mt-1 border-warning-border" placeholder="Para margen" />
           </div>
         </div>
 
@@ -530,7 +530,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
           </Button>
         </div>
         {aiNotice && (
-          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-700/30 rounded px-2 py-1">{aiNotice}</p>
+          <p className="text-[11px] text-warning-fg bg-warning-bg border border-warning-border rounded px-2 py-1">{aiNotice}</p>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -658,7 +658,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
 
       {/* Error + Guardar */}
       {error && (
-        <p className="text-xs text-red-700 font-medium bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
+        <p className="text-xs text-danger-fg font-medium bg-danger-bg px-3 py-2 rounded-lg">{error}</p>
       )}
 
       <button type="button" onClick={handleSubmit} disabled={submitting}

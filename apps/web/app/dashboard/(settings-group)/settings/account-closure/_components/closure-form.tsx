@@ -153,25 +153,25 @@ export function ClosureForm({ tenantName, status }: Props) {
       : 0
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-amber-700 bg-amber-50 p-4 space-y-2">
+        <div className="rounded-lg border border-warning-border bg-warning-bg p-4 space-y-2">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-700 mt-0.5 shrink-0" />
+            <AlertTriangle className="h-5 w-5 text-warning-fg mt-0.5 shrink-0" />
             <div className="flex-1">
-              <h2 className="text-sm font-semibold text-amber-900">
+              <h2 className="text-sm font-semibold text-warning-fg">
                 Eliminación en curso
               </h2>
-              <p className="text-sm text-amber-800 mt-1">
+              <p className="text-sm text-warning-fg mt-1">
                 Tu cuenta será eliminada permanentemente el{' '}
                 <strong>{scheduledFor?.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</strong>{' '}
                 ({daysRemaining} día{daysRemaining !== 1 ? 's' : ''} restante).
                 Durante el grace period la cuenta está en lectura-solo.
               </p>
               {status.deletion_reason && (
-                <p className="text-xs text-amber-700 mt-2">
+                <p className="text-xs text-warning-fg mt-2">
                   <strong>Razón:</strong> {status.deletion_reason}
                 </p>
               )}
-              <p className="text-xs text-amber-700 mt-2">
+              <p className="text-xs text-warning-fg mt-2">
                 Tus credenciales de integraciones (Wompi/Aveonline/Meta/MeLi/
                 Telegram) fueron invalidadas. Si cancelas, deberás
                 reconectarlas.
@@ -239,17 +239,17 @@ export function ClosureForm({ tenantName, status }: Props) {
       </section>
 
       {/* Sección 2 — Solicitar eliminación */}
-      <section className="rounded-lg border border-red-700 bg-red-50 p-5 space-y-3">
+      <section className="rounded-lg border border-danger-border bg-danger-bg p-5 space-y-3">
         <div className="flex items-start gap-3">
-          <Trash2 className="h-5 w-5 text-red-700 mt-0.5 shrink-0" />
+          <Trash2 className="h-5 w-5 text-danger-fg mt-0.5 shrink-0" />
           <div className="flex-1">
-            <h2 className="text-base font-semibold text-red-900">
+            <h2 className="text-base font-semibold text-danger-fg">
               Solicitar eliminación de cuenta
             </h2>
-            <p className="text-sm text-red-800 mt-1">
+            <p className="text-sm text-danger-fg mt-1">
               Inicia el proceso de cierre permanente de tu cuenta Konvi:
             </p>
-            <ul className="text-sm text-red-800 mt-2 space-y-1 list-disc list-inside">
+            <ul className="text-sm text-danger-fg mt-2 space-y-1 list-disc list-inside">
               <li>Período de gracia de <strong>30 días</strong> — cancelable.</li>
               <li>Tus integraciones (Wompi/Aveonline/Meta/MeLi/Telegram) se invalidan inmediatamente.</li>
               <li>Audit log + consent se preservan 5 años (Ley 1581 Art. 22).</li>
@@ -280,10 +280,10 @@ export function ClosureForm({ tenantName, status }: Props) {
           <div
             ref={modalRef}
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg rounded-lg border border-red-700 bg-card shadow-xl"
+            className="w-full max-w-lg rounded-lg border border-danger-border bg-card shadow-xl"
           >
             <header className="flex items-center justify-between p-4 border-b border-border">
-              <h2 id="closure-modal-title" className="text-base font-semibold text-red-900 inline-flex items-center gap-2">
+              <h2 id="closure-modal-title" className="text-base font-semibold text-danger-fg inline-flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5" /> Confirmar eliminación
               </h2>
               <button
@@ -310,14 +310,14 @@ export function ClosureForm({ tenantName, status }: Props) {
                   placeholder={`ELIMINAR ${tenantName}`}
                   className={`w-full px-3 py-2 rounded-md border bg-background font-mono text-sm ${
                     confirmationPhrase && !phraseOk
-                      ? 'border-red-700'
+                      ? 'border-danger-border'
                       : phraseOk
-                        ? 'border-green-600'
+                        ? 'border-success-border'
                         : 'border-border'
                   }`}
                 />
                 {confirmationPhrase && !phraseOk && (
-                  <p className="text-xs text-red-600 mt-1">
+                  <p className="text-xs text-danger-fg mt-1">
                     Debe coincidir EXACTAMENTE (incluyendo mayúsculas + nombre del tenant).
                   </p>
                 )}
@@ -333,7 +333,7 @@ export function ClosureForm({ tenantName, status }: Props) {
                   rows={3}
                   placeholder="Ej: Cierre operativo del negocio · Migración a otra plataforma · Pruebas finalizadas"
                   className={`w-full px-3 py-2 rounded-md border bg-background text-sm ${
-                    reason && !reasonOk ? 'border-red-700' : 'border-border'
+                    reason && !reasonOk ? 'border-danger-border' : 'border-border'
                   }`}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
@@ -377,16 +377,16 @@ export function ClosureForm({ tenantName, status }: Props) {
 function FeedbackBanner({ feedback }: { feedback: { kind: 'ok' | 'err'; text: string } }) {
   if (feedback.kind === 'ok') {
     return (
-      <div className="rounded-md border border-green-700 bg-green-50 p-3 flex items-start gap-2">
-        <CheckCircle2 className="h-4 w-4 text-green-700 mt-0.5 shrink-0" />
-        <p className="text-sm text-green-800">{feedback.text}</p>
+      <div className="rounded-md border border-success-border bg-success-bg p-3 flex items-start gap-2">
+        <CheckCircle2 className="h-4 w-4 text-success-fg mt-0.5 shrink-0" />
+        <p className="text-sm text-success-fg">{feedback.text}</p>
       </div>
     )
   }
   return (
-    <div className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
-      <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
-      <p className="text-sm text-red-800">{feedback.text}</p>
+    <div className="rounded-md border border-danger-border bg-danger-bg p-3 flex items-start gap-2">
+      <AlertTriangle className="h-4 w-4 text-danger-fg mt-0.5 shrink-0" />
+      <p className="text-sm text-danger-fg">{feedback.text}</p>
     </div>
   )
 }

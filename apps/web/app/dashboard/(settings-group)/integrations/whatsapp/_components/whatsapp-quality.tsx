@@ -29,13 +29,13 @@ const TIER_LIMITS: Record<string, string> = {
 const QUALITY_UI: Record<string, { label: string; cls: string; dot: string }> = {
   UNFLAGGED: {
     label: 'Saludable',
-    cls: 'bg-emerald-700/10 border-emerald-700/40 text-emerald-900',
-    dot: 'bg-emerald-700',
+    cls: 'bg-success-bg border-success-border text-success-fg',
+    dot: 'bg-success-fg',
   },
   FLAGGED: {
     label: 'Marcado por Meta',
-    cls: 'bg-rose-700/10 border-rose-700/40 text-rose-900',
-    dot: 'bg-rose-700',
+    cls: 'bg-danger-bg border-danger-border text-danger-fg',
+    dot: 'bg-danger-fg',
   },
 }
 
@@ -60,9 +60,9 @@ export default function WhatsAppQuality({ connected, credentials }: Props) {
   return (
     <div className="space-y-5">
       {!hasData && (
-        <div className="rounded-xl border border-amber-700/30 bg-amber-700/5 p-4 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-amber-800 mt-0.5 shrink-0" />
-          <div className="text-sm text-amber-900">
+        <div className="rounded-xl border border-warning-border bg-warning-bg p-4 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-warning-fg mt-0.5 shrink-0" />
+          <div className="text-sm text-warning-fg">
             Aún no hemos recibido señales de calidad de Meta para este número.
             Los datos aparecen cuando Meta emite el primer evento
             {' '}<span className="font-mono text-xs">phone_number_quality_update</span>
@@ -84,7 +84,7 @@ export default function WhatsAppQuality({ connected, credentials }: Props) {
               {quality.label}
             </span>
             {qualityRaw === 'FLAGGED' && (
-              <span className="text-xs text-rose-900">
+              <span className="text-xs text-danger-fg">
                 Reduce envíos proactivos: Meta puede restringir el número.
               </span>
             )}

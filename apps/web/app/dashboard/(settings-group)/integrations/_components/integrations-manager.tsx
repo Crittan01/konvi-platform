@@ -229,14 +229,14 @@ export function IntegrationsManager(props: Props) {
 
       {/* Banners */}
       {connectedParam && !meliSameUser && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-green-700/30 bg-green-500/10 text-sm text-green-700">
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {connectedParam === 'mercadolibre' ? 'Mercado Libre' : connectedParam} conectado exitosamente.
         </div>
       )}
       {/* Rev. 108 Layer C — banner same-user reconnect */}
       {connectedParam === 'mercadolibre' && meliSameUser === '1' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-amber-700/30 bg-amber-500/10 text-sm text-amber-700">
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-warning-border bg-warning-bg text-sm text-warning-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="space-y-1">
             <p className="font-medium">
@@ -256,69 +256,69 @@ export function IntegrationsManager(props: Props) {
         </div>
       )}
       {errorParam && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0" />
           Error al conectar: {errorParam}. Intenta de nuevo.
         </div>
       )}
       {meliStartError && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {meliStartError}
         </div>
       )}
       {tgTest === 'success' && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-700/30 bg-emerald-500/10 text-sm text-emerald-700">
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           Telegram verificado — el bot puede enviar alertas de escalamiento al grupo del asesor.
         </div>
       )}
       {tgTest === 'error' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al probar Telegram</p>
-            {tgMsg && <p className="text-xs text-red-700/80 mt-0.5 font-mono">{tgMsg}</p>}
-            {tgMsg?.includes('403') && <p className="text-xs text-red-700/90 mt-1.5">El grupo fue eliminado o el bot fue expulsado. Desconecta Telegram, crea un nuevo grupo, agrega el bot como miembro y reconecta.</p>}
-            {tgMsg?.includes('400') && <p className="text-xs text-red-700/90 mt-1.5">El Chat ID no es válido. Debe ser negativo (ej: -1001234567890).</p>}
-            {tgMsg?.includes('401') && <p className="text-xs text-red-700/90 mt-1.5">Bot Token inválido o revocado. Desconecta y regenera en @BotFather → /token.</p>}
+            {tgMsg && <p className="text-xs text-danger-fg/80 mt-0.5 font-mono">{tgMsg}</p>}
+            {tgMsg?.includes('403') && <p className="text-xs text-danger-fg/90 mt-1.5">El grupo fue eliminado o el bot fue expulsado. Desconecta Telegram, crea un nuevo grupo, agrega el bot como miembro y reconecta.</p>}
+            {tgMsg?.includes('400') && <p className="text-xs text-danger-fg/90 mt-1.5">El Chat ID no es válido. Debe ser negativo (ej: -1001234567890).</p>}
+            {tgMsg?.includes('401') && <p className="text-xs text-danger-fg/90 mt-1.5">Bot Token inválido o revocado. Desconecta y regenera en @BotFather → /token.</p>}
           </div>
         </div>
       )}
 
       {/* Banners WhatsApp test */}
       {waTest === 'success' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-emerald-700/30 bg-emerald-500/10 text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">WhatsApp verificado</p>
-            {waMsg && <p className="text-xs text-emerald-700/80 mt-0.5">{waMsg}</p>}
+            {waMsg && <p className="text-xs text-success-fg/80 mt-0.5">{waMsg}</p>}
           </div>
         </div>
       )}
       {waTest === 'error' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al probar WhatsApp</p>
-            {waMsg && <p className="text-xs text-red-700/80 mt-0.5">{waMsg}</p>}
+            {waMsg && <p className="text-xs text-danger-fg/80 mt-0.5">{waMsg}</p>}
           </div>
         </div>
       )}
 
       {/* Banners Aveonline test/connect */}
       {aveTest === 'success' && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-700/30 bg-emerald-500/10 text-sm text-emerald-700">
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           Aveonline verificado — credenciales válidas. El bot puede cotizar con tus carriers asignados.
         </div>
       )}
       {aveTest === 'error' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al conectar/probar Aveonline</p>
-            {aveMsg && <p className="text-xs text-red-700/80 mt-0.5">{aveMsg}</p>}
+            {aveMsg && <p className="text-xs text-danger-fg/80 mt-0.5">{aveMsg}</p>}
           </div>
         </div>
       )}
@@ -359,19 +359,19 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── WhatsApp ──────────────────────────────────────────────────────── */}
         {visibleCards.includes('whatsapp') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${waConnected ? 'border-emerald-700/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${waConnected ? 'border-emerald-700/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${waConnected ? 'border-success-border' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${waConnected ? 'border-success-border bg-success-bg' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-green-500/15 border border-green-700/20 flex items-center justify-center shrink-0">
-                    <MessageCircle className="h-4 w-4 text-green-700" />
+                  <div className="h-9 w-9 rounded-xl bg-success-bg border border-success-border flex items-center justify-center shrink-0">
+                    <MessageCircle className="h-4 w-4 text-success-fg" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">WhatsApp</p>
                     <p className="text-[11px] text-muted-foreground truncate">WhatsApp Cloud API</p>
                   </div>
                 </div>
-                <StatusBadge connected={waConnected} colorClass="bg-emerald-500/15 text-emerald-700 border-emerald-700/30" />
+                <StatusBadge connected={waConnected} colorClass="bg-success-bg text-success-fg border-success-border" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -437,8 +437,8 @@ export function IntegrationsManager(props: Props) {
                   /integrations/whatsapp, única superficie de onboarding válida.
                 */
                 <div className="space-y-3">
-                  <div className="rounded-lg border border-green-700/20 bg-green-500/5 p-3 space-y-1.5">
-                    <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider">Conexión Direct Provider</p>
+                  <div className="rounded-lg border border-success-border bg-success-bg p-3 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-success-fg uppercase tracking-wider">Conexión Direct Provider</p>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
                       Tu negocio conecta su <strong className="text-foreground font-medium">propia Meta App</strong> (ADR-0023).
                       El panel dedicado captura las <strong className="text-foreground font-medium">6 credenciales</strong> —incluyendo
@@ -467,19 +467,19 @@ export function IntegrationsManager(props: Props) {
           tiempo_token) vive en /integrations/aveonline.
         */}
         {visibleCards.includes('aveonline') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-700/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-cyan-700/20 bg-cyan-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-info-border' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-info-border bg-info-bg' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-cyan-500/15 border border-cyan-700/20 flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-cyan-700" />
+                  <div className="h-9 w-9 rounded-xl bg-info-bg border border-info-border flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-info-fg" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Aveonline</p>
                     <p className="text-[11px] text-muted-foreground truncate">Shipping multi-carrier Colombia</p>
                   </div>
                 </div>
-                <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-700 border-cyan-700/30" />
+                <StatusBadge connected={aveonlineConnected} colorClass="bg-info-bg text-info-fg border-info-border" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -537,23 +537,23 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.aveonline && (
                     <>
-                      <div className="rounded-lg border border-cyan-700/20 bg-cyan-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-cyan-700 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-info-border bg-info-bg p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-info-fg uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Ingresa el <strong className="text-foreground font-medium">usuario y password</strong> de tu cuenta Aveonline (la misma que usas en <span className="font-mono text-foreground">app.aveonline.co</span>).
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Validamos contra <span className="font-mono text-[10px] text-foreground">autenticarusuario.php</span> antes de guardar. El password se almacena cifrado en Supabase Vault.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               ¿No tienes cuenta? Cuenta DEMO: <span className="font-mono text-foreground">demointegracion</span> / <span className="font-mono text-foreground">demointegra2021</span>.
                             </p>
@@ -594,30 +594,30 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Mercado Libre ─────────────────────────────────────────────────── */}
         {visibleCards.includes('mercadolibre') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${meliConnected ? 'border-yellow-700/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${meliConnected ? 'border-yellow-700/20 bg-yellow-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${meliConnected ? 'border-warning-border' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${meliConnected ? 'border-warning-border bg-warning-bg' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-yellow-400/15 border border-yellow-700/30 flex items-center justify-center shrink-0">
-                    <Store className="h-4 w-4 text-yellow-700" />
+                  <div className="h-9 w-9 rounded-xl bg-yellow-400/15 border border-warning-border flex items-center justify-center shrink-0">
+                    <Store className="h-4 w-4 text-warning-fg" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Mercado Libre</p>
                     <p className="text-[11px] text-muted-foreground truncate">Marketplace · OAuth 2.0</p>
                   </div>
                 </div>
-                <StatusBadge connected={meliConnected} colorClass="bg-yellow-500/15 text-yellow-700 border-yellow-700/30" />
+                <StatusBadge connected={meliConnected} colorClass="bg-warning-bg text-warning-fg border-warning-border" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
               <p className="text-xs text-muted-foreground">Sincroniza catálogo y recibe pedidos de MeLi vía webhooks.</p>
               {meliInt?.status === 'error' && isOwner ? (
                 /* Token expirado o error de refresh — acción clara para el operador */
-                <div className="rounded-lg border border-amber-700/30 bg-amber-500/8 p-3 space-y-2">
-                  <p className="text-xs font-medium text-amber-700">Token expirado</p>
-                  <p className="text-[11px] text-amber-700/70">El acceso a Mercado Libre expiró. Reconecta tu cuenta para restaurar la sincronización.</p>
+                <div className="rounded-lg border border-warning-border bg-warning-bg p-3 space-y-2">
+                  <p className="text-xs font-medium text-warning-fg">Token expirado</p>
+                  <p className="text-[11px] text-warning-fg/70">El acceso a Mercado Libre expiró. Reconecta tu cuenta para restaurar la sincronización.</p>
                   <button onClick={startMeliOAuth} disabled={connectingMeli}
-                    className="mt-1 h-7 text-xs px-3 rounded-md border border-amber-700/40 text-amber-700 hover:bg-amber-500/10 transition-colors disabled:opacity-50">
+                    className="mt-1 h-7 text-xs px-3 rounded-md border border-warning-border text-warning-fg hover:bg-warning-bg transition-colors disabled:opacity-50">
                     {connectingMeli ? 'Conectando...' : 'Reconectar Mercado Libre'}
                   </button>
                 </div>
@@ -651,31 +651,31 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.meli && (
                     <>
-                      <div className="rounded-lg border border-yellow-700/20 bg-yellow-500/5 p-3 space-y-2.5">
-                        <p className="text-[10px] font-semibold text-yellow-700 uppercase tracking-wider">Requisito</p>
+                      <div className="rounded-lg border border-warning-border bg-warning-bg p-3 space-y-2.5">
+                        <p className="text-[10px] font-semibold text-warning-fg uppercase tracking-wider">Requisito</p>
                         <p className="text-[11px] text-muted-foreground leading-relaxed">
                           Necesitas la <strong className="text-foreground font-medium">cuenta principal vendedor</strong> de Mercado Libre Colombia con verificación de identidad completa — no una cuenta de operador.
                         </p>
-                        <div className="border-t border-yellow-700/15 pt-2 space-y-2">
+                        <div className="border-t border-warning-border pt-2 space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-warning-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">Presiona <strong className="text-foreground font-medium">Conectar con Mercado Libre</strong> — serás redirigido a MeLi.</p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-warning-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">Inicia sesión con tu cuenta vendedor → revisa permisos → presiona <strong className="text-foreground font-medium">Permitir</strong>.</p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-warning-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">Serás redirigido de vuelta con estado <strong className="text-foreground font-medium">Conectado</strong> y tu MeLi ID visible.</p>
                           </div>
                         </div>
-                        <div className="border-t border-yellow-700/15 pt-2">
+                        <div className="border-t border-warning-border pt-2">
                           <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                            <span className="text-yellow-700/80 font-medium">Vigencia:</span> 6 meses. Pasado ese tiempo deberás reconectar.
+                            <span className="text-warning-fg/80 font-medium">Vigencia:</span> 6 meses. Pasado ese tiempo deberás reconectar.
                           </p>
                           <p className="text-[10px] text-muted-foreground/70 leading-relaxed mt-1">
-                            <span className="text-yellow-700/80 font-medium">Error &quot;la aplicación no puede conectarse&quot;:</span> estás usando una cuenta de operador o la verificación de identidad está incompleta.
+                            <span className="text-warning-fg/80 font-medium">Error &quot;la aplicación no puede conectarse&quot;:</span> estás usando una cuenta de operador o la verificación de identidad está incompleta.
                           </p>
                         </div>
                       </div>
@@ -700,19 +700,19 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Wompi ─────────────────────────────────────────────────────────── */}
         {visibleCards.includes('wompi') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${wompiConnected ? 'border-violet-700/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${wompiConnected ? 'border-violet-700/20 bg-violet-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${wompiConnected ? 'border-ai-border' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${wompiConnected ? 'border-ai-border bg-ai-bg' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-violet-500/15 border border-violet-700/20 flex items-center justify-center shrink-0">
-                    <CreditCard className="h-4 w-4 text-violet-700" />
+                  <div className="h-9 w-9 rounded-xl bg-ai-bg border border-ai-border flex items-center justify-center shrink-0">
+                    <CreditCard className="h-4 w-4 text-ai-fg" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Wompi</p>
                     <p className="text-[11px] text-muted-foreground truncate">Pagos en línea Colombia</p>
                   </div>
                 </div>
-                <StatusBadge connected={wompiConnected} colorClass="bg-violet-500/15 text-violet-700 border-violet-700/30" />
+                <StatusBadge connected={wompiConnected} colorClass="bg-ai-bg text-ai-fg border-ai-border" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -724,7 +724,7 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill
                       label="Entorno"
                       value={wompiInt.meta?.environment === 'production' ? 'Producción' : 'Sandbox'}
-                      className={wompiInt.meta?.environment === 'production' ? 'text-emerald-700' : 'text-amber-700'}
+                      className={wompiInt.meta?.environment === 'production' ? 'text-success-fg' : 'text-warning-fg'}
                     />
                   </div>
                   <a
@@ -754,23 +754,23 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.wompi && (
                     <>
-                      <div className="rounded-lg border border-violet-700/20 bg-violet-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-ai-border bg-ai-bg p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-ai-fg uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-ai-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Regístrate en <span className="font-mono text-foreground">wompi.co</span> y activa tu cuenta de comercio.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-ai-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               En el Dashboard de Wompi → <strong className="text-foreground font-medium">Desarrolladores</strong> → copia la <strong className="text-foreground font-medium">Llave Privada</strong> y la <strong className="text-foreground font-medium">Llave de Eventos</strong>.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-ai-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">{webhookUrl('wompi')}</span>
                             </p>
@@ -823,19 +823,19 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Telegram ──────────────────────────────────────────────────────── */}
         {visibleCards.includes('telegram') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${tgConnected ? 'border-sky-700/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${tgConnected ? 'border-sky-700/20 bg-sky-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${tgConnected ? 'border-info-border' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${tgConnected ? 'border-info-border bg-info-bg' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center border ${tgConnected ? 'bg-sky-500/20 border-sky-700/30' : 'bg-white/10 border-white/10'}`}>
-                    <Bot className={`h-4 w-4 ${tgConnected ? 'text-sky-700' : 'text-muted-foreground'}`} />
+                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center border ${tgConnected ? 'bg-info-bg border-info-border' : 'bg-white/10 border-white/10'}`}>
+                    <Bot className={`h-4 w-4 ${tgConnected ? 'text-info-fg' : 'text-muted-foreground'}`} />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Telegram</p>
                     <p className="text-[11px] text-muted-foreground truncate">Alertas Operativas</p>
                   </div>
                 </div>
-                <StatusBadge connected={tgConnected} colorClass="bg-sky-500/15 text-sky-700 border-sky-700/30" />
+                <StatusBadge connected={tgConnected} colorClass="bg-info-bg text-info-fg border-info-border" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -846,7 +846,7 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill label="Bot Token" value={tgConfig?.config?.token_preview ?? '●●●●●●●●'} />
                     <MetaPill label="Chat ID" value={tgConfig?.config?.chat_id ?? '—'} />
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                  <div className="flex items-center gap-1.5 text-xs text-success-fg">
                     <ShieldCheck className="h-3 w-3 shrink-0" /> Alertas habilitadas
                   </div>
                   <a
@@ -886,27 +886,27 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   {open.telegram && (
                     <>
-                      <div className="rounded-lg border border-sky-700/20 bg-sky-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-sky-700 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-info-border bg-info-bg p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-info-fg uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              En Telegram busca <span className="font-mono text-foreground">@BotFather</span> → <span className="font-mono text-sky-700">/newbot</span> → sigue los pasos → copia el <strong className="text-foreground font-medium">Bot Token</strong>.
+                              En Telegram busca <span className="font-mono text-foreground">@BotFather</span> → <span className="font-mono text-info-fg">/newbot</span> → sigue los pasos → copia el <strong className="text-foreground font-medium">Bot Token</strong>.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
                               Crea un <strong className="text-foreground font-medium">grupo privado</strong> y agrega el bot como miembro.
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <span className="h-4 w-4 rounded-full bg-sky-500/25 text-info-fg flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1 min-w-0">
                               <p>Abre en el navegador:</p>
-                              <p className="font-mono text-[10px] text-sky-700/80 bg-black/20 rounded px-2 py-1 break-all leading-normal">
-                                api.telegram.org/bot<span className="text-sky-700">TOKEN</span>/getUpdates
+                              <p className="font-mono text-[10px] text-info-fg/80 bg-black/20 rounded px-2 py-1 break-all leading-normal">
+                                api.telegram.org/bot<span className="text-info-fg">TOKEN</span>/getUpdates
                               </p>
                               <p>En el JSON busca <span className="font-mono text-foreground">&quot;chat&quot; → &quot;id&quot;</span>: número negativo.</p>
                             </div>

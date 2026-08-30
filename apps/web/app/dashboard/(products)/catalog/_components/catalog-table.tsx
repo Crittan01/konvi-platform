@@ -102,14 +102,14 @@ const ExpandedPanel = memo(function ExpandedPanel({
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">{fmtAttrs(v.attributes)}</span>
                       {v.sku && <span className="font-mono text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{v.sku}</span>}
-                      {linked && <span className="text-[10px] text-yellow-700 bg-yellow-500/10 border border-yellow-700/30 px-1.5 py-0.5 rounded">MeLi</span>}
+                      {linked && <span className="text-[10px] text-warning-fg bg-warning-bg border border-warning-border px-1.5 py-0.5 rounded">MeLi</span>}
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums">
                     ${(v.price ?? 0).toLocaleString('es-CO')}
                     {v.compare_at_price && <span className="text-muted-foreground line-through text-[10px] ml-1">${v.compare_at_price.toLocaleString('es-CO')}</span>}
                   </td>
-                  <td className={`px-3 py-2 text-right font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= threshold ? 'text-amber-700 font-semibold' : 'text-muted-foreground'}`}>
+                  <td className={`px-3 py-2 text-right font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= threshold ? 'text-warning-fg font-semibold' : 'text-muted-foreground'}`}>
                     {v.stock_quantity} u.
                   </td>
                   {canWrite && adjustStockAction && (
@@ -236,7 +236,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="font-semibold text-sm leading-tight truncate">{p.title}</p>
             {linkedVariationIds && vars.some(v => linkedVariationIds.includes(v.id)) && (
-              <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-700/20 shrink-0">
+              <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-warning-bg text-warning-fg border border-warning-border shrink-0">
                 <Store className="h-2.5 w-2.5" /> MeLi
               </span>
             )}
@@ -253,7 +253,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
 
         <div className="text-right shrink-0 mr-1">
           <p className="font-bold text-sm text-primary">{fmtPrice(vars)}</p>
-          <p className={`text-[10px] tabular-nums ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
+          <p className={`text-[10px] tabular-nums ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-warning-fg' : 'text-muted-foreground'}`}>
             {totalStock} u.
           </p>
         </div>
@@ -561,7 +561,7 @@ export default function CatalogTable({
         <button
           onClick={() => setLowStockOnly(false)}
           title="Quitar filtro de bajo stock"
-          className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-amber-700/30 bg-amber-500/10 text-amber-700 text-xs font-medium whitespace-nowrap hover:bg-amber-500/15 transition-colors"
+          className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-warning-border bg-warning-bg text-warning-fg text-xs font-medium whitespace-nowrap hover:bg-warning-bg transition-colors"
         >
           <AlertTriangle className="h-3.5 w-3.5" />
           Bajo stock
@@ -671,7 +671,7 @@ export default function CatalogTable({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="font-semibold leading-tight line-clamp-1">{p.title}</p>
                         {linkedVariationIds && vars.some(v => linkedVariationIds.includes(v.id)) && (
-                          <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-700/20 shrink-0">
+                          <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-warning-bg text-warning-fg border border-warning-border shrink-0">
                             <Store className="h-2.5 w-2.5" /> MeLi
                           </span>
                         )}
@@ -694,7 +694,7 @@ export default function CatalogTable({
                     </td>
                     <td className="px-3 py-3 text-right">
                       <span className={`text-sm font-semibold tabular-nums ${
-                        hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-700' : 'text-muted-foreground'
+                        hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-warning-fg' : 'text-muted-foreground'
                       }`}>{totalStock} u.</span>
                     </td>
                     <td className="px-2 py-3 text-muted-foreground">
@@ -801,7 +801,7 @@ export default function CatalogTable({
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-bold text-primary text-sm">{fmtPrice(vars)}</p>
-                      <p className={`text-[11px] tabular-nums font-medium ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                      <p className={`text-[11px] tabular-nums font-medium ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-warning-fg' : 'text-muted-foreground'}`}>
                         {totalStock} u.
                       </p>
                     </div>

@@ -81,13 +81,13 @@ const STATUS_NEXT: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:         'bg-yellow-500/15 text-yellow-700 border-yellow-700/30',
-  pending_payment: 'bg-amber-500/15 text-amber-700 border-amber-700/30',
-  confirmed:  'bg-blue-500/15 text-blue-700 border-blue-700/30',
-  processing: 'bg-purple-500/15 text-purple-700 border-purple-700/30',
-  shipped:    'bg-indigo-500/15 text-indigo-700 border-indigo-700/30',
-  delivered:  'bg-green-500/15 text-green-700 border-green-700/30',
-  cancelled:  'bg-red-500/15 text-red-700 border-red-700/30',
+  pending:         'bg-warning-bg text-warning-fg border-warning-border',
+  pending_payment: 'bg-warning-bg text-warning-fg border-warning-border',
+  confirmed:  'bg-info-bg text-info-fg border-info-border',
+  processing: 'bg-ai-bg text-ai-fg border-ai-border',
+  shipped:    'bg-ai-bg text-ai-fg border-ai-border',
+  delivered:  'bg-success-bg text-success-fg border-success-border',
+  cancelled:  'bg-danger-bg text-danger-fg border-danger-border',
 }
 
 const STATUS_ADVANCE_HELP: Record<string, string> = {
@@ -180,7 +180,7 @@ function PaymentLinkButton({ orderId, phone }: { orderId: string; phone?: string
       <button type="button" onClick={() => void copy()} className="inline-flex items-center gap-1.5 text-xs text-foreground border border-border hover:bg-accent rounded-lg px-2.5 py-1.5 transition-all">
         <Copy className="h-3 w-3" /> Copiar link
       </button>
-      <a href={waHref()} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-emerald-700 border border-emerald-700/40 hover:border-emerald-700/60 bg-emerald-50 rounded-lg px-2.5 py-1.5 transition-all">
+      <a href={waHref()} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-success-fg border border-success-border hover:border-success-fg bg-success-bg rounded-lg px-2.5 py-1.5 transition-all">
         <Send className="h-3 w-3" /> Reenviar por WhatsApp
       </a>
     </div>
@@ -220,14 +220,14 @@ function GenerateGuideButton({
         type="button"
         onClick={() => void handle()}
         disabled={isPending}
-        className="inline-flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 border border-emerald-700/40 hover:border-emerald-700/60 bg-emerald-50 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 text-xs text-success-fg hover:text-success-fg border border-success-border hover:border-success-fg bg-success-bg rounded-lg px-3 py-1.5 transition-all disabled:opacity-50"
         title="Genera guía Aveonline con contraentrega — el courier recauda al entregar"
       >
         {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}
         {isPending ? 'Generando…' : 'Generar guía COD'}
       </button>
       {result && (
-        <span className={`text-xs ${result.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+        <span className={`text-xs ${result.ok ? 'text-success-fg' : 'text-danger-fg'}`}>
           {result.message}
         </span>
       )}
@@ -298,7 +298,7 @@ function ActionButton({
           onClick={() => setConfirmAction('cancel')}
           disabled={isPending}
           size="sm"
-          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-red-700 hover:bg-destructive/10"
+          className="w-full sm:w-auto h-8 text-xs text-muted-foreground hover:text-danger-fg hover:bg-destructive/10"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancelar pedido'}
         </Button>
@@ -543,7 +543,7 @@ export default function OrdersManager({
             <StaggerList stagger={0.025} className={`space-y-4 transition-opacity ${isNavPending ? 'opacity-60' : ''}`}>
               {initialOrders.map((o, orderIdx) => {
                 const nextStatus = STATUS_NEXT[o.status]
-                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-700'
+                const colorClass = STATUS_COLORS[o.status] || 'bg-muted text-muted-foreground'
                 const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
                 const subtotal  = o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
                 const shipping  = o.shipping_cost ?? 0
@@ -561,7 +561,7 @@ export default function OrdersManager({
                             <TooltipProvider delayDuration={200}>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-700/30 cursor-default">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-success-bg text-success-fg border-success-border cursor-default">
                                     💵 COD
                                   </span>
                                 </TooltipTrigger>
@@ -606,8 +606,8 @@ export default function OrdersManager({
                       )}
                       {discount > 0 && (
                         <div className="flex justify-between items-center gap-2">
-                          <span className="text-emerald-700 flex items-center gap-1">Descuento</span>
-                          <span className="font-mono tabular-nums shrink-0 text-emerald-700">−${discount.toLocaleString('es-CO')}</span>
+                          <span className="text-success-fg flex items-center gap-1">Descuento</span>
+                          <span className="font-mono tabular-nums shrink-0 text-success-fg">−${discount.toLocaleString('es-CO')}</span>
                         </div>
                       )}
                       {(shipping > 0 || discount > 0) && (

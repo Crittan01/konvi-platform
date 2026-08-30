@@ -40,10 +40,10 @@ export function IndexPendingBanner({ pendingCount }: Props) {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-amber-700/25 bg-amber-500/5 flex-wrap">
+    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-warning-border bg-warning-bg flex-wrap">
       <div className="flex items-center gap-2">
-        <Zap className="h-4 w-4 text-amber-700 shrink-0" />
-        <p className="text-xs text-amber-700">
+        <Zap className="h-4 w-4 text-warning-fg shrink-0" />
+        <p className="text-xs text-warning-fg">
           {state === 'loading'
             ? `Preparando documentos para IA...`
             : `${pendingCount} documento${pendingCount !== 1 ? 's' : ''} pendiente${pendingCount !== 1 ? 's' : ''} de preparar para IA`
@@ -53,13 +53,13 @@ export function IndexPendingBanner({ pendingCount }: Props) {
       {state !== 'loading' && (
         <button
           onClick={handleIndex}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-700 border border-amber-700/30 hover:bg-amber-500/25 transition-colors shrink-0"
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-warning-bg text-warning-fg border border-warning-border hover:bg-amber-500/25 transition-colors shrink-0"
         >
           <Zap className="h-3 w-3" /> Preparar para IA
         </button>
       )}
       {state === 'loading' && (
-        <Loader2 className="h-4 w-4 animate-spin text-amber-700 shrink-0" />
+        <Loader2 className="h-4 w-4 animate-spin text-warning-fg shrink-0" />
       )}
     </div>
   )

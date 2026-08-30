@@ -153,13 +153,13 @@ export function DocCard({
             </span>
             {/* Terminología humana: sin "embedding" ni "RAG" */}
             {doc.is_active && doc.has_embedding ? (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-700/30 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-success-fg border border-success-border bg-success-bg rounded-full px-1.5 py-0.5">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Listo para IA
               </span>
             ) : doc.is_active && !doc.has_embedding ? (
               canWrite
                 ? <EmbedRetryButton docId={doc.id} reindexDocument={reindexDocument} />
-                : <span className="text-[10px] text-amber-700 border border-amber-700/30 rounded-full px-1.5 py-0.5">Pendiente de preparar</span>
+                : <span className="text-[10px] text-warning-fg border border-warning-border rounded-full px-1.5 py-0.5">Pendiente de preparar</span>
             ) : (
               <span className="text-[11px] text-muted-foreground border border-border rounded-full px-2 py-0.5">
                 Inactivo
@@ -188,7 +188,7 @@ export function DocCard({
                 <SubmitButton size="sm" variant="outline"
                   pendingText="Activando..."
                   savedText="Activado"
-                  className="text-xs h-7 w-full text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
+                  className="text-xs h-7 w-full text-success-fg border-success-border hover:bg-success-bg">
                   Activar
                 </SubmitButton>
               </ActionResultForm>

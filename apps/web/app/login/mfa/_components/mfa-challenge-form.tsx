@@ -126,9 +126,9 @@ export function MfaChallengeForm({ factorId, message }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <div role="alert" aria-live="assertive" className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
-          <ShieldAlert className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
-          <p className="text-sm text-red-800">{error}</p>
+        <div role="alert" aria-live="assertive" className="rounded-md border border-danger-border bg-danger-bg p-3 flex items-start gap-2">
+          <ShieldAlert className="h-4 w-4 text-danger-fg mt-0.5 shrink-0" />
+          <p className="text-sm text-danger-fg">{error}</p>
         </div>
       )}
 

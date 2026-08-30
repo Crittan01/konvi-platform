@@ -56,7 +56,7 @@ export function BottomNav({ inboxBadge = 0 }: { inboxBadge?: number }) {
                   {showBadge && (
                     <span
                       aria-hidden
-                      className="absolute -top-1.5 -right-2.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-red-100 text-red-600 border border-red-200 text-[10px] font-bold tabular-nums"
+                      className="absolute -top-1.5 -right-2.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-danger-bg text-danger-fg border border-danger-border text-[10px] font-bold tabular-nums"
                     >
                       {inboxBadge > 99 ? '99+' : inboxBadge}
                     </span>

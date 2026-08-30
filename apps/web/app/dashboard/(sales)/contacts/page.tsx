@@ -844,7 +844,7 @@ export default async function ContactsPage(
       )}
 
       {/* Habeas Data notice */}
-      <div className="rounded-xl border border-blue-700/40 bg-blue-700/5 px-4 py-3 text-sm text-blue-700 flex items-start gap-2">
+      <div className="rounded-xl border border-info-border bg-info-bg px-4 py-3 text-sm text-info-fg flex items-start gap-2">
         <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
           <span className="font-semibold">Habeas Data — Ley 1581/2012 Colombia.</span>{' '}

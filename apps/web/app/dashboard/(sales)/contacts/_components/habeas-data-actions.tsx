@@ -285,7 +285,7 @@ export default function HabeasDataActions({
     <div className="pt-3 mt-3 border-t border-border space-y-3">
       {/* Header con (?) info */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-success-fg uppercase tracking-wide">
           <ShieldCheck className="h-3 w-3" />
           Habeas Data — Derechos del titular
         </div>
@@ -293,7 +293,7 @@ export default function HabeasDataActions({
           <DialogTrigger asChild>
             <button
               type="button"
-              className="text-muted-foreground hover:text-emerald-700 transition-colors"
+              className="text-muted-foreground hover:text-success-fg transition-colors"
               title="¿Para qué sirve cada acción?"
             >
               <HelpCircle className="h-4 w-4" />
@@ -318,12 +318,12 @@ export default function HabeasDataActions({
                     key={kind}
                     className={`rounded-lg border p-3 ${
                       m.isDestructive
-                        ? 'border-amber-700/40 bg-amber-700/5'
-                        : 'border-emerald-700/40 bg-emerald-700/5'
+                        ? 'border-warning-border bg-warning-bg'
+                        : 'border-success-border bg-success-bg'
                     }`}
                   >
                     <div className={`flex items-center gap-2 font-semibold ${
-                      m.isDestructive ? 'text-amber-700' : 'text-emerald-700'
+                      m.isDestructive ? 'text-warning-fg' : 'text-success-fg'
                     }`}>
                       <Icon className="h-4 w-4" />
                       {m.label}
@@ -374,8 +374,8 @@ export default function HabeasDataActions({
               }. Acción no disponible.`
             : m.description
           const hoverClasses = m.isDestructive
-            ? 'hover:bg-amber-700/10 hover:text-amber-800 hover:border-amber-700'
-            : 'hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700'
+            ? 'hover:bg-warning-bg hover:text-warning-fg hover:border-warning-fg'
+            : 'hover:bg-success-bg hover:text-success-fg hover:border-success-fg'
           return (
             <Button
               key={kind}
@@ -384,7 +384,7 @@ export default function HabeasDataActions({
               size="sm"
               variant="outline"
               title={buttonTitle}
-              className={`h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 ${hoverClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`h-8 text-xs gap-1.5 px-3 border-success-border text-success-fg ${hoverClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
               onClick={handleClick(kind)}
             >
               {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
@@ -404,7 +404,7 @@ export default function HabeasDataActions({
               <>
                 <DialogHeader>
                   <DialogTitle className={`flex items-center gap-2 ${
-                    m.isDestructive ? 'text-amber-700' : 'text-emerald-700'
+                    m.isDestructive ? 'text-warning-fg' : 'text-success-fg'
                   }`}>
                     {m.isDestructive ? <AlertTriangle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
                     Confirmar: {m.label}
@@ -429,7 +429,7 @@ export default function HabeasDataActions({
                     </ul>
                   </div>
                   {m.isDestructive && (
-                    <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2.5 text-xs text-amber-700">
+                    <div className="rounded-md border border-warning-border bg-warning-bg p-2.5 text-xs text-warning-fg">
                       <strong>Esta acción es IRREVERSIBLE.</strong> Una vez ejecutada, los datos
                       personales NO se pueden recuperar. El audit log conservará prueba de lo ocurrido.
                     </div>
@@ -506,7 +506,7 @@ export default function HabeasDataActions({
             <>
               <DialogHeader>
                 <DialogTitle className={`flex items-center gap-2 ${
-                  resultDialog.kind === 'success' ? 'text-emerald-700' : 'text-red-700'
+                  resultDialog.kind === 'success' ? 'text-success-fg' : 'text-danger-fg'
                 }`}>
                   {resultDialog.kind === 'success'
                     ? <CheckCircle2 className="h-5 w-5" />

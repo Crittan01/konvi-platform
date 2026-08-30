@@ -113,12 +113,12 @@ export default async function ReceiptPage(props: { params: Promise<{ id: string 
           )}
 
           {s.vendedor?.completa === false && (
-            <div className="mb-5 rounded-md border border-amber-700/40 bg-amber-50 p-3 print:hidden">
-              <p className="text-sm text-amber-800">
+            <div className="mb-5 rounded-md border border-warning-border bg-warning-bg p-3 print:hidden">
+              <p className="text-sm text-warning-fg">
                 Faltan datos de identificación del vendedor
                 {s.vendedor?.faltantes?.length ? `: ${s.vendedor.faltantes.join(', ')}` : ''}.
               </p>
-              <p className="text-xs text-amber-700 mt-0.5">
+              <p className="text-xs text-warning-fg mt-0.5">
                 La Ley 1480 (art. 50 lit. a) exige que el comprador pueda identificar a quién
                 le compró. Se completan en Configuración.
               </p>
@@ -198,7 +198,7 @@ export default async function ReceiptPage(props: { params: Promise<{ id: string 
             {descuento > 0 && (
               <div className="flex justify-between py-1">
                 <span className="text-muted-foreground">Descuento</span>
-                <span className="tabular-nums text-emerald-700">− {cop(descuento)}</span>
+                <span className="tabular-nums text-success-fg">− {cop(descuento)}</span>
               </div>
             )}
             {/* Art. 50 lit. c): los gastos de envío, informados POR SEPARADO. */}

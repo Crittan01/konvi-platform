@@ -55,10 +55,10 @@ const ROLE_LABEL: Record<string, string> = {
 const ALL_ROLES = ['sales', 'support', 'marketing', 'claims', 'custom']
 
 const ROLE_BADGE: Record<string, string> = {
-  sales:     'bg-emerald-500/10 text-emerald-700 border-emerald-700/25',
-  support:   'bg-sky-500/10 text-sky-700 border-sky-700/25',
+  sales:     'bg-success-bg text-success-fg border-success-border',
+  support:   'bg-info-bg text-info-fg border-info-border',
   marketing: 'bg-fuchsia-500/10 text-fuchsia-700 border-fuchsia-700/25',
-  claims:    'bg-amber-500/10 text-amber-700 border-amber-700/25',
+  claims:    'bg-warning-bg text-warning-fg border-warning-border',
   custom:    'bg-muted/40 text-muted-foreground border-border',
 }
 
@@ -244,9 +244,9 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
           claims:    'Devoluciones, reclamos, garantías (Ley 1480)',
         }
         return (
-          <div className="rounded-lg border border-amber-700/25 bg-amber-500/5 p-3.5 mt-1 space-y-2">
+          <div className="rounded-lg border border-warning-border bg-warning-bg p-3.5 mt-1 space-y-2">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-700" />
+              <Sparkles className="h-4 w-4 text-warning-fg" />
               <p className="text-sm font-semibold text-foreground">
                 Sugerencia: mejora la cobertura de tu bot
               </p>
@@ -370,7 +370,7 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
                 Solo 1 agente por rol. Los tachados ya están asignados a otro agente.
               </p>
               {selectedRole === 'custom' && !editing?.is_default && (
-                <p className="text-[11px] text-amber-700 leading-relaxed">
+                <p className="text-[11px] text-warning-fg leading-relaxed">
                   Nota: el router pre-LLM solo enruta a Ventas, Soporte, Marketing y Reclamos.
                   Un agente <strong>Personalizado</strong> que no sea el default nunca recibirá
                   tráfico automáticamente — úsalo solo si vas a asignarlo manualmente.

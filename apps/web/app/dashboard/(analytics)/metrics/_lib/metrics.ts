@@ -37,16 +37,16 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
   cancelled:       'Cancelado',
 }
 
-// Chips de estado en fondo claro crema → wash 500/15 + texto/borde 700
-// (regla de paleta founder: nunca shades 300-500 en texto/borde).
+// Chips de estado → tokens semánticos de status (FASE 2: antes wash 500/15 +
+// texto/borde 700 de paleta; ahora theme-aware light+dark sin remap).
 export const ORDER_STATUS_CHIP: Record<string, string> = {
-  pending:         'bg-amber-500/15 text-amber-700 border border-amber-700/30',
-  pending_payment: 'bg-yellow-500/15 text-yellow-700 border border-yellow-700/30',
-  confirmed:       'bg-blue-500/15 text-blue-700 border border-blue-700/30',
-  processing:      'bg-violet-500/15 text-violet-700 border border-violet-700/30',
-  shipped:         'bg-indigo-500/15 text-indigo-700 border border-indigo-700/30',
-  delivered:       'bg-emerald-500/15 text-emerald-700 border border-emerald-700/30',
-  cancelled:       'bg-red-500/15 text-red-700 border border-red-700/30',
+  pending:         'bg-warning-bg text-warning-fg border border-warning-border',
+  pending_payment: 'bg-warning-bg text-warning-fg border border-warning-border',
+  confirmed:       'bg-info-bg text-info-fg border border-info-border',
+  processing:      'bg-ai-bg text-ai-fg border border-ai-border',
+  shipped:         'bg-ai-bg text-ai-fg border border-ai-border',
+  delivered:       'bg-success-bg text-success-fg border border-success-border',
+  cancelled:       'bg-danger-bg text-danger-fg border border-danger-border',
 }
 
 // Color del pie POR ESTADO (no por índice de inserción) → el mismo estado

@@ -33,8 +33,8 @@ export function RouteError({ title, description, error, reset, logTag }: RouteEr
       <Card className="max-w-md w-full">
         <CardContent className="pt-8 pb-8 text-center space-y-5">
           <div className="flex justify-center">
-            <div className="h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center">
-              <AlertTriangle className="h-6 w-6 text-red-700" />
+            <div className="h-12 w-12 rounded-full bg-danger-bg flex items-center justify-center">
+              <AlertTriangle className="h-6 w-6 text-danger-fg" />
             </div>
           </div>
           <div className="space-y-1">

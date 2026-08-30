@@ -78,23 +78,23 @@ export default function ProductsManager({
     </div>,
 
     /* Stock bajo */
-    <div key="low" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-amber-700/30 bg-amber-500/5' : 'border-border'}`}>
-      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-amber-500/15' : 'bg-muted'}`}>
-        <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-amber-700' : 'text-muted-foreground'}`} />
+    <div key="low" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${lowStockCount > 0 ? 'border-warning-border bg-warning-bg' : 'border-border'}`}>
+      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${lowStockCount > 0 ? 'bg-warning-bg' : 'bg-muted'}`}>
+        <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? 'text-warning-fg' : 'text-muted-foreground'}`} />
       </div>
       <div className="min-w-0">
-        <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-amber-700' : 'text-foreground'}`}>{lowStockCount}</p>
+        <p className={`text-xl font-bold tabular-nums ${lowStockCount > 0 ? 'text-warning-fg' : 'text-foreground'}`}>{lowStockCount}</p>
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Stock bajo</p>
       </div>
     </div>,
 
     /* Sin stock */
-    <div key="zero" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-red-700/30 bg-red-500/5' : 'border-border'}`}>
-      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${zeroStockCount > 0 ? 'bg-red-500/15' : 'bg-muted'}`}>
-        <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-red-700' : 'text-muted-foreground'}`} />
+    <div key="zero" className={`h-full rounded-xl border bg-card p-3 sm:p-4 flex items-center gap-3 ${zeroStockCount > 0 ? 'border-danger-border bg-danger-bg' : 'border-border'}`}>
+      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${zeroStockCount > 0 ? 'bg-danger-bg' : 'bg-muted'}`}>
+        <XCircle className={`h-4 w-4 ${zeroStockCount > 0 ? 'text-danger-fg' : 'text-muted-foreground'}`} />
       </div>
       <div className="min-w-0">
-        <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-red-700' : 'text-foreground'}`}>{zeroStockCount}</p>
+        <p className={`text-xl font-bold tabular-nums ${zeroStockCount > 0 ? 'text-danger-fg' : 'text-foreground'}`}>{zeroStockCount}</p>
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">Sin stock</p>
       </div>
     </div>,
@@ -153,7 +153,7 @@ export default function ProductsManager({
 
       {/* Aviso: el listado no se pudo cargar (no mostrar un catálogo falso-vacío) */}
       {loadError && (
-        <div className="flex items-start gap-2 rounded-xl border border-red-700/30 bg-red-500/5 px-4 py-3 text-sm text-red-700">
+        <div className="flex items-start gap-2 rounded-xl border border-danger-border bg-danger-bg px-4 py-3 text-sm text-danger-fg">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>No pudimos cargar el catálogo completo. Recarga la página; si persiste, avísanos.</span>
         </div>
@@ -161,7 +161,7 @@ export default function ProductsManager({
 
       {/* Aviso: el catálogo excede la ventana mostrada (PostgREST trunca sin avisar) */}
       {activeTotal > products.length && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-700/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+        <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-fg">
           <Info className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             Mostrando {products.length} de {activeTotal} productos activos. Usa el buscador para encontrar los que no ves aquí.

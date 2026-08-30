@@ -160,7 +160,7 @@ export default async function RetentionPoliciesPage() {
         description="Habeas Data Ley 1581/2012 Art. 4 — uso limitado y prudente. Configura cuánto tiempo se conservan los datos de tu tenant antes de purgarse automáticamente cada domingo 03:xx UTC."
       />
 
-      <div className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-3 text-sm text-amber-700">
+      <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-fg">
         <strong>Importante:</strong> los cambios aplican el siguiente domingo a las 03:xx UTC.
         Los audit logs ({'consent_audit_log'}) son append-only por ley y NO se purgan automáticamente.
       </div>

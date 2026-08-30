@@ -99,7 +99,7 @@ export function ContextPanel({
       {/* Banner de error del auto-refresh: el panel puede estar desactualizado
           (antes el error se tragaba silenciosamente → panel stale sin señal). */}
       {error && (
-        <div className="px-4 py-2 text-[11px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-1.5">
+        <div className="px-4 py-2 text-[11px] text-danger-fg bg-danger-bg border-b border-danger-border flex items-center gap-1.5">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span>No se pudo actualizar el contexto — los datos pueden estar desactualizados.</span>
         </div>
@@ -155,7 +155,7 @@ export function ContextPanel({
                context.contact.shipping_phone.replace(/\+/g, '') !==
                context.contact.phone.replace(/\+/g, '') && (
                 <p
-                  className="text-xs text-amber-700 flex items-center gap-1.5"
+                  className="text-xs text-warning-fg flex items-center gap-1.5"
                   title="Celular alternativo de envío. La transportadora contactará a este número (no el WhatsApp)."
                 >
                   <Truck className="h-3 w-3 shrink-0" />
@@ -193,11 +193,11 @@ export function ContextPanel({
               )}
               <div className="flex items-center gap-1 mt-1">
                 {context.contact.consent_given ? (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 bg-emerald-700/10 px-1.5 py-0.5 rounded-full border border-emerald-700/30">
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-success-fg bg-success-bg px-1.5 py-0.5 rounded-full border border-success-border">
                     <BadgeCheck className="h-3 w-3" /> Habeas data
                   </span>
                 ) : context.contact.consent_revoked_at ? (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 bg-amber-700/10 px-1.5 py-0.5 rounded-full border border-amber-700/30">
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-warning-fg bg-warning-bg px-1.5 py-0.5 rounded-full border border-warning-border">
                     <BadgeX className="h-3 w-3" /> Revocado
                   </span>
                 ) : (
@@ -218,8 +218,8 @@ export function ContextPanel({
         {context?.active_cart && context.active_cart.items.length > 0 && (
           <section className={`p-4 border-b border-border ${
             context.active_cart.requires_requote
-              ? 'bg-amber-50/30'
-              : 'bg-emerald-50/20'
+              ? 'bg-warning-bg/30'
+              : 'bg-success-bg/20'
           }`}>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <ShoppingCart className="h-3.5 w-3.5" /> Carrito en construcción
@@ -257,7 +257,7 @@ export function ContextPanel({
                   const carrier = context.active_cart.carrier_name || ''
                   const cls =
                     status === 'stale'
-                      ? 'text-amber-700'
+                      ? 'text-warning-fg'
                       : status === 'pending'
                         ? 'text-muted-foreground italic'
                         : 'text-muted-foreground'
@@ -268,7 +268,7 @@ export function ContextPanel({
                         {status === 'stale' && (
                           <span
                             title="El carrito cambió post-cotización. El bot re-cotizará al confirmar."
-                            className="text-[9px] uppercase tracking-wider px-1 py-px rounded bg-amber-100 text-amber-800 border border-amber-200"
+                            className="text-[9px] uppercase tracking-wider px-1 py-px rounded bg-warning-bg text-warning-fg border border-warning-border"
                           >
                             recotizar
                           </span>
@@ -289,12 +289,12 @@ export function ContextPanel({
                   <span>
                     Descuento
                     {context.active_cart.coupon_code && (
-                      <span className="ml-1 text-[9px] uppercase tracking-wider px-1 py-px rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <span className="ml-1 text-[9px] uppercase tracking-wider px-1 py-px rounded bg-success-bg text-success-fg border border-success-border">
                         {context.active_cart.coupon_code}
                       </span>
                     )}
                   </span>
-                  <span className={context.active_cart.discount_cents > 0 ? 'text-emerald-700' : ''}>
+                  <span className={context.active_cart.discount_cents > 0 ? 'text-success-fg' : ''}>
                     {context.active_cart.discount_cents > 0
                       ? `-${formatMoney(context.active_cart.discount_cents / 100)}`
                       : '—'}
@@ -320,12 +320,12 @@ export function ContextPanel({
         {/* Reclamos abiertos */}
         {context?.open_claims && context.open_claims.length > 0 && (
           <section className="p-4 border-b border-border">
-            <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <p className="text-xs font-semibold text-danger-fg uppercase tracking-wider mb-2 flex items-center gap-1">
               <AlertCircle className="h-3 w-3" /> Reclamos abiertos ({context.open_claims.length})
             </p>
             <div className="space-y-1.5">
               {context.open_claims.map(claim => (
-                <div key={claim.id} className="p-2 rounded-lg bg-red-50/40 border border-red-200/50">
+                <div key={claim.id} className="p-2 rounded-lg bg-danger-bg/40 border border-danger-border">
                   <p className="text-xs font-medium">#{claim.ticket_number}</p>
                   {claim.reason && (
                     <p className="text-[11px] text-muted-foreground line-clamp-2 italic">
@@ -400,7 +400,7 @@ export function ContextPanel({
               Catálogo ({context?.product_count ?? '—'})
             </p>
             {context && (context.low_stock_count ?? 0) > 0 && (
-              <span className="text-[10px] text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-700/20">
+              <span className="text-[10px] text-warning-fg bg-warning-bg px-1.5 py-0.5 rounded-full border border-warning-border">
                 {context.low_stock_count} bajo stock
               </span>
             )}
@@ -445,10 +445,10 @@ export function ContextPanel({
                       <p className="text-xs font-medium leading-tight">{product.title}</p>
                       <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border ${
                         product.stock_total === 0
-                          ? 'bg-red-500/10 text-red-700 border-red-700/20'
+                          ? 'bg-danger-bg text-danger-fg border-danger-border'
                           : product.stock_total <= 3
-                            ? 'bg-amber-500/10 text-amber-600 border-amber-700/20'
-                            : 'bg-emerald-500/10 text-emerald-600 border-emerald-700/20'
+                            ? 'bg-warning-bg text-warning-fg border-warning-border'
+                            : 'bg-success-bg text-success-fg border-success-border'
                       }`}>
                         {product.stock_total === 0 ? 'Sin stock' : `${product.stock_total} uds`}
                       </span>
@@ -463,7 +463,7 @@ export function ContextPanel({
                             key={v.id}
                             className={`text-[10px] px-1.5 py-0.5 rounded border ${
                               v.stock_quantity <= 0
-                                ? 'border-red-700/20 text-red-700 bg-red-500/5'
+                                ? 'border-danger-border text-danger-fg bg-danger-bg'
                                 : 'border-border text-muted-foreground'
                             }`}
                           >

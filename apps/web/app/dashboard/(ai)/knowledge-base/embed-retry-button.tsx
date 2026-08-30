@@ -34,7 +34,7 @@ export function EmbedRetryButton({ docId, reindexDocument }: Props) {
       title={isPending
         ? 'Preparando documento para la IA...'
         : 'Hubo un problema al preparar el documento. Clic para reintentar.'}
-      className="inline-flex items-center gap-0.5 text-[10px] border rounded-full px-1.5 py-0.5 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer text-amber-700 border-amber-700/30 bg-amber-500/8 hover:bg-amber-500/15"
+      className="inline-flex items-center gap-0.5 text-[10px] border rounded-full px-1.5 py-0.5 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer text-warning-fg border-warning-border bg-warning-bg hover:bg-warning-border/40"
     >
       {isPending
         ? <><Loader2 className="h-2.5 w-2.5 animate-spin" /> Preparando...</>

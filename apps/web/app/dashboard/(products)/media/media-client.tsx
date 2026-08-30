@@ -140,7 +140,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
         )}
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-xl border border-red-700/30 bg-red-500/10 text-sm text-red-700">
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
             <X className="h-4 w-4 shrink-0" />
             {error}
             <button onClick={() => setError(null)} className="ml-auto"><X className="h-3.5 w-3.5" /></button>
@@ -159,7 +159,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
 
         {/* Aviso de truncamiento: la lista trae como máximo MEDIA_LIMIT archivos */}
         {files.length >= MEDIA_LIMIT && (
-          <div className="flex items-start gap-2 rounded-xl border border-amber-700/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+          <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-fg">
             <Info className="h-4 w-4 shrink-0 mt-0.5" />
             <span>Mostrando las {MEDIA_LIMIT} imágenes más recientes. Puede haber más en el almacenamiento.</span>
           </div>

@@ -54,7 +54,7 @@ export function StockAdjustSheet({
       description={
         <>
           {product.title} · {fmtAttrs(variation.attributes)} — stock actual:{' '}
-          <span className={`font-semibold tabular-nums ${variation.stock_quantity === 0 ? 'text-destructive' : variation.stock_quantity <= threshold ? 'text-amber-700' : ''}`}>
+          <span className={`font-semibold tabular-nums ${variation.stock_quantity === 0 ? 'text-destructive' : variation.stock_quantity <= threshold ? 'text-warning-fg' : ''}`}>
             {variation.stock_quantity} u.
           </span>
         </>

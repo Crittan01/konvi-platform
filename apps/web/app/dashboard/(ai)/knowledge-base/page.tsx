@@ -356,18 +356,18 @@ export default async function KnowledgeBasePage(
         title="Base de Conocimiento"
         description={
           <>
-            <span className={atLimit ? 'text-amber-700 font-medium' : ''}>
+            <span className={atLimit ? 'text-warning-fg font-medium' : ''}>
               {activeCount}/{MAX_DOCS} activos
             </span>
             {totalCount > activeCount && <>{' · '}{totalCount - activeCount} inactivos</>}
-            {' · '}<span className="text-emerald-700">{embCount} listos para IA</span>
+            {' · '}<span className="text-success-fg">{embCount} listos para IA</span>
             {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} por preparar</span>}
           </>
         }
       />
 
       {/* AI badge */}
-      <div className="flex items-start gap-3 rounded-xl border border-green-700/30 bg-green-500/5 px-4 py-3 text-sm text-green-700">
+      <div className="flex items-start gap-3 rounded-xl border border-success-border bg-success-bg px-4 py-3 text-sm text-success-fg">
         <BrainCircuit className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
           <span className="font-semibold">Base de Conocimiento activa en respuestas.</span>{' '}
@@ -436,7 +436,7 @@ export default async function KnowledgeBasePage(
                 <PenLine className="h-4 w-4" /> Nuevo documento
               </h2>
               {atLimit ? (
-                <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-700/30 bg-amber-500/8 text-xs text-amber-700 mt-3">
+                <div className="flex items-start gap-2 p-3 rounded-lg border border-warning-border bg-warning-bg text-xs text-warning-fg mt-3">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                   <span>Límite de {MAX_DOCS} documentos activos alcanzado. Desactiva o elimina alguno para agregar nuevos.</span>
                 </div>

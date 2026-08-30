@@ -40,25 +40,25 @@ const ROLES = {
   owner: {
     label: 'Administrador',
     icon: Crown,
-    color: 'bg-amber-500/10 text-amber-700 border-amber-700/25',
-    headerColor: 'border-amber-700/20 bg-amber-500/5',
-    textColor: 'text-amber-700',
-    iconColor: 'text-amber-700',
+    color: 'bg-warning-bg text-warning-fg border-warning-border',
+    headerColor: 'border-warning-border bg-warning-bg',
+    textColor: 'text-warning-fg',
+    iconColor: 'text-warning-fg',
     description: 'Acceso total. Configura integraciones, equipo y datos del negocio.',
   },
   manager: {
     label: 'Supervisor',
     icon: Briefcase,
-    color: 'bg-blue-500/10 text-blue-700 border-blue-700/25',
-    headerColor: 'border-blue-700/20 bg-blue-500/5',
-    textColor: 'text-blue-700',
-    iconColor: 'text-blue-700',
+    color: 'bg-info-bg text-info-fg border-info-border',
+    headerColor: 'border-info-border bg-info-bg',
+    textColor: 'text-info-fg',
+    iconColor: 'text-info-fg',
     description: 'Gestiona la operación: pedidos, contactos, catálogo, promociones, canales, métricas y base de conocimiento.',
   },
   operator: {
     label: 'Gestor',
     icon: Headphones,
-    color: 'bg-slate-500/10 text-slate-700 border-slate-700/25',
+    color: 'bg-muted text-muted-foreground border-border',
     headerColor: 'border-border bg-muted/20',
     textColor: 'text-muted-foreground',
     iconColor: 'text-muted-foreground',
@@ -593,11 +593,11 @@ export default async function TeamPage(
 
       {/* Banners resultado */}
       {searchParams.invited && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Invitación enviada</p>
-            <p className="text-xs text-emerald-700/70 mt-0.5">
+            <p className="text-xs text-success-fg/70 mt-0.5">
               Se envió un email a <strong>{searchParams.invited}</strong> con el enlace de acceso.
               Si no llega en unos minutos, revisa la carpeta de spam o usa &quot;Reenviar&quot;.
             </p>
@@ -605,11 +605,11 @@ export default async function TeamPage(
         </div>
       )}
       {searchParams.added && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Acceso otorgado</p>
-            <p className="text-xs text-emerald-700/70 mt-0.5">
+            <p className="text-xs text-success-fg/70 mt-0.5">
               <strong>{searchParams.added}</strong> ya tenía cuenta y fue agregado al equipo directamente.
               No se envió email — puede iniciar sesión ahora.
             </p>
@@ -617,62 +617,62 @@ export default async function TeamPage(
         </div>
       )}
       {searchParams.error && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/8 text-sm text-red-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-danger-border bg-danger-bg text-sm text-danger-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al procesar la acción</p>
-            <p className="text-xs text-red-700/70 mt-0.5">{mapTeamError(decodeURIComponent(searchParams.error))}</p>
+            <p className="text-xs text-danger-fg/70 mt-0.5">{mapTeamError(decodeURIComponent(searchParams.error))}</p>
           </div>
         </div>
       )}
       {searchParams.inactivated && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-700/30 bg-amber-500/8 text-sm text-amber-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-warning-border bg-warning-bg text-sm text-warning-fg">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro inactivado</p>
-            <p className="text-xs text-amber-700/70 mt-0.5">
+            <p className="text-xs text-warning-fg/70 mt-0.5">
               El acceso fue suspendido y la sesión cerrada. Puedes activarlo de nuevo cuando sea necesario.
             </p>
           </div>
         </div>
       )}
       {searchParams.activated && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro activado</p>
-            <p className="text-xs text-emerald-700/70 mt-0.5">
+            <p className="text-xs text-success-fg/70 mt-0.5">
               El acceso fue restaurado. El miembro podrá iniciar sesión nuevamente.
             </p>
           </div>
         </div>
       )}
       {searchParams.removed && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Miembro eliminado</p>
-            <p className="text-xs text-emerald-700/70 mt-0.5">
+            <p className="text-xs text-success-fg/70 mt-0.5">
               El usuario fue removido del equipo y su sesión activa fue cerrada inmediatamente.
             </p>
           </div>
         </div>
       )}
       {searchParams.resent && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/8 text-sm text-emerald-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-success-border bg-success-bg text-sm text-success-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Invitación reenviada</p>
-            <p className="text-xs text-emerald-700/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
+            <p className="text-xs text-success-fg/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
           </div>
         </div>
       )}
       {searchParams.role_changed && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-700/30 bg-blue-500/8 text-sm text-blue-700">
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-info-border bg-info-bg text-sm text-info-fg">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Rol actualizado</p>
-            <p className="text-xs text-blue-700/70 mt-0.5">La sesión del miembro fue cerrada. Al iniciar sesión nuevamente tendrá el nuevo rol activo en su JWT.</p>
+            <p className="text-xs text-info-fg/70 mt-0.5">La sesión del miembro fue cerrada. Al iniciar sesión nuevamente tendrá el nuevo rol activo en su JWT.</p>
           </div>
         </div>
       )}
@@ -745,9 +745,9 @@ export default async function TeamPage(
         {teamLoadFailed ? (
           // No mentir con "equipo vacío" cuando el RPC falló: estado de error explícito + retry.
           <div className="flex flex-col items-center text-center py-8 gap-3">
-            <AlertCircle className="h-8 w-8 text-red-700/60" />
+            <AlertCircle className="h-8 w-8 text-danger-fg/60" />
             <div>
-              <p className="text-sm font-medium text-red-700">No se pudo cargar el equipo</p>
+              <p className="text-sm font-medium text-danger-fg">No se pudo cargar el equipo</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm">
                 Hubo un problema al leer los miembros de tu equipo. Puede ser temporal; vuelve a intentarlo.
               </p>
@@ -788,7 +788,7 @@ export default async function TeamPage(
                           <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5 shrink-0">Tú</span>
                         )}
                         {!m.confirmed && (
-                          <span className="text-[10px] font-medium text-amber-700 border border-amber-700/30 bg-amber-500/10 rounded-full px-1.5 py-0.5 shrink-0">
+                          <span className="text-[10px] font-medium text-warning-fg border border-warning-border bg-warning-bg rounded-full px-1.5 py-0.5 shrink-0">
                             Pendiente
                           </span>
                         )}
@@ -814,7 +814,7 @@ export default async function TeamPage(
                         <form action={resendInvite}>
                           <input type="hidden" name="email" value={m.email} />
                           <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Enviado"
-                            className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10">
+                            className="text-xs h-7 px-2.5 text-warning-fg border-warning-border hover:bg-warning-bg">
                             Reenviar
                           </SubmitButton>
                         </form>
@@ -825,7 +825,7 @@ export default async function TeamPage(
                         <form action={activateMember}>
                           <input type="hidden" name="user_id" value={m.user_id} />
                           <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Activado"
-                            className="text-xs h-7 px-2.5 text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
+                            className="text-xs h-7 px-2.5 text-success-fg border-success-border hover:bg-success-bg">
                             Activar
                           </SubmitButton>
                         </form>

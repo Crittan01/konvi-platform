@@ -367,28 +367,28 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
         </Alert>
       )}
 
-      {/* Recovery codes — display ONCE (post-enrollment o post-regenerate) */}
+      {/* Recovery codes — display ONCE (post-enrollment o post-regenerate).
+          100% tokens semánticos (FASE 2): legible en light y dark por diseño. */}
       {recoveryCodes && (
-        <section className="rounded-lg border border-amber-700 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 p-4 space-y-3">
+        <section className="rounded-lg border border-warning-border bg-warning-bg p-4 space-y-3">
           <div className="flex items-start gap-2">
-            <KeyRound className="h-5 w-5 text-amber-700 dark:text-amber-400 mt-0.5 shrink-0" />
+            <KeyRound className="h-5 w-5 text-warning-fg mt-0.5 shrink-0" />
             <div className="flex-1">
-              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">
+              <h2 className="text-base font-semibold text-warning-fg">
                 Guarda estos códigos AHORA
               </h2>
-              <p className="text-sm text-amber-800 dark:text-amber-300/90 mt-1">
+              <p className="text-sm text-warning-fg/90 mt-1">
                 Solo se muestran UNA VEZ. Si pierdes tu authenticator, los
                 necesitarás para iniciar sesión.
               </p>
             </div>
           </div>
-          {/* Tiles: par texto/fondo explícito en AMBOS temas — sin esto, en dark
-              el texto heredado (claro) quedaba invisible sobre el tile claro. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded border border-amber-700/40 bg-white dark:bg-transparent p-3 font-mono text-sm">
+          {/* Tiles: bg-card sobre el wash warning → contraste AA en ambos temas. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded border border-warning-border p-3 font-mono text-sm">
             {recoveryCodes.map(c => (
               <code
                 key={c}
-                className="rounded px-2 py-1 text-center tracking-wider select-all bg-amber-100 text-amber-950 dark:bg-amber-400/15 dark:text-amber-100"
+                className="rounded px-2 py-1 text-center tracking-wider select-all border border-warning-border bg-card text-warning-fg"
               >
                 {c}
               </code>
@@ -398,14 +398,14 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
             <button
               type="button"
               onClick={downloadCodes}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-700 text-white hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-800 text-white hover:bg-amber-900 text-sm"
             >
               <Download className="h-4 w-4" /> Descargar .txt
             </button>
             <button
               type="button"
               onClick={copyCodes}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-700 text-amber-900 hover:bg-amber-100 dark:border-amber-500/50 dark:text-amber-200 dark:hover:bg-amber-500/10 text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-warning-border text-warning-fg hover:bg-warning-bg text-sm"
             >
               <Copy className="h-4 w-4" /> Copiar
             </button>
@@ -500,9 +500,9 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
         <section className="rounded-lg border border-border bg-card p-5 space-y-3">
           <div className="flex items-start gap-3">
             {state.totpEnrolled ? (
-              <ShieldCheck className="h-6 w-6 text-emerald-600 shrink-0 mt-0.5" />
+              <ShieldCheck className="h-6 w-6 text-success-fg shrink-0 mt-0.5" />
             ) : (
-              <Shield className="h-6 w-6 text-slate-700 shrink-0 mt-0.5" />
+              <Shield className="h-6 w-6 text-muted-foreground shrink-0 mt-0.5" />
             )}
             <div className="flex-1">
               <h2 className="text-base font-semibold">
@@ -579,7 +579,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
                   onClick={openReEnrollDialog}
                   disabled={busy === 'disable'}
                   title="Vincular un nuevo authenticator (perdiste el actual o quieres cambiarlo)"
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-amber-700 text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-sm"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-warning-border text-warning-fg hover:bg-warning-bg disabled:opacity-50 text-sm"
                 >
                   {busy === 'disable' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -592,7 +592,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
                   type="button"
                   onClick={openDisableDialog}
                   disabled={busy === 'disable'}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-red-700 text-red-700 hover:bg-red-50 disabled:opacity-50 text-sm"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-danger-border text-danger-fg hover:bg-danger-bg disabled:opacity-50 text-sm"
                 >
                   {busy === 'disable' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -631,7 +631,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
             <button
               type="button"
               onClick={performReEnroll}
-              className="px-4 py-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 text-sm inline-flex items-center gap-1.5"
+              className="px-4 py-2 rounded-md bg-amber-800 text-white hover:bg-amber-900 text-sm inline-flex items-center gap-1.5"
             >
               <Shield className="h-4 w-4" /> Continuar
             </button>
@@ -644,7 +644,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="inline-flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-700" /> Verificación adicional
+              <AlertTriangle className="h-5 w-5 text-warning-fg" /> Verificación adicional
             </DialogTitle>
             <DialogDescription>
               Estás en sesión de recuperación. Para vincular un nuevo authenticator
@@ -670,7 +670,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               className="w-full px-3 py-2 rounded-md border border-border bg-background font-mono text-base text-center"
             />
             {error && (
-              <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-700 rounded px-2 py-1">
+              <p role="alert" className="text-xs text-danger-fg bg-danger-bg border border-danger-border rounded px-2 py-1">
                 {error}
               </p>
             )}
@@ -688,7 +688,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               type="button"
               onClick={performRecoveryReEnroll}
               disabled={busy === 'disable' || recoveryCodeInput.trim().length < 4}
-              className="px-4 py-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 text-sm inline-flex items-center gap-1.5 disabled:opacity-50"
+              className="px-4 py-2 rounded-md bg-amber-800 text-white hover:bg-amber-900 text-sm inline-flex items-center gap-1.5 disabled:opacity-50"
             >
               {busy === 'disable' ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Verificando…</>
@@ -704,7 +704,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
       <Dialog open={openDialog === 'disable'} onOpenChange={open => !open && setOpenDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="inline-flex items-center gap-2 text-red-700">
+            <DialogTitle className="inline-flex items-center gap-2 text-danger-fg">
               <Trash2 className="h-5 w-5" /> Desactivar MFA
             </DialogTitle>
             <DialogDescription>
@@ -724,7 +724,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
             <button
               type="button"
               onClick={performDisableMfa}
-              className="px-4 py-2 rounded-md bg-red-700 text-white hover:bg-red-800 text-sm inline-flex items-center gap-1.5"
+              className="px-4 py-2 rounded-md bg-red-800 text-white hover:bg-red-900 text-sm inline-flex items-center gap-1.5"
             >
               <Trash2 className="h-4 w-4" /> Desactivar MFA
             </button>

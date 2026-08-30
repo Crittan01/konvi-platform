@@ -57,7 +57,7 @@ export function NewDocForm({
           })}
         </select>
         {emptyCategories.includes(category) && (
-          <p className="text-[11px] text-amber-700 mt-1">
+          <p className="text-[11px] text-warning-fg mt-1">
             Esta categoría está vacía — el bot no podrá responder con verdad si un cliente pregunta sobre este tema.
           </p>
         )}
@@ -69,8 +69,8 @@ export function NewDocForm({
         <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs space-y-1">
           <p className="font-semibold text-foreground/90">Guía para esta categoría</p>
           <p className="text-muted-foreground italic">{guide.placeholder}</p>
-          <p className="text-emerald-600">✓ Sí: <span className="text-foreground/80">{guide.doYes}</span></p>
-          <p className="text-red-700">✗ No: <span className="text-foreground/80">{guide.doNo}</span></p>
+          <p className="text-success-fg">✓ Sí: <span className="text-foreground/80">{guide.doYes}</span></p>
+          <p className="text-danger-fg">✗ No: <span className="text-foreground/80">{guide.doNo}</span></p>
         </div>
       )}
 
@@ -106,8 +106,8 @@ export function NewDocForm({
               <div key={c.value} className="border-l-2 border-primary/20 pl-2.5">
                 <p className="font-semibold text-foreground/90">{c.label}</p>
                 <p className="text-muted-foreground italic">{g.placeholder}</p>
-                <p className="text-emerald-600 mt-0.5">✓ Sí: <span className="text-foreground/80">{g.doYes}</span></p>
-                <p className="text-red-700">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
+                <p className="text-success-fg mt-0.5">✓ Sí: <span className="text-foreground/80">{g.doYes}</span></p>
+                <p className="text-danger-fg">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
               </div>
             )
           })}

@@ -211,13 +211,13 @@ export default async function ShippingPage(
 
       {/* Banner Aveonline desconectado (provider único shipping ADR-0019). */}
       {!activeProviderConnected && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-700/30 bg-amber-500/10">
-          <AlertCircle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-warning-border bg-warning-bg">
+          <AlertCircle className="h-4 w-4 text-warning-fg shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-amber-700">
+            <p className="text-sm font-medium text-warning-fg">
               Aveonline no está conectado
             </p>
-            <p className="text-xs text-amber-700/80 mt-0.5">
+            <p className="text-xs text-warning-fg/80 mt-0.5">
               Ve a{' '}
               <Link
                 href="/dashboard/integrations/aveonline"
@@ -238,12 +238,12 @@ export default async function ShippingPage(
             <p className="text-2xl font-bold text-primary">{totalCount}</p>
             <p className="text-xs text-muted-foreground mt-1">Total envíos</p>
           </div>
-          <div className={`rounded-xl border bg-card p-4 text-center ${inTransitCount > 0 ? 'border-indigo-700/30' : 'border-border'}`}>
-            <p className={`text-2xl font-bold ${inTransitCount > 0 ? 'text-indigo-700' : 'text-primary'}`}>{inTransitCount}</p>
+          <div className={`rounded-xl border bg-card p-4 text-center ${inTransitCount > 0 ? 'border-ai-border' : 'border-border'}`}>
+            <p className={`text-2xl font-bold ${inTransitCount > 0 ? 'text-ai-fg' : 'text-primary'}`}>{inTransitCount}</p>
             <p className="text-xs text-muted-foreground mt-1">En tránsito</p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4 text-center">
-            <p className="text-2xl font-bold text-emerald-700">{deliveredCount}</p>
+            <p className="text-2xl font-bold text-success-fg">{deliveredCount}</p>
             <p className="text-xs text-muted-foreground mt-1">Entregados</p>
           </div>
         </div>
@@ -285,9 +285,9 @@ export default async function ShippingPage(
           )}
         </div>
         {shipmentsError ? (
-          <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-red-700/40 bg-red-500/5 text-center">
-            <AlertCircle className="h-10 w-10 text-red-700/60 mb-3" />
-            <p className="text-red-700 text-sm font-medium">No se pudo cargar el historial de envíos.</p>
+          <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-danger-border bg-danger-bg text-center">
+            <AlertCircle className="h-10 w-10 text-danger-fg/60 mb-3" />
+            <p className="text-danger-fg text-sm font-medium">No se pudo cargar el historial de envíos.</p>
             <p className="text-muted-foreground text-xs mt-1">Recarga la página para reintentar.</p>
           </div>
         ) : shipments.length === 0 ? (

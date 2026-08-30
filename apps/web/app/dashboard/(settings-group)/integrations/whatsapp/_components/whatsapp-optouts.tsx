@@ -43,9 +43,9 @@ export default function WhatsAppOptOuts({ optOuts, connected }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-emerald-700/30 bg-emerald-700/5 p-4 flex items-start gap-3">
-        <ShieldCheck className="h-5 w-5 text-emerald-800 mt-0.5 shrink-0" />
-        <div className="text-sm text-emerald-900">
+      <div className="rounded-xl border border-success-border bg-success-bg p-4 flex items-start gap-3">
+        <ShieldCheck className="h-5 w-5 text-success-fg mt-0.5 shrink-0" />
+        <div className="text-sm text-success-fg">
           Estos contactos escribieron <strong>STOP</strong> (o revocaron su consentimiento
           por Habeas Data). El bot bloquea todo mensaje proactivo hacia ellos, incluidas
           las plantillas HSM. La lista es de solo lectura: la revocación solo la puede

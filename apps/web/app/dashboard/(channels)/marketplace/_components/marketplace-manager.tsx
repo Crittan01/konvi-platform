@@ -84,9 +84,9 @@ type Props = {
 }
 
 const STATUS_CONFIG = {
-  active:  { label: 'Activo',  className: 'bg-green-500/15 text-green-600' },
-  paused:  { label: 'Pausado', className: 'bg-yellow-500/15 text-yellow-600' },
-  closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-700' },
+  active:  { label: 'Activo',  className: 'bg-success-bg text-success-fg' },
+  paused:  { label: 'Pausado', className: 'bg-warning-bg text-warning-fg' },
+  closed:  { label: 'Cerrado', className: 'bg-danger-bg text-danger-fg' },
 }
 
 const CONDITION_LABEL: Record<string, string> = {
@@ -470,7 +470,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                 return (
                   <tr
                     key={item.meli_id}
-                    className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''} ${rowError ? 'bg-red-500/5' : ''} ${isSelected ? 'bg-primary/5' : ''}`}
+                    className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''} ${rowError ? 'bg-danger-bg' : ''} ${isSelected ? 'bg-primary/5' : ''}`}
                   >
                     {/* Selección masiva — solo publicaciones sin vincular */}
                     {canWrite && (
@@ -509,7 +509,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             )}
                           </div>
                           {rowError && (
-                            <p className="text-xs text-red-700 flex items-center gap-1 mt-0.5">
+                            <p className="text-xs text-danger-fg flex items-center gap-1 mt-0.5">
                               <AlertTriangle className="h-3 w-3 shrink-0" /> {rowError}
                               <button onClick={() => clearError(item.meli_id)} className="ml-1 text-muted-foreground hover:text-foreground">
                                 <X className="h-3 w-3" />
@@ -529,8 +529,8 @@ export default function MarketplaceManager({ items, paging, variations, categori
                     <td className="py-3 px-4 text-center">
                       <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
                         item.available_quantity > 0
-                          ? 'bg-amber-500/15 text-amber-600'
-                          : 'bg-red-500/15 text-red-700'
+                          ? 'bg-warning-bg text-warning-fg'
+                          : 'bg-danger-bg text-danger-fg'
                       }`}>
                         {item.available_quantity} u.
                       </span>
@@ -551,12 +551,12 @@ export default function MarketplaceManager({ items, paging, variations, categori
                           <p className="text-[10px] text-muted-foreground">SKU: {item.sku}</p>
                           <div className="flex items-center gap-1 mt-0.5">
                             {stockOutOfSync ? (
-                              <span className="text-[10px] text-yellow-600 flex items-center gap-1">
+                              <span className="text-[10px] text-warning-fg flex items-center gap-1">
                                 <AlertTriangle className="h-3 w-3" />
                                 {item.supabase_stock} u. en catálogo (desincronizado)
                               </span>
                             ) : (
-                              <span className="text-[10px] text-green-600 flex items-center gap-1">
+                              <span className="text-[10px] text-success-fg flex items-center gap-1">
                                 <CheckCircle2 className="h-3 w-3" />
                                 {item.supabase_stock} u. en catálogo (sincronizado)
                               </span>
@@ -564,7 +564,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                           </div>
                           {priceOutOfSync && (
                             <div className="flex items-center gap-1 mt-0.5">
-                              <span className="text-[10px] text-amber-800 flex items-center gap-1">
+                              <span className="text-[10px] text-warning-fg flex items-center gap-1">
                                 <AlertTriangle className="h-3 w-3" />
                                 Catálogo ${item.supabase_price?.toLocaleString('es-CO')} vs MeLi ${item.price?.toLocaleString('es-CO')} (precio desincronizado)
                               </span>
@@ -583,7 +583,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                         {item.permalink && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-700 hover:text-blue-600" asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-info-fg hover:text-info-fg" asChild>
                                 <a href={item.permalink} target="_blank" rel="noreferrer" aria-label="Ver en Mercado Libre">
                                   <ExternalLink className="h-3.5 w-3.5" />
                                 </a>
@@ -599,7 +599,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-8 text-xs gap-1.5 text-blue-600 border-blue-700/30"
+                                className="h-8 text-xs gap-1.5 text-info-fg border-info-border"
                                 onClick={() => handleSyncStock(item)}
                                 aria-label="Sincronizar stock y precio desde el Catálogo a Mercado Libre"
                               >
@@ -615,7 +615,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 text-xs gap-1.5 text-yellow-600 border-yellow-700/30"
+                              className="h-8 text-xs gap-1.5 text-warning-fg border-warning-border"
                               onClick={() => handleStatusChange(item, 'paused')}
                             >
                               <Pause className="h-3 w-3" /> Pausar
@@ -624,7 +624,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 text-xs gap-1.5 text-green-600 border-green-700/30"
+                              className="h-8 text-xs gap-1.5 text-success-fg border-success-border"
                               onClick={() => handleStatusChange(item, 'active')}
                             >
                               <Play className="h-3 w-3" /> Activar
@@ -847,7 +847,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                 </Select>
 
                 {meliVariationRequired && selectedMeliVariationId == null && (
-                  <p className="text-[11px] text-amber-800 flex items-center gap-1">
+                  <p className="text-[11px] text-warning-fg flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3 shrink-0" />
                     Selecciona la variación de Mercado Libre antes de vincular.
                   </p>

@@ -185,7 +185,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
             <Download className="h-4 w-4" /> Bajar Plantilla .xlsx
           </Button>
           
-          <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-700/20 text-xs text-amber-700">
+          <div className="mt-3 p-3 rounded-lg bg-warning-bg border border-warning-border text-xs text-warning-fg">
             <strong>Nota visual:</strong> La importación masiva es 100% texto para evitar complicaciones con URLs. Una vez cargues tus productos, podrás subir sus fotos directamente visualizando tu Catálogo.
           </div>
         </div>
@@ -198,7 +198,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
         </div>
 
         {error && <p className="text-xs text-destructive font-medium bg-destructive/10 p-2.5 rounded-lg border border-destructive/20 shadow-xs">{error}</p>}
-        {success && <p className="text-xs text-emerald-700 font-medium bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-700/20 shadow-xs flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0"/>{success}</p>}
+        {success && <p className="text-xs text-success-fg font-medium bg-success-bg p-2.5 rounded-lg border border-success-border shadow-xs flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0"/>{success}</p>}
 
         <div className="pt-2">
           <Button type="button" className="w-full gap-2 font-medium" onClick={handleProcessImport} disabled={uploading}>

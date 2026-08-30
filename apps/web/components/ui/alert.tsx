@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils"
  * Alert — primitivo del DS (F1 2026-07-04).
  *
  * Para avisos persistentes en página (no efímeros — esos van por toast).
- * Paleta: shade 700 para texto sobre washes claros (regla de paleta founder).
+ * FASE 2 (2026-08-30): variants de status usan los tokens semánticos
+ * warning/danger/success (bg + fg + border por tema — dark sin remap).
  */
 const alertVariants = cva(
   "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg~*]:pl-7 [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-3.5 [&>svg]:h-4 [&>svg]:w-4",
@@ -15,9 +16,9 @@ const alertVariants = cva(
       variant: {
         default: "bg-card text-foreground",
         info: "border-primary/25 bg-primary/5 text-primary [&>svg]:text-primary",
-        warning: "border-amber-700/25 bg-amber-500/10 text-amber-800 [&>svg]:text-amber-700",
-        destructive: "border-red-700/25 bg-red-500/10 text-red-800 [&>svg]:text-red-700",
-        success: "border-emerald-700/25 bg-emerald-500/10 text-emerald-800 [&>svg]:text-emerald-700",
+        warning: "border-warning-border bg-warning-bg text-warning-fg [&>svg]:text-warning-fg",
+        destructive: "border-danger-border bg-danger-bg text-danger-fg [&>svg]:text-danger-fg",
+        success: "border-success-border bg-success-bg text-success-fg [&>svg]:text-success-fg",
       },
     },
     defaultVariants: {

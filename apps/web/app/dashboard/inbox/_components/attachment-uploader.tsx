@@ -248,7 +248,7 @@ export function AttachmentUploader({ conversationId, onSent, disabled }: Props) 
               />
 
               {error && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
+                <p className="text-xs text-danger-fg bg-danger-bg border border-danger-border rounded px-2 py-1">
                   {error}
                 </p>
               )}

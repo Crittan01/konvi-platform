@@ -305,8 +305,8 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
         )}
 
         {activeSuppliers.length === 0 && !showAdd && canWrite && (
-          <div className="border border-amber-700/25 bg-amber-500/10 p-4 rounded-lg">
-            <p className="text-xs text-amber-800 font-medium">
+          <div className="border border-warning-border bg-warning-bg p-4 rounded-lg">
+            <p className="text-xs text-warning-fg font-medium">
               {suppliers.length === 0
                 ? <>Aún no hay proveedores registrados. Registra un proveedor en la pestaña <strong>Proveedores</strong> antes de crear una orden de compra.</>
                 : <>Todos tus proveedores están inactivos. Reactiva uno en la pestaña <strong>Proveedores</strong> para poder crear una orden de compra.</>}
@@ -425,7 +425,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                       size="sm"
                       disabled={isPending}
                       onClick={() => handleCancel(o)}
-                      className="h-8 text-xs text-red-700 hover:text-red-800 hover:bg-red-500/10 gap-2 border-red-700/25"
+                      className="h-8 text-xs text-danger-fg hover:text-danger-fg hover:bg-danger-bg gap-2 border-danger-border"
                     >
                       <XCircle className="h-3.5 w-3.5" /> Cancelar orden
                     </Button>
@@ -627,7 +627,7 @@ function ItemsEditor({
                           type="button"
                           aria-label={`Quitar ${it.product_title} de la orden`}
                           onClick={() => onChange(items.filter((_, i) => i !== idx))}
-                          className="text-red-700 hover:text-red-800"
+                          className="text-danger-fg hover:text-danger-fg"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

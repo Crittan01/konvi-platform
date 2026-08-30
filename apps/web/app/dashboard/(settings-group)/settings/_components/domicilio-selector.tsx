@@ -91,7 +91,7 @@ export default function DomicilioSelector({
         </Select>
         <input type="hidden" name="domicilio_ciudad" value={ciudad} />
         {guardadoFueraDelCatalogo && (
-          <p className="text-[10px] text-amber-700">
+          <p className="text-[10px] text-warning-fg">
             Lo guardado antes («{departamentoInicial}») no está en la lista oficial.
             Vuelve a elegirlo para que las guías de envío lo reconozcan.
           </p>

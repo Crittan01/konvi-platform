@@ -214,7 +214,7 @@ export default function DashboardClient({
               <button
                 type="button"
                 onClick={() => setTab('operaciones')}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-xs hover:bg-amber-100 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-warning-bg border border-warning-border text-warning-fg text-sm font-medium shadow-xs hover:bg-warning-bg transition-colors"
               >
                 <Zap className="h-4 w-4 shrink-0" />
                 <span>Ver {totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
@@ -234,7 +234,7 @@ export default function DashboardClient({
             <button
               type="button"
               onClick={() => router.refresh()}
-              className="inline-flex items-center gap-1.5 self-start rounded-lg border border-red-700/30 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-500/10 transition-colors"
+              className="inline-flex items-center gap-1.5 self-start rounded-lg border border-danger-border px-2.5 py-1 text-xs font-medium text-danger-fg hover:bg-danger-bg transition-colors"
             >
               <RefreshCw className="h-3 w-3" /> Reintentar
             </button>
@@ -305,7 +305,7 @@ export default function DashboardClient({
                 <><BarChart2 className="h-3.5 w-3.5" /> Negocio</>
               )}
               {t === 'operaciones' && totalOpsAlerts > 0 && (
-                <span className="ml-1 h-4 min-w-4 px-1 rounded-full bg-amber-600 text-[10px] font-bold text-white flex items-center justify-center">
+                <span className="ml-1 h-4 min-w-4 px-1 rounded-full bg-warning-bg text-[10px] font-bold text-warning-fg border border-warning-border flex items-center justify-center">
                   {totalOpsAlerts}
                 </span>
               )}
@@ -353,7 +353,7 @@ export default function DashboardClient({
                 label: 'Agente humano',
                 value: ops.humanTakeovers,
                 icon: UserCheck,
-                color: 'text-amber-700',
+                color: 'text-warning-fg',
                 description: 'Requieren atención',
                 urgent: ops.humanTakeovers > 0,
               },
@@ -362,7 +362,7 @@ export default function DashboardClient({
                 label: 'Pedidos pendientes',
                 value: ops.pendingOrders,
                 icon: Clock,
-                color: 'text-blue-700',
+                color: 'text-info-fg',
                 description: 'Por confirmar',
                 urgent: ops.pendingOrders > 0,
               },
@@ -371,7 +371,7 @@ export default function DashboardClient({
                 label: 'Productos con poco stock',
                 value: ops.lowStockCount,
                 icon: AlertTriangle,
-                color: 'text-red-700',
+                color: 'text-danger-fg',
                 description: `Stock entre 1 y ${lowStockThreshold} u.`,
                 urgent: ops.lowStockCount > 0,
               },
@@ -615,7 +615,7 @@ function OnboardingStep({
   const inner = (
     <div className="flex items-start gap-3">
       {done
-        ? <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0 mt-0.5" />
+        ? <CheckCircle2 className="h-5 w-5 text-success-fg shrink-0 mt-0.5" />
         : <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />}
       <div className="min-w-0">
         <p className={`text-sm font-medium ${done ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{title}</p>
@@ -664,7 +664,7 @@ function OpsCard({
       >
         <div className="flex items-center justify-between mb-2">
           <Icon className={`h-4 w-4 ${color}`} />
-          {urgent && <span className="h-2 w-2 rounded-full bg-amber-600 animate-pulse" />}
+          {urgent && <span className="h-2 w-2 rounded-full bg-warning-fg animate-pulse" />}
         </div>
         <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${color}`}>{Math.round(animated)}</p>
         <p className="text-xs font-medium text-foreground mt-1 leading-snug">{label}</p>
@@ -695,8 +695,8 @@ function MoneyKpiCard({ label, value }: { label: string; value: number | null })
   // Neto negativo (reembolsos > ventas en la ventana): rojo + signo explícito
   // (formatCOPNegative → "-$X"), no el verde de dinero con "$-X" malformado.
   const negative = value !== null && value < 0
-  const border = negative ? 'border-red-700/25 bg-red-500/5' : 'border-emerald-700/25 bg-emerald-500/5'
-  const text = negative ? 'text-red-700' : 'text-emerald-700'
+  const border = negative ? 'border-danger-border bg-danger-bg' : 'border-success-border bg-success-bg'
+  const text = negative ? 'text-danger-fg' : 'text-success-fg'
   const animated = useCountUp(value ?? 0)
   return (
     // BentoCard estática (no navega → sin card-hover, F1) con span=2: el

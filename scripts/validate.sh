@@ -284,6 +284,26 @@ else
   _ok "Sin hex-32 sospechosos en archivos trackeados (allowlist: ${#_HEX32_ALLOWLIST[@]} valores justificados)"
 fi
 
+# ─── 4.9 UI palette ratchet (FASE 2, 2026-08-30) — sin clases light-only ─────
+# Tras la migración a tokens semánticos de status (warning/danger/success/
+# info/ai + muted) y la muerte del remap dark interino de globals.css, este
+# gate impide reintroducir clases de paleta que solo se ven bien en light
+# (el bug original: texto invisible en dark). Allowlist explícita con
+# justificación dentro del script (botones sólidos text-white, marcas de
+# proveedor, dots multi-hue del timeline, security-form founder-paired).
+_hdr "UI palette ratchet (tokens semánticos de status)"
+if [ -f "scripts/audit_ui_palette.py" ]; then
+  palette_out=$(python3.11 scripts/audit_ui_palette.py 2>&1); palette_rc=$?
+  if [ $palette_rc -eq 0 ]; then
+    _ok "UI palette: 0 clases light-only nuevas fuera de allowlist"
+  else
+    _err "UI palette ratchet: clases de paleta light-only detectadas — usar tokens de status (ver scripts/audit_ui_palette.py)"
+    echo "$palette_out" | grep -E "^\s+apps/" | head -5
+  fi
+else
+  _warn "UI palette ratchet script ausente (scripts/audit_ui_palette.py)"
+fi
+
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 

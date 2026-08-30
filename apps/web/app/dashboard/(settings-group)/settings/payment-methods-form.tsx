@@ -104,14 +104,14 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
             className={[
               'rounded-lg border p-4 transition-colors',
               enabled
-                ? 'border-emerald-700/40 bg-emerald-700/5'
+                ? 'border-success-border bg-success-bg'
                 : 'border-border bg-card opacity-80',
             ].join(' ')}
           >
             <div className="flex items-start gap-3">
               <Icon className={[
                 'h-5 w-5 mt-0.5 shrink-0',
-                enabled ? 'text-emerald-700' : 'text-muted-foreground',
+                enabled ? 'text-success-fg' : 'text-muted-foreground',
               ].join(' ')} />
 
               <div className="flex-1 space-y-1.5">
@@ -133,7 +133,7 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
                   {meta.description}
                 </p>
                 {!enabled && (
-                  <p className="text-[11px] text-amber-700/90 leading-relaxed mt-2 flex items-start gap-1.5">
+                  <p className="text-[11px] text-warning-fg/90 leading-relaxed mt-2 flex items-start gap-1.5">
                     <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
                     <span>{meta.consequence}</span>
                   </p>
@@ -181,9 +181,9 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
       })}
 
       {noneEnabled && (
-        <div className="rounded-lg border border-red-700/40 bg-red-700/5 p-3 flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
-          <div className="text-xs text-red-700/90 leading-relaxed">
+        <div className="rounded-lg border border-danger-border bg-danger-bg p-3 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-danger-fg mt-0.5 shrink-0" />
+          <div className="text-xs text-danger-fg/90 leading-relaxed">
             <strong>Configuración inválida:</strong> NINGÚN método de pago habilitado.
             El bot escalará a humano todas las compras. Habilita al menos uno.
           </div>
@@ -199,7 +199,7 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
             : 'Guardar configuración'}
         </Button>
         {saved && (
-          <span className="flex items-center gap-1 text-xs text-emerald-700">
+          <span className="flex items-center gap-1 text-xs text-success-fg">
             <Check className="h-3.5 w-3.5" /> Métodos actualizados
           </span>
         )}

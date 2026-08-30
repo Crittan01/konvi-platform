@@ -187,12 +187,12 @@ export default function SidebarClient({
                   <item.icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1">{item.label}</span>
                     {isInbox && inboxBadge > 0 && (
-                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-red-100 text-red-600 border border-red-200 text-[10px] font-bold tabular-nums">
+                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-danger-bg text-danger-fg border border-danger-border text-[10px] font-bold tabular-nums">
                       {inboxBadge > 99 ? '99+' : inboxBadge}
                     </span>
                   )}
                     {shouldRenderMarketplaceBadge(item.href, meliBadge) && (
-                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[10px] font-bold tabular-nums">
+                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-warning-bg text-warning-fg border border-warning-border text-[10px] font-bold tabular-nums">
                       {meliBadge > 99 ? '99+' : meliBadge}
                     </span>
                   )}
@@ -265,7 +265,7 @@ export default function SidebarClient({
                           <child.icon className="h-3.5 w-3.5 shrink-0" />
                           <span className="flex-1">{child.label}</span>
                           {shouldRenderMarketplaceBadge(child.href, meliBadge) && (
-                            <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[10px] font-bold tabular-nums">
+                            <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-warning-bg text-warning-fg border border-warning-border text-[10px] font-bold tabular-nums">
                               {meliBadge > 99 ? '99+' : meliBadge}
                             </span>
                           )}

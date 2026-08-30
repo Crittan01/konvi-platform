@@ -74,8 +74,8 @@ function formatBogota(utc: string): string {
 const SENSITIVE_PURPOSES = new Set(['data_export', 'sar_export', 'sar_export_printable', 'sic_report'])
 function purposeColor(purpose: string): string {
   return SENSITIVE_PURPOSES.has(purpose)
-    ? 'bg-amber-500/10 text-amber-800 border border-amber-700/25'
-    : 'bg-blue-500/10 text-blue-800 border border-blue-700/25'
+    ? 'bg-warning-bg text-warning-fg border border-warning-border'
+    : 'bg-info-bg text-info-fg border border-info-border'
 }
 
 export default async function AuditPage(
