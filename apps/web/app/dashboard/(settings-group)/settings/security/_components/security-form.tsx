@@ -144,8 +144,17 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
         method: 'POST',
         headers: { 'Authorization': `Bearer ${session.access_token}` },
       })
-      if (!res.ok) throw new Error('Error generando códigos')
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // 429: el límite es 1/día y el enroll YA consumió el cupo mostrando los
+        // primeros códigos — sin este mensaje el user veía un genérico
+        // "Error generando códigos" y creía que algo estaba roto (2026-08-30).
+        throw new Error(
+          res.status === 429
+            ? 'Ya se generaron códigos hoy (límite de 1 vez al día). Los que te mostramos al activar MFA siguen vigentes — si los guardaste, no necesitas regenerar. Si los perdiste, podrás generar nuevos mañana.'
+            : (data?.detail ?? 'Error generando códigos'),
+        )
+      }
       setRecoveryCodes(data.codes)
       setState(s => ({ ...s, recoveryCodesCount: data.codes.length, recoveryCountAvailable: true }))
     } catch (e) {
